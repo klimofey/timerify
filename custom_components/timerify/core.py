@@ -1,13 +1,13 @@
 """Pure timer state machine: commands and expiry become effects for a controller.
 
 Nothing here touches Home Assistant, the clock or the event loop. Every command
-takes the current time, updates the snapshot and returns the effects the caller
-must carry out, in order.
+and every observation of the target takes the current time, updates the snapshot
+and returns the effects the caller must carry out, in order.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from functools import wraps
 from math import ceil
 from typing import Concatenate, Literal
@@ -58,6 +58,10 @@ class Changed:
 type Effect = TurnOn | TurnOff | Arm | Disarm | Changed
 
 
+def _switch(target: Literal["on", "off"]) -> TurnOn | TurnOff:
+    return TurnOn() if target == "on" else TurnOff()
+
+
 def _reports_change[**P](
     command: Callable[Concatenate[TimerCore, P], list[Effect]],
 ) -> Callable[Concatenate[TimerCore, P], list[Effect]]:
@@ -92,11 +96,13 @@ class TimerCore:
     @_reports_change
     def set_duration(self, now: datetime, duration: timedelta) -> list[Effect]:
         """Count down `duration` from now; zero or less stops the timer."""
+        now = now.astimezone(UTC)
         return self._run_until(now, now + duration)
 
     @_reports_change
     def add(self, now: datetime, delta: timedelta) -> list[Effect]:
         """Move the end by `delta`; on an idle timer only a positive delta starts it."""
+        now = now.astimezone(UTC)
         end = self._snapshot.end
         if end is None:
             if delta <= timedelta(0):
@@ -116,6 +122,7 @@ class TimerCore:
         Strict mode applies the default duration; loose mode runs with the timer
         at zero.
         """
+        now = now.astimezone(UTC)
         if self._mode == "strict":
             return self._run_until(now, now + self._default_duration)
         self._snapshot = replace(self._snapshot, end=None)
@@ -124,10 +131,58 @@ class TimerCore:
     @_reports_change
     def expire(self, now: datetime) -> list[Effect]:
         """Handle the alarm; one that fires before the end is a stale leftover."""
+        return self._expire(now.astimezone(UTC))
+
+    @_reports_change
+    def observe(self, now: datetime, actual: Actual, *, by_us: bool) -> list[Effect]:
+        """React to the target's state: on every change and once at startup.
+
+        `by_us` says the change came from a service call the core asked for.
+        """
+        now = now.astimezone(UTC)
+        previous = self._snapshot.last_actual
+        # Record the observation first: everything below reasons about the state
+        # the target is in now, so an unavailable target is never switched and
+        # one that is already where a wish wants it needs no service call.
+        self._snapshot = replace(self._snapshot, last_actual=actual)
+        effects = self._expire(now)
+        if actual == "unavailable":
+            return effects
+        pending = self._snapshot.pending
+        if previous in (None, "unavailable") and pending is not None:
+            # The target is back (or seen for the first time): apply what it missed.
+            if pending == actual:
+                self._snapshot = replace(self._snapshot, pending=None)
+            else:
+                switch = _switch(pending)
+                if switch not in effects:  # the expiry above may have asked already
+                    effects.append(switch)
+        elif by_us:
+            if pending == actual:
+                self._snapshot = replace(self._snapshot, pending=None)
+        elif actual != previous:
+            effects += self._follow_external_change(now, actual)
+        return effects
+
+    def _expire(self, now: datetime) -> list[Effect]:
         end = self._snapshot.end
         if end is None or end > now:
             return []
         return self._stop()
+
+    def _follow_external_change(
+        self, now: datetime, actual: Literal["on", "off"]
+    ) -> list[Effect]:
+        """Someone else switched the target: the timer follows (R3 to R5)."""
+        self._snapshot = replace(self._snapshot, pending=None)
+        if actual == "off":
+            if self._snapshot.end is None:
+                return []
+            self._snapshot = replace(self._snapshot, end=None)
+            return [Disarm()]
+        if self._mode == "strict" and self._snapshot.end is None:
+            return self._run_until(now, now + self._default_duration)
+        return []
 
     def _run_until(self, now: datetime, end: datetime) -> list[Effect]:
         """Count down to `end`, or stop when it is not in the future."""
@@ -154,11 +209,12 @@ class TimerCore:
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
         if state.last_actual == "unavailable":
             return []  # applied when the target is back
-        return [TurnOn() if target == "on" else TurnOff()]
+        return [_switch(target)]
 
 
 def remaining_minutes(snapshot: Snapshot, now: datetime) -> int:
     """Whole minutes left, rounded up; 0 when idle or past the end."""
     if snapshot.end is None:
         return 0
-    return max(0, ceil((snapshot.end - now) / timedelta(minutes=1)))
+    left = snapshot.end - now.astimezone(UTC)
+    return max(0, ceil(left / timedelta(minutes=1)))

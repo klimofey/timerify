@@ -1,6 +1,9 @@
 """The timer core turns commands and expiry into effects, without Home Assistant."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Literal
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -247,6 +250,37 @@ def test_expire_while_unavailable_records_pending_without_service_call() -> None
     assert c.snapshot.pending == "off"
 
 
+def test_repeated_stop_while_turning_off_emits_one_turn_off() -> None:
+    """A second stop while the first turn-off is in flight must not repeat it."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    assert TurnOff() in c.stop(NOW)
+
+    assert TurnOff() not in c.stop(NOW)
+    assert c.snapshot.pending == "off"
+
+
+def test_repeated_expire_while_turning_off_emits_one_turn_off() -> None:
+    """A second alarm while the first turn-off is in flight must not repeat it."""
+    c = core("strict", "on")
+    c.set_duration(NOW - minutes(10), minutes(10))
+    assert TurnOff() in c.expire(NOW)
+
+    assert TurnOff() not in c.expire(NOW)
+    assert c.snapshot.pending == "off"
+
+
+def test_add_after_an_open_run_in_loose_mode_starts_a_countdown() -> None:
+    """Adding time to a target running without a countdown starts one."""
+    c = core("loose", "on")
+    c.run_open(NOW)
+
+    fx = c.add(NOW, minutes(30))
+
+    assert fx == [Arm(NOW + minutes(30)), Changed()]
+    assert c.snapshot.end == NOW + minutes(30)
+
+
 def test_core_resumes_from_a_stored_snapshot() -> None:
     """A snapshot restored after a restart carries on where it left off."""
     stored = Snapshot(end=NOW + minutes(5), pending="on", last_actual="on")
@@ -254,6 +288,284 @@ def test_core_resumes_from_a_stored_snapshot() -> None:
 
     assert c.snapshot == stored
     assert c.add(NOW, minutes(5)) == [Arm(NOW + minutes(10)), Changed()]
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_manual_off_clears_timer(mode: Mode) -> None:
+    """Someone else switching the target off ends the countdown in either mode (R3)."""
+    c = core(mode, "on")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_manual_on_in_strict_starts_default_duration() -> None:
+    """In strict mode a target switched on by hand gets the default countdown (R4)."""
+    c = core("strict", "off")
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(45), last_actual="on")
+
+
+def test_manual_on_in_loose_leaves_timer_idle() -> None:
+    """In loose mode a target switched on by hand just runs, with no countdown (R5)."""
+    c = core("loose", "off")
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(last_actual="on")
+
+
+def test_own_turn_on_clears_pending() -> None:
+    """The target confirming our own turn-on is not a manual change (R6)."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.observe(NOW, "on", by_us=True)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+
+
+def test_own_turn_off_clears_pending() -> None:
+    """The target confirming our own turn-off settles the wish and nothing else."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.stop(NOW)
+
+    fx = c.observe(NOW, "off", by_us=True)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_late_confirmation_of_the_opposite_switch_keeps_pending() -> None:
+    """A turn-off report that lands after a newer turn-on wish does not cancel it."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.stop(NOW)
+    c.set_duration(NOW, minutes(5))
+
+    c.observe(NOW, "off", by_us=True)
+    assert c.snapshot.pending == "on"
+
+    c.observe(NOW, "on", by_us=True)
+    assert c.snapshot.pending is None
+
+
+def test_state_update_without_a_change_does_nothing() -> None:
+    """An attribute-only update repeats the state and is not a manual change."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    before = c.snapshot
+
+    assert c.observe(NOW + minutes(1), "on", by_us=False) == []
+    assert c.snapshot == before
+
+
+def test_expired_timer_is_not_restarted_by_a_state_update() -> None:
+    """The target still reads on while our turn-off is in flight; that is not R4."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.expire(NOW + minutes(10))
+
+    fx = c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert fx == []
+    assert c.snapshot == Snapshot(pending="off", last_actual="on")
+
+
+def test_observing_after_the_end_expires_the_timer_once() -> None:
+    """A state change that arrives after the end applies the expiry first (rule 1)."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.observe(NOW + minutes(11), "on", by_us=False)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot == Snapshot(pending="off", last_actual="on")
+
+
+def test_manual_off_after_the_end_does_not_switch_again() -> None:
+    """A target already off when the expiry is noticed needs no turn-off."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.observe(NOW + minutes(11), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_expiry_while_unavailable_turns_off_when_back() -> None:
+    """A timer that ran out during an outage switches the target off on its return."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW, last_actual="unavailable"))
+
+    fx = c.observe(NOW + minutes(3), "on", by_us=False)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot == Snapshot(pending="off", last_actual="on")
+
+
+def test_expiry_while_unavailable_needs_no_turn_off_when_back_off() -> None:
+    """A target that returns already off needs no switching after an outage expiry."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW, last_actual="unavailable"))
+
+    fx = c.observe(NOW + minutes(3), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_expiry_noticed_with_the_outage_waits_for_the_target() -> None:
+    """An unavailable target is not switched; the turn-off waits until it reports."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+
+    gone = c.observe(NOW + minutes(10), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(12), "on", by_us=False)
+
+    assert gone == [Disarm(), Changed()]
+    assert c.snapshot.pending == "off"
+    assert back == [TurnOff(), Changed()]
+
+
+def test_set_while_unavailable_turns_on_when_back() -> None:
+    """A start requested during an outage is applied when the target returns (R10)."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(10))
+
+    back = c.observe(NOW + minutes(1), "off", by_us=False)
+    confirmed = c.observe(NOW + minutes(2), "on", by_us=True)
+
+    assert back == [TurnOn(), Changed()]
+    assert confirmed == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+
+
+def test_set_while_unavailable_needs_no_turn_on_when_back_on() -> None:
+    """A target that returns already on settles the wish without a service call."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+
+
+def test_wifi_drop_does_not_clear_timer() -> None:
+    """Unavailable is not off: a drop and a return leave the countdown alone (R10)."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+
+    gone = c.observe(NOW + minutes(1), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(2), "on", by_us=False)
+
+    assert gone == [Changed()]
+    assert back == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+
+
+def test_startup_with_running_timer_and_target_on_rearms_nothing_else() -> None:
+    """After a restart a running timer on a running target needs no switching."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW + minutes(20)))
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(20), last_actual="on")
+
+
+def test_startup_target_off_with_running_timer_clears_it() -> None:
+    """A target found off after a restart means the timer is over (§5.7, R3)."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW + minutes(20)))
+
+    fx = c.observe(NOW, "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_startup_after_expiry_turns_off() -> None:
+    """A timer that ran out while Home Assistant was down switches the target off."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(5)))
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot == Snapshot(pending="off", last_actual="on")
+
+
+def test_startup_target_on_in_strict_starts_default_duration() -> None:
+    """A strict target found on without a timer is handled as a manual turn-on."""
+    c = TimerCore("strict", minutes(45), Snapshot())
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+
+
+@pytest.mark.parametrize(
+    ("pending", "actual", "expected"),
+    [("on", "off", TurnOn()), ("off", "on", TurnOff())],
+)
+def test_startup_enforces_a_stored_pending_command(
+    pending: Literal["on", "off"], actual: Actual, expected: TurnOn | TurnOff
+) -> None:
+    """A command that never reached the target before the restart is sent again."""
+    stored = Snapshot(end=NOW + minutes(20), pending=pending)
+    c = TimerCore("strict", minutes(45), stored)
+
+    fx = c.observe(NOW, actual, by_us=False)
+
+    assert fx == [expected, Changed()]
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(20), pending=pending, last_actual=actual
+    )
+
+
+def test_startup_with_unavailable_target_waits_for_it() -> None:
+    """A target that is not there yet is not switched; the stored wish waits."""
+    stored = Snapshot(end=NOW + minutes(20), pending="on")
+    c = TimerCore("strict", minutes(45), stored)
+
+    gone = c.observe(NOW, "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert gone == [Changed()]
+    assert back == [TurnOn(), Changed()]
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        pytest.param(lambda c, now: c.set_duration(now, minutes(90)), id="set"),
+        pytest.param(lambda c, now: c.add(now, minutes(90)), id="add"),
+        pytest.param(lambda c, now: c.run_open(now), id="run-open"),
+        pytest.param(lambda c, now: c.observe(now, "on", by_us=False), id="manual-on"),
+    ],
+)
+def test_end_is_utc_for_a_local_time_across_a_dst_change(
+    start: Callable[[TimerCore, datetime], object],
+) -> None:
+    """90 real minutes from 00:30 local, 01:30 before the clocks go back, is 23:00 UTC.
+
+    Adding to a local datetime moves the wall clock, which would end an hour late.
+    """
+    now = datetime(2026, 10, 25, 0, 30, tzinfo=ZoneInfo("Asia/Jerusalem"))
+    c = TimerCore("strict", minutes(90), Snapshot(last_actual="off"))
+
+    start(c, now)
+
+    assert c.snapshot.end == datetime(2026, 10, 24, 23, 0, tzinfo=UTC)
+    assert c.snapshot.end.tzinfo is UTC
 
 
 @pytest.mark.parametrize(
@@ -275,3 +587,10 @@ def test_remaining_minutes_rounds_up(
     end = None if end_offset is None else NOW + end_offset
 
     assert remaining_minutes(Snapshot(end=end), NOW) == expected
+
+
+def test_remaining_minutes_accepts_a_local_time() -> None:
+    """The caller's timezone does not matter, only the instant."""
+    local = NOW.astimezone(ZoneInfo("Asia/Jerusalem"))
+
+    assert remaining_minutes(Snapshot(end=NOW + minutes(5)), local) == 5

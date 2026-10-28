@@ -473,8 +473,136 @@ def test_wifi_drop_does_not_clear_timer() -> None:
     assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
 
 
+def test_expiry_noticed_with_a_manual_on_does_not_start_a_new_timer() -> None:
+    """The turn-off that follows the expiry outranks a manual on seen with it."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(end=NOW, pending="on", last_actual="off"),
+    )
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot == Snapshot(pending="off", last_actual="on")
+
+
+def test_startup_after_expiry_needs_no_turn_off_for_a_target_already_off() -> None:
+    """A wish that expired unsent is dropped when the target already shows off."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW, pending="on"))
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_failed_turn_on_is_sent_again_when_the_target_reports() -> None:
+    """A rejected turn-on is retried by the next report of a target still off."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    assert c.call_failed(NOW) == []
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [TurnOn()]
+    assert c.snapshot.pending == "on"
+
+
+def test_failed_turn_on_is_sent_again_only_once() -> None:
+    """Once resent, the turn-on is in flight again and further reports leave it."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+    c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert c.observe(NOW + minutes(2), "off", by_us=False) == []
+
+
+def test_failed_turn_on_is_sent_again_by_the_next_command() -> None:
+    """Setting the timer again after a rejected turn-on tries the target again."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+
+    fx = c.set_duration(NOW + minutes(1), minutes(20))
+
+    assert fx == [Arm(NOW + minutes(21)), TurnOn(), Changed()]
+
+
+def test_failed_turn_off_is_sent_again_when_the_target_reports() -> None:
+    """A rejected turn-off is retried by the next report of a target still on."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.stop(NOW)
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [TurnOff()]
+    assert c.snapshot.pending == "off"
+
+
+def test_turn_on_in_flight_is_not_repeated_by_a_state_report() -> None:
+    """A report queued behind the call (attributes, same state) must not repeat it."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+
+    assert c.observe(NOW + minutes(1), "off", by_us=False) == []
+
+
+def test_stop_after_a_failed_turn_on_needs_no_turn_off() -> None:
+    """A turn-on that never reached the target leaves nothing to switch back."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+
+    fx = c.stop(NOW + minutes(1))
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_failed_turn_on_waits_for_an_unavailable_target() -> None:
+    """The retry waits for the target to report a usable state."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+
+    gone = c.observe(NOW + minutes(1), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(2), "off", by_us=False)
+
+    assert gone == [Changed()]
+    assert back == [TurnOn(), Changed()]
+
+
+def test_target_found_on_after_a_failed_turn_on_settles_it() -> None:
+    """If the target ended up on anyway, there is nothing left to send."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+
+
+def test_call_failed_without_a_pending_wish_changes_nothing() -> None:
+    """A failure report with nothing pending must not make a later wish look unsent."""
+    c = core("strict", "off")
+    assert c.call_failed(NOW) == []
+
+    c.set_duration(NOW, minutes(10))
+
+    assert c.observe(NOW + minutes(1), "off", by_us=False) == []
+
+
 def test_startup_with_running_timer_and_target_on_rearms_nothing_else() -> None:
-    """After a restart a running timer on a running target needs no switching."""
+    """After a restart a running timer on a running target needs no switching.
+
+    Arming the alarm for the stored end is the controller's job, not an effect here.
+    """
     c = TimerCore("strict", minutes(45), Snapshot(end=NOW + minutes(20)))
 
     fx = c.observe(NOW, "on", by_us=False)
@@ -594,3 +722,30 @@ def test_remaining_minutes_accepts_a_local_time() -> None:
     local = NOW.astimezone(ZoneInfo("Asia/Jerusalem"))
 
     assert remaining_minutes(Snapshot(end=NOW + minutes(5)), local) == 5
+
+
+NAIVE = datetime(2026, 1, 5, 7, 0)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(lambda c: c.set_duration(NAIVE, minutes(5)), id="set"),
+        pytest.param(lambda c: c.add(NAIVE, minutes(5)), id="add"),
+        pytest.param(lambda c: c.stop(NAIVE), id="stop"),
+        pytest.param(lambda c: c.run_open(NAIVE), id="run-open"),
+        pytest.param(lambda c: c.expire(NAIVE), id="expire"),
+        pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
+        pytest.param(lambda c: c.call_failed(NAIVE), id="call-failed"),
+        pytest.param(lambda c: remaining_minutes(c.snapshot, NAIVE), id="remaining"),
+    ],
+)
+def test_naive_time_is_rejected(call: Callable[[TimerCore], object]) -> None:
+    """A time without a timezone is ambiguous, so it is refused, not guessed."""
+    c = core("strict", "off")
+    before = c.snapshot
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        call(c)
+
+    assert c.snapshot == before

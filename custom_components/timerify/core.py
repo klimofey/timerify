@@ -58,8 +58,11 @@ class Changed:
 type Effect = TurnOn | TurnOff | Arm | Disarm | Changed
 
 
-def _switch(target: Literal["on", "off"]) -> TurnOn | TurnOff:
-    return TurnOn() if target == "on" else TurnOff()
+def _utc(now: datetime) -> datetime:
+    """`now` in UTC, so every end is UTC whatever zone the caller works in."""
+    if now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(UTC)
 
 
 def _reports_change[**P](
@@ -87,6 +90,10 @@ class TimerCore:
         self._mode = mode
         self._default_duration = default_duration
         self._snapshot = snapshot
+        self._unsent = False
+        """The pending wish has not reached the target (its call failed, or the
+        target was away). Only true while a wish is pending; never persisted,
+        because a restart sends every stored wish again."""
 
     @property
     def snapshot(self) -> Snapshot:
@@ -96,13 +103,13 @@ class TimerCore:
     @_reports_change
     def set_duration(self, now: datetime, duration: timedelta) -> list[Effect]:
         """Count down `duration` from now; zero or less stops the timer."""
-        now = now.astimezone(UTC)
+        now = _utc(now)
         return self._run_until(now, now + duration)
 
     @_reports_change
     def add(self, now: datetime, delta: timedelta) -> list[Effect]:
         """Move the end by `delta`; on an idle timer only a positive delta starts it."""
-        now = now.astimezone(UTC)
+        now = _utc(now)
         end = self._snapshot.end
         if end is None:
             if delta <= timedelta(0):
@@ -113,6 +120,7 @@ class TimerCore:
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
         """End the countdown and switch the target off."""
+        _utc(now)  # unused, but every command rejects a naive time alike
         return self._stop()
 
     @_reports_change
@@ -122,7 +130,7 @@ class TimerCore:
         Strict mode applies the default duration; loose mode runs with the timer
         at zero.
         """
-        now = now.astimezone(UTC)
+        now = _utc(now)
         if self._mode == "strict":
             return self._run_until(now, now + self._default_duration)
         self._snapshot = replace(self._snapshot, end=None)
@@ -131,7 +139,21 @@ class TimerCore:
     @_reports_change
     def expire(self, now: datetime) -> list[Effect]:
         """Handle the alarm; one that fires before the end is a stale leftover."""
-        return self._expire(now.astimezone(UTC))
+        if not self._due(_utc(now)):
+            return []
+        return self._stop()
+
+    def call_failed(self, now: datetime) -> list[Effect]:
+        """The service call for the pending wish failed.
+
+        The wish is sent again by the next report of the target or the next
+        command that wants the same thing. The caller reports a failure right
+        after executing the effects, before anything else reaches the core.
+        """
+        _utc(now)  # unused, but every command rejects a naive time alike
+        if self._snapshot.pending is not None:
+            self._unsent = True
+        return []
 
     @_reports_change
     def observe(self, now: datetime, actual: Actual, *, by_us: bool) -> list[Effect]:
@@ -139,42 +161,41 @@ class TimerCore:
 
         `by_us` says the change came from a service call the core asked for.
         """
-        now = now.astimezone(UTC)
+        now = _utc(now)
         previous = self._snapshot.last_actual
+        if previous in (None, "unavailable") and self._snapshot.pending is not None:
+            self._unsent = True  # a target that is back has not received the wish
         # Record the observation first: everything below reasons about the state
         # the target is in now, so an unavailable target is never switched and
         # one that is already where a wish wants it needs no service call.
         self._snapshot = replace(self._snapshot, last_actual=actual)
-        effects = self._expire(now)
+        expired = self._due(now)
+        effects = self._stop() if expired else []
         if actual == "unavailable":
             return effects
         pending = self._snapshot.pending
-        if previous in (None, "unavailable") and pending is not None:
-            # The target is back (or seen for the first time): apply what it missed.
+        if pending is not None and self._unsent:
             if pending == actual:
-                self._snapshot = replace(self._snapshot, pending=None)
+                self._settle()
             else:
-                switch = _switch(pending)
-                if switch not in effects:  # the expiry above may have asked already
-                    effects.append(switch)
+                effects += self._send(pending)
         elif by_us:
             if pending == actual:
-                self._snapshot = replace(self._snapshot, pending=None)
-        elif actual != previous:
+                self._settle()
+        elif actual != previous and not expired:
+            # Our own expiry is already switching the target off; it outranks this.
             effects += self._follow_external_change(now, actual)
         return effects
 
-    def _expire(self, now: datetime) -> list[Effect]:
+    def _due(self, now: datetime) -> bool:
         end = self._snapshot.end
-        if end is None or end > now:
-            return []
-        return self._stop()
+        return end is not None and end <= now
 
     def _follow_external_change(
         self, now: datetime, actual: Literal["on", "off"]
     ) -> list[Effect]:
         """Someone else switched the target: the timer follows (R3 to R5)."""
-        self._snapshot = replace(self._snapshot, pending=None)
+        self._settle()
         if actual == "off":
             if self._snapshot.end is None:
                 return []
@@ -199,22 +220,36 @@ class TimerCore:
         """Ask for the target to be switched, once per direction.
 
         A command can arrive while the opposite service call is still in flight,
-        so both directions share this one algorithm.
+        so both directions share this one algorithm. A wish that never reached
+        the target is not in flight: it is sent again, or dropped if the target
+        is already where the new wish wants it.
         """
         state = self._snapshot
-        if state.pending == target:
+        in_flight = state.pending is not None and not self._unsent
+        if in_flight and state.pending == target:
             return []  # already on its way
-        if state.pending is None and state.last_actual == target:
+        if not in_flight and state.last_actual == target:
+            self._settle()
             return []  # already there
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
         if state.last_actual == "unavailable":
+            self._unsent = True
             return []  # applied when the target is back
-        return [_switch(target)]
+        return self._send(target)
+
+    def _send(self, target: Literal["on", "off"]) -> list[Effect]:
+        self._unsent = False
+        return [TurnOn() if target == "on" else TurnOff()]
+
+    def _settle(self) -> None:
+        """Drop the pending wish: it was fulfilled or no longer applies."""
+        self._snapshot = replace(self._snapshot, pending=None)
+        self._unsent = False
 
 
 def remaining_minutes(snapshot: Snapshot, now: datetime) -> int:
     """Whole minutes left, rounded up; 0 when idle or past the end."""
+    now = _utc(now)
     if snapshot.end is None:
         return 0
-    left = snapshot.end - now.astimezone(UTC)
-    return max(0, ceil(left / timedelta(minutes=1)))
+    return max(0, ceil((snapshot.end - now) / timedelta(minutes=1)))

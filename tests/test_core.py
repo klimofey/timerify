@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.timerify.const import Mode
+from custom_components.timerify.const import MAX_MINUTES, Mode
 from custom_components.timerify.core import (
     Arm,
     Changed,
@@ -130,6 +130,48 @@ def test_add_on_idle_starts_timer() -> None:
 
     assert fx == set_.set_duration(NOW, minutes(30))
     assert added.snapshot == set_.snapshot
+
+
+def test_add_cannot_take_the_timer_past_a_day() -> None:
+    """The time left never exceeds a day, counted from now and not from the old end."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(1000))
+    later = NOW + minutes(10)
+
+    fx = c.add(later, minutes(1000))
+
+    assert fx == [Arm(later + minutes(MAX_MINUTES)), Changed()]
+    assert c.snapshot.end == later + minutes(MAX_MINUTES)
+
+
+def test_add_to_a_full_day_changes_nothing() -> None:
+    """A timer that already has a day left keeps its end and is not saved again."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(MAX_MINUTES))
+    before = c.snapshot
+
+    fx = c.add(NOW, minutes(100))
+
+    assert fx == [Arm(NOW + minutes(MAX_MINUTES))]
+    assert c.snapshot == before
+
+
+def test_add_on_idle_is_capped_at_a_day() -> None:
+    """Starting a timer by adding more than a day gives it a day."""
+    c = core("strict", "off")
+
+    c.add(NOW, minutes(MAX_MINUTES + 100))
+
+    assert c.snapshot.end == NOW + minutes(MAX_MINUTES)
+
+
+def test_set_duration_is_capped_at_a_day() -> None:
+    """No command can start a countdown longer than a day."""
+    c = core("strict", "off")
+
+    c.set_duration(NOW, minutes(MAX_MINUTES + 100))
+
+    assert c.snapshot.end == NOW + minutes(MAX_MINUTES)
 
 
 def test_add_negative_on_idle_does_nothing() -> None:

@@ -123,6 +123,36 @@ async def test_add_time_accepts_up_to_a_day(
     assert fake_target.calls == [TURN_ON]
 
 
+async def test_add_time_never_passes_a_day(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Adding a day twice still leaves a day: the timer is capped, not doubled."""
+    await setup_target()
+
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=MAX_MINUTES)
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=MAX_MINUTES)
+
+    assert state_of(hass, NUMBER) == str(MAX_MINUTES)
+    assert state_of(hass, SENSOR) == "2026-01-06T07:00:00+00:00"
+    assert fake_target.calls == [TURN_ON]
+
+
+@pytest.mark.parametrize("minutes", [15.0, "15", "15.0"], ids=repr)
+async def test_add_time_accepts_whole_numbers_in_any_form(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    minutes: float | str,
+) -> None:
+    """A template may hand over 15.0 or "15", as an input_number's state does."""
+    await setup_target()
+
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=minutes)
+
+    assert state_of(hass, NUMBER) == "15"
+    assert fake_target.calls == [TURN_ON]
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -130,8 +160,19 @@ async def test_add_time_accepts_up_to_a_day(
         {"minutes": MAX_MINUTES + 1},
         {"minutes": -MAX_MINUTES - 1},
         {"minutes": 2.5},
+        {"minutes": "2.5"},
+        {"minutes": True},
+        {"minutes": "soon"},
     ],
-    ids=["missing", "above_a_day", "below_minus_a_day", "not_whole"],
+    ids=[
+        "missing",
+        "above_a_day",
+        "below_minus_a_day",
+        "not_whole",
+        "not_whole_text",
+        "boolean",
+        "text",
+    ],
 )
 async def test_add_time_rejects_invalid_minutes(
     hass: HomeAssistant,
@@ -174,6 +215,35 @@ async def test_run_loose_turns_on_without_countdown(
     assert state_of(hass, TARGET_ID) == "on"
     assert state_of(hass, NUMBER) == "0"
     assert state_of(hass, SENSOR) == "unknown"
+
+
+@pytest.mark.parametrize(
+    ("service", "data", "left"),
+    [("add_time", {"minutes": 20}, "20"), ("run", {}, "45")],
+)
+async def test_services_record_the_timer_of_an_unavailable_target(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    service: str,
+    data: dict[str, Any],
+    left: str,
+) -> None:
+    """The timer does not go unavailable with its target, so the services still
+    reach it; the target is switched on once it is back."""
+    await setup_target(default_duration=45)
+    await fake_target.set_state("unavailable")
+
+    await call_service(hass, service, {"entity_id": NUMBER}, **data)
+
+    assert state_of(hass, NUMBER) == left
+    assert fake_target.calls == []
+
+    await fake_target.set_state("off")
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, NUMBER) == left
 
 
 async def test_services_accept_the_device_of_the_target(

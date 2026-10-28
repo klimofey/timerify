@@ -28,6 +28,23 @@ START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 TARGET_ID = "switch.boiler"
 
 
+HTTP_APP_KEY_WARNING = (
+    "ignore::aiohttp.web_exceptions.NotAppKeyWarning:homeassistant.components.http"
+)
+"""Home Assistant's own http component still keys its aiohttp application by
+strings. Only that warning, from that component, is ignored."""
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Ignore `HTTP_APP_KEY_WARNING` in every test, also under `pytest -W error`.
+
+    A `filterwarnings` setting in pyproject.toml would not do: pytest lets the
+    command-line `-W` outrank it, while a mark outranks the command line.
+    """
+    for item in items:
+        item.add_marker(pytest.mark.filterwarnings(HTTP_APP_KEY_WARNING))
+
+
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Let Home Assistant load integrations from custom_components/."""

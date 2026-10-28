@@ -10,10 +10,13 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 from math import ceil
-from typing import Concatenate, Literal
+from typing import Concatenate, Final, Literal
 
-from .const import Mode
+from .const import MAX_MINUTES, Mode
 from .domains import Actual
+
+_MAX_DURATION: Final = timedelta(minutes=MAX_MINUTES)
+"""The longest countdown from now, whichever command starts or extends it."""
 
 
 @dataclass(frozen=True)
@@ -206,9 +209,10 @@ class TimerCore:
         return []
 
     def _run_until(self, now: datetime, end: datetime) -> list[Effect]:
-        """Count down to `end`, or stop when it is not in the future."""
+        """Count down to `end`, at most a day from now, or stop if it is not ahead."""
         if end <= now:
             return self._stop()
+        end = min(end, now + _MAX_DURATION)
         self._snapshot = replace(self._snapshot, end=end)
         return [Arm(end), *self._want("on")]
 

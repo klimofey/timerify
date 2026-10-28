@@ -56,4 +56,5 @@ uv run ruff format --check  # formatting
 uv run mypy                 # strict type check of custom_components
 ```
 
-All four must pass locally before any commit lands on `main`.
+All four checks (pytest, ruff check, ruff format --check, mypy) must pass locally before any
+commit lands on `main`.

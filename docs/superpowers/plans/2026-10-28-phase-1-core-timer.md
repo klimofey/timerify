@@ -72,7 +72,7 @@ tests/
   - `def behaviour_for(entity_id: str) -> DomainBehaviour` (raises `ValueError` for unsupported domains)
   - `def actual_state(state: State | None) -> Actual` (`None`, `unavailable`, `unknown` → `"unavailable"`)
 
-Table (simple rows use state `"on"`): `switch`, `input_boolean`, `light`, `fan`, `humidifier`, `siren`, `remote`, `group`; special rows: `climate` (on ⇔ state != `off`; `climate.turn_on`/`turn_off`), `water_heater` (on ⇔ state != `off`; `water_heater.turn_on`/`turn_off`), `media_player` (on ⇔ state not in `off`, `standby`; `media_player.turn_on`/`turn_off`).
+Table (simple rows use state `"on"`): `switch`, `input_boolean`, `light`, `fan`, `humidifier`, `siren`, `remote`; special rows: `group` (on ⇔ state `on`; `homeassistant.turn_on`/`turn_off`, the group domain has no turn_on/turn_off services), `climate` (on ⇔ state != `off`; `climate.turn_on`/`turn_off`), `water_heater` (on ⇔ state != `off`; `water_heater.turn_on`/`turn_off`), `media_player` (on ⇔ state not in `off`, `standby`; `media_player.turn_on`/`turn_off`).
 
 - [ ] **Step 1: Write the failing tests**
 

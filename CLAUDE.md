@@ -2,11 +2,11 @@
 
 Home Assistant custom integration (distributed through HACS) that attaches timers to existing
 entities, the way Powercalc attaches virtual power sensors to existing devices. A plain switch
-(boiler, grow light, fan) gains, on its own device page: a "run for N minutes" countdown, an
-auto-off-after duration, a weekly schedule and a remaining-time sensor — plus Assist voice
+(boiler, grow light, fan) gains, on its own device page: a "run for N minutes" countdown,
+pending commands, a weekly schedule and a remaining-time sensor — plus Assist voice
 intents ("turn on the boiler for 10 minutes", "how long is left on the boiler").
 
-Status: design phase. Research notes live in `docs/research/`; specs go to `docs/specs/` before
+Status: design phase. Research notes live in `docs/research/`; specs go to `docs/superpowers/specs/` before
 any feature code is written.
 
 ## Repository rules (non-negotiable)

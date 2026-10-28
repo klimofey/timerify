@@ -18,7 +18,7 @@ from .domains import Actual
 
 @dataclass(frozen=True)
 class Snapshot:
-    """The part of the timer that is persisted and restored."""
+    """The state of the timer; a store keeps `end` and `pending`, not `last_actual`."""
 
     end: datetime | None = None
     """When the countdown reaches zero (timezone-aware UTC); None while idle."""

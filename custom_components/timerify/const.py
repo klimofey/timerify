@@ -1,5 +1,6 @@
 """Constants for the Timerify integration."""
 
+from datetime import timedelta
 from typing import Final, Literal
 
 DOMAIN: Final = "timerify"
@@ -14,6 +15,9 @@ CONF_DEFAULT_DURATION: Final = "default_duration"
 DEFAULT_DURATION_MINUTES: Final = 30
 MAX_MINUTES: Final = 1440
 """The longest timer: one day."""
+
+SERVICE_CALL_TIMEOUT: Final = timedelta(seconds=30)
+"""How long a turn_on or turn_off call may take before it counts as failed."""
 
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may

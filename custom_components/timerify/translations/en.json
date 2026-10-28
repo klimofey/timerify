@@ -5,5 +5,10 @@
         "name": "Run for"
       }
     }
+  },
+  "exceptions": {
+    "target_not_found": {
+      "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."
+    }
   }
 }

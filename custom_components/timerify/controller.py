@@ -9,7 +9,6 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable
-from dataclasses import replace
 from datetime import datetime, timedelta
 from typing import Literal, assert_never
 
@@ -23,7 +22,7 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
@@ -37,6 +36,8 @@ from .const import (
     CONF_MODE,
     CONF_TARGET,
     DEFAULT_DURATION_MINUTES,
+    DOMAIN,
+    SERVICE_CALL_TIMEOUT,
 )
 from .core import (
     Arm,
@@ -75,22 +76,27 @@ class TargetController:
         self._hass = hass
         self._entry = entry
         self._store = store
-        self.target_entity_id = er.async_validate_entity_id(
-            er.async_get(hass), options[CONF_TARGET]
-        )
-        self._behaviour = behaviour_for(self.target_entity_id)
-        # Nothing is known about the target after a restart, so the first report
-        # counts as the target coming back.
+        target = er.async_resolve_entity_id(er.async_get(hass), options[CONF_TARGET])
+        if target is None:
+            raise ConfigEntryError(
+                translation_domain=DOMAIN, translation_key="target_not_found"
+            )
+        self.target_entity_id = target
+        self._behaviour = behaviour_for(target)
+        # The store keeps no `last_actual`: nothing is known about the target after
+        # a restart, so its first report counts as the target coming back.
         self._core = TimerCore(
             options[CONF_MODE],
             timedelta(
                 minutes=options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
             ),
-            replace(snapshot, last_actual=None),
+            snapshot,
         )
         self._lock = asyncio.Lock()
+        self._stopped = False
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
+        self._notified_end = snapshot.end
         self._expiry_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
 
@@ -101,7 +107,7 @@ class TargetController:
 
     async def async_start(self) -> None:
         """Follow the target; once Home Assistant is running, take stock of it."""
-        self._entry.async_on_unload(self._cancel_alarms)
+        self._entry.async_on_unload(self._stop)
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, self.target_entity_id, self._handle_state_change
@@ -136,11 +142,15 @@ class TargetController:
 
     async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
         async with self._lock:
+            if self._stopped:
+                return
             await self._execute(command(dt_util.utcnow()))
 
     async def _handle_started(self, _hass: HomeAssistant) -> None:
         """Take stock of the target once, with Home Assistant fully started."""
         async with self._lock:
+            if self._stopped:
+                return
             # A timer restored unchanged gets no Arm from the core. Arming only now
             # keeps a stored end that has long passed from switching a target that
             # has not been seen yet; the first observation expires it instead.
@@ -154,6 +164,8 @@ class TargetController:
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
         async with self._lock:
+            if self._stopped:
+                return
             await self._execute(
                 self._core.observe(
                     dt_util.utcnow(),
@@ -164,6 +176,8 @@ class TargetController:
 
     async def _handle_expiry(self, _scheduled: datetime) -> None:
         async with self._lock:
+            if self._stopped:
+                return
             effects = self._core.expire(dt_util.utcnow())
             if effects and self.snapshot.last_actual == "unavailable":
                 _LOGGER.info(
@@ -180,6 +194,8 @@ class TargetController:
 
     async def _execute(self, effects: list[Effect]) -> None:
         for effect in effects:
+            if self._stopped:
+                return  # Unloaded while an earlier effect was under way.
             match effect:
                 case TurnOn():
                     await self._switch("on")
@@ -192,7 +208,10 @@ class TargetController:
                 case Changed():
                     await self._store.async_save(self.snapshot)
                     self._schedule_refresh()
-                    self._notify()
+                    # The entities show the end of the countdown; the rest of the
+                    # snapshot is bookkeeping that needs no state write.
+                    if self.snapshot.end != self._notified_end:
+                        self._notify()
                 case _:
                     assert_never(effect)
 
@@ -203,21 +222,29 @@ class TargetController:
         context = Context()
         self._own_contexts.append(context.id)
         try:
-            await self._hass.services.async_call(
-                domain,
-                service,
-                {ATTR_ENTITY_ID: self.target_entity_id},
-                blocking=True,
-                context=context,
-            )
+            async with asyncio.timeout(SERVICE_CALL_TIMEOUT.total_seconds()):
+                await self._hass.services.async_call(
+                    domain,
+                    service,
+                    {ATTR_ENTITY_ID: self.target_entity_id},
+                    blocking=True,
+                    context=context,
+                )
         except HomeAssistantError as err:
-            _LOGGER.warning(
-                "Could not turn %s %s: %s", self.target_entity_id, wish, err
+            await self._call_failed(wish, err)
+        except TimeoutError:
+            await self._call_failed(
+                wish, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
             )
-            await self._execute(self._core.call_failed(dt_util.utcnow()))
+
+    async def _call_failed(self, wish: Literal["on", "off"], reason: object) -> None:
+        _LOGGER.warning("Could not turn %s %s: %s", self.target_entity_id, wish, reason)
+        await self._execute(self._core.call_failed(dt_util.utcnow()))
 
     def _arm(self, at: datetime) -> None:
         """Wake up at `at` to expire the timer, replacing any earlier alarm."""
+        if self._stopped:
+            return
         self._disarm()
         self._expiry_alarm = async_track_point_in_utc_time(
             self._hass, self._handle_expiry, at
@@ -233,11 +260,11 @@ class TargetController:
         """Wake up when the rounded-up remaining minutes next change."""
         self._cancel_refresh()
         end = self.snapshot.end
-        if end is None:
+        if self._stopped or end is None:
             return
         remaining = remaining_minutes(self.snapshot, dt_util.utcnow())
-        if remaining == 0:
-            return  # Over; the expiry alarm takes it from here.
+        if remaining <= 1:
+            return  # The expiry alarm comes at the end, and its change notifies.
         self._refresh_alarm = async_track_point_in_utc_time(
             self._hass,
             self._handle_refresh,
@@ -249,10 +276,13 @@ class TargetController:
             self._refresh_alarm()
             self._refresh_alarm = None
 
-    def _cancel_alarms(self) -> None:
+    def _stop(self) -> None:
+        """Make an unloaded controller inert: work already waiting is dropped."""
+        self._stopped = True
         self._disarm()
         self._cancel_refresh()
 
     def _notify(self) -> None:
+        self._notified_end = self.snapshot.end
         for listener in list(self._listeners):
             listener()

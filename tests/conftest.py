@@ -125,14 +125,16 @@ async def setup_target(hass: HomeAssistant, fake_target: FakeTarget) -> SetupTar
     """Set up a Timerify entry for `switch.boiler`; it returns the loaded entry."""
 
     async def setup(
-        mode: Mode = "strict", default_duration: int = 45
+        mode: Mode = "strict",
+        default_duration: int = 45,
+        target: str = TARGET_ID,
     ) -> MockConfigEntry:
         entry = MockConfigEntry(
             domain=DOMAIN,
             version=1,
             title="Boiler",
             options={
-                CONF_TARGET: TARGET_ID,
+                CONF_TARGET: target,
                 CONF_MODE: mode,
                 CONF_DEFAULT_DURATION: default_duration,
             },

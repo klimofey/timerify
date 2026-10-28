@@ -1,6 +1,7 @@
 """The timer as the user meets it: the "Run for" number on the target's device."""
 
 import asyncio
+import copy
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -405,3 +406,109 @@ async def test_run_in_loose_mode_switches_on_without_countdown(
 
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "0"
+
+
+@pytest.mark.parametrize("call_ends", ["is_released", "times_out"])
+async def test_unloaded_entry_stays_quiet_after_a_slow_call_ends(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    call_ends: str,
+) -> None:
+    """Work that waited behind a slow call is dropped once the entry is unloaded."""
+    entry = await setup_target()
+    key = f"timerify.{entry.entry_id}"
+    slow = fake_target.hold_next_call()
+    start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(30))
+    await slow.reached.wait()
+    hass.states.async_set(TARGET_ID, "on")  # a report queued behind the slow call
+    await hass.config_entries.async_unload(entry.entry_id)
+    stored = copy.deepcopy(hass_storage.get(key))
+
+    if call_ends == "is_released":
+        slow.release.set()
+        await start
+    await advance(hass, freezer, hours=2)  # the countdown is long over by now
+    await start
+    await advance(hass, freezer, hours=2)
+
+    assert fake_target.calls == [TURN_ON]
+    assert hass_storage.get(key) == stored
+
+
+async def test_number_is_written_once_at_expiry(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The last minute ends with one write: the countdown changed it, not the target."""
+    await setup_target()
+    await set_number(hass, NUMBER, 2)
+    await advance(hass, freezer, minutes=1)
+    assert state_of(hass, NUMBER) == "1"
+    writes = record_writes(hass, NUMBER)
+
+    await advance(hass, freezer, minutes=1)
+
+    assert writes == ["0"]
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_missing_target_is_a_setup_error_with_a_message(
+    hass: HomeAssistant, setup_target: SetupTarget, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A target that is gone from the registry fails setup with a translated reason."""
+    entry = await setup_target(target="0123456789abcdef0123456789abcdef")
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_domain == "timerify"
+    assert entry.error_reason_translation_key == "target_not_found"
+    assert entry.reason is not None
+    assert "no longer exists" in entry.reason
+    assert "Unknown entity registry entry" not in caplog.text
+
+
+async def test_hung_turn_on_is_given_up_and_retried(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A device that never answers is given up on like one that rejects the call."""
+    controller = (await setup_target()).runtime_data
+    slow = fake_target.hold_next_call()
+    start = asyncio.ensure_future(controller.async_set_minutes(10))
+    await slow.reached.wait()
+
+    freezer.tick(timedelta(seconds=30))
+    async_fire_time_changed(hass)
+    await start
+
+    assert "Could not turn switch.boiler on" in caplog.text
+    assert state_of(hass, NUMBER) == "10"
+    await fake_target.set_state("unavailable")
+    await fake_target.set_state("off")
+    assert fake_target.calls == [TURN_ON, TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+
+
+async def test_toggling_the_target_without_a_timer_stores_nothing(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Only the timer is stored: what the target does by itself leaves no trace."""
+    entry = await setup_target(mode="loose")
+    key = f"timerify.{entry.entry_id}"
+
+    await fake_target.set_state("on")
+    await fake_target.set_state("off")
+
+    assert key not in hass_storage
+    await set_number(hass, NUMBER, 5)
+    assert hass_storage[key]["data"]["end"] == "2026-01-05T07:05:00+00:00"

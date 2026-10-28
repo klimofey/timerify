@@ -4,6 +4,11 @@
       "run_for": {
         "name": "Включить на"
       }
+    },
+    "sensor": {
+      "ends_at": {
+        "name": "Выключится в"
+      }
     }
   },
   "exceptions": {

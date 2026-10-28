@@ -1,4 +1,4 @@
-"""The timer as the user meets it: the "Run for" number on the target's device."""
+"""The timer as the user meets it: the "Run for" number and the "Ends at" sensor."""
 
 import asyncio
 import copy
@@ -19,9 +19,12 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
+from custom_components.timerify.const import DOMAIN
+
 from .conftest import TARGET_ID, FakeTarget, SetupTarget
 
 NUMBER = "number.boiler_run_for"
+SENSOR = "sensor.boiler_ends_at"
 TURN_ON = ("turn_on", TARGET_ID)
 TURN_OFF = ("turn_off", TARGET_ID)
 
@@ -512,3 +515,103 @@ async def test_toggling_the_target_without_a_timer_stores_nothing(
     assert key not in hass_storage
     await set_number(hass, NUMBER, 5)
     assert hass_storage[key]["data"]["end"] == "2026-01-05T07:05:00+00:00"
+
+
+async def test_ends_at_shows_end_time_and_clears(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The sensor shows when the countdown ends, and nothing once it is stopped."""
+    await setup_target()
+    assert state_of(hass, SENSOR) == "unknown"
+
+    await set_number(hass, NUMBER, 45)
+
+    assert state_of(hass, SENSOR) == "2026-01-05T07:45:00+00:00"
+
+    await set_number(hass, NUMBER, 0)
+
+    assert state_of(hass, SENSOR) == "unknown"
+
+
+async def test_ends_at_follows_the_end_of_the_countdown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Adding time moves the shown end; the end of the countdown clears it."""
+    entry = await setup_target()
+    await set_number(hass, NUMBER, 15)
+
+    await entry.runtime_data.async_add_minutes(30)
+
+    assert state_of(hass, SENSOR) == "2026-01-05T07:45:00+00:00"
+
+    await advance(hass, freezer, minutes=45)
+
+    assert state_of(hass, SENSOR) == "unknown"
+
+
+async def test_ends_at_is_not_rewritten_while_running(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The end does not move as minutes pass, so the sensor is not written again."""
+    await setup_target()
+    await set_number(hass, NUMBER, 45)
+    sensor_writes = record_writes(hass, SENSOR)
+    number_writes = record_writes(hass, NUMBER)
+
+    for _ in range(10):
+        await advance(hass, freezer, minutes=1)
+
+    assert number_writes == [str(minutes) for minutes in range(44, 34, -1)]
+    assert sensor_writes == []
+    assert state_of(hass, SENSOR) == "2026-01-05T07:45:00+00:00"
+
+
+@pytest.mark.parametrize("fake_target", [False], indirect=True)
+async def test_target_without_device_gets_own_device(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A target on no device gets one device named after it, holding both entities."""
+    entry = await setup_target()
+
+    [device] = dr.async_get(hass).devices
+    assert device.identifiers == {(DOMAIN, entry.entry_id)}
+    assert device.name == "Boiler"
+    entities = er.async_get(hass)
+    for entity_id in (NUMBER, SENSOR):
+        registered = entities.async_get(entity_id)
+        assert registered is not None
+        assert registered.device_id == device.id
+
+
+@pytest.mark.parametrize(
+    ("target", "attributes", "device_name"),
+    [
+        ("switch.lamp", {"friendly_name": "Reading lamp"}, "Reading lamp"),
+        ("switch.not_started_yet", None, "switch.not_started_yet"),
+    ],
+)
+async def test_device_of_unregistered_target_is_named_after_its_state(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    target: str,
+    attributes: dict[str, str] | None,
+    device_name: str,
+) -> None:
+    """A target the registry does not know is named by its state, else by its id."""
+    if attributes is not None:
+        hass.states.async_set(target, "off", attributes)
+
+    entry = await setup_target(target=target)
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, entry.entry_id), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == device_name

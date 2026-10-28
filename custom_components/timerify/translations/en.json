@@ -4,6 +4,11 @@
       "run_for": {
         "name": "Run for"
       }
+    },
+    "sensor": {
+      "ends_at": {
+        "name": "Ends at"
+      }
     }
   },
   "exceptions": {

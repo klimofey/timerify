@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from .controller import TargetController, TimerifyConfigEntry
 from .store import TimerStore
 
-PLATFORMS: Final = (Platform.NUMBER,)
+PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:

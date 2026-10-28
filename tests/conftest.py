@@ -48,7 +48,8 @@ class FakeTarget:
     device, a state, and `turn_on`/`turn_off` services that record every call."""
 
     hass: HomeAssistant
-    device_id: str
+    device_id: str | None
+    """The device the switch is on; None when it belongs to no device."""
     calls: list[tuple[str, str]] = field(default_factory=list)
     """Every service call received as (service, entity_id), failed ones included."""
     _fail_next: bool = False
@@ -93,26 +94,38 @@ class FakeTarget:
 
 
 @pytest.fixture
-def fake_target(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> FakeTarget:
-    """`switch.boiler` on a device called Boiler, switched off, at `START`."""
+def fake_target(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, request: pytest.FixtureRequest
+) -> FakeTarget:
+    """`switch.boiler` on a device called Boiler, switched off, at `START`.
+
+    Parametrize it indirectly with `False` for a switch that is on no device.
+    """
     freezer.move_to(START)
     provider = MockConfigEntry(domain="boiler_maker")
     provider.add_to_hass(hass)
-    device = dr.async_get(hass).async_get_or_create(
-        config_entry_id=provider.entry_id,
-        identifiers={("boiler_maker", "boiler")},
-        name="Boiler",
-    )
+    device_id = None
+    if getattr(request, "param", True):
+        device_id = (
+            dr.async_get(hass)
+            .async_get_or_create(
+                config_entry_id=provider.entry_id,
+                identifiers={("boiler_maker", "boiler")},
+                name="Boiler",
+            )
+            .id
+        )
     er.async_get(hass).async_get_or_create(
         "switch",
         "boiler_maker",
         "boiler",
         config_entry=provider,
-        device_id=device.id,
+        device_id=device_id,
+        original_name="Boiler",
         suggested_object_id="boiler",
     )
     hass.states.async_set(TARGET_ID, "off")
-    target = FakeTarget(hass, device.id)
+    target = FakeTarget(hass, device_id)
     target.register_services()
     return target
 

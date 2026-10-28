@@ -4,6 +4,11 @@
       "run_for": {
         "default": "mdi:timer-outline"
       }
+    },
+    "sensor": {
+      "ends_at": {
+        "default": "mdi:clock-end"
+      }
     }
   }
 }

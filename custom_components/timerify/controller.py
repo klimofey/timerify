@@ -193,6 +193,10 @@ class TargetController:
         self._notify()
 
     async def _execute(self, effects: list[Effect]) -> None:
+        if any(isinstance(effect, Changed) for effect in effects):
+            # Saved ahead of the effects: a service call may take up to
+            # SERVICE_CALL_TIMEOUT, and a restart meanwhile must find the new timer.
+            await self._store.async_save(self.snapshot)
         for effect in effects:
             if self._stopped:
                 return  # Unloaded while an earlier effect was under way.
@@ -206,7 +210,6 @@ class TargetController:
                 case Disarm():
                     self._disarm()
                 case Changed():
-                    await self._store.async_save(self.snapshot)
                     self._schedule_refresh()
                     # The entities show the end of the countdown; the rest of the
                     # snapshot is bookkeeping that needs no state write.

@@ -22,37 +22,15 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.timerify.const import DOMAIN
 
 from .conftest import TARGET_ID, FakeTarget, SetupTarget
-
-NUMBER = "number.boiler_run_for"
-SENSOR = "sensor.boiler_ends_at"
-TURN_ON = ("turn_on", TARGET_ID)
-TURN_OFF = ("turn_off", TARGET_ID)
-
-
-async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
-    """Move the slider, as the dashboard does, and let the target's report settle."""
-    await hass.services.async_call(
-        "number",
-        "set_value",
-        {"entity_id": entity_id, "value": value},
-        blocking=True,
-    )
-    await hass.async_block_till_done()
-
-
-async def advance(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory, **delta: float
-) -> None:
-    """Let time pass and run everything that falls due."""
-    freezer.tick(timedelta(**delta))
-    async_fire_time_changed(hass)
-    await hass.async_block_till_done()
-
-
-def state_of(hass: HomeAssistant, entity_id: str) -> str:
-    state = hass.states.get(entity_id)
-    assert state is not None
-    return state.state
+from .helpers import (
+    NUMBER,
+    SENSOR,
+    TURN_OFF,
+    TURN_ON,
+    advance,
+    set_number,
+    state_of,
+)
 
 
 def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:

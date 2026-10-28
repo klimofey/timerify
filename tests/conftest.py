@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
@@ -134,13 +135,20 @@ type SetupTarget = Callable[..., Awaitable[MockConfigEntry]]
 
 
 @pytest.fixture
-async def setup_target(hass: HomeAssistant, fake_target: FakeTarget) -> SetupTarget:
-    """Set up a Timerify entry for `switch.boiler`; it returns the loaded entry."""
+async def setup_target(
+    hass: HomeAssistant, fake_target: FakeTarget, hass_storage: dict[str, Any]
+) -> SetupTarget:
+    """Set up a Timerify entry for `switch.boiler`; it returns the loaded entry.
+
+    `stored` is what an earlier run left in the entry's storage file, as the store
+    writes it; the entry then starts the way it does after a restart.
+    """
 
     async def setup(
         mode: Mode = "strict",
         default_duration: int = 45,
         target: str = TARGET_ID,
+        stored: dict[str, Any] | None = None,
     ) -> MockConfigEntry:
         entry = MockConfigEntry(
             domain=DOMAIN,
@@ -153,6 +161,14 @@ async def setup_target(hass: HomeAssistant, fake_target: FakeTarget) -> SetupTar
             },
         )
         entry.add_to_hass(hass)
+        if stored is not None:
+            key = f"timerify.{entry.entry_id}"
+            hass_storage[key] = {
+                "version": 1,
+                "minor_version": 1,
+                "key": key,
+                "data": stored,
+            }
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         return entry

@@ -1,10 +1,26 @@
 #!/usr/bin/env bash
 # Rejects staged files containing Cyrillic text: the repository is English-only.
-# README.ru.md is the single permitted exception (a translation of README.md).
+# The exceptions are translations of the product itself: README.ru.md, and every
+# language but English under custom_components/timerify/translations/<lang>.json
+# and custom_components/timerify/sentences/<lang>/.
 status=0
 
+cyrillic_allowed() {
+  local path="$1"
+  [[ $path == README.ru.md ]] && return 0
+  if [[ $path =~ ^custom_components/timerify/translations/([^/]+)\.json$ ]]; then
+    [[ ${BASH_REMATCH[1]} != en ]]
+    return
+  fi
+  if [[ $path =~ ^custom_components/timerify/sentences/([^/]+)/ ]]; then
+    [[ ${BASH_REMATCH[1]} != en ]]
+    return
+  fi
+  return 1
+}
+
 git diff --cached --name-only --diff-filter=ACMR -z | while IFS= read -r -d '' path; do
-  [ "$path" = "README.ru.md" ] && continue
+  cyrillic_allowed "$path" && continue
   if git show ":$path" | perl -CSD -ne 'exit 1 if /\p{Cyrillic}/'; then :; else
     echo "pre-commit: $path contains Cyrillic text; the repository is English-only." >&2
     exit 1

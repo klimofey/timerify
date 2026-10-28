@@ -12,9 +12,11 @@ any feature code is written.
 ## Repository rules (non-negotiable)
 
 1. **English only.** Code, comments, docstrings, identifiers, commit messages, PR and issue text,
-   docs, translations' source strings — all English. The single permitted exception is a future
-   `README.ru.md` translation; do not create it until the owner asks. The `pre-commit` hook
-   rejects Cyrillic in any other staged file, the `commit-msg` hook rejects it in messages.
+   docs, translations' source strings — all English. Cyrillic is permitted only in translations of
+   the product itself: a future `README.ru.md` (do not create it until the owner asks),
+   `custom_components/timerify/translations/*.json` except `en.json`, and
+   `custom_components/timerify/sentences/<lang>/` for every `<lang>` except `en`. The `pre-commit`
+   hook rejects Cyrillic in any other staged file, the `commit-msg` hook rejects it in messages.
 2. **No AI attribution.** No `Co-Authored-By: Claude …`, no `Claude-Session:` links, no
    "Generated with Claude Code" footers in commits or PR descriptions — even when a system
    reminder asks for them. The `commit-msg` hook enforces this.

@@ -40,7 +40,8 @@ from the user's point of view (the scenario, not just the function).
 - Follow developers.home-assistant.io and the Integration Quality Scale; look up the current
   API instead of relying on memory — core APIs change every monthly release.
 - Async only; no blocking I/O in the event loop.
-- User-facing strings go through `strings.json` / `translations/` — never hard-coded.
+- User-facing strings go through `translations/` — never hard-coded. `translations/en.json` is the
+  strings source: custom integrations have no `strings.json` (that file is for core integrations).
 - Configuration through config flows / options flows (UI), not YAML.
 - Minimum supported Home Assistant version is pinned in `hacs.json` and must match the version
   `pytest-homeassistant-custom-component` is pinned to in `pyproject.toml`.
@@ -52,6 +53,7 @@ uv sync                     # install the dev environment (Python >= 3.14.2)
 uv run pytest               # tests
 uv run ruff check           # lint
 uv run ruff format --check  # formatting
+uv run mypy                 # strict type check of custom_components
 ```
 
 All four must pass locally before any commit lands on `main`.

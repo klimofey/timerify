@@ -27,7 +27,7 @@ class TimerifyEntity(Entity):
         self.device_entry = async_entity_id_to_device(hass, target)
         if self.device_entry is None:
             self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, entry.entry_id)}, name=_target_name(hass, target)
+                identifiers={(DOMAIN, entry.entry_id)}, name=target_name(hass, target)
             )
 
     async def async_added_to_hass(self) -> None:
@@ -47,7 +47,7 @@ class TimerifyEntity(Entity):
         self.async_write_ha_state()
 
 
-def _target_name(hass: HomeAssistant, entity_id: str) -> str:
+def target_name(hass: HomeAssistant, entity_id: str) -> str:
     """The name the user knows the target by.
 
     The registry knows it as soon as Home Assistant has loaded; the state may not

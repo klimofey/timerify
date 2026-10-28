@@ -2,6 +2,7 @@
   "domain": "timerify",
   "name": "Timerify",
   "codeowners": ["@klimofey"],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/klimofey/timerify",
   "integration_type": "helper",

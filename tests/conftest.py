@@ -86,7 +86,7 @@ class FakeTarget:
                 self._fail_next = False
                 raise HomeAssistantError("The device rejected the command")
             self.hass.states.async_set(
-                TARGET_ID,
+                call.data["entity_id"],
                 "on" if service == "turn_on" else "off",
                 context=call.context,
             )

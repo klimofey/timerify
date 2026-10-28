@@ -72,6 +72,22 @@
       }
     }
   },
+  "services": {
+    "add_time": {
+      "name": "Add time",
+      "description": "Adds minutes to the countdown of a timer, or takes them off with a negative number. Adding to a timer that is not running starts it; taking off all the time that is left turns the entity off.",
+      "fields": {
+        "minutes": {
+          "name": "Minutes",
+          "description": "How many minutes to move the end of the countdown by, up to a day either way."
+        }
+      }
+    },
+    "run": {
+      "name": "Run",
+      "description": "Turns the entity on without saying for how long: for the default duration in strict mode, without a countdown in loose mode."
+    }
+  },
   "exceptions": {
     "target_not_found": {
       "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."

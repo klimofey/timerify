@@ -49,3 +49,11 @@ class RunForNumber(TimerifyEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Count down `value` minutes from now."""
         await self._controller.async_set_minutes(int(value))
+
+    async def async_add_time(self, minutes: int) -> None:
+        """Move the end of the countdown by `minutes`, which may be negative."""
+        await self._controller.async_add_minutes(minutes)
+
+    async def async_run(self) -> None:
+        """Switch the target on without a duration."""
+        await self._controller.async_run()

@@ -4,14 +4,25 @@ from typing import Final
 
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device import async_entity_id_to_device_id
 from homeassistant.helpers.helper_integration import async_handle_source_entity_changes
+from homeassistant.helpers.typing import ConfigType
 
-from .const import CONF_TARGET
+from .const import CONF_TARGET, DOMAIN
 from .controller import TargetController, TimerifyConfigEntry
+from .services import async_setup_services
 from .store import TimerStore
 
 PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR)
+
+CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the services, which belong to the integration, not to a timer."""
+    async_setup_services(hass)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:

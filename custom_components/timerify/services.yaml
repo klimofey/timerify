@@ -1,0 +1,21 @@
+add_time:
+  target:
+    entity:
+      integration: timerify
+      domain: number
+  fields:
+    minutes:
+      required: true
+      example: 15
+      selector:
+        number:
+          min: -1440
+          max: 1440
+          step: 1
+          mode: box
+          unit_of_measurement: min
+run:
+  target:
+    entity:
+      integration: timerify
+      domain: number

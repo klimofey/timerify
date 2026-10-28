@@ -10,5 +10,13 @@
         "default": "mdi:clock-end"
       }
     }
+  },
+  "services": {
+    "add_time": {
+      "service": "mdi:timer-plus-outline"
+    },
+    "run": {
+      "service": "mdi:timer-play-outline"
+    }
   }
 }

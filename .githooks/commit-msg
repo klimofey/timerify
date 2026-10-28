@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Rejects commit messages that carry AI attribution or non-English (Cyrillic) text.
+msg_file="$1"
+
+if grep -qiE '^(co-authored-by:.*(claude|anthropic|noreply@anthropic\.com))|^claude-session:|generated with \[?claude' "$msg_file"; then
+  echo "commit-msg: remove AI attribution lines (Co-Authored-By: Claude, Claude-Session, Generated with Claude Code)." >&2
+  exit 1
+fi
+
+if perl -CSD -ne 'next if /^#/; exit 1 if /\p{Cyrillic}/' "$msg_file"; then :; else
+  echo "commit-msg: commit messages must be in English." >&2
+  exit 1
+fi

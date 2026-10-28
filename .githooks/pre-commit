@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Rejects staged files containing Cyrillic text: the repository is English-only.
+# README.ru.md is the single permitted exception (a translation of README.md).
+status=0
+
+git diff --cached --name-only --diff-filter=ACMR -z | while IFS= read -r -d '' path; do
+  [ "$path" = "README.ru.md" ] && continue
+  if git show ":$path" | perl -CSD -ne 'exit 1 if /\p{Cyrillic}/'; then :; else
+    echo "pre-commit: $path contains Cyrillic text; the repository is English-only." >&2
+    exit 1
+  fi
+done || status=1
+
+exit $status

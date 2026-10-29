@@ -10,6 +10,7 @@ import logging
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import cached_property
 from typing import Literal, assert_never
 
 from homeassistant.config_entries import ConfigEntry
@@ -52,6 +53,7 @@ from .core import (
 )
 from .domains import actual_state, behaviour_for
 from .store import TimerStore
+from .target import target_name
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -99,6 +101,12 @@ class TargetController:
         self._notified_end = snapshot.end
         self._expiry_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
+
+    @cached_property
+    def device_name(self) -> str:
+        """The name of the device made for a target that is on none: the name the
+        user knows the target by, looked up once per timer."""
+        return target_name(self._hass, self.target_entity_id)
 
     @property
     def snapshot(self) -> Snapshot:

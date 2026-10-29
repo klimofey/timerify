@@ -1,7 +1,6 @@
 """Base class of the entities Timerify adds to a target's device."""
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device import async_entity_id_to_device
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
@@ -27,7 +26,8 @@ class TimerifyEntity(Entity):
         self.device_entry = async_entity_id_to_device(hass, target)
         if self.device_entry is None:
             self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, entry.entry_id)}, name=target_name(hass, target)
+                identifiers={(DOMAIN, entry.entry_id)},
+                name=self._controller.device_name,
             )
 
     async def async_added_to_hass(self) -> None:
@@ -45,17 +45,3 @@ class TimerifyEntity(Entity):
         whole timer can skip the write.
         """
         self.async_write_ha_state()
-
-
-def target_name(hass: HomeAssistant, entity_id: str) -> str:
-    """The name the user knows the target by.
-
-    The registry knows it as soon as Home Assistant has loaded; the state may not
-    exist yet while the target's own integration is still starting.
-    """
-    entry = er.async_get(hass).async_get(entity_id)
-    if entry is not None and (name := er.async_get_full_entity_name(hass, entry)):
-        return name
-    if (state := hass.states.get(entity_id)) is not None:
-        return state.name
-    return entity_id

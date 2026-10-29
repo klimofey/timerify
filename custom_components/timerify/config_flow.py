@@ -35,7 +35,7 @@ from .const import (
     Mode,
 )
 from .domains import SUPPORTED_DOMAINS
-from .entity import target_name
+from .target import target_name
 
 _REQUIRED_FEATURES: Final[Mapping[str, tuple[IntFlag, ...]]] = {
     "climate": (ClimateEntityFeature.TURN_ON, ClimateEntityFeature.TURN_OFF),

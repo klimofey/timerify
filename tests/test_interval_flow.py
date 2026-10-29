@@ -29,6 +29,7 @@ from .helpers import (
     add_interval,
     advance,
     edit_interval,
+    prefilled,
     set_number,
     state_of,
     submit_interval,
@@ -85,13 +86,17 @@ def settings_fields(form: Any) -> dict[str, Selector[Any]]:
     return {} if validator is None else fields_of(validator.schema)
 
 
-def shown_value(schema: probatio.Schema, name: str) -> Any:
-    """The value a form shows in the field `name`: the one suggested to the user, or
-    else the one the field starts with."""
-    (marker,) = (marker for marker in schema.schema if marker == name)
-    if marker.description and "suggested_value" in marker.description:
-        return marker.description["suggested_value"]
-    return marker.default()
+def frontend_fields(form: Any) -> list[dict[str, Any]]:
+    """The fields of the form as Home Assistant sends them to the frontend."""
+    return probatio.to_field_list(
+        form["data_schema"], custom_serializer=cv.custom_serializer
+    )
+
+
+def settings_are_open(form: Any) -> bool:
+    """Whether the frontend draws the settings section expanded."""
+    (settings,) = (f for f in frontend_fields(form) if f["name"] == "settings")
+    return bool(settings["expanded"])
 
 
 async def test_adding_an_interval_stores_it_with_a_readable_title(
@@ -200,10 +205,7 @@ async def test_new_interval_form_offers_every_day_and_no_times(
 
     schema = form["data_schema"]
     assert list(fields_of(schema)) == ["weekdays", "start", "end"]
-    assert shown_value(schema, "weekdays") == list(WEEK)
-    markers = {str(marker): marker for marker in schema.schema}
-    assert markers["start"].default is probatio.UNDEFINED
-    assert markers["end"].default is probatio.UNDEFINED
+    assert prefilled(schema) == {"weekdays": list(WEEK)}
     weekdays = fields_of(schema)["weekdays"]
     assert weekdays.config["options"] == list(WEEK)
     assert weekdays.config["multiple"] is True
@@ -252,10 +254,33 @@ async def test_a_refused_form_keeps_what_was_typed(
         hass, entry, start="06:30", end="06:30", weekdays=["mon", "tue"]
     )
 
-    schema = result["data_schema"]
-    assert shown_value(schema, "weekdays") == ["mon", "tue"]
-    assert shown_value(schema, "start") == "06:30"
-    assert shown_value(schema, "end") == "06:30"
+    assert prefilled(result["data_schema"]) == {
+        "weekdays": ["mon", "tue"],
+        "start": "06:30",
+        "end": "06:30",
+    }
+
+
+async def test_a_refused_form_keeps_the_settings_that_were_typed_and_shows_them(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The settings stay in the form, and the section is open so that the user sees
+    the fields an error about them is about."""
+    entry = await setup_target(target=AC_ID)
+
+    result = await submit_interval(
+        hass,
+        entry,
+        start="06:30",
+        end="06:30",
+        settings={"hvac_mode": "cool", "temperature": 24},
+    )
+
+    assert prefilled(result["data_schema"])["settings"] == {
+        "hvac_mode": "cool",
+        "temperature": 24,
+    }
+    assert settings_are_open(result)
 
 
 async def test_times_from_the_ui_are_stored_as_hours_and_minutes(
@@ -276,13 +301,12 @@ async def test_form_reaches_the_frontend(
     hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
 ) -> None:
     """The form converts to the fields the frontend draws, in order, with the
-    settings in a section that starts closed."""
+    settings in a section that starts closed and has no value of its own: a default
+    on the section would hide the settings that are in it."""
     entry = await setup_target(target=AC_ID)
     form = await open_form(hass, entry)
 
-    fields = probatio.to_field_list(
-        form["data_schema"], custom_serializer=cv.custom_serializer
-    )
+    fields = frontend_fields(form)
 
     assert [field["name"] for field in fields] == [
         "weekdays",
@@ -292,6 +316,7 @@ async def test_form_reaches_the_frontend(
     ]
     assert fields[-1]["type"] == "expandable"
     assert fields[-1]["expanded"] is False
+    assert "default" not in fields[-1]
     assert [field["name"] for field in fields[-1]["schema"]] == [
         "hvac_mode",
         "temperature",
@@ -428,10 +453,7 @@ async def test_settings_the_ac_no_longer_takes_are_refused(
     that was picked is refused rather than stored."""
     entry = await setup_target(target=AC_ID)
     form = await open_form(hass, entry)
-    fake_climate.capability_attributes = {
-        **fake_climate.capability_attributes,
-        "hvac_modes": ["off", "heat"],
-    }
+    fake_climate.capability_attributes["hvac_modes"] = ["off", "heat"]
     await fake_climate.set_state("off")
 
     result = await hass.config_entries.subentries.async_configure(
@@ -509,14 +531,31 @@ async def test_edit_form_shows_the_current_values(
 
     form = await open_form(hass, entry, "reconfigure", subentry_id)
 
-    schema = form["data_schema"]
     assert form["step_id"] == "reconfigure"
-    assert shown_value(schema, "weekdays") == ["sat", "sun"]
-    assert shown_value(schema, "start") == "06:30"
-    assert shown_value(schema, "end") == "07:15"
-    shown = fields_of(schema)["settings"].schema
-    assert shown_value(shown, "hvac_mode") == "heat"
-    assert shown_value(shown, "temperature") == 22.5
+    assert prefilled(form["data_schema"]) == {
+        "weekdays": ["sat", "sun"],
+        "start": "06:30",
+        "end": "07:15",
+        "settings": {"hvac_mode": "heat", "temperature": 22.5},
+    }
+
+
+async def test_settings_are_open_when_the_form_shows_some(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The section is closed on a new interval and on one without settings, and open
+    on an interval that has some, so that the user sees what it does."""
+    entry = await setup_target(target=AC_ID)
+    with_settings = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings={"hvac_mode": "heat"}
+    )
+    without_settings = await add_interval(hass, entry, start="08:00", end="09:00")
+
+    assert not settings_are_open(await open_form(hass, entry))
+    assert settings_are_open(await open_form(hass, entry, "reconfigure", with_settings))
+    assert not settings_are_open(
+        await open_form(hass, entry, "reconfigure", without_settings)
+    )
 
 
 async def test_editing_the_days_renames_the_interval(

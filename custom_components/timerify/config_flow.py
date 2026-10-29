@@ -337,14 +337,21 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
-                self._interval_schema(entry), shown
+                self._interval_schema(entry, opened=bool(shown.get(CONF_SETTINGS))),
+                shown,
             ),
             errors=errors,
         )
 
-    def _interval_schema(self, entry: ConfigEntry) -> probatio.Schema:
+    def _interval_schema(self, entry: ConfigEntry, *, opened: bool) -> probatio.Schema:
         """The form: days, start, end and, when the target can be turned on with any,
-        a closed section of its settings."""
+        a section of its settings.
+
+        The section is open when the form shows settings, which are then not hidden
+        from the user nor the fields an error about them is about, and closed when it
+        shows none. It has no default: a default on a section makes the frontend skip
+        the settings inside it, and an edit would clear them.
+        """
         fields: dict[Any, Any] = {
             probatio.Required(
                 CONF_WEEKDAYS, default=lambda: list(WEEKDAYS)
@@ -360,14 +367,14 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             probatio.Required(CONF_END): selector.TimeSelector(),
         }
         if choices := supported_settings(self.hass, entry.options[CONF_TARGET]):
-            fields[probatio.Optional(CONF_SETTINGS, default=dict)] = section(
+            fields[probatio.Optional(CONF_SETTINGS)] = section(
                 probatio.Schema(
                     {
                         probatio.Optional(choice.name): _setting_selector(choice)
                         for choice in choices
                     }
                 ),
-                {"collapsed": True},
+                {"collapsed": not opened},
             )
         return probatio.Schema(fields)
 

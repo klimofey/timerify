@@ -281,7 +281,7 @@ def provide_target(
             hass,
             device_id,
             entity_id,
-            capability_attributes=capability_attributes or {},
+            capability_attributes=dict(capability_attributes or {}),
             state_attributes=state_attributes or {},
         )
         target.write("off")

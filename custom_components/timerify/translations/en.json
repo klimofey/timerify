@@ -150,7 +150,7 @@
         "same_start_and_end": "The end time must differ from the start time. To run past midnight, give an end time that is earlier than the start time.",
         "whole_minutes_only": "The time must be a whole minute, without seconds.",
         "settings_not_supported": "The entity cannot be turned on with these settings. Check that each one is something it can do and that its value is one it accepts.",
-        "settings_not_whole": "A speed and a humidity are whole numbers of percent, without decimals."
+        "settings_not_whole": "A setting must be a whole number, without decimals."
       }
     }
   },

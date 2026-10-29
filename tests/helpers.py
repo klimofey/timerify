@@ -78,17 +78,22 @@ async def add_command(
     return response
 
 
-def _prefilled(schema: probatio.Schema) -> dict[str, Any]:
-    """What a form submits when the user touches nothing: for each field the value it
-    shows, which is the suggested value or else the default."""
+def prefilled(schema: probatio.Schema) -> dict[str, Any]:
+    """What the frontend puts in a form before the user touches it, which is what it
+    submits then: for each field its suggested value, else its default, and for a
+    section, when neither is there, what its fields hold, if the section is required
+    or anything is in it. (`computeInitialHaFormData` in the frontend takes that
+    order: a default on a section hides what is inside it.)"""
     values: dict[str, Any] = {}
     for marker, validator in schema.schema.items():
-        if isinstance(validator, section):
-            values[marker.schema] = _prefilled(validator.schema)
-        elif (shown := (marker.description or {}).get("suggested_value")) is not None:
+        if (shown := (marker.description or {}).get("suggested_value")) is not None:
             values[marker.schema] = shown
         elif callable(marker.default):
             values[marker.schema] = marker.default()
+        elif isinstance(validator, section):
+            inside = prefilled(validator.schema)
+            if inside or isinstance(marker, probatio.Required):
+                values[marker.schema] = inside
     return values
 
 
@@ -151,7 +156,7 @@ async def edit_interval(
     )
     assert result["type"] is FlowResultType.FORM
     result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {**_prefilled(result["data_schema"]), **fields}
+        result["flow_id"], {**prefilled(result["data_schema"]), **fields}
     )
     await hass.async_block_till_done()
     return result

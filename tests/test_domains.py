@@ -151,6 +151,20 @@ def test_fallback_reads_only_on_as_on(state: str, expected: Actual) -> None:
     assert actual_state(State("camera.door", state)) == expected
 
 
+def test_only_rows_that_misread_other_states_are_judged_by_state() -> None:
+    """The generic row takes every state but `on` for off, and a group goes through
+    it: those are the targets whose state must read on or off. A thermostat's mode and
+    a player's `playing` are not on or off, and their rows read them right."""
+    judged = {
+        domain
+        for domain in SUPPORTED_DOMAINS
+        if behaviour_for_domain(domain).judged_by_state
+    }
+
+    assert judged == {"group"}
+    assert behaviour_for_domain("kettle").judged_by_state
+
+
 def test_malformed_entity_id_raises() -> None:
     """An entity id without a domain part is refused."""
     with pytest.raises(ValueError, match="Invalid entity ID"):

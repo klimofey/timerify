@@ -40,7 +40,6 @@ from .const import (
     Mode,
 )
 from .domains import (
-    FALLBACK,
     SUPPORTED_DOMAINS,
     behaviour_for_domain,
     switchable_by_features,
@@ -160,7 +159,7 @@ async def _validate_target(
         flow.hass, entity_id
     ):
         raise SchemaFlowError("target_not_supported")
-    if behaviour_for_domain(domain) is FALLBACK and not _reads_on_or_off(
+    if behaviour_for_domain(domain).judged_by_state and not _reads_on_or_off(
         flow.hass, entity_id
     ):
         raise SchemaFlowError("not_switchable")

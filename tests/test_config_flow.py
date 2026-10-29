@@ -585,6 +585,33 @@ async def test_picker_offers_domains_that_can_be_turned_on_and_off(
     assert unfiltered[0]["domain"] == [d for d in offered if d not in featured]
 
 
+async def test_entity_id_is_taken_when_its_domain_has_both_services(
+    hass: HomeAssistant,
+) -> None:
+    """The form offers the domains that have both services when it opens: the entity
+    id of a domain that has only one is refused by the form itself, and the same id is
+    accepted in a form that opens once the domain has the other service too."""
+    provide_services(hass, "lamp_like", "turn_on")
+    hass.states.async_set("lamp_like.hall", "on")
+
+    with pytest.raises(InvalidData):
+        await submit(
+            hass,
+            await start_flow(hass),
+            {CONF_TARGET: "lamp_like.hall", CONF_MODE: "strict"},
+        )
+
+    provide_services(hass, "lamp_like", "turn_off")
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: "lamp_like.hall", CONF_MODE: "strict"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "duration"
+
+
 @pytest.mark.parametrize("minutes", [0, MAX_MINUTES + 1])
 async def test_duration_outside_the_range_is_rejected(
     hass: HomeAssistant, fake_target: FakeTarget, minutes: int

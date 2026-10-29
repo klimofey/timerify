@@ -233,6 +233,11 @@ class DomainBehaviour:
     settings: tuple[_Setting, ...] = ()
     """The settings the entities can be turned on with, in the order that their calls
     are made."""
+    judged_by_state: bool = False
+    """Whether a target must read `on` or `off` when its timer is added. The row takes
+    every state but `on` for off, so it would misread `open`, `locked` or `idle`; the
+    other rows have their own idea of on, and a thermostat's mode or a player's
+    `playing` says nothing against them."""
 
     @property
     def setting_names(self) -> frozenset[str]:
@@ -302,6 +307,7 @@ FALLBACK: Final = DomainBehaviour(
     on_service=("homeassistant", SERVICE_TURN_ON),
     off_service=("homeassistant", SERVICE_TURN_OFF),
     is_on=_is_state_on,
+    judged_by_state=True,
 )
 """The row of every domain that has none of its own."""
 

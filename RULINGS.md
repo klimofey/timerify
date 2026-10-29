@@ -5,8 +5,8 @@ silent or its plan was wrong, recorded so they can be revisited. Each entry: wha
 decided, why, and what it costs if it turns out wrong. Process decisions (branching,
 tooling) are not listed; only decisions that shape the product or its code.
 
-An entry of phase 1 that a later phase changed is rewritten to what holds now, not
-repeated beside its successor.
+An entry of an earlier phase that a later phase changed is rewritten to what holds now,
+not repeated beside its successor.
 
 ## Phase 1: core timer
 
@@ -75,36 +75,56 @@ repeated beside its successor.
 - **The longest countdown is one day** (`MAX_MINUTES = 1440`). `timerify.add_time` clamps
   so the remaining time never exceeds it, matching the maximum of the "Run for" number.
   Cost if wrong: users who need longer timers.
-- **R10 logging lives in the controller.** When a wake-up comes due while the target is
+- **R10 logging lives in the controller.** When something comes due while the target is
   unavailable, the controller logs what was due, comparing the snapshot before and after
   `tick`: "ended" only when the countdown really ended and the target is wanted off (a
   command due at that instant that extended it, or that turns the target on, does not
-  count), and "command came due" for every command that was carried out (what it wants
-  is applied when the target is back, if it is still relevant then, as R10 says). A command dropped because the run it asked for is over
-  is an effect of the core (`CommandDropped`) that the controller logs at info level; the
-  core stays pure and emits no other signal. Cost if wrong: none.
+  count), "command came due" for every command that was carried out (what it wants is
+  applied when the target is back, if it is still relevant then, as R10 says), and "a
+  schedule window started" only for a window whose start set the timer, that is, whose
+  interval carries the timer's end after the fold. A start that left the timer alone, a
+  window that was over, and one that was handed over to a later window wanted nothing,
+  so they log nothing. The lines are written by every fold that goes through
+  `_fold_due`: the alarm, the refresh of the windows and the switching off of an
+  interval. The fold of start-up and of a report of the target writes none; see
+  `docs/followups.md`. A command dropped because the run it asked for is over is an
+  effect of the core (`CommandDropped`) that the controller logs at info level; the core
+  stays pure and emits no other signal. Cost if wrong: none.
 
 ### Restarts and storage
 
-- **The store keeps the end, the unconfirmed wish to turn on or off, the owed settings and
-  the pending commands**, with times as ISO UTC strings, and writes only when one of them
+- **The store keeps the end, the unconfirmed wish to turn on or off, the owed settings
+  (and whether they may only go with a turn-on), the pending commands, the schedule
+  windows with the interval whose window end the timer carries, and the intervals that
+  are switched off**, with times as ISO UTC strings, and writes only when one of them
   changes. The last observed state of the target is not stored: on start-up the first
   report of the target is always treated as "came back" (spec §5.7, R10), so a wish stored
-  before a restart is enforced. The owed settings are stored under `owed_settings`, the
-  commands with `command_to_json`, the shape of the "Next command" attribute, so there is
-  one serialisation.
-- **The store file is version 2; the pending commands joined it without a further
-  version.** The migration from version 1 adds `owed_settings` and `commands`, and the
-  store reads version 2 strictly: the migration guarantees the keys, and tolerant reads
-  would hide a broken migration. Version 2 was never released before commands existed, so
-  it needs no second step. Cost if wrong: a version 2 file written by a development build
-  from between the two changes has no `commands` and fails to load; that exists on
-  developer machines only.
+  before a restart is enforced. The owed settings are stored under `owed_settings` (the
+  marker under `owed_turn_on_only`), the commands with `command_to_json`, the shape of the
+  "Next command" attribute, and the windows with `window_to_json`, so there is one
+  serialisation of each.
+- **The store file is version 3; the keys of the later changes joined it without a further
+  version.** The migration from version 1 adds `owed_settings`, `commands`,
+  `owed_turn_on_only`, `scheduled_by`, `windows` and `disabled_intervals`, the one from
+  version 2 the last four, and the store reads version 3 strictly: the migration
+  guarantees the keys, and tolerant reads would hide a broken migration. A file that
+  contradicts itself is refused when the timer is set up, not repaired: two windows of one
+  interval, a window that is suppressed but has not started, a window of a switched-off
+  interval, an interval switched off twice, `scheduled_by` without an end, the marker
+  without owed settings. Only the timer's own code writes the file, so such a file means a
+  defect, and it should show when the timer loads, not as a target switched for reasons
+  nobody can follow. Versions 2 and 3 were never released before their keys were
+  complete, so they need no further steps. Cost if wrong: a version 2 or 3 file written by
+  a development build from between the changes lacks a key and fails to load; that exists
+  on developer machines only.
 - **The snapshot is stored before a command is sent.** A restart during a slow call would
   otherwise lose a newly set countdown.
-- **The controller arms the stored wake-up itself at start-up**: the earlier of the stored
-  end and the first stored command, since an unchanged snapshot produces no new alarm from
-  the core.
+- **At start-up the merge of the windows arms the stored wake-up.** `set_windows` always
+  returns the alarm for the merged snapshot, the earliest of the stored end, the first
+  stored command and the start and end of every window, and it is the first effect of the
+  one `_execute` that also carries the first observation; an unchanged snapshot produces
+  no new alarm from the core otherwise. Nothing is armed earlier, because a stored end,
+  command or window that has long passed would switch a target that has not been seen.
 
 ### Services
 
@@ -177,16 +197,23 @@ repeated beside its successor.
   `services.yaml` is written once and reused by anchor**, so neither logic nor selectors
   are duplicated. The translations still repeat the field texts per service: custom
   integrations get no `[%key:...%]`. Cost if wrong: none.
-- **"Apply is separate" is the `apply_if_on` keyword of `set_duration` and `run_open`**
-  (design note D3), not a public `apply_settings`. The change of the timer and the push of
-  settings onto a running target are decided separately but in one atomic core call, which
-  meets the §5.4 bullets. Cost if wrong: a phase-3 caller that forgets
-  `apply_if_on=False` pushes settings onto a running target, so phase-3 tests must cover
-  S1 with settings. `apply_if_on=False` is not stored yet either; see `docs/followups.md`.
+- **"Apply is separate": a schedule window owns the settings that may only travel with a
+  turn-on, and a stored marker says so; there is no `apply_if_on`.** §5.4: a window that
+  opens on a target that already runs pushes no settings, someone chose the current ones.
+  The core owes a window's settings with `owed_turn_on_only`, which is stored; S1 is the
+  only caller that sets it, and every other way to owe settings (`set_duration`,
+  `run_open`, a due pending command) replaces them with unmarked ones, which a command may
+  push onto a running target (P1). The change of the timer and the decision what to push
+  stay in one atomic core call, which meets the §5.4 bullets. The `apply_if_on` keyword
+  that design note D3 gave `set_duration` and `run_open` is gone: it had no caller outside
+  the tests, and a keyword was a second place deciding what the marker now decides alone,
+  one that was lost when the target was unavailable. Cost if wrong: a future caller that
+  must not push onto a running target does what S1 does, `_owe(..., turn_on_only=True)`.
 - **Owed settings go with the next `TurnOn`; otherwise `ApplySettings` is sent when the
   target is on or a turn-on is in flight.** The lock means an in-flight turn-on has
-  returned before the next command runs. Cost if wrong: a device slow to report "on" gets
-  its `set_*` calls right after the turn-on.
+  returned before the next command runs. Settings marked turn-on-only are never sent that
+  way (see Phase 3). Cost if wrong: a device slow to report "on" gets its `set_*` calls
+  right after the turn-on.
 - **A command without settings leaves owed settings alone; only non-empty settings replace
   them**, also for an executed pending `on`. Settings are never invented or silently
   dropped. Cost if wrong: settings asked for during an outage reach the device after a
@@ -247,22 +274,33 @@ repeated beside its successor.
   Strict mode counts the default duration from the command's time, so a stale one is
   dropped; a command to turn off is always carried out. Cost if wrong: a boiler started
   hours late; the user can cancel the command, or give it minutes.
-- **One alarm sits at `next_wakeup`, the earlier of the end and the first command**, and
-  the core's `tick` (formerly `expire`) handles both kinds of due items. One wake-up path
-  for both. Cost if wrong: none.
-- **The catch-up folds all due items in time order, a command before the expiry on a tie,
-  and wants one final state.** That avoids off/on flaps after a restart and at coinciding
-  times. Cost if wrong: a due `on` then `off` never reaches the device, which is intended.
+- **One alarm sits at `next_wakeup`, the earliest of the end, the first command, the start
+  of every window not yet started and the end of every window**, and the core's `tick`
+  (formerly `expire`) handles all four kinds of due items. One wake-up path for all of
+  them, which is also what keeps a restart from flapping the target. Cost if wrong: none.
+- **The catch-up folds all due items in one order, the key `(time, rank)`, and wants one
+  final state.** The ranks at one instant: the end of a window, the start of a window, a
+  command, the end of the timer. A command at a window's start is a manual set and wins
+  (P3); a window that starts as the timer ends extends it without an off; phase 2's
+  "a command before the end on a tie" is kept. That avoids off/on flaps after a restart
+  and at coinciding times. Cost if wrong: a due `on` then `off` never reaches the device,
+  which is intended.
 - **`observe` runs the catch-up first, and skips R3 to R5 only when the catch-up moved the
-  timer**, that is, a command was carried out or the end was reached. It generalises
-  phase 1's "expiry outranks the report": a manual off reported in the same instant a
-  command fires is overridden by the command (P1). A command that was merely dropped does
-  not move the timer, so R3 to R5 still apply: spec §5.7 lists "execute or drop" and "apply
-  R3/R4" as separate steps, and skipping them would leave a strict target that is found on
-  after a restart without a countdown. Cost if wrong: none found.
-- **The controller notifies the entities when `end` or `commands` changed, and each entity
-  gates its own write.** The "Next command" sensor must show a command added to an idle
-  timer. Cost if wrong: none.
+  timer**, that is, a command was carried out, the end was reached, a window's start set
+  the timer (an applied S1) or a realignment changed it. It generalises phase 1's "expiry
+  outranks the report": a manual off reported in the same instant a command fires or a
+  window opens is overridden by it (P1, P3). Neither a window start that left the timer
+  alone (it ends later already, or the window was over), nor a window end, nor a command
+  that was merely dropped moves the timer, so R3 to R5 still apply: spec §5.7 lists
+  "execute or drop" and "apply R3/R4" as separate steps, and skipping them would leave a
+  strict target that is found on after a restart without a countdown. A realignment that
+  stops the timer at start-up does count: it must hide R4 from the report of the same
+  observation, or a stopped strict target would get the default duration. Cost if wrong:
+  none found.
+- **The controller notifies the entities when `end`, `commands` or the switched-off
+  intervals changed, and each entity gates its own write.** The "Next command" sensor must
+  show a command added to an idle timer, and the switch of an interval follows its flag.
+  Cost if wrong: none.
 - **The "Next command" sensor writes its state only when the command list changes, and its
   attribute is unrecorded**, proven with the recorder fixture (§3, a small recorder).
   Cost if wrong: one slower test.
@@ -272,3 +310,293 @@ repeated beside its successor.
 - **A deleted target still gives no sign.** The spec is silent and it changes no
   spec-defined behaviour, so it stays in `docs/followups.md`, under "Later". Cost if wrong:
   timers of deleted targets stay silent until a later phase.
+
+## Phase 3: schedules
+
+The plan's rulings (`docs/superpowers/plans/2026-10-29-phase-3-schedules.md`) and the ones
+the reviews added, in the form they have now. Where a later ruling replaced a plan ruling,
+only the final behaviour is written.
+
+### The windows in the core
+
+- **§5.7's "a schedule window that is active now → apply S1" means a window whose S1 has
+  not run**: it began during downtime, or was never applied. A window that already started
+  keeps its `started` mark across the restart. Re-applying S1 would ignore a manual change
+  (R8, and the anti-goal of §2: the user always wins over automation) and make a restart
+  mis-fire (§2 goal 5); D5 already says "unless suppressed". The design notes'
+  `window_started` and `window_changed` events (marked "e.g.") became fold items plus a
+  realignment: one wake-up path and no flap after a restart, which D4's "one alarm"
+  preferred. Cost if wrong: a user who expects a restart to bring back a window they
+  stopped.
+- **S4 is two stored marks per occurrence, `started` and `suppressed`; a window applies S1
+  once.** `started` says S1 has dealt with the opening (it set the timer, left it alone
+  because it ends later, or found the window over); `suppressed` says the timer was zeroed
+  after that. Both survive edits (a new window that is open now and replaces a started
+  window that is open now is the same occurrence and inherits them) and restarts. So any
+  zeroing during a started window keeps the target off until the next window: R3 (also
+  when the timer was idle, so a loose target that someone switches off during a started
+  window stays off), a stop from the card, Run for 0, the end of a manual run, an off
+  command, a realignment that stops. The timer is never handed to a suppressed window.
+  Why: R8 "manual wins", and a restart must behave like no restart. A window that starts
+  after the zeroing is not suppressed. Cost if wrong: a user who stops the boiler from the
+  card and expects a restart to bring the window back.
+- **S1 judges "the target already runs" by the desired state, not by delivery.** At a
+  window start the interval's settings are owed (turn-on only) only if the target is not
+  wanted running as of that item: the fold's wish so far is "off", or, before any wish,
+  the pending wish is "off" (sent or not), or, with none pending, the target is not on. A
+  pending "off" counts as wanted off even while the target still reports "on", so a window
+  that opens while the end of a timer is being switched off turns the target on with its
+  settings. Why: P1, P3, R8, R10: a window must never replace the settings of a command
+  because the command's turn-on has not reached the target yet (it is unavailable, the call
+  failed, the wish was restored from the file). This replaced the plan's reading, "on or
+  its turn-on is in flight". `_deliver_settings` keeps its own question, whether owed
+  settings can be sent now. Tests:
+  `test_window_start_while_a_turn_on_waits_for_the_target_keeps_its_settings` and
+  `test_window_start_after_a_restart_keeps_the_settings_of_an_unconfirmed_on`. Cost if
+  wrong: none found.
+- **Turn-on-only settings are dropped, not applied, when the target is found on without
+  our turn-on list completing** (D6, store key `owed_turn_on_only`): it came back already
+  on, someone switched it on, the turn-on on its way carries none, the file was restored
+  that way. The target is running by someone else's hand. One place decides it,
+  `_deliver_settings`, so no second path can disagree. Cost if wrong: none found; the
+  exception is the next entry.
+- **One exception, which releases the settings: our own turn-on switched the target on but
+  a later call of the same list failed.** When the target then reports "on" in response to
+  our own call (`by_us`), the marker is cleared and the settings stay owed, sent again as
+  `ApplySettings` under the resend cap. Why: the settings belong to a turn-on Timerify
+  itself made on a target that was off (§5.4: a command that turns the target on applies
+  its settings); dropping them leaves the air conditioner on the wrong setpoint. The
+  release needs the report to carry our context, so a polled climate entity that reports
+  later with another context drops the remaining marked settings; that fails safe, as
+  phase 2 does, because nothing is pushed onto a target someone else may have set. The
+  retry sends the whole owed set again, so the mode is set once more before the
+  temperature. Cost if wrong: one extra settings call.
+- **Every write of the end goes through `_set_end(end, *, by=None)`; only S1 and the
+  realignment pass `by`.** The plan's "`_run_until` and `_end_timer`" missed a loose
+  `run_open`, a due on-command and R3, which would have left `scheduled_by` set and broken
+  S3. `scheduled_by` is `None` whenever `end` is. Cost if wrong: none.
+- **A window start whose window has ended by the fold's `now` is dropped: marked started,
+  the timer untouched, no log.** §5.7 lists only active windows and R10 drops an "on" whose
+  window passed (the start-while-unavailable line already said so); otherwise a kept
+  window that passed during downtime would cut a loose open run. Cost if wrong: a user who
+  wants a log for a window missed while Home Assistant was down.
+- **While the schedule owns the timer, its end is the latest end among the windows that are
+  open, started and not suppressed; the realignment (S2) runs at the end of every fold and
+  after every window end.** The timer is the schedule's while `scheduled_by` is set, that
+  is, while nobody has changed it since (S3). At every realignment its end becomes the
+  latest end among the open windows, and `scheduled_by` the interval of that window (a tie
+  keeps the current one); with none open it stops. So an edit, a deletion or a switch is
+  one thing for S2, a window that changes or leaves, and: removing or shortening the
+  window that carries the end hands the timer to the latest other open window instead of
+  stopping it; extending a started window that does not carry the end past the timer's end
+  takes the timer at once, without applying that window's S1 again, so no settings are
+  pushed; a window end hands the timer over before the timer's own end can end it, at that
+  item's instant, and with no other window open it does nothing there, so a window that
+  opens at that very instant extends the timer without an off. A timer someone changed is
+  never realigned, and one with nothing to change gets no effects, so a timer whose end
+  drifted from its window without an edit (possible only after the one-day cap, which the
+  windows respect) is pulled back. This replaced the plan's "a realign to stop does not
+  hand the timer to an overlapping window". Why: §5.5, schedules are declarative ("the
+  target should run during this window"), and §5.4's overlap bullet. Cost if wrong: a
+  schedule-owned run lasts to another open window's end after the user shortened the one
+  they were looking at.
+- **An edit that moves the active occurrence so it is no longer active creates a new
+  occurrence.** S2 stops a scheduled timer now, and the moved window applies S1 at its
+  start even after a manual off: S2's "start later if the window moved ahead". Why: an
+  edit is itself a manual act expressing the user's current intent. Cost if wrong: a
+  target turned back on after the user edited its schedule.
+- **Adding an interval or switching one on during its window starts it for the remainder;
+  switching off and on again forgets S4 for that occurrence.** Schedules are declarative
+  and a restart does the same (§5.7). Switching on is the user's own act, newer than the
+  manual off, as an edit is. An in-place edit of an open, started window keeps its
+  suppression (`_inheriting`) and a toggle does not, because a disabled interval has no
+  window to remember it in: the invariant "no window for a disabled interval" has one
+  owner. Cost if wrong: a surprise turn-on when enabling mid-window, also after the user
+  stopped the boiler.
+- **Deleting an interval is disabling it for S2.** Its window leaves the snapshot and the
+  realignment follows, so the timer stops, or passes to another open window, at once. Cost
+  if wrong: none.
+- **A loose open run is cut at a window's end when the window starts during it.** S1 sets
+  the timer, and a timer above zero means "off at zero" in loose mode. Cost if wrong:
+  loose users may expect the run to continue.
+- **A window is capped at `MAX_MINUTES`, and an occurrence that the change of the clock
+  swallows is skipped; wall times convert with `fold=0`.** zoneinfo's own rule, no private
+  Home Assistant helpers: 02:30 on the night the clock goes forward happens at 03:30, a
+  time that comes twice is its first, and an interval that lies wholly in the skipped hour
+  does not run that day. Cost if wrong: a 02:30 to 03:15 interval does not run on the
+  spring-forward day.
+
+### The controller
+
+- **Occurrences are computed ahead: one current-or-next window per enabled interval, in
+  Home Assistant's time zone, refreshed when the zone changes (`EVENT_CORE_CONFIG_UPDATE`);
+  a Workday answer is asked when an occurrence is computed, not at its start.**
+  `check_date` answers a date deterministically, and computing ahead keeps the core pure
+  and the alarm single. A Workday configuration changed between computing and the start is
+  noticed only when the sensor reports, which it does, since its entry reloads. A time zone
+  changed in YAML and applied with "reload core configuration" fires no such event; see
+  `docs/followups.md`. Cost if wrong: windows in the old zone until the next refresh.
+- **The search horizon is `WINDOW_SEARCH_DAYS = 14`.** A weekday interval always matches
+  within 7 days; a Workday-based one with no match is searched again when the sensor
+  reports, daily. Cost if wrong: none found.
+- **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
+  callbacks use `_refresh_windows`, which takes the lock; after every await the controller
+  re-checks that it is still loaded and takes `now` afresh.** `asyncio.Lock` is not
+  re-entrant (a wake-up or a toggle calling the locking variant deadlocks), and a stale
+  controller that outlived a reload during a Workday call must not save over the new one.
+  The fresh `now` matters: a command that queues behind a slow refresh must find a window
+  that opened meanwhile already folded, so the command, the later word, wins
+  (`test_window_made_by_a_slow_refresh_comes_before_a_later_command`). Cost if wrong: none.
+- **Every fold of what fell due goes through `_execute_fold`, after `observe` as well as
+  `tick`, and a window the fold found over is replaced by the next one of its interval.** A
+  report of the target can get the lock before the alarm of a window's end does, and the
+  alarm then finds nothing due; the refresh's own fold can find a window over because
+  asking the Workday sensor took until its end. Without the replacement the interval would
+  have no window until a reload. The R10 lines are written by `_fold_due`, through which
+  the alarm, the refresh and the switching off of an interval fold. Tests: `test_window_that_ends_while_the_boiler_is_slow_is_replaced_by_tomorrows`,
+  `test_window_that_ends_while_the_sensor_is_slow_is_replaced_by_tomorrows`. Cost if
+  wrong: none.
+- **Start-up merges the fresh windows, arms `next_wakeup` read after the merge, observes,
+  and executes the merge's and the observation's effects together; the time-zone and
+  Workday listeners are registered at the top of `_handle_started`, under the lock, not
+  after the first fold.** One save and one fold, §5.7's order. The plan put the listeners
+  after the first fold (pre-flight finding 14); their handlers need the lock that
+  `_handle_started` holds, so nothing folds before the first observation either way, and
+  a change that arrives while the start-up waits for a slow device or sensor is no longer
+  lost (`test_time_zone_change_during_start_up_is_not_lost`,
+  `test_sensor_that_comes_back_while_the_timer_starts_is_not_missed`). Cost if wrong: none.
+- **An unknown Workday answer keeps every window the interval already has, started or not
+  (`keep`), and computes nothing new for it.** Unknown is a sensor that is unavailable, a
+  call that failed with anything (a `HomeAssistantError`, a time-out, a bug or a changed
+  service; none of them may stop a timer), a service that is missing, or an answer that is
+  not about the sensor. The first unknown answer of a refresh ends that refresh's
+  questions, since what is wrong with the sensor is wrong for all its intervals; each day
+  is asked at most once per refresh. One warning is logged per outage, the next answer
+  ends the outage, and the traceback of an unexpected error is logged only with that first
+  warning. The windows are worked out again on the sensor's next state change or state
+  report; Workday writes its state every midnight, so a transient failure is retried
+  within a day without polling. A kept future window starts although the sensor is down,
+  since its answer was known. Why: D3, event-driven. Cost if wrong: a window of a sensor
+  that never comes back never starts, and the warning says why.
+- **The Workday answer is taken as the sensor gives it, `days_offset` included; the README
+  asks for a sensor with an offset of 0.** No reading of another integration's options. A
+  sensor with an offset of 1 answers for the day after, and its schedule runs shifted by a
+  day (`test_day_offset_of_the_sensor_shifts_the_days_as_it_answers`). Cost if wrong: a
+  user with a "tomorrow" sensor gets shifted days until they read the README.
+- **A question to the Workday sensor can hold the lock for up to `SERVICE_CALL_TIMEOUT`,
+  and a start-up that finds a kept window over asks twice.** A hung `check_date` holds the
+  lock for up to 30 seconds once per refresh (the first unknown answer ends the questions),
+  as a hung target call does ("A service call that takes longer than 30 seconds counts as
+  failed" and "A `delay` counts from the moment the command gets its turn"): target
+  reports, commands and the wake-up wait, so an end can fire that late. The real
+  `check_date` is a lookup in memory, and an unavailable sensor fails at once. When the
+  start-up fold finds a window over that it kept because the sensor was unknown, the
+  recompute asks again, bounded at two rounds because the fold removed the window. Cost if
+  wrong: a late end during a hung sensor; one extra failed question at start-up.
+- **Enabling an interval is one change: the flag and the window refresh are one `_execute`
+  and one save, and enabling an interval that is on returns at once.** The flag is
+  recorded in the core's memory before the Workday awaits and saved with the windows, so
+  a timer unloaded during the wait raises `timer_unloaded` ("nothing was changed") and that
+  is true. Disabling is a flag and a tick in one fold. Nothing is asked for an interval
+  that is switched off or already on. Cost if wrong: a countdown refresh alarm that fires
+  while a flip waits for the sensor writes the switch from memory, so it shows "on" a
+  moment before the answer; only if the flip then fails does that matter.
+- **A timer whose intervals need a Workday sensor it lacks fails to load**
+  (`ConfigEntryError`, `workday_sensor_missing`). The interval form refuses the mode and
+  the timer's settings refuse to remove the sensor while an interval uses it, so only a
+  hand-edited file gets there, and asking a sensor that is not there would only fail. The
+  update listener is added after the controller is built, so fixing the file does not
+  reload the entry: the user reloads it. Cost if wrong: a manual reload.
+- **A change before Home Assistant has started is not held back.** The flip of an interval
+  runs its tick or its refresh, and a phase-2 command arms the alarm of a stored end,
+  command or window that has long passed, before the first observation of the target. The
+  wish goes out to a target that may not be there yet, fails, is marked unsent, and the
+  first observation sends it again, so the state converges, as it does for a restart. One
+  rule for every command (record and save, arm nothing, let `_handle_started` fold) is in
+  `docs/followups.md`. Cost if wrong: one failed call at start-up.
+
+### The entry, the intervals and the entities
+
+- **One update listener reloads the entry on any change (`async_schedule_reload`, which
+  also collapses repeated changes); `options_flow_reloads = False`; `_follow_target` no
+  longer reloads itself.** In 2026.10.4 a subentry add
+  (`ConfigSubentryFlowManager.async_finish_flow` → `async_add_subentry`), edit
+  (`async_update_subentry`) and delete (`async_remove_subentry`) only fire update
+  listeners, the subentry `async_update_reload_and_abort` raises with a listener, and
+  `OptionsFlowWithReload` raises with one; Home Assistant's usage report says to reload
+  from the listener (ollama and anthropic await `async_reload` there). Every interval add,
+  edit and delete reloads the timer, entities re-added and the start-up path run again;
+  tests prove a countdown survives it (`test_adding_an_interval_keeps_a_running_countdown` and its edit and delete
+  siblings), and the pending commands are stored and restored as at a restart. Cost if
+  wrong: none.
+- **The enable flag is `Snapshot.disabled_intervals` in the timer's store, enabled by
+  default; the core drops the windows of disabled intervals and the controller does not
+  compute them.** One store, one save path, a toggle never reloads (D2), the invariant has
+  one owner. Cost if wrong: none.
+- **Every Timerify entity attaches to its device through `device_entry`: the target's
+  device, or the timer's own device got or created once, without a subentry
+  (`timer_device`).** In 2026.10.4 an entity of a subentry that brings the shared
+  `DeviceInfo` moves the device into the subentry (deprecated, an error from 2027.8); the
+  registry then drops the number and the sensors, and deleting the interval deletes the
+  device. Cost if wrong: none.
+- **The switch is named "Schedule {interval}" with the subentry title.** The title
+  identifies the interval and follows edits after the reload; entity ids keep the first
+  title. Cost if wrong: a dashboard that matches on the name.
+- **The interval form refuses seconds (`whole_minutes_only`), accepts the UI's `HH:MM:00`
+  and stores `"HH:MM"`; its settings pass through the services' `SETTINGS_SCHEMA` before
+  `validate_settings`.** Values are never silently dropped, and a setting has one type
+  whichever channel made it. Weekdays are stored as `[]` for the working-day modes, where
+  they mean nothing. Cost if wrong: none.
+- **The settings section of the interval form is collapsed unless the form shows
+  settings, and it has no default.** It is open when editing an interval that has
+  settings and on a refused form that carries some, so a `base` error points at visible
+  fields; closed for a new interval and for one without. A default on a section makes the
+  real frontend skip the settings inside it, and an edit would clear them. Cost if wrong:
+  none.
+- **Titles are generated in Home Assistant's configured language from the selector labels;
+  a title the user renamed survives edits.** Subentry titles are plain strings, so a title
+  stays in the language of its creation. Cost if wrong: an old title stays in the old
+  language after the house language changes; see `docs/followups.md`.
+- **The Workday step appears only when a Workday sensor exists in the house (or is set,
+  in the options); its schema function returns `None` to skip it, and `duration`'s
+  `next_step` is a function too.** §6.2's "three clicks for the common case"; D3's order
+  otherwise kept. A `next_step` sees only the options, so the schema decides. With a
+  string `next_step` the duration form would say "Next" in a house with no sensor, where
+  nothing follows; a function leaves `last_step` unset and the frontend says "Submit",
+  which is also what it says before a Workday form that does follow, exactly as the mode
+  form says before the duration form. The options form refuses to clear the sensor while
+  an interval uses it (`workday_in_use`), and a sensor whose integration is gone stays on
+  offer so that it can be removed. Cost if wrong: a user who adds a Workday sensor later
+  picks it in the options.
+- **A renamed Workday sensor is not followed.** The option holds the entity id; after a
+  rename `check_date` answers "did not match any entities", the intervals wait with a
+  warning, and the listeners sit on the old id. It is in `docs/followups.md` for the
+  `_follow_target` pattern, to be done before release. Cost if wrong: the schedules of
+  working-day intervals stop until the user picks the sensor again.
+
+### Verification
+
+- **`holidays==0.106` joins the dev group for the contract tests with the real Workday
+  integration; scenarios use `FakeWorkday`, which fails the way Home Assistant does
+  (`HomeAssistantError`, "did not match any entities").** The real tests pin the response
+  shape, the Israeli week and the error of an unloaded sensor; the fake controls holidays
+  and outages. A test pins the version to the one Workday requires. Cost if wrong: a dev
+  dependency to bump with Home Assistant.
+- **One jump of the clock in a test is one catch-up; scenario tests step to each event.**
+  Home Assistant fires a chained alarm at once with the frozen time, so a jump over a
+  start and an end folds them; that is the downtime behaviour, tested with `restart_after`.
+  Cost if wrong: none.
+- **The test fake of a switch hands Timerify's own switch to the domain's service.**
+  Timerify now sets the real `switch` component up, which re-registers `switch.turn_on`
+  and `turn_off`, so the fake routes a call whose entity is registered under platform
+  `timerify` to the service that was there before it and keeps every other call. That is
+  how Home Assistant dispatches one domain service to the platform that owns each entity;
+  it changes no production code and is not a backdoor. Cost if wrong: none.
+- **The smoke interval uses days of the week, not a Workday sensor, and takes the time
+  zone from Home Assistant.** The date of the container is not under the script's control;
+  the real `check_date` is proven by the pytest contract tests, not in the container. The
+  script asks Home Assistant for its configured time zone (`get_config`), since that is
+  the zone the windows are worked out in, adds the interval through the subentry flow of
+  the REST API, finds its switch by the unique id `{entry_id}_interval_{subentry_id}` and
+  checks it sits on the timer's device. Cost if wrong: a Workday-based interval is never
+  run against a real container.

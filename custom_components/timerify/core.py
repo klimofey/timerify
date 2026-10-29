@@ -166,8 +166,9 @@ class TimerCore:
         """The pending wish did not reach the target: its service call failed, or
         succeeded without the target changing.
 
-        The wish is sent again by the next report of the target or the next
-        command that wants the same thing. The caller reports a failure right
+        The wish is sent again by the next command that wants the same thing, or
+        by a report of the target, within the limit of MAX_AUTOMATIC_RESENDS for
+        reports that repeat its state. The caller reports a failure right
         after executing the effects, before anything else reaches the core.
         """
         _utc(now)  # unused, but every command rejects a naive time alike

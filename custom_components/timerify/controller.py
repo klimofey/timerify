@@ -277,8 +277,8 @@ class TargetController:
             actual = actual_state(self._hass.states.get(self.target_entity_id))
             if actual != wish:
                 # Accepted, but nothing changed (yet): a device out of reach, or one
-                # that confirms later. Not worth a warning; the wish is sent again if
-                # the target reports anything but the wish.
+                # that confirms later. Not worth a warning; the core sends the wish
+                # again on a later report, within its limit of automatic re-sends.
                 _LOGGER.debug(
                     "%s accepted turn_%s but reports %s",
                     self.target_entity_id,

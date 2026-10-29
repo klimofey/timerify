@@ -36,6 +36,14 @@ were made on purpose are in `RULINGS.md`, not here.
 
 ## Later
 
+- **A device that answers each refused call with `unknown` and then its old state is re-sent
+  without end.** Each cycle is a real state change, which resets the allowance of automatic
+  re-sends by design. Not a regression (phase 1 before the cap behaved the same). A per-wish
+  total limit would close it. `custom_components/timerify/core.py:270-285`.
+- **The give-up warning is logged once per allowance, not once per wish.** A refusing target
+  that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
+  `custom_components/timerify/controller.py:228-240`.
+
 - **`type Actual` has no runtime arguments.** `typing.get_args(Actual)` is `()` because the alias
   is a PEP 695 `type`; use `Actual.__value__` if the values are ever enumerated (for example
   to validate stored data). `custom_components/timerify/domains.py:18`. Do it when needed.

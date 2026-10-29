@@ -94,9 +94,9 @@ class TimerCore:
         self._default_duration = default_duration
         self._snapshot = snapshot
         self._unsent = False
-        """The pending wish has not reached the target (its call failed, or the
-        target was away). Only true while a wish is pending; never persisted,
-        because a restart sends every stored wish again."""
+        """The pending wish has not reached the target (its call failed or changed
+        nothing, or the target was away). Only true while a wish is pending; never
+        persisted, because a restart sends every stored wish again."""
 
     @property
     def snapshot(self) -> Snapshot:
@@ -147,7 +147,8 @@ class TimerCore:
         return self._stop()
 
     def call_failed(self, now: datetime) -> list[Effect]:
-        """The service call for the pending wish failed.
+        """The pending wish did not reach the target: its service call failed, or
+        succeeded without the target changing.
 
         The wish is sent again by the next report of the target or the next
         command that wants the same thing. The caller reports a failure right

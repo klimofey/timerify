@@ -239,9 +239,35 @@ class TargetController:
             await self._call_failed(
                 wish, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
             )
+        except Exception:
+            # Another integration's bug, which must not freeze this timer: its
+            # entities are refreshed and the wish is sent again like a failed one.
+            _LOGGER.exception(
+                "Could not turn %s %s: its service raised an unexpected error",
+                self.target_entity_id,
+                wish,
+            )
+            await self._not_delivered()
+        else:
+            actual = actual_state(self._hass.states.get(self.target_entity_id))
+            if actual != wish:
+                # Accepted, but nothing changed (yet): a device out of reach, or one
+                # that confirms later. Not worth a warning; the wish is sent again if
+                # the target reports anything but the wish.
+                _LOGGER.debug(
+                    "%s accepted turn_%s but reports %s",
+                    self.target_entity_id,
+                    wish,
+                    actual,
+                )
+                await self._not_delivered()
 
     async def _call_failed(self, wish: Literal["on", "off"], reason: object) -> None:
         _LOGGER.warning("Could not turn %s %s: %s", self.target_entity_id, wish, reason)
+        await self._not_delivered()
+
+    async def _not_delivered(self) -> None:
+        """Tell the core the target did not get the wish, so it is sent again."""
         await self._execute(self._core.call_failed(dt_util.utcnow()))
 
     def _arm(self, at: datetime) -> None:

@@ -70,7 +70,8 @@ class FakeTarget:
     """The device the switch is on; None when it belongs to no device."""
     calls: list[tuple[str, str]] = field(default_factory=list)
     """Every service call received as (service, entity_id), failed ones included."""
-    _fail_next: bool = False
+    _failure: Exception | None = None
+    _ignore_next: bool = False
     _held: HeldCall | None = None
 
     async def set_state(self, value: str, **attributes: str | int) -> None:
@@ -78,9 +79,15 @@ class FakeTarget:
         self.hass.states.async_set(TARGET_ID, value, attributes)
         await self.hass.async_block_till_done()
 
-    def fail_next_call(self) -> None:
-        """Make the next service call fail as a device that rejects it."""
-        self._fail_next = True
+    def fail_next_call(self, error: Exception | None = None) -> None:
+        """Make the next service call fail: with `error`, or as a device that
+        rejects the command."""
+        self._failure = error or HomeAssistantError("The device rejected the command")
+
+    def ignore_next_call(self) -> None:
+        """Make the next service call succeed without the switch doing anything, as
+        a device out of reach that the integration cannot tell about."""
+        self._ignore_next = True
 
     def hold_next_call(self) -> HeldCall:
         """Make the next service call slow: it waits inside the device."""
@@ -99,9 +106,12 @@ class FakeTarget:
                 held, self._held = self._held, None
                 held.reached.set()
                 await held.release.wait()
-            if self._fail_next:
-                self._fail_next = False
-                raise HomeAssistantError("The device rejected the command")
+            if self._failure is not None:
+                failure, self._failure = self._failure, None
+                raise failure
+            if self._ignore_next:
+                self._ignore_next = False
+                return
             self.hass.states.async_set(
                 call.data["entity_id"],
                 "on" if service == "turn_on" else "off",

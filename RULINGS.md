@@ -28,9 +28,14 @@ tooling) are not listed; only decisions that shape the product or its code.
 
 - **A rejected command is retried, an in-flight one is not repeated.** A failed or timed
   out `turn_on` / `turn_off` marks the wish as unsent (in memory only); it is sent again
-  when the target next reports its state. A wish that was sent is never re-sent because a
-  report merely repeats the old state. This is how "pending commands are firm promises"
-  holds without duplicating commands a slow device is still executing.
+  when the target next reports its state, or by the next command that wants the same
+  thing. A call that returns without error while the target still shows the old state
+  counts as not delivered too, so a device that acknowledges and ignores a command (an MQTT
+  switch out of range, a cloud integration that only acknowledges) is sent it again. This
+  is how "pending commands are firm promises" holds. Cost if wrong: a device that confirms
+  its state only after the call returns may get one duplicate, idempotent command.
+- **The generic domain fallback of spec §5.4 is built in phase 2**, together with the rest
+  of §5.4; phase 1 supported only the listed domains.
 - **A service call that takes longer than 30 seconds counts as failed**
   (`SERVICE_CALL_TIMEOUT`). Home Assistant service calls have no timeout of their own, and a
   hung device would otherwise freeze its timer. Cost if wrong: a slow but working device

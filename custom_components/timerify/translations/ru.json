@@ -95,6 +95,15 @@
     },
     "not_whole_minutes": {
       "message": "«Включить на» принимает только целое число минут: {minutes} не подходит."
+    },
+    "setting_not_supported": {
+      "message": "{target} нельзя включить с настройкой {setting}."
+    },
+    "setting_out_of_range": {
+      "message": "Значение {value} не подходит для настройки {setting}: допустимы значения от {min} до {max}."
+    },
+    "setting_not_an_option": {
+      "message": "Значение {value} не подходит для настройки {setting}: допустимые значения: {options}."
     }
   }
 }

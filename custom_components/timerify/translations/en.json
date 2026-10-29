@@ -95,6 +95,15 @@
     },
     "not_whole_minutes": {
       "message": "Run for takes a whole number of minutes; {minutes} is not one."
+    },
+    "setting_not_supported": {
+      "message": "{target} cannot be turned on with the setting {setting}."
+    },
+    "setting_out_of_range": {
+      "message": "{value} is not a valid {setting}: it must be between {min} and {max}."
+    },
+    "setting_not_an_option": {
+      "message": "{value} is not a valid {setting}: it must be one of {options}."
     }
   }
 }

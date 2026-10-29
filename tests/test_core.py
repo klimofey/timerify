@@ -7,8 +7,15 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.timerify.const import MAX_AUTOMATIC_RESENDS, MAX_MINUTES, Mode
+from custom_components.timerify.const import (
+    MAX_AUTOMATIC_RESENDS,
+    MAX_MINUTES,
+    NO_SETTINGS,
+    Mode,
+    freeze_settings,
+)
 from custom_components.timerify.core import (
+    ApplySettings,
     Arm,
     Changed,
     Disarm,
@@ -23,6 +30,7 @@ from custom_components.timerify.core import (
 from custom_components.timerify.domains import Actual
 
 NOW = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
+COOL24 = freeze_settings({"hvac_mode": "cool", "temperature": 24.0})
 
 
 def core(mode: Mode, actual: Actual | None) -> TimerCore:
@@ -661,7 +669,7 @@ def repeat_reports(
     for step in range(count):
         now = NOW + minutes(1 + step)
         effects = c.observe(now, actual, by_us=False)
-        if TurnOn() in effects or TurnOff() in effects:
+        if any(isinstance(e, TurnOn | TurnOff | ApplySettings) for e in effects):
             c.call_failed(now)
         results.append(effects)
     return results
@@ -879,6 +887,413 @@ def test_remaining_minutes_accepts_a_local_time() -> None:
     assert remaining_minutes(Snapshot(end=NOW + minutes(5)), local) == 5
 
 
+def owing(mode: Mode, actual: Actual | None) -> TimerCore:
+    """A core whose target was last seen as given and that was asked, for an hour,
+    to run with `COOL24`; the effects of that command are dropped."""
+    c = core(mode, actual)
+    c.set_duration(NOW, minutes(60), COOL24)
+    return c
+
+
+def test_settings_ride_with_turn_on() -> None:
+    """A target that is off gets its settings in the very call that turns it on."""
+    c = core("strict", "off")
+
+    fx = c.set_duration(NOW, minutes(60), COOL24)
+
+    assert fx == [Arm(NOW + minutes(60)), TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_settings_on_running_target_are_applied() -> None:
+    """A target that already runs is not turned on, but the settings are still set."""
+    c = core("strict", "on")
+
+    fx = c.set_duration(NOW, minutes(60), COOL24)
+
+    assert fx == [Arm(NOW + minutes(60)), ApplySettings(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_apply_if_on_false_leaves_running_target_alone() -> None:
+    """A command that must not push settings onto a running target sends none."""
+    c = core("strict", "on")
+
+    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_apply_if_on_false_still_sends_settings_with_the_turn_on_it_causes() -> None:
+    """The settings go to a target that is switched on by the command itself."""
+    c = core("strict", "off")
+
+    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
+
+    assert fx == [Arm(NOW + minutes(60)), TurnOn(COOL24), Changed()]
+
+
+def test_apply_if_on_false_keeps_settings_for_a_turn_on_that_waits() -> None:
+    """The command causes a turn-on that waits for the target; the settings wait too."""
+    c = core("strict", "unavailable")
+
+    c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
+
+    assert c.snapshot.owed_settings == COOL24
+    assert c.observe(NOW, "off", by_us=False) == [TurnOn(COOL24), Changed()]
+
+
+def test_apply_if_on_false_sends_no_settings_while_a_turn_on_is_in_flight() -> None:
+    """A turn-on that another command started is not this command's: no settings."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_loose_open_run_with_settings_on_running_target_applies_them() -> None:
+    """Running without a countdown on a target that is on still sets the settings."""
+    c = core("loose", "on")
+
+    fx = c.run_open(NOW, COOL24)
+
+    assert fx == [Disarm(), ApplySettings(COOL24), Changed()]
+
+
+def test_strict_open_run_carries_settings_with_the_default_duration() -> None:
+    """The default duration and the settings are one command."""
+    c = core("strict", "off")
+
+    fx = c.run_open(NOW, COOL24)
+
+    assert fx == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
+
+
+def test_settings_with_a_zero_duration_are_not_owed() -> None:
+    """A command that ends the timer has nothing to turn on, so it keeps no settings."""
+    c = core("strict", "on")
+
+    fx = c.set_duration(NOW, timedelta(0), COOL24)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_settings_applied_clears_them() -> None:
+    """Once the target took the settings nothing is owed any more."""
+    c = owing("strict", "on")
+
+    fx = c.settings_applied(NOW)
+
+    assert fx == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert c.observe(NOW + minutes(1), "on", by_us=False) == []
+
+
+def test_settings_in_flight_are_not_sent_by_a_report() -> None:
+    """A report that arrives while the settings are on their way sends nothing."""
+    c = owing("strict", "off")
+
+    assert c.observe(NOW + minutes(1), "off", by_us=False) == []
+
+
+def test_failed_settings_are_resent_on_next_report() -> None:
+    """Settings the target refused go out again when it next reports."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [ApplySettings(COOL24)]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_failed_settings_are_resent_by_the_next_command() -> None:
+    """Asking again for the same timer tries the settings again."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+
+    fx = c.set_duration(NOW + minutes(1), minutes(30))
+
+    assert fx == [Arm(NOW + minutes(31)), ApplySettings(COOL24), Changed()]
+
+
+def test_failed_turn_on_resends_settings_with_it() -> None:
+    """A turn-on that did not reach the target takes the settings along again."""
+    c = owing("strict", "off")
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [TurnOn(COOL24)]
+
+
+def test_turn_on_that_took_but_not_its_settings_resends_only_the_settings() -> None:
+    """The target is on now, so the settings alone are sent."""
+    c = owing("strict", "off")
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=True)
+
+    assert fx == [ApplySettings(COOL24), Changed()]
+    assert c.snapshot.pending is None
+
+
+def test_settings_wait_for_unavailable_target() -> None:
+    """Nothing is sent to a target that is away; it gets the turn-on and the
+    settings together when it is back."""
+    c = core("strict", "unavailable")
+
+    asked = c.set_duration(NOW, minutes(60), COOL24)
+    back = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert asked == [Arm(NOW + minutes(60)), Changed()]
+    assert back == [TurnOn(COOL24), Changed()]
+
+
+def test_settings_wait_for_unavailable_target_that_comes_back_on() -> None:
+    """A target that returns already running needs the settings alone."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(60), COOL24)
+
+    back = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert back == [ApplySettings(COOL24), Changed()]
+    assert c.snapshot.pending is None
+
+
+def test_settings_wait_while_a_running_target_drops_off() -> None:
+    """A running target that is away when asked gets the settings once it is back."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(10))
+    c.observe(NOW, "on", by_us=False)
+    c.observe(NOW, "unavailable", by_us=False)
+
+    assert c.set_duration(NOW, minutes(60), COOL24) == [
+        Arm(NOW + minutes(60)),
+        Changed(),
+    ]
+    assert c.observe(NOW, "on", by_us=False) == [ApplySettings(COOL24), Changed()]
+
+
+def test_settings_wait_while_a_turn_on_in_flight_loses_the_target() -> None:
+    """A turn-on on its way does not reach a target that drops off meanwhile; the
+    settings wait for it as the turn-on does."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(10))
+    c.observe(NOW, "unavailable", by_us=False)
+
+    asked = c.set_duration(NOW, minutes(60), COOL24)
+    back = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert asked == [Arm(NOW + minutes(60)), Changed()]
+    assert back == [ApplySettings(COOL24), Changed()]
+
+
+def test_settings_while_turn_on_in_flight_are_applied() -> None:
+    """A turn-on that is already on its way is not repeated; the settings follow."""
+    c = core("strict", "off")
+    assert c.set_duration(NOW, minutes(10)) == [
+        Arm(NOW + minutes(10)),
+        TurnOn(),
+        Changed(),
+    ]
+
+    fx = c.set_duration(NOW, minutes(60), COOL24)
+
+    assert fx == [Arm(NOW + minutes(60)), ApplySettings(COOL24), Changed()]
+
+
+def test_newer_settings_replace_owed() -> None:
+    """Of two commands that wait for the target, the later one's settings count."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(60), COOL24)
+    heat = freeze_settings({"hvac_mode": "heat"})
+
+    c.set_duration(NOW, minutes(60), heat)
+
+    assert c.snapshot.owed_settings == heat
+    assert c.observe(NOW, "off", by_us=False) == [TurnOn(heat), Changed()]
+
+
+def test_command_without_settings_keeps_owed() -> None:
+    """A plain command neither invents settings nor drops those that are owed."""
+    c = core("strict", "unavailable")
+    c.set_duration(NOW, minutes(60), COOL24)
+
+    c.set_duration(NOW, minutes(30))
+
+    assert c.snapshot.owed_settings == COOL24
+    assert c.observe(NOW, "off", by_us=False) == [TurnOn(COOL24), Changed()]
+
+
+def test_manual_off_drops_owed_settings() -> None:
+    """Someone switching the target off ends the timer and what it was to run with."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert c.snapshot.end is None
+
+
+@pytest.mark.parametrize(
+    "ending",
+    [
+        pytest.param(lambda c, now: c.stop(now), id="stop"),
+        pytest.param(lambda c, now: c.set_duration(now, timedelta(0)), id="zero"),
+        pytest.param(lambda c, now: c.expire(now + minutes(60)), id="expiry"),
+    ],
+)
+def test_every_end_of_the_timer_drops_owed_settings(
+    ending: Callable[[TimerCore, datetime], object],
+) -> None:
+    """A timer that stops runs with nothing: its settings are not applied later."""
+    c = owing("strict", "unavailable")
+
+    ending(c, NOW + minutes(1))
+
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert c.snapshot.pending == "off"
+    assert c.observe(NOW + minutes(70), "on", by_us=False) == [TurnOff(), Changed()]
+
+
+def test_manual_on_pushes_no_settings() -> None:
+    """Someone else switching the target on starts the default timer, nothing more."""
+    c = core("strict", "off")
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_restored_owed_settings_are_resent() -> None:
+    """Settings owed when Home Assistant stopped are sent on the first report."""
+    c = TimerCore(
+        "strict", minutes(45), Snapshot(end=NOW + minutes(30), owed_settings=COOL24)
+    )
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [ApplySettings(COOL24), Changed()]
+
+
+def test_restored_owed_settings_wait_for_an_unavailable_target() -> None:
+    """A target that is not there at start-up gets them when it is."""
+    c = TimerCore(
+        "strict", minutes(45), Snapshot(end=NOW + minutes(30), owed_settings=COOL24)
+    )
+
+    assert c.observe(NOW, "unavailable", by_us=False) == [Changed()]
+    assert c.observe(NOW + minutes(1), "on", by_us=False) == [
+        ApplySettings(COOL24),
+        Changed(),
+    ]
+
+
+def test_refused_settings_are_resent_a_limited_number_of_times() -> None:
+    """Reports that repeat the target's state send refused settings 3 times, say so
+    once, and then leave the target alone."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+
+    reports = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 3)
+
+    assert reports == [[ApplySettings(COOL24)]] * MAX_AUTOMATIC_RESENDS + [
+        [GaveUp("settings")],
+        [],
+        [],
+    ]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_a_change_of_state_gives_settings_a_full_allowance_again() -> None:
+    """The target goes away and comes back: that is a new chance for the settings."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    c.observe(NOW + minutes(10), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(11), "on", by_us=False)
+    c.call_failed(NOW + minutes(11))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert back == [ApplySettings(COOL24), Changed()]
+    assert again == [[ApplySettings(COOL24)]] * MAX_AUTOMATIC_RESENDS + [
+        [GaveUp("settings")]
+    ]
+
+
+def test_new_settings_start_a_full_allowance_again() -> None:
+    """After the core gave up on settings, a command with new ones sends them."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    heat = freeze_settings({"hvac_mode": "heat"})
+
+    asked = c.set_duration(NOW + minutes(10), minutes(60), heat)
+    c.call_failed(NOW + minutes(10))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert ApplySettings(heat) in asked
+    assert again == [[ApplySettings(heat)]] * MAX_AUTOMATIC_RESENDS + [
+        [GaveUp("settings")]
+    ]
+
+
+def test_a_command_gives_refused_settings_a_full_allowance_again() -> None:
+    """Asking for the timer again after the core gave up sends the settings once more,
+    and they may be repeated as before."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    asked = c.set_duration(NOW + minutes(10), minutes(30))
+    c.call_failed(NOW + minutes(10))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert ApplySettings(COOL24) in asked
+    assert again == [[ApplySettings(COOL24)]] * MAX_AUTOMATIC_RESENDS + [
+        [GaveUp("settings")]
+    ]
+
+
+def test_the_limit_of_the_core_is_the_limit_of_its_settings_too() -> None:
+    """A core built with fewer re-sends gives up on settings sooner."""
+    c = TimerCore(
+        "strict", minutes(45), Snapshot(last_actual="on"), automatic_resends=1
+    )
+    c.set_duration(NOW, minutes(60), COOL24)
+    c.call_failed(NOW)
+
+    reports = repeat_reports(c, 3)
+
+    assert reports == [[ApplySettings(COOL24)], [GaveUp("settings")], []]
+
+
+def test_zero_automatic_resends_answers_only_changes() -> None:
+    """A device that must not be told twice is told again only after its state moved."""
+    c = TimerCore(
+        "strict", minutes(45), Snapshot(last_actual="off"), automatic_resends=0
+    )
+    c.set_duration(NOW, minutes(10))
+    c.call_failed(NOW)
+
+    repeated = c.observe(NOW + minutes(1), "off", by_us=False)
+    c.observe(NOW + minutes(2), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(3), "off", by_us=False)
+
+    assert repeated == [GaveUp("on")]
+    assert back == [TurnOn(), Changed()]
+
+
 NAIVE = datetime(2026, 1, 5, 7, 0)
 
 
@@ -892,6 +1307,7 @@ NAIVE = datetime(2026, 1, 5, 7, 0)
         pytest.param(lambda c: c.expire(NAIVE), id="expire"),
         pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
         pytest.param(lambda c: c.call_failed(NAIVE), id="call-failed"),
+        pytest.param(lambda c: c.settings_applied(NAIVE), id="settings-applied"),
         pytest.param(lambda c: remaining_minutes(c.snapshot, NAIVE), id="remaining"),
     ],
 )

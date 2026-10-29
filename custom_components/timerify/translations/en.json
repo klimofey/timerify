@@ -59,6 +59,16 @@
         "strict": "Strict: runs only while the timer counts down",
         "loose": "Loose: may also run without a timer"
       }
+    },
+    "hvac_mode": {
+      "options": {
+        "heat": "Heat",
+        "cool": "Cool",
+        "heat_cool": "Heat/Cool",
+        "auto": "Auto",
+        "dry": "Dry",
+        "fan_only": "Fan only"
+      }
     }
   },
   "entity": {
@@ -86,7 +96,54 @@
     },
     "run": {
       "name": "Run",
-      "description": "Turns the entity on without saying for how long: for the default duration in strict mode, without a countdown in loose mode."
+      "description": "Turns the entity on, for the minutes given or else for the default duration in strict mode and without a countdown in loose mode, with the settings given if the entity supports them.",
+      "fields": {
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long to run, in whole minutes, up to a day. Without it the entity runs for the default duration in strict mode and without a countdown in loose mode."
+        },
+        "hvac_mode": {
+          "name": "HVAC mode",
+          "description": "The mode to turn a climate entity on in."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "The target temperature of a climate entity or a water heater."
+        },
+        "fan_mode": {
+          "name": "Fan mode",
+          "description": "The fan mode of a climate entity."
+        },
+        "preset_mode": {
+          "name": "Preset mode",
+          "description": "The preset mode of a fan."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "The mode of a humidifier."
+        },
+        "operation_mode": {
+          "name": "Operation mode",
+          "description": "The operation mode of a water heater."
+        },
+        "brightness_pct": {
+          "name": "Brightness",
+          "description": "The brightness of a light, in percent."
+        },
+        "percentage": {
+          "name": "Speed",
+          "description": "The speed of a fan, in percent."
+        },
+        "humidity": {
+          "name": "Humidity",
+          "description": "The target humidity of a humidifier, in percent."
+        }
+      },
+      "sections": {
+        "settings": {
+          "name": "Settings"
+        }
+      }
     }
   },
   "exceptions": {

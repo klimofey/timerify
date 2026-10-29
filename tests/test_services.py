@@ -290,4 +290,19 @@ async def test_services_are_described_for_the_ui(hass: HomeAssistant) -> None:
     assert minutes["required"] is True
     assert minutes["selector"]["number"]["min"] == -MAX_MINUTES
     assert minutes["selector"]["number"]["max"] == MAX_MINUTES
-    assert descriptions["run"]["fields"] == {}
+    run_for = descriptions["run"]["fields"]["minutes"]
+    assert run_for["selector"]["number"]["min"] == 1
+    assert run_for["selector"]["number"]["max"] == MAX_MINUTES
+    settings = descriptions["run"]["fields"]["settings"]
+    assert settings["collapsed"] is True
+    assert settings["fields"].keys() == {
+        "hvac_mode",
+        "temperature",
+        "fan_mode",
+        "preset_mode",
+        "mode",
+        "operation_mode",
+        "brightness_pct",
+        "percentage",
+        "humidity",
+    }

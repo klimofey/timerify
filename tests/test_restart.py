@@ -13,8 +13,12 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 
+from custom_components.timerify.store import TimerStore
+
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
+    AC_ID,
+    AC_NUMBER,
     NUMBER,
     SENSOR,
     TARGET_ID,
@@ -22,6 +26,7 @@ from .helpers import (
     TURN_ON,
     advance,
     at,
+    payload,
     saved,
     set_number,
     state_of,
@@ -78,12 +83,12 @@ async def test_timer_expired_during_downtime_turns_off_on_start(
     """
     await fake_target.set_state(target_state)
 
-    entry = await setup_target(stored={"end": at(-5), "pending": None})
+    entry = await setup_target(stored=payload(end=at(-5)))
 
     assert fake_target.calls == calls
     assert state_of(hass, TARGET_ID) == "off"
     assert state_of(hass, NUMBER) == "0"
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
     await advance(hass, freezer, hours=1)
     assert fake_target.calls == calls
 
@@ -97,7 +102,7 @@ async def test_stored_end_in_the_future_expires_at_that_end(
     """A countdown restored for a target that is on keeps its end: no switch, no cut."""
     await fake_target.set_state("on")
 
-    await setup_target(stored={"end": at(20), "pending": None})
+    await setup_target(stored=payload(end=at(20)))
 
     assert fake_target.calls == []
     assert state_of(hass, NUMBER) == "20"
@@ -116,11 +121,11 @@ async def test_target_off_at_start_clears_stored_timer(
     hass_storage: dict[str, Any],
 ) -> None:
     """A target found off was switched off meanwhile, which ends the countdown."""
-    entry = await setup_target(stored={"end": at(20), "pending": None})
+    entry = await setup_target(stored=payload(end=at(20)))
 
     assert state_of(hass, NUMBER) == "0"
     assert state_of(hass, SENSOR) == "unknown"
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
     await advance(hass, freezer, minutes=30)
     assert fake_target.calls == []
 
@@ -138,7 +143,7 @@ async def test_target_unavailable_at_start_waits_for_it(
     else:
         await fake_target.set_state(target_state)
 
-    await setup_target(stored={"end": at(-5), "pending": None})
+    await setup_target(stored=payload(end=at(-5)))
 
     assert fake_target.calls == []
     assert state_of(hass, NUMBER) == "0"
@@ -153,11 +158,9 @@ async def test_target_unavailable_at_start_waits_for_it(
     ("stored", "target_state", "call", "target_ends_up"),
     [
         pytest.param(
-            {"end": at(30), "pending": "on"}, "off", TURN_ON, "on", id="turn_on"
+            payload(end=at(30), pending="on"), "off", TURN_ON, "on", id="turn_on"
         ),
-        pytest.param(
-            {"end": None, "pending": "off"}, "on", TURN_OFF, "off", id="turn_off"
-        ),
+        pytest.param(payload(pending="off"), "on", TURN_OFF, "off", id="turn_off"),
     ],
 )
 async def test_stored_wish_the_target_never_got_is_sent_once(
@@ -195,16 +198,93 @@ async def test_state_is_saved_on_every_change(
 
     await set_number(hass, NUMBER, 45)
 
-    assert hass_storage[storage_key(entry)]["version"] == 1
-    assert saved(hass_storage, entry) == {"end": at(45), "pending": None}
+    assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
+    assert saved(hass_storage, entry) == payload(end=at(45))
 
     await entry.runtime_data.async_add_minutes(15)
 
-    assert saved(hass_storage, entry) == {"end": at(60), "pending": None}
+    assert saved(hass_storage, entry) == payload(end=at(60))
 
     await set_number(hass, NUMBER, 0)
 
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
+
+
+async def test_version_1_store_is_migrated(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A timer stored before settings existed is read as one that owes none, and the
+    next change writes it in the current form."""
+    await fake_target.set_state("on")
+    entry = await setup_target(
+        stored={"end": at(30), "pending": None}, stored_version=1
+    )
+
+    assert state_of(hass, NUMBER) == "30"
+    assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+    await set_number(hass, NUMBER, 45)
+
+    assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
+    assert saved(hass_storage, entry) == payload(end=at(45), owed_settings={})
+
+
+async def test_owed_settings_survive_restart(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Settings that were asked for and never confirmed are applied once the timer is
+    back, and are then not owed any more."""
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(60),
+            pending="on",
+            owed_settings={"hvac_mode": "cool", "temperature": 24.0},
+        ),
+    )
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "cool"}),
+        ("set_temperature", {"temperature": 24.0}),
+    ]
+    assert state_of(hass, AC_ID) == "cool"
+    assert state_of(hass, AC_NUMBER) == "60"
+    assert saved(hass_storage, entry) == payload(end=at(60), owed_settings={})
+
+
+async def test_owed_settings_are_stored_until_the_ac_confirms_them(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The settings are on file while the device is still working on them, so a restart
+    meanwhile applies them again."""
+    entry = await setup_target(target=AC_ID)
+    slow = fake_climate.hold_next_call()
+    start = asyncio.ensure_future(
+        entry.runtime_data.async_run(60, {"hvac_mode": "cool", "temperature": 24})
+    )
+    await slow.reached.wait()
+
+    assert saved(hass_storage, entry) == payload(
+        end=at(60),
+        pending="on",
+        owed_settings={"hvac_mode": "cool", "temperature": 24.0},
+    )
+
+    slow.release.set()
+    await start
+    await hass.async_block_till_done()
+
+    assert saved(hass_storage, entry) == payload(end=at(60))
 
 
 async def test_expiry_is_saved(
@@ -220,7 +300,7 @@ async def test_expiry_is_saved(
 
     await advance(hass, freezer, minutes=45)
 
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
 
 
 async def test_expiry_while_unavailable_turns_off_when_back(
@@ -236,7 +316,7 @@ async def test_expiry_while_unavailable_turns_off_when_back(
     await fake_target.set_state("unavailable")
     await advance(hass, freezer, minutes=45)
     assert fake_target.calls == [TURN_ON]
-    assert saved(hass_storage, entry) == {"end": None, "pending": "off"}
+    assert saved(hass_storage, entry) == payload(pending="off")
 
     await restart(hass, entry)
 
@@ -247,7 +327,7 @@ async def test_expiry_while_unavailable_turns_off_when_back(
 
     assert fake_target.calls == [TURN_ON, TURN_OFF]
     assert state_of(hass, TARGET_ID) == "off"
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
 
 
 async def test_timer_is_saved_before_a_slow_service_call_ends(
@@ -262,13 +342,13 @@ async def test_timer_is_saved_before_a_slow_service_call_ends(
     start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(45))
     await slow.reached.wait()
 
-    assert saved(hass_storage, entry) == {"end": at(45), "pending": "on"}
+    assert saved(hass_storage, entry) == payload(end=at(45), pending="on")
 
     slow.release.set()
     await start
     await hass.async_block_till_done()
 
-    assert saved(hass_storage, entry) == {"end": at(45), "pending": None}
+    assert saved(hass_storage, entry) == payload(end=at(45))
 
 
 async def test_timer_set_during_a_slow_call_survives_a_restart(
@@ -340,7 +420,7 @@ async def test_countdown_restored_in_a_cold_start_ends_on_time(
 ) -> None:
     """A countdown stored before a restart is shown while Home Assistant is still
     starting, and runs out at its end whenever the target shows up."""
-    await set_up_while_starting(hass, setup_target, {"end": at(20), "pending": None})
+    await set_up_while_starting(hass, setup_target, payload(end=at(20)))
     assert state_of(hass, NUMBER) == "20"
 
     await finish_start_up(hass, fake_target, target_appears)
@@ -367,9 +447,7 @@ async def test_countdown_that_ended_before_a_cold_start_switches_off_once(
     target_appears: TargetAppears,
 ) -> None:
     """A target found on after its countdown ended is switched off, exactly once."""
-    entry = await set_up_while_starting(
-        hass, setup_target, {"end": at(-5), "pending": None}
-    )
+    entry = await set_up_while_starting(hass, setup_target, payload(end=at(-5)))
     assert fake_target.calls == []
 
     await finish_start_up(hass, fake_target, target_appears)
@@ -377,6 +455,6 @@ async def test_countdown_that_ended_before_a_cold_start_switches_off_once(
     assert fake_target.calls == [TURN_OFF]
     assert state_of(hass, TARGET_ID) == "off"
     assert state_of(hass, NUMBER) == "0"
-    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    assert saved(hass_storage, entry) == payload()
     await advance(hass, freezer, hours=1)
     assert fake_target.calls == [TURN_OFF]

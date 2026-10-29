@@ -1,5 +1,7 @@
 """The "Run for" number: remaining minutes of the countdown, writable."""
 
+from typing import Any
+
 from homeassistant.components.number import (
     NumberEntity,
     NumberEntityDescription,
@@ -62,6 +64,7 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         """Move the end of the countdown by `minutes`, which may be negative."""
         await self._controller.async_add_minutes(minutes)
 
-    async def async_run(self) -> None:
-        """Switch the target on without a duration."""
-        await self._controller.async_run()
+    async def async_run(self, minutes: int | None = None, **settings: Any) -> None:
+        """Switch the target on for `minutes`, or without a duration, with the settings
+        the service was given."""
+        await self._controller.async_run(minutes, settings)

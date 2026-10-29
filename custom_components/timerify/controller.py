@@ -8,10 +8,10 @@ one after another and an effect is finished before the next event is looked at.
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
 from functools import cached_property
-from typing import Literal, assert_never
+from typing import Any, Literal, assert_never
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
@@ -38,10 +38,10 @@ from .const import (
     CONF_TARGET,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
-    MAX_AUTOMATIC_RESENDS,
     SERVICE_CALL_TIMEOUT,
 )
 from .core import (
+    ApplySettings,
     Arm,
     Changed,
     Disarm,
@@ -53,7 +53,7 @@ from .core import (
     TurnOn,
     remaining_minutes,
 )
-from .domains import actual_state, behaviour_for
+from .domains import TargetCall, actual_state, behaviour_for, validate_settings
 from .store import TimerStore
 from .target import target_name
 
@@ -61,7 +61,12 @@ _LOGGER = logging.getLogger(__name__)
 
 _REMEMBERED_CONTEXTS = 16
 """How many of our own service calls are still recognised when the target reports
-them. Commands run one at a time, so only the last few can have a report in flight."""
+them. Commands run one at a time, so only the calls of the last few can have a report
+in flight."""
+
+type Label = Literal["on", "off", "settings"]
+"""What a list of service calls is for: switching the target on or off, or setting
+what it runs with."""
 
 type TimerifyConfigEntry = ConfigEntry[TargetController]
 
@@ -95,6 +100,7 @@ class TargetController:
                 minutes=options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
             ),
             snapshot,
+            automatic_resends=self._behaviour.automatic_resends,
         )
         self._lock = asyncio.Lock()
         self._stopped = False
@@ -103,8 +109,9 @@ class TargetController:
         self._notified_end = snapshot.end
         self._expiry_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
-        self._raised_for: Literal["on", "off"] | None = None
-        """The pending wish whose failure was logged with a traceback."""
+        self._raised_for: tuple[Label, object] | None = None
+        """The work of a list of calls (see `_work_of`) whose failure was logged with a
+        traceback, with the label of the list."""
 
     @cached_property
     def device_name(self) -> str:
@@ -137,9 +144,23 @@ class TargetController:
         """Move the end of the countdown by `minutes`, which may be negative."""
         await self._command(lambda now: self._core.add(now, timedelta(minutes=minutes)))
 
-    async def async_run(self) -> None:
-        """Switch the target on without a duration (the default one in strict mode)."""
-        await self._command(self._core.run_open)
+    async def async_run(
+        self, minutes: int | None = None, settings: Mapping[str, Any] | None = None
+    ) -> None:
+        """Switch the target on for `minutes`, or without a duration (the default one
+        in strict mode), with `settings` if there are any.
+
+        Raises ServiceValidationError, before anything runs, for settings that the
+        target cannot take.
+        """
+        owed = validate_settings(self._hass, self.target_entity_id, settings or {})
+        if minutes is None:
+            await self._command(lambda now: self._core.run_open(now, owed))
+        else:
+            duration = timedelta(minutes=minutes)
+            await self._command(
+                lambda now: self._core.set_duration(now, duration, owed)
+            )
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -205,8 +226,7 @@ class TargetController:
         self._notify()
 
     async def _execute(self, effects: list[Effect]) -> None:
-        if self.snapshot.pending != self._raised_for:
-            self._raised_for = None  # that wish settled or was replaced
+        self._forget_settled_failure()
         if any(isinstance(effect, Changed) for effect in effects):
             # Saved ahead of the effects: a service call may take up to
             # SERVICE_CALL_TIMEOUT, and a restart meanwhile must find the new timer.
@@ -218,24 +238,32 @@ class TargetController:
             if self._stopped:
                 return  # Unloaded while an earlier effect was under way.
             match effect:
-                case TurnOn():
-                    await self._switch("on")
+                case TurnOn(settings):
+                    await self._carry_out(
+                        "on",
+                        self._behaviour.turn_on_calls(settings),
+                        with_settings=bool(settings),
+                    )
+                case ApplySettings(settings):
+                    await self._carry_out(
+                        "settings",
+                        self._behaviour.apply_calls(settings),
+                        with_settings=True,
+                    )
                 case TurnOff():
-                    await self._switch("off")
+                    await self._carry_out(
+                        "off",
+                        (TargetCall(*self._behaviour.off_service, {}),),
+                        with_settings=False,
+                    )
                 case Arm(at):
                     self._arm(at)
                 case Disarm():
                     self._disarm()
                 case Changed():
                     pass  # Saved and shown ahead of the other effects.
-                case GaveUp(wish):
-                    _LOGGER.warning(
-                        "%s did not turn %s after %d attempts; Timerify will try"
-                        " again when it reports a change or on the next command",
-                        self.target_entity_id,
-                        wish,
-                        MAX_AUTOMATIC_RESENDS + 1,
-                    )
+                case GaveUp(what):
+                    self._log_gave_up(what)
                 case _:
                     assert_never(effect)
 
@@ -246,73 +274,135 @@ class TargetController:
         if self.snapshot.end != self._notified_end:
             self._notify()
 
-    async def _switch(self, wish: Literal["on", "off"]) -> None:
-        domain, service = (
-            self._behaviour.on_service if wish == "on" else self._behaviour.off_service
-        )
+    def _log_gave_up(self, what: Label) -> None:
+        attempts = self._behaviour.automatic_resends + 1
+        noun = "attempt" if attempts == 1 else "attempts"
+        if what == "settings":
+            _LOGGER.warning(
+                "%s did not take its settings after %d %s; Timerify will try"
+                " again when it reports a change or on the next command",
+                self.target_entity_id,
+                attempts,
+                noun,
+            )
+        else:
+            _LOGGER.warning(
+                "%s did not turn %s after %d %s; Timerify will try"
+                " again when it reports a change or on the next command",
+                self.target_entity_id,
+                what,
+                attempts,
+                noun,
+            )
+
+    async def _carry_out(
+        self, label: Label, calls: Sequence[TargetCall], *, with_settings: bool
+    ) -> None:
+        """Make the calls one after the other and tell the core how it went.
+
+        The first call that fails ends the list. A list that switches the target must
+        also leave it in the state it was meant to: accepted but ignored counts as
+        failed, so the core sends it again. A list that carried settings and did not
+        fail has delivered them.
+        """
+        for call in calls:
+            if not await self._call(label, call):
+                await self._not_delivered()
+                return
+            if self._stopped:
+                return  # Unloaded while the call was under way.
+        if label != "settings":
+            actual = actual_state(self._hass.states.get(self.target_entity_id))
+            if actual != label:
+                # Accepted, but nothing changed (yet): a device out of reach, or one
+                # that confirms later. Not worth a warning; the core sends it again
+                # on a later report, within its limit of automatic re-sends.
+                _LOGGER.debug(
+                    "%s accepted the calls to turn %s but reports %s",
+                    self.target_entity_id,
+                    label,
+                    actual,
+                )
+                await self._not_delivered()
+                return
+        if with_settings:
+            await self._execute(self._core.settings_applied(dt_util.utcnow()))
+
+    async def _call(self, label: Label, call: TargetCall) -> bool:
+        """Make one service call as ourselves; False, after logging why, if it fails."""
         context = Context()
         self._own_contexts.append(context.id)
         try:
             async with asyncio.timeout(SERVICE_CALL_TIMEOUT.total_seconds()):
                 await self._hass.services.async_call(
-                    domain,
-                    service,
-                    {ATTR_ENTITY_ID: self.target_entity_id},
+                    call.domain,
+                    call.service,
+                    {ATTR_ENTITY_ID: self.target_entity_id, **call.data},
                     blocking=True,
                     context=context,
                 )
         except HomeAssistantError as err:
-            await self._call_failed(wish, err)
+            self._log_failure(label, err)
+            return False
         except TimeoutError:
-            await self._call_failed(
-                wish, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
+            self._log_failure(
+                label, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
             )
+            return False
         except Exception as err:
             # Another integration's bug. It must not stop the effects that follow
-            # or leave the wish counted as on its way: it is sent again like one
+            # or leave the work counted as on its way: it is sent again like one
             # the device rejected.
-            self._log_raised(wish, err)
-            await self._not_delivered()
-        else:
-            actual = actual_state(self._hass.states.get(self.target_entity_id))
-            if actual != wish:
-                # Accepted, but nothing changed (yet): a device out of reach, or one
-                # that confirms later. Not worth a warning; the core sends the wish
-                # again on a later report, within its limit of automatic re-sends.
-                _LOGGER.debug(
-                    "%s accepted turn_%s but reports %s",
-                    self.target_entity_id,
-                    wish,
-                    actual,
-                )
-                await self._not_delivered()
+            self._log_raised(label, err)
+            return False
+        return True
 
-    def _log_raised(self, wish: Literal["on", "off"], err: Exception) -> None:
+    def _what_failed(self, label: Label) -> str:
+        if label == "settings":
+            return f"Could not apply settings to {self.target_entity_id}"
+        return f"Could not turn {self.target_entity_id} {label}"
+
+    def _log_failure(self, label: Label, reason: object) -> None:
+        _LOGGER.warning("%s: %s", self._what_failed(label), reason)
+
+    def _work_of(self, label: Label) -> object:
+        """What a label's calls are for: the wish for a switch, the owed settings for
+        settings. A failure lasts as long as its work does."""
+        return (
+            self.snapshot.owed_settings
+            if label == "settings"
+            else self.snapshot.pending
+        )
+
+    def _log_raised(self, label: Label, err: Exception) -> None:
         """Log what another integration's service raised: the traceback the first time
-        for a wish, a line for each repeat, as a bug that persists repeats on every
-        report of the target."""
-        if self._raised_for == wish:
+        for a piece of work, a line for each repeat, as a bug that persists repeats on
+        every report of the target."""
+        work = (label, self._work_of(label))
+        if self._raised_for == work:
             _LOGGER.warning(
-                "Could not turn %s %s: its service raised %r again",
-                self.target_entity_id,
-                wish,
-                err,
+                "%s: its service raised %r again", self._what_failed(label), err
             )
             return
-        self._raised_for = wish
+        self._raised_for = work
         _LOGGER.error(
-            "Could not turn %s %s: its service raised an unexpected error",
-            self.target_entity_id,
-            wish,
+            "%s: its service raised an unexpected error",
+            self._what_failed(label),
             exc_info=err,
         )
 
-    async def _call_failed(self, wish: Literal["on", "off"], reason: object) -> None:
-        _LOGGER.warning("Could not turn %s %s: %s", self.target_entity_id, wish, reason)
-        await self._not_delivered()
+    def _forget_settled_failure(self) -> None:
+        """Let a failure that was logged with a traceback be logged with one again once
+        its work is settled: the wish is no longer pending, or the settings are
+        cleared or replaced."""
+        if self._raised_for is not None:
+            label, work = self._raised_for
+            if self._work_of(label) != work:
+                self._raised_for = None
 
     async def _not_delivered(self) -> None:
-        """Tell the core the target did not get the wish, so it is sent again."""
+        """Tell the core the target did not get the wish or the settings, so they are
+        sent again."""
         await self._execute(self._core.call_failed(dt_util.utcnow()))
 
     def _arm(self, at: datetime) -> None:

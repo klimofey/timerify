@@ -5,11 +5,13 @@ target to the `number` entities this integration owns and calls the method named
 here on each, so the service reaches the controller of every timer picked.
 """
 
+from collections.abc import Callable
 from typing import Any
 
 import probatio
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import service
 from homeassistant.helpers.typing import VolDictType
 
@@ -20,31 +22,60 @@ SERVICE_RUN = "run"
 
 ATTR_MINUTES = "minutes"
 
-_NOT_WHOLE = "expected a whole number of minutes"
 
-
-def whole_minutes(value: Any) -> int:
-    """A count of whole minutes, as an int.
+def _whole(message: str) -> Callable[[Any], int]:
+    """A validator of whole numbers that gives them as an int and refuses the rest
+    with `message`.
 
     Templates hand numbers over as they were rendered: an input_number gives 15.0
     or "15.0", and 30 / 2 is 15.0. Those are whole and accepted; 2.5 is rejected
     rather than rounded, and so is a boolean, which Python would count as 1.
     """
-    if isinstance(value, bool):
-        raise probatio.Invalid(_NOT_WHOLE)
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError) as err:
-        raise probatio.Invalid(_NOT_WHOLE) from err
-    if not number.is_integer():
-        raise probatio.Invalid(_NOT_WHOLE)
-    return int(number)
 
+    def whole(value: Any) -> int:
+        if isinstance(value, bool):
+            raise probatio.Invalid(message)
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as err:
+            raise probatio.Invalid(message) from err
+        if not number.is_integer():
+            raise probatio.Invalid(message)
+        return int(number)
+
+    return whole
+
+
+whole_minutes = _whole("expected a whole number of minutes")
+whole_number = _whole("expected a whole number")
 
 ADD_TIME_SCHEMA: VolDictType = {
     probatio.Required(ATTR_MINUTES): probatio.All(
         whole_minutes, probatio.Range(min=-MAX_MINUTES, max=MAX_MINUTES)
     )
+}
+
+SETTINGS_SCHEMA: VolDictType = {
+    probatio.Optional("hvac_mode"): cv.string,
+    probatio.Optional("temperature"): probatio.Coerce(float),
+    probatio.Optional("fan_mode"): cv.string,
+    probatio.Optional("preset_mode"): cv.string,
+    probatio.Optional("mode"): cv.string,
+    probatio.Optional("operation_mode"): cv.string,
+    probatio.Optional("brightness_pct"): probatio.Coerce(float),
+    probatio.Optional("percentage"): whole_number,
+    probatio.Optional("humidity"): whole_number,
+}
+"""The ways to turn a target on that a service can ask for, as the services of the
+target's domain name them. Which of them a target takes, and the values it accepts,
+is for the target's own capabilities to decide (see `validate_settings`); this only
+gives the values their types."""
+
+RUN_SCHEMA: VolDictType = {
+    probatio.Optional(ATTR_MINUTES): probatio.All(
+        whole_minutes, probatio.Range(min=1, max=MAX_MINUTES)
+    ),
+    **SETTINGS_SCHEMA,
 }
 
 
@@ -64,6 +95,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_RUN,
         entity_domain=NUMBER_DOMAIN,
-        schema=None,
+        schema=RUN_SCHEMA,
         func="async_run",
     )

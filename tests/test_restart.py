@@ -5,15 +5,18 @@ is there before the entry is set up, or the entry is unloaded and set up again.
 """
 
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Final, Literal
+from zoneinfo import ZoneInfo
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 
-from custom_components.timerify.store import TimerStore
+from custom_components.timerify.const import freeze_settings
+from custom_components.timerify.core import Command
+from custom_components.timerify.store import TimerStore, command_to_json
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -26,6 +29,7 @@ from .helpers import (
     TURN_ON,
     advance,
     at,
+    command_json,
     payload,
     saved,
     set_number,
@@ -216,8 +220,9 @@ async def test_version_1_store_is_migrated(
     setup_target: SetupTarget,
     hass_storage: dict[str, Any],
 ) -> None:
-    """A timer stored before settings existed is read as one that owes none, and the
-    next change writes it in the current form."""
+    """A timer stored before settings and commands existed is read as one that owes
+    no settings and waits for no commands, and the next change writes it in the
+    current form."""
     await fake_target.set_state("on")
     entry = await setup_target(
         stored={"end": at(30), "pending": None}, stored_version=1
@@ -226,11 +231,32 @@ async def test_version_1_store_is_migrated(
     assert state_of(hass, NUMBER) == "30"
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
+    assert saved(hass_storage, entry)["commands"] == []
 
     await set_number(hass, NUMBER, 45)
 
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
-    assert saved(hass_storage, entry) == payload(end=at(45), owed_settings={})
+    assert saved(hass_storage, entry) == payload(
+        end=at(45), owed_settings={}, commands=[]
+    )
+
+
+def test_command_is_stored_as_plain_data_in_utc() -> None:
+    """The file, and anything else that shows a command, gets its time in UTC whatever
+    zone it was made in, and its settings as a plain dict."""
+    command = Command(
+        "c1",
+        datetime(2026, 1, 5, 9, 15, tzinfo=ZoneInfo("Asia/Jerusalem")),
+        "on",
+        60,
+        freeze_settings({"hvac_mode": "cool", "temperature": 24.0}),
+    )
+
+    assert command_to_json(command) == command_json(
+        at(15),
+        minutes=60,
+        settings={"hvac_mode": "cool", "temperature": 24.0},
+    )
 
 
 async def test_owed_settings_survive_restart(

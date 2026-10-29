@@ -7,12 +7,34 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import freeze_settings
-from .core import Snapshot
+from .core import Command, Snapshot
+
+
+def command_to_json(command: Command) -> dict[str, Any]:
+    """A pending command as plain data: its time as ISO-8601 UTC, its settings as a
+    dict. The file of the timer and the "Next command" sensor show it alike."""
+    return {
+        "id": command.id,
+        "at": command.at.astimezone(UTC).isoformat(),
+        "action": command.action,
+        "minutes": command.minutes,
+        "settings": dict(command.settings),
+    }
+
+
+def _command_from_json(data: dict[str, Any]) -> Command:
+    return Command(
+        id=data["id"],
+        at=datetime.fromisoformat(data["at"]),
+        action=data["action"],
+        minutes=data["minutes"],
+        settings=freeze_settings(data["settings"]),
+    )
 
 
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
-    """What is stored of a snapshot: the countdown, the wish not yet confirmed and the
-    settings not yet confirmed.
+    """What is stored of a snapshot: the countdown, the wish not yet confirmed, the
+    settings not yet confirmed and the pending commands.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
@@ -22,6 +44,7 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
         "end": None if end is None else end.astimezone(UTC).isoformat(),
         "pending": snapshot.pending,
         "owed_settings": dict(snapshot.owed_settings),
+        "commands": [command_to_json(command) for command in snapshot.commands],
     }
 
 
@@ -36,10 +59,11 @@ class _TimerFile(Store[dict[str, Any]]):
     ) -> dict[str, Any]:
         """Bring the stored timer of an older version to the current one.
 
-        Version 1 knew no settings, so nothing was owed.
+        Version 1 knew no settings and no commands, so nothing was owed and nothing
+        waited.
         """
         if old_major_version == 1:
-            return {**old_data, "owed_settings": {}}
+            return {**old_data, "owed_settings": {}, "commands": []}
         raise NotImplementedError
 
 
@@ -65,6 +89,7 @@ class TimerStore:
                 end=None if end is None else datetime.fromisoformat(end),
                 pending=data["pending"],
                 owed_settings=freeze_settings(data["owed_settings"]),
+                commands=tuple(_command_from_json(c) for c in data["commands"]),
             )
         self._saved = _payload(snapshot)
         return snapshot

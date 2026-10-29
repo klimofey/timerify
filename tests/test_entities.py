@@ -231,8 +231,8 @@ async def test_expiry_while_target_unavailable_is_applied_when_it_is_back(
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "0"
     assert (
-        "switch.boiler is unavailable; it will be turned off when it is back"
-        in caplog.text
+        "The timer of switch.boiler ended while it is unavailable;"
+        " it is turned off when it is back" in caplog.text
     )
 
     await fake_target.set_state("on")

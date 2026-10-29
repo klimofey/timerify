@@ -1,4 +1,5 @@
-"""Pure timer state machine: commands and expiry become effects for a controller.
+"""Pure timer state machine: commands, pending commands and expiry become effects for
+a controller.
 
 Nothing here touches Home Assistant, the clock or the event loop. Every command
 and every observation of the target takes the current time, updates the snapshot
@@ -20,6 +21,22 @@ _MAX_DURATION: Final = timedelta(minutes=MAX_MINUTES)
 
 
 @dataclass(frozen=True)
+class Command:
+    """A pending command: at `at`, turn the target on or off, whatever state it is in
+    then (P1). Only an explicit cancel removes it (P2)."""
+
+    id: str
+    at: datetime
+    """When the command is due (timezone-aware UTC)."""
+    action: Literal["on", "off"]
+    minutes: int | None = None
+    """How long an "on" runs, counted from `at`; None runs the default duration in
+    strict mode and without a countdown in loose mode. Never set for "off"."""
+    settings: Settings = NO_SETTINGS
+    """What an "on" turns the target on with. Never set for "off"."""
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """The state of the timer; a store keeps everything but `last_actual`."""
 
@@ -30,6 +47,8 @@ class Snapshot:
     owed_settings: Settings = NO_SETTINGS
     """The settings the target was asked to run with and has not yet confirmed to
     have taken. Never set while `pending` is "off"."""
+    commands: tuple[Command, ...] = ()
+    """The pending commands, ordered by `at` and then by when they were added."""
     last_actual: Actual | None = None
     """The target's last observed state; None until it has been observed."""
 
@@ -55,14 +74,15 @@ class TurnOff:
 
 @dataclass(frozen=True)
 class Arm:
-    """Schedule the expiry alarm for `at`, replacing any earlier one."""
+    """Schedule the wake-up alarm for `at` (see `next_wakeup`), replacing any earlier
+    one."""
 
     at: datetime
 
 
 @dataclass(frozen=True)
 class Disarm:
-    """Cancel the expiry alarm."""
+    """Cancel the wake-up alarm: there is nothing to wake up for."""
 
 
 @dataclass(frozen=True)
@@ -80,7 +100,26 @@ class GaveUp:
     what: Literal["on", "off", "settings"]
 
 
-type Effect = TurnOn | ApplySettings | TurnOff | Arm | Disarm | Changed | GaveUp
+@dataclass(frozen=True)
+class CommandDropped:
+    """A command came due after the run it asked for was over (§5.7): it was removed
+    without touching the timer. The caller says so, as nothing else shows it."""
+
+    command: Command
+
+
+type Effect = (
+    TurnOn | ApplySettings | TurnOff | Arm | Disarm | Changed | GaveUp | CommandDropped
+)
+
+
+def next_wakeup(snapshot: Snapshot) -> datetime | None:
+    """When the timer must next be looked at: the end or the first command, whichever
+    comes first; None when neither is there."""
+    times = [snapshot.end] if snapshot.end is not None else []
+    if snapshot.commands:
+        times.append(snapshot.commands[0].at)
+    return min(times, default=None)
 
 
 def _utc(now: datetime) -> datetime:
@@ -88,6 +127,11 @@ def _utc(now: datetime) -> datetime:
     if now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     return now.astimezone(UTC)
+
+
+def _capped(now: datetime, end: datetime) -> datetime:
+    """`end`, but at most a day from `now`."""
+    return min(end, now + _MAX_DURATION)
 
 
 def _reports_change[**P](
@@ -225,14 +269,40 @@ class TimerCore:
                 now, now + self._default_duration, settings, apply_if_on=apply_if_on
             )
         self._snapshot = replace(self._snapshot, end=None)
-        return [Disarm(), *self._want("on", settings, apply_if_on=apply_if_on)]
+        return [
+            self._wakeup(),
+            *self._want("on", settings, apply_if_on=apply_if_on),
+        ]
 
     @_reports_change
-    def expire(self, now: datetime) -> list[Effect]:
-        """Handle the alarm; one that fires before the end is a stale leftover."""
-        if not self._due(_utc(now)):
-            return []
-        return self._stop()
+    def add_command(self, now: datetime, command: Command) -> list[Effect]:
+        """Keep `command` until its time, after those that are due at the same time."""
+        _utc(now)  # unused, but every command rejects a naive time alike
+        if command.at.utcoffset() is None:
+            raise ValueError("the command's time must be timezone-aware")
+        commands = sorted((*self._snapshot.commands, command), key=lambda c: c.at)
+        self._snapshot = replace(self._snapshot, commands=tuple(commands))
+        return [self._wakeup()]
+
+    @_reports_change
+    def cancel_command(self, now: datetime, command_id: str) -> list[Effect]:
+        """Forget the command with that id; `KeyError` when there is none."""
+        _utc(now)  # unused, but every command rejects a naive time alike
+        commands = self._snapshot.commands
+        kept = tuple(c for c in commands if c.id != command_id)
+        if len(kept) == len(commands):
+            raise KeyError(command_id)
+        self._snapshot = replace(self._snapshot, commands=kept)
+        return [self._wakeup()]
+
+    @_reports_change
+    def tick(self, now: datetime) -> list[Effect]:
+        """Handle the wake-up alarm: carry out the end and the commands that are due.
+
+        An alarm that fires with nothing due is a stale leftover and does nothing.
+        """
+        effects, _ = self._catch_up(_utc(now))
+        return effects
 
     @_reports_change
     def settings_applied(self, now: datetime) -> list[Effect]:
@@ -281,8 +351,7 @@ class TimerCore:
         # the target is in now, so an unavailable target is never switched and
         # one that is already where a wish wants it needs no service call.
         self._snapshot = replace(self._snapshot, last_actual=actual)
-        expired = self._due(now)
-        effects = self._stop() if expired else []
+        effects, caught_up = self._catch_up(now)
         if actual == "unavailable":
             return effects
         pending = self._snapshot.pending
@@ -294,14 +363,93 @@ class TimerCore:
         elif by_us:
             if pending == actual:
                 self._settle()
-        elif not repeated and not expired:
-            # Our own expiry is already switching the target off; it outranks this.
+        elif not repeated and not caught_up:
+            # What was due has just decided what the target is to do; it outranks
+            # what someone else did to the target.
             effects += self._follow_external_change(now, actual)
         return effects + self._deliver_settings(repeated=repeated)
 
-    def _due(self, now: datetime) -> bool:
-        end = self._snapshot.end
-        return end is not None and end <= now
+    def _wakeup(self) -> Effect:
+        """The alarm for what the snapshot waits for next, or none."""
+        at = next_wakeup(self._snapshot)
+        return Disarm() if at is None else Arm(at)
+
+    def _catch_up(self, now: datetime) -> tuple[list[Effect], bool]:
+        """Fold everything that is due by `now` into the timer, in the order it fell
+        due: the end and every command at or before `now`.
+
+        A command goes before the end that is due at the same moment, as it may move
+        the end. The end is an item only if it is still `<= now` once the items before
+        it are folded in. Each item leaves the timer as it would have if it had been
+        carried out when it fell due, but the target is asked once, for the last wish:
+        a turn-on and an off that were due together switch nothing.
+
+        Returns the effects, and whether an item moved the timer: the end or an
+        executed command. A command dropped for coming too late leaves it as it was.
+        """
+        effects: list[Effect] = []
+        wish: Literal["on", "off"] | None = None
+        due = False
+        while (item := self._next_due(now)) is not None:
+            due = True
+            if isinstance(item, Command):
+                commands = self._snapshot.commands[1:]
+                self._snapshot = replace(self._snapshot, commands=commands)
+                if (command_wish := self._run_command(now, item)) is None:
+                    effects.append(CommandDropped(item))
+                else:
+                    wish = command_wish
+            else:
+                self._end_timer()
+                wish = "off"
+        if not due:
+            return [], False
+        effects.append(self._wakeup())
+        if wish is not None:
+            effects += self._want(wish)
+        return effects, wish is not None
+
+    def _next_due(self, now: datetime) -> Command | Literal["end"] | None:
+        """The item to fold in next: the first command or the end, whichever fell due
+        first, the command on a tie; None when neither is due."""
+        state = self._snapshot
+        command = state.commands[0] if state.commands else None
+        if command is not None and command.at > now:
+            command = None
+        end = state.end
+        if end is not None and end <= now and (command is None or end < command.at):
+            return "end"
+        return command
+
+    def _run_command(
+        self, now: datetime, command: Command
+    ) -> Literal["on", "off"] | None:
+        """Fold a command that is due into the timer and return the wish it leaves;
+        None if its run was over before it was noticed, which drops it (§5.7).
+
+        A command that turns on sets its settings even when the target is running
+        (P1), and is the same as setting the timer by hand (P3).
+        """
+        if command.action == "off":
+            self._end_timer()
+            return "off"
+        end = self._command_end(command)
+        if end is not None and end <= now:
+            return None
+        self._snapshot = replace(
+            self._snapshot, end=None if end is None else _capped(now, end)
+        )
+        self._owe(command.settings)
+        return "on"
+
+    def _command_end(self, command: Command) -> datetime | None:
+        """When the run of a command that turns on is over, counted from its time;
+        None for a run without a countdown (loose mode, no minutes)."""
+        if command.minutes is not None:
+            return command.at + timedelta(minutes=command.minutes)
+        if self._mode == "strict":
+            return command.at + self._default_duration
+        return None
 
     def _follow_external_change(
         self, now: datetime, actual: Literal["on", "off"]
@@ -313,7 +461,7 @@ class TimerCore:
             if self._snapshot.end is None:
                 return []
             self._snapshot = replace(self._snapshot, end=None)
-            return [Disarm()]
+            return [self._wakeup()]
         if self._mode == "strict" and self._snapshot.end is None:
             return self._run_until(now, now + self._default_duration)
         return []
@@ -329,14 +477,20 @@ class TimerCore:
         """Count down to `end`, at most a day from now, or stop if it is not ahead."""
         if end <= now:
             return self._stop()
-        end = min(end, now + _MAX_DURATION)
-        self._snapshot = replace(self._snapshot, end=end)
-        return [Arm(end), *self._want("on", settings, apply_if_on=apply_if_on)]
+        self._snapshot = replace(self._snapshot, end=_capped(now, end))
+        return [
+            self._wakeup(),
+            *self._want("on", settings, apply_if_on=apply_if_on),
+        ]
 
     def _stop(self) -> list[Effect]:
+        self._end_timer()
+        return [self._wakeup(), *self._want("off")]
+
+    def _end_timer(self) -> None:
+        """The countdown is over: there is no end, and nothing to run with."""
         self._snapshot = replace(self._snapshot, end=None)
-        self._clear_settings()  # a timer that stops has nothing to run with
-        return [Disarm(), *self._want("off")]
+        self._clear_settings()
 
     def _want(
         self,

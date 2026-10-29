@@ -44,6 +44,8 @@ from .core import (
     ApplySettings,
     Arm,
     Changed,
+    Command,
+    CommandDropped,
     Disarm,
     Effect,
     GaveUp,
@@ -51,6 +53,7 @@ from .core import (
     TimerCore,
     TurnOff,
     TurnOn,
+    next_wakeup,
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
@@ -107,7 +110,7 @@ class TargetController:
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = snapshot.end
-        self._expiry_alarm: CALLBACK_TYPE | None = None
+        self._wakeup_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
         self._raised_for: tuple[Label, object] | None = None
         """The work of a list of calls (see `_work_of`) whose failure was logged with a
@@ -185,10 +188,10 @@ class TargetController:
             if self._stopped:
                 return
             # A timer restored unchanged gets no Arm from the core. Arming only now
-            # keeps a stored end that has long passed from switching a target that
-            # has not been seen yet; the first observation expires it instead.
-            if (end := self.snapshot.end) is not None:
-                self._arm(end)
+            # keeps a stored end or command that has long passed from switching a
+            # target that has not been seen yet; the first observation folds it in.
+            if (wakeup := next_wakeup(self.snapshot)) is not None:
+                self._arm(wakeup)
             self._schedule_refresh()
             state = self._hass.states.get(self.target_entity_id)
             await self._execute(
@@ -207,18 +210,38 @@ class TargetController:
                 )
             )
 
-    async def _handle_expiry(self, _scheduled: datetime) -> None:
+    async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
             if self._stopped:
                 return
-            effects = self._core.expire(dt_util.utcnow())
-            if effects and self.snapshot.last_actual == "unavailable":
-                _LOGGER.info(
-                    "The timer ended but %s is unavailable;"
-                    " it will be turned off when it is back",
-                    self.target_entity_id,
-                )
+            now = dt_util.utcnow()
+            before = self.snapshot
+            effects = self._core.tick(now)
+            self._log_due_while_unavailable(before, now, effects)
             await self._execute(effects)
+
+    def _log_due_while_unavailable(
+        self, before: Snapshot, now: datetime, effects: list[Effect]
+    ) -> None:
+        """Say what came due while the target is away, worded by what it was: nothing
+        else shows that a switch waits for the target to come back (R10)."""
+        after = self.snapshot
+        if after.last_actual != "unavailable":
+            return
+        if before.end is not None and before.end <= now and after.end is None:
+            _LOGGER.info(
+                "The timer of %s ended while it is unavailable;"
+                " it is turned off when it is back",
+                self.target_entity_id,
+            )
+        dropped = {e.command.id for e in effects if isinstance(e, CommandDropped)}
+        kept = {command.id for command in after.commands}
+        if any(c.id not in kept and c.id not in dropped for c in before.commands):
+            _LOGGER.info(
+                "A pending command for %s came due while it is unavailable;"
+                " it is carried out when it is back",
+                self.target_entity_id,
+            )
 
     @callback
     def _handle_refresh(self, _scheduled: datetime) -> None:
@@ -264,6 +287,8 @@ class TargetController:
                     pass  # Saved and shown ahead of the other effects.
                 case GaveUp(what):
                     self._log_gave_up(what)
+                case CommandDropped(command):
+                    self._log_dropped(command)
                 case _:
                     assert_never(effect)
 
@@ -273,6 +298,15 @@ class TargetController:
         # bookkeeping that needs no state write.
         if self.snapshot.end != self._notified_end:
             self._notify()
+
+    def _log_dropped(self, command: Command) -> None:
+        _LOGGER.info(
+            "Dropped the pending command to turn %s %s at %s:"
+            " the run it asked for was already over",
+            self.target_entity_id,
+            command.action,
+            dt_util.as_local(command.at).isoformat(sep=" ", timespec="seconds"),
+        )
 
     def _log_gave_up(self, what: Label) -> None:
         attempts = self._behaviour.automatic_resends + 1
@@ -406,19 +440,19 @@ class TargetController:
         await self._execute(self._core.call_failed(dt_util.utcnow()))
 
     def _arm(self, at: datetime) -> None:
-        """Wake up at `at` to expire the timer, replacing any earlier alarm."""
+        """Wake up at `at` to carry out what is due, replacing any earlier alarm."""
         if self._stopped:
             return
         self._disarm()
-        self._expiry_alarm = async_track_point_in_utc_time(
-            self._hass, self._handle_expiry, at
+        self._wakeup_alarm = async_track_point_in_utc_time(
+            self._hass, self._handle_wakeup, at
         )
 
     def _disarm(self) -> None:
-        """Cancel the expiry alarm; there may be none."""
-        if self._expiry_alarm is not None:
-            self._expiry_alarm()
-            self._expiry_alarm = None
+        """Cancel the wake-up alarm; there may be none."""
+        if self._wakeup_alarm is not None:
+            self._wakeup_alarm()
+            self._wakeup_alarm = None
 
     def _schedule_refresh(self) -> None:
         """Wake up when the rounded-up remaining minutes next change."""
@@ -428,7 +462,7 @@ class TargetController:
             return
         remaining = remaining_minutes(self.snapshot, dt_util.utcnow())
         if remaining <= 1:
-            return  # The expiry alarm comes at the end, and its change notifies.
+            return  # The wake-up comes at the end, and its change notifies.
         self._refresh_alarm = async_track_point_in_utc_time(
             self._hass,
             self._handle_refresh,

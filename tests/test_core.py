@@ -12,12 +12,15 @@ from custom_components.timerify.const import (
     MAX_MINUTES,
     NO_SETTINGS,
     Mode,
+    Settings,
     freeze_settings,
 )
 from custom_components.timerify.core import (
     ApplySettings,
     Arm,
     Changed,
+    Command,
+    CommandDropped,
     Disarm,
     Effect,
     GaveUp,
@@ -25,6 +28,7 @@ from custom_components.timerify.core import (
     TimerCore,
     TurnOff,
     TurnOn,
+    next_wakeup,
     remaining_minutes,
 )
 from custom_components.timerify.domains import Actual
@@ -40,6 +44,33 @@ def core(mode: Mode, actual: Actual | None) -> TimerCore:
 
 def minutes(count: int) -> timedelta:
     return timedelta(minutes=count)
+
+
+def cmd(
+    minutes_from_now: int,
+    action: Literal["on", "off"] = "on",
+    minutes: int | None = None,
+    settings: Settings = NO_SETTINGS,
+    id: str = "c1",
+) -> Command:
+    """A pending command due `minutes_from_now` minutes after `NOW`; negative: late."""
+    at = NOW + timedelta(minutes=minutes_from_now)
+    return Command(id, at, action, minutes, settings)
+
+
+def holding(
+    mode: Mode,
+    actual: Actual | None,
+    *commands: Command,
+    end: datetime | None = None,
+) -> TimerCore:
+    """A core that waits for `commands` (in order of time), as one restored from the
+    store does, with its target last seen in the given state."""
+    return TimerCore(
+        mode,
+        timedelta(minutes=45),
+        Snapshot(end=end, commands=commands, last_actual=actual),
+    )
 
 
 def test_set_duration_on_off_target_turns_on_and_arms() -> None:
@@ -224,33 +255,33 @@ def test_run_open_loose_drops_a_running_countdown() -> None:
     assert c.snapshot.end is None
 
 
-def test_expire_at_end_turns_off() -> None:
+def test_tick_at_end_turns_off() -> None:
     """When the alarm fires at the end time, the target is switched off."""
     c = core("strict", "on")
     c.set_duration(NOW - minutes(10), minutes(10))
 
-    fx = c.expire(NOW)
+    fx = c.tick(NOW)
 
     assert fx == [Disarm(), TurnOff(), Changed()]
     assert c.snapshot.end is None
     assert c.snapshot.pending == "off"
 
 
-def test_stale_expire_is_ignored() -> None:
+def test_stale_tick_is_ignored() -> None:
     """An alarm that fires before the (extended) end is a leftover and is ignored."""
     c = core("strict", "on")
     c.set_duration(NOW, minutes(5))
     before = c.snapshot
 
-    assert c.expire(NOW) == []
+    assert c.tick(NOW) == []
     assert c.snapshot == before
 
 
-def test_expire_on_idle_timer_is_ignored() -> None:
+def test_tick_on_idle_timer_is_ignored() -> None:
     """An alarm that fires after the timer was stopped has nothing to expire."""
     c = core("strict", "off")
 
-    assert c.expire(NOW) == []
+    assert c.tick(NOW) == []
 
 
 def test_repeated_set_while_turning_on_emits_one_turn_on() -> None:
@@ -290,12 +321,12 @@ def test_set_while_unavailable_records_pending_without_service_call() -> None:
     assert c.snapshot.pending == "on"
 
 
-def test_expire_while_unavailable_records_pending_without_service_call() -> None:
+def test_tick_at_end_while_unavailable_records_pending_without_service_call() -> None:
     """An expiry during an outage clears the timer and waits to switch off."""
     c = core("strict", "unavailable")
     c.set_duration(NOW - minutes(10), minutes(10))
 
-    fx = c.expire(NOW)
+    fx = c.tick(NOW)
 
     assert TurnOff() not in fx
     assert c.snapshot.end is None
@@ -312,13 +343,13 @@ def test_repeated_stop_while_turning_off_emits_one_turn_off() -> None:
     assert c.snapshot.pending == "off"
 
 
-def test_repeated_expire_while_turning_off_emits_one_turn_off() -> None:
+def test_repeated_tick_at_end_while_turning_off_emits_one_turn_off() -> None:
     """A second alarm while the first turn-off is in flight must not repeat it."""
     c = core("strict", "on")
     c.set_duration(NOW - minutes(10), minutes(10))
-    assert TurnOff() in c.expire(NOW)
+    assert TurnOff() in c.tick(NOW)
 
-    assert TurnOff() not in c.expire(NOW)
+    assert TurnOff() not in c.tick(NOW)
     assert c.snapshot.pending == "off"
 
 
@@ -425,7 +456,7 @@ def test_expired_timer_is_not_restarted_by_a_state_update() -> None:
     """The target still reads on while our turn-off is in flight; that is not R4."""
     c = core("strict", "on")
     c.set_duration(NOW, minutes(10))
-    c.expire(NOW + minutes(10))
+    c.tick(NOW + minutes(10))
 
     fx = c.observe(NOW + minutes(10), "on", by_us=False)
 
@@ -1148,7 +1179,7 @@ def test_manual_off_drops_owed_settings() -> None:
     [
         pytest.param(lambda c, now: c.stop(now), id="stop"),
         pytest.param(lambda c, now: c.set_duration(now, timedelta(0)), id="zero"),
-        pytest.param(lambda c, now: c.expire(now + minutes(60)), id="expiry"),
+        pytest.param(lambda c, now: c.tick(now + minutes(60)), id="expiry"),
     ],
 )
 def test_every_end_of_the_timer_drops_owed_settings(
@@ -1294,6 +1325,489 @@ def test_zero_automatic_resends_answers_only_changes() -> None:
     assert back == [TurnOn(), Changed()]
 
 
+# --- Pending commands -------------------------------------------------------------
+
+
+def test_add_command_arms_wakeup() -> None:
+    """A command on an idle timer is the only reason to wake up."""
+    c = core("strict", "off")
+
+    fx = c.add_command(NOW, cmd(15))
+
+    assert fx == [Arm(NOW + minutes(15)), Changed()]
+    assert c.snapshot.commands == (cmd(15),)
+    assert c.snapshot.end is None
+    assert next_wakeup(c.snapshot) == NOW + minutes(15)
+
+
+def test_wakeup_is_earliest_of_end_and_commands() -> None:
+    """The one alarm sits at whichever comes first: the end or the next command."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+
+    added = c.add_command(NOW, cmd(15))
+
+    assert added == [Arm(NOW + minutes(15)), Changed()]
+    assert next_wakeup(c.snapshot) == NOW + minutes(15)
+
+    cancelled = c.cancel_command(NOW, "c1")
+
+    assert cancelled == [Arm(NOW + minutes(45)), Changed()]
+    assert next_wakeup(c.snapshot) == NOW + minutes(45)
+
+
+def test_a_command_after_the_end_does_not_move_the_wakeup() -> None:
+    """The end is earlier, so the alarm stays there until it has passed."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+
+    fx = c.add_command(NOW, cmd(30))
+
+    assert fx == [Arm(NOW + minutes(10)), Changed()]
+    assert next_wakeup(c.snapshot) == NOW + minutes(10)
+
+
+def test_nothing_to_wake_up_for() -> None:
+    """An idle timer without commands has no wake-up."""
+    assert next_wakeup(Snapshot()) is None
+
+
+def test_commands_ordered_by_time_then_insertion() -> None:
+    """Commands wait in order of time; those at the same time keep insertion order."""
+    c = core("strict", "off")
+
+    for command in (cmd(20, id="c2"), cmd(10, id="c1"), cmd(10, id="c3")):
+        c.add_command(NOW, command)
+
+    assert tuple(command.id for command in c.snapshot.commands) == ("c1", "c3", "c2")
+
+
+def test_cancel_unknown_command_raises() -> None:
+    """Cancelling what is not there is an error, and changes nothing."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10))
+    before = c.snapshot
+
+    with pytest.raises(KeyError):
+        c.cancel_command(NOW, "unknown")
+
+    assert c.snapshot == before
+
+
+def test_cancel_last_command_on_idle_timer_disarms() -> None:
+    """With nothing left to wake up for, the alarm is cancelled."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10))
+
+    fx = c.cancel_command(NOW, "c1")
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.commands == ()
+
+
+def test_cancelling_one_command_keeps_the_others() -> None:
+    """Each command is cancelled on its own."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10, id="c1"))
+    c.add_command(NOW, cmd(20, id="c2"))
+
+    fx = c.cancel_command(NOW, "c1")
+
+    assert fx == [Arm(NOW + minutes(20)), Changed()]
+    assert c.snapshot.commands == (cmd(20, id="c2"),)
+
+
+def test_stopping_the_timer_keeps_the_commands() -> None:
+    """A pending command is not part of the countdown: stopping leaves it (P2)."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    c.add_command(NOW, cmd(15))
+
+    fx = c.stop(NOW + minutes(1))
+
+    assert fx == [Arm(NOW + minutes(15)), TurnOff(), Changed()]
+    assert c.snapshot.commands == (cmd(15),)
+
+
+def test_every_start_of_a_countdown_arms_the_earliest_wakeup() -> None:
+    """The alarm follows the commands wherever the timer used to be armed alone."""
+    c = holding("strict", "off", cmd(15))
+
+    assert c.set_duration(NOW, minutes(45)) == [
+        Arm(NOW + minutes(15)),
+        TurnOn(),
+        Changed(),
+    ]
+    assert c.set_duration(NOW, minutes(5)) == [Arm(NOW + minutes(5)), Changed()]
+    assert c.set_duration(NOW, timedelta(0)) == [
+        Arm(NOW + minutes(15)),
+        TurnOff(),
+        Changed(),
+    ]
+    loose = holding("loose", "off", cmd(15))
+    assert loose.run_open(NOW) == [Arm(NOW + minutes(15)), TurnOn(), Changed()]
+
+
+def test_ac_command_resets_timer_and_applies_settings() -> None:
+    """A command is a firm promise: a running AC gets cooling 24 and a new hour (P1)."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    c.add_command(NOW, cmd(15, minutes=60, settings=COOL24))
+
+    fx = c.tick(NOW + minutes(15))
+
+    assert fx == [Arm(NOW + minutes(75)), ApplySettings(COOL24), Changed()]
+    assert c.snapshot.end == NOW + minutes(75)
+    assert c.snapshot.commands == ()
+
+
+def test_command_on_off_target_turns_on_with_settings() -> None:
+    """The turn-on of a command carries its settings."""
+    c = holding("strict", "off", cmd(15, minutes=60, settings=COOL24))
+
+    fx = c.tick(NOW + minutes(15))
+
+    assert fx == [Arm(NOW + minutes(75)), TurnOn(COOL24), Changed()]
+    assert c.snapshot.pending == "on"
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_command_without_minutes_strict_runs_default_from_at() -> None:
+    """Strict mode has no open run: the default duration counts from the command's
+    time, not from when the core noticed."""
+    c = holding("strict", "off", cmd(10))
+
+    fx = c.tick(NOW + minutes(12))
+
+    assert fx == [Arm(NOW + minutes(55)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(10) + minutes(45)
+
+
+def test_command_without_minutes_loose_runs_open() -> None:
+    """Loose mode runs the target with the timer at zero."""
+    c = holding("loose", "off", cmd(10))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Disarm(), TurnOn(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.pending == "on"
+
+
+def test_loose_open_run_drops_a_running_countdown() -> None:
+    """As an open-ended run by hand does, the command replaces the countdown."""
+    c = holding("loose", "on", cmd(10), end=NOW + minutes(30))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.end is None
+
+
+def test_off_command_stops() -> None:
+    """A command to turn off ends the countdown and switches the target off."""
+    c = holding("strict", "on", cmd(10, "off"), end=NOW + minutes(60))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.pending == "off"
+
+
+def test_off_command_drops_the_settings_that_are_owed() -> None:
+    """A timer that stops runs with nothing, as for any other end."""
+    c = holding("strict", "unavailable", cmd(10, "off"))
+    c.set_duration(NOW, minutes(60), COOL24)
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_manual_off_keeps_commands() -> None:
+    """Switching the target off by hand ends the countdown, not the promises (P2)."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    c.add_command(NOW, cmd(15))
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(15)), Changed()]
+    assert c.snapshot.commands == (cmd(15),)
+    assert c.snapshot.end is None
+
+
+def test_manual_on_keeps_commands() -> None:
+    """The default timer a manual start makes does not replace the commands (P2); the
+    alarm stays at the command, which is earlier."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(15))
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(15)), Changed()]
+    assert c.snapshot.commands == (cmd(15),)
+    assert c.snapshot.end == NOW + minutes(46)
+
+
+def test_late_command_runs_for_the_remainder() -> None:
+    """A command noticed late counts its duration from the time it was due."""
+    c = holding("strict", "off", cmd(-20, minutes=60))
+
+    fx = c.tick(NOW)
+
+    assert fx == [Arm(NOW + minutes(40)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(40)
+
+
+@pytest.mark.parametrize(
+    ("late_by", "dropped"),
+    [(61, True), (60, True), (59, False)],
+    ids=["past", "to-the-minute", "one-minute-left"],
+)
+def test_late_command_past_its_duration_is_dropped(late_by: int, dropped: bool) -> None:
+    """With nothing left of the run, the command is dropped and the timer untouched."""
+    late = cmd(-late_by, minutes=60)
+    c = holding("strict", "on", late, end=NOW + minutes(30))
+
+    fx = c.tick(NOW)
+
+    assert c.snapshot.commands == ()
+    if dropped:
+        assert fx == [CommandDropped(late), Arm(NOW + minutes(30)), Changed()]
+        assert c.snapshot.end == NOW + minutes(30)
+    else:
+        assert fx == [Arm(NOW + minutes(1)), Changed()]
+        assert c.snapshot.end == NOW + minutes(1)
+
+
+@pytest.mark.parametrize(
+    ("late_by", "dropped"),
+    [(46, True), (45, True), (44, False)],
+    ids=["past", "to-the-minute", "one-minute-left"],
+)
+def test_late_strict_open_run_past_default_is_dropped(
+    late_by: int, dropped: bool
+) -> None:
+    """The default duration of strict mode is the run an open command asked for."""
+    late = cmd(-late_by)
+    c = holding("strict", "off", late)
+
+    fx = c.tick(NOW)
+
+    assert (CommandDropped(late) in fx) is dropped
+    assert (TurnOn() in fx) is not dropped
+
+
+def test_command_never_runs_past_the_longest_countdown() -> None:
+    """A command may ask for more than a day, but no countdown lasts longer than that
+    from now, whichever command starts it."""
+    c = holding("strict", "off", cmd(0, minutes=MAX_MINUTES + 60))
+
+    c.tick(NOW)
+
+    assert c.snapshot.end == NOW + minutes(MAX_MINUTES)
+
+
+def test_late_loose_open_run_and_late_off_still_execute() -> None:
+    """Neither has a duration that can have run out: they are carried out, however
+    late."""
+    opening = holding("loose", "off", cmd(-600))
+    closing = holding("strict", "on", cmd(-600, "off"), end=NOW + minutes(30))
+
+    assert opening.tick(NOW) == [Disarm(), TurnOn(), Changed()]
+    assert closing.tick(NOW) == [Disarm(), TurnOff(), Changed()]
+
+
+def test_due_on_then_off_switches_nothing() -> None:
+    """Both were due while nobody was looking: only their net result counts, and on
+    an off target that is nothing."""
+    c = holding("strict", "off", cmd(0, id="c1"), cmd(0, "off", id="c2"))
+
+    fx = c.tick(NOW)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_due_off_then_on_switches_on_once() -> None:
+    """The last wish wins: an off that was due before an on is never sent."""
+    c = holding(
+        "strict",
+        "on",
+        cmd(-20, "off", id="c1"),
+        cmd(-10, minutes=60, id="c2"),
+        end=NOW + minutes(30),
+    )
+
+    fx = c.tick(NOW)
+
+    assert fx == [Arm(NOW + minutes(50)), Changed()]
+    assert c.snapshot.end == NOW + minutes(50)
+
+
+def test_several_due_commands_leave_the_last_settings() -> None:
+    """Of commands that were all due, the one nearest to now sets what the target
+    runs with, and its run is the one that counts."""
+    heat = freeze_settings({"hvac_mode": "heat"})
+    c = holding(
+        "strict",
+        "off",
+        cmd(-20, minutes=60, settings=heat, id="c1"),
+        cmd(-10, minutes=60, settings=COOL24, id="c2"),
+    )
+
+    fx = c.tick(NOW)
+
+    assert fx == [Arm(NOW + minutes(50)), TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_command_at_timer_end_extends_without_flap() -> None:
+    """A command due at the very end moves it, so the target is never switched off."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.add_command(NOW, cmd(10, minutes=30))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(40)), Changed()]
+    assert c.snapshot.end == NOW + minutes(40)
+    assert c.snapshot.commands == ()
+
+
+def test_command_at_the_end_keeps_the_settings_that_are_owed() -> None:
+    """The command goes before the end on a tie: the timer never stops, so what it
+    was to run with is still owed."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(10),
+            owed_settings=COOL24,
+            commands=(cmd(10, minutes=30),),
+            last_actual="on",
+        ),
+    )
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_command_after_the_end_runs_after_the_timer_stopped() -> None:
+    """Due items go in time order: the end at 06:55 stops the timer, and the command
+    at 06:57 starts a new one, with one switch for the pair."""
+    c = holding("strict", "off", cmd(-3, minutes=60), end=NOW - minutes(5))
+
+    fx = c.tick(NOW)
+
+    assert fx == [Arm(NOW + minutes(57)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(57)
+
+
+def test_off_command_before_the_end_stops_once() -> None:
+    """The end that the command removes is not an item of its own."""
+    c = holding("strict", "on", cmd(-10, "off"), end=NOW - minutes(5))
+
+    fx = c.tick(NOW)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+
+
+def test_command_due_while_unavailable_changes_timer_at_once() -> None:
+    """The timer follows the command now; the target gets it when it is back (R10)."""
+    c = holding("strict", "unavailable", cmd(10, minutes=30, settings=COOL24))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(40)), Changed()]
+    assert c.snapshot.end == NOW + minutes(40)
+
+    back = c.observe(NOW + minutes(12), "off", by_us=False)
+
+    assert back == [TurnOn(COOL24), Changed()]
+
+
+def test_restart_with_expired_timer_and_late_command_does_not_flap() -> None:
+    """After a restart the timer that ran out and the command that came due before it
+    are folded together: the target stays on, and runs for the rest of the command."""
+    c = TimerCore(
+        "strict",
+        timedelta(minutes=45),
+        Snapshot(
+            end=NOW - timedelta(minutes=5),
+            commands=(cmd(-10, minutes=60, settings=COOL24),),
+        ),
+    )
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    # No TurnOff and no TurnOn: the settings alone reach the target that kept running.
+    assert fx == [Arm(NOW + minutes(50)), ApplySettings(COOL24), Changed()]
+    assert c.snapshot.end == NOW + timedelta(minutes=50)
+    assert c.snapshot.commands == ()
+
+
+def test_command_due_with_a_manual_off_still_runs() -> None:
+    """The report of a target switched off is not allowed to undo a command that came
+    due with it: the due items outrank it."""
+    c = holding("strict", "on", cmd(-1, minutes=30))
+
+    fx = c.observe(NOW, "off", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(29)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(29)
+
+
+def test_dropped_command_leaves_a_manual_start_to_strict_mode() -> None:
+    """A command that was dropped did nothing to the timer, so a target found on is
+    still given its default countdown (R4)."""
+    late = cmd(-61, minutes=60)
+    c = holding("strict", None, late)
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [CommandDropped(late), Disarm(), Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.commands == ()
+
+
+def test_observations_never_touch_commands() -> None:
+    """Whatever the target reports, commands that are not due stay (P2)."""
+    c = holding("strict", "off", cmd(30), cmd(60, "off", id="c2"))
+    before = c.snapshot.commands
+
+    for step, actual in enumerate(("on", "off", "unavailable", "on", "off"), 1):
+        c.observe(NOW + minutes(step), actual, by_us=False)
+
+    assert c.snapshot.commands == before
+
+
+def test_tick_with_nothing_due_is_stale() -> None:
+    """An alarm that fires before anything is due is a leftover and does nothing."""
+    c = holding("strict", "on", cmd(30), end=NOW + minutes(10))
+    before = c.snapshot
+
+    assert c.tick(NOW + minutes(5)) == []
+    assert c.snapshot == before
+
+
+def test_tick_on_idle_timer_without_commands_is_stale() -> None:
+    assert core("strict", "off").tick(NOW) == []
+
+
+def test_command_with_a_naive_time_is_rejected() -> None:
+    """Commands are kept in UTC: a time without a zone is refused, not guessed."""
+    c = core("strict", "off")
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        c.add_command(NOW, Command("c1", datetime(2026, 1, 5, 7, 15), "on"))
+
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
 NAIVE = datetime(2026, 1, 5, 7, 0)
 
 
@@ -1304,7 +1818,9 @@ NAIVE = datetime(2026, 1, 5, 7, 0)
         pytest.param(lambda c: c.add(NAIVE, minutes(5)), id="add"),
         pytest.param(lambda c: c.stop(NAIVE), id="stop"),
         pytest.param(lambda c: c.run_open(NAIVE), id="run-open"),
-        pytest.param(lambda c: c.expire(NAIVE), id="expire"),
+        pytest.param(lambda c: c.tick(NAIVE), id="tick"),
+        pytest.param(lambda c: c.add_command(NAIVE, cmd(10)), id="add-command"),
+        pytest.param(lambda c: c.cancel_command(NAIVE, "c1"), id="cancel-command"),
         pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
         pytest.param(lambda c: c.call_failed(NAIVE), id="call-failed"),
         pytest.param(lambda c: c.settings_applied(NAIVE), id="settings-applied"),

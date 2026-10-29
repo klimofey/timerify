@@ -1,8 +1,9 @@
 """Helpers shared by the scenario tests: the entities, the calls and the clock."""
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
@@ -74,13 +75,36 @@ def at(minutes: float) -> str:
     return (START + timedelta(minutes=minutes)).isoformat()
 
 
+def command_json(
+    when: str,
+    action: Literal["on", "off"] = "on",
+    minutes: int | None = None,
+    settings: dict[str, Any] | None = None,
+    id: str = "c1",
+) -> dict[str, Any]:
+    """The stored form of a pending command due at `when` (see `at`)."""
+    return {
+        "id": id,
+        "at": when,
+        "action": action,
+        "minutes": minutes,
+        "settings": settings or {},
+    }
+
+
 def payload(
     end: str | None = None,
     pending: str | None = None,
     owed_settings: dict[str, Any] | None = None,
+    commands: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """What the storage file of a timer holds: the stored form of its snapshot."""
-    return {"end": end, "pending": pending, "owed_settings": owed_settings or {}}
+    return {
+        "end": end,
+        "pending": pending,
+        "owed_settings": owed_settings or {},
+        "commands": list(commands),
+    }
 
 
 def saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> dict[str, Any]:
@@ -99,11 +123,28 @@ def storage_key(entry: ConfigEntry) -> str:
     return f"timerify.{entry.entry_id}"
 
 
+def _timerify_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        record
+        for record in caplog.records
+        if record.name.startswith("custom_components.timerify")
+    ]
+
+
 def timerify_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
     """What Timerify said at warning level or above."""
     return [
         record.getMessage()
-        for record in caplog.records
-        if record.name.startswith("custom_components.timerify")
-        and record.levelno >= logging.WARNING
+        for record in _timerify_records(caplog)
+        if record.levelno >= logging.WARNING
+    ]
+
+
+def timerify_info(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """What Timerify said at info level exactly; the test sets the level that is
+    recorded."""
+    return [
+        record.getMessage()
+        for record in _timerify_records(caplog)
+        if record.levelno == logging.INFO
     ]

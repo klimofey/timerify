@@ -23,6 +23,7 @@
     },
     "error": {
       "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
+      "not_switchable": "This entity does not report on or off, so a timer cannot tell whether it is running. Pick another one; if it is unavailable now, try again when it is back.",
       "duration_not_whole": "The duration must be a whole number of minutes."
     },
     "abort": {
@@ -59,6 +60,22 @@
         "strict": "Strict: runs only while the timer counts down",
         "loose": "Loose: may also run without a timer"
       }
+    },
+    "hvac_mode": {
+      "options": {
+        "heat": "Heat",
+        "cool": "Cool",
+        "heat_cool": "Heat/Cool",
+        "auto": "Auto",
+        "dry": "Dry",
+        "fan_only": "Fan only"
+      }
+    },
+    "command_action": {
+      "options": {
+        "on": "Turn on",
+        "off": "Turn off"
+      }
     }
   },
   "entity": {
@@ -70,6 +87,14 @@
     "sensor": {
       "ends_at": {
         "name": "Ends at"
+      },
+      "next_command": {
+        "name": "Next command",
+        "state_attributes": {
+          "commands": {
+            "name": "Commands"
+          }
+        }
       }
     }
   },
@@ -86,7 +111,127 @@
     },
     "run": {
       "name": "Run",
-      "description": "Turns the entity on without saying for how long: for the default duration in strict mode, without a countdown in loose mode."
+      "description": "Turns the entity on, for the minutes given or else for the default duration in strict mode and without a countdown in loose mode, with the settings given if the entity supports them.",
+      "fields": {
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long to run, in whole minutes, up to a day. Without it the entity runs for the default duration in strict mode and without a countdown in loose mode."
+        },
+        "hvac_mode": {
+          "name": "HVAC mode",
+          "description": "The mode to turn a climate entity on in."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "The target temperature of a climate entity or a water heater."
+        },
+        "fan_mode": {
+          "name": "Fan mode",
+          "description": "The fan mode of a climate entity."
+        },
+        "preset_mode": {
+          "name": "Preset mode",
+          "description": "The preset mode of a fan."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "The mode of a humidifier."
+        },
+        "operation_mode": {
+          "name": "Operation mode",
+          "description": "The operation mode of a water heater."
+        },
+        "brightness_pct": {
+          "name": "Brightness",
+          "description": "The brightness of a light, in percent."
+        },
+        "percentage": {
+          "name": "Speed",
+          "description": "The speed of a fan, in percent."
+        },
+        "humidity": {
+          "name": "Humidity",
+          "description": "The target humidity of a humidifier, in percent."
+        }
+      },
+      "sections": {
+        "settings": {
+          "name": "Settings"
+        }
+      }
+    },
+    "add_command": {
+      "name": "Add command",
+      "description": "Keeps a command to turn the entity on or off at a time you choose, a number of minutes from now or at a moment. A command to turn on can run for some minutes and set the entity up with the settings given. It is carried out at its time whatever state the entity is in then, and using the entity by hand does not cancel it. The response holds the command's id, which cancels it.",
+      "fields": {
+        "action": {
+          "name": "Action",
+          "description": "Whether to turn the entity on or off at that time."
+        },
+        "delay": {
+          "name": "Delay",
+          "description": "In how many minutes to carry the command out, up to a week. Give this or a time, not both."
+        },
+        "at": {
+          "name": "Time",
+          "description": "When to carry the command out, up to a week ahead. A time without a time zone is in Home Assistant's time zone. Give this or a delay, not both."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long a command to turn on runs, in whole minutes, up to a day. Without it the entity runs for the default duration in strict mode and without a countdown in loose mode. A command to turn off takes none."
+        },
+        "hvac_mode": {
+          "name": "HVAC mode",
+          "description": "The mode to turn a climate entity on in."
+        },
+        "temperature": {
+          "name": "Temperature",
+          "description": "The target temperature of a climate entity or a water heater."
+        },
+        "fan_mode": {
+          "name": "Fan mode",
+          "description": "The fan mode of a climate entity."
+        },
+        "preset_mode": {
+          "name": "Preset mode",
+          "description": "The preset mode of a fan."
+        },
+        "mode": {
+          "name": "Mode",
+          "description": "The mode of a humidifier."
+        },
+        "operation_mode": {
+          "name": "Operation mode",
+          "description": "The operation mode of a water heater."
+        },
+        "brightness_pct": {
+          "name": "Brightness",
+          "description": "The brightness of a light, in percent."
+        },
+        "percentage": {
+          "name": "Speed",
+          "description": "The speed of a fan, in percent."
+        },
+        "humidity": {
+          "name": "Humidity",
+          "description": "The target humidity of a humidifier, in percent."
+        }
+      },
+      "sections": {
+        "settings": {
+          "name": "Settings"
+        }
+      }
+    },
+    "cancel_command": {
+      "name": "Cancel command",
+      "description": "Cancels a pending command before its time. Aim the call at the timer that holds the command; another timer does not know it. The id is in the response of Add command and in the attributes of the Next command sensor.",
+      "fields": {
+        "command_id": {
+          "name": "Command ID",
+          "description": "The id of the command to cancel."
+        }
+      }
     }
   },
   "exceptions": {
@@ -95,6 +240,36 @@
     },
     "not_whole_minutes": {
       "message": "Run for takes a whole number of minutes; {minutes} is not one."
+    },
+    "setting_not_supported": {
+      "message": "{target} cannot be turned on with the setting {setting}."
+    },
+    "setting_out_of_range": {
+      "message": "{value} is not a valid {setting}: it must be between {min} and {max}."
+    },
+    "setting_not_an_option": {
+      "message": "{value} is not a valid {setting}: it must be one of {options}."
+    },
+    "delay_or_at": {
+      "message": "Give the command either a delay or a time, not both and not neither."
+    },
+    "off_takes_no_duration_or_settings": {
+      "message": "A command to turn off takes no minutes and no settings."
+    },
+    "command_in_past": {
+      "message": "{at} has already passed. Pick a time that is still ahead."
+    },
+    "command_too_far": {
+      "message": "A command can be set at most {days} days ahead."
+    },
+    "too_many_commands": {
+      "message": "{target} already has {limit} pending commands. Cancel one before adding another."
+    },
+    "unknown_command": {
+      "message": "This timer has no pending command with the id {command_id}. Cancel a command through the timer that holds it."
+    },
+    "timer_unloaded": {
+      "message": "This timer was unloaded while the call waited, so nothing was changed. Try again once the timer is loaded."
     }
   }
 }

@@ -62,7 +62,13 @@ def test_services_are_translated(language: str) -> None:
     wanted: set[str] = set()
     for name, service in services.items():
         wanted |= {f"{name}.{text}" for text in TEXTS}
-        for field in service.get("fields", {}):
-            wanted |= {f"{name}.fields.{field}.{text}" for text in TEXTS}
+        for field, spec in service.get("fields", {}).items():
+            if "fields" in spec:  # A section: its fields are translated flat.
+                wanted.add(f"{name}.sections.{field}.name")
+                fields = spec["fields"]
+            else:
+                fields = {field: spec}
+            for field_name in fields:
+                wanted |= {f"{name}.fields.{field_name}.{text}" for text in TEXTS}
 
     assert texts_in(translations_of(language)["services"]).keys() == wanted

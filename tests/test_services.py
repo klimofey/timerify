@@ -1,4 +1,4 @@
-"""The services of a timer: add time to it, or run the target without a duration."""
+"""The services of a timer: add time to it, run the target, make and cancel commands."""
 
 import logging
 from typing import Any
@@ -7,30 +7,27 @@ import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.service import async_get_all_descriptions
 from homeassistant.setup import async_setup_component
+from homeassistant.util.yaml import parse_yaml
 
-from custom_components.timerify.const import DOMAIN, MAX_MINUTES
+from custom_components.timerify.const import DOMAIN, MAX_DELAY_MINUTES, MAX_MINUTES
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
+    NEXT,
     NUMBER,
     SENSOR,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_command,
     advance,
+    call_service,
     set_number,
     state_of,
 )
-
-
-async def call_service(
-    hass: HomeAssistant, service: str, target: dict[str, Any], **data: Any
-) -> None:
-    """Call a Timerify service the way an automation or the UI does."""
-    await hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
-    await hass.async_block_till_done()
 
 
 async def test_add_time_extends_running_timer(
@@ -277,10 +274,128 @@ async def test_services_on_unloaded_timer_do_nothing(
 
     await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=10)
     await call_service(hass, "run", {"entity_id": NUMBER})
+    await call_service(hass, "add_command", {"entity_id": NUMBER}, action="on", delay=5)
+    await call_service(hass, "cancel_command", {"entity_id": NUMBER}, command_id="c1")
 
     assert fake_target.calls == []
     assert state_of(hass, NUMBER) == "unavailable"
     assert f"Referenced entities {NUMBER} are missing" in caplog.text
+
+
+async def test_add_command_asking_for_a_response_on_unloaded_timer_fails(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Home Assistant has nothing to answer for with: a call that wants the new
+    command's id from a timer that is not loaded is an error, not a warning."""
+    entry = await setup_target()
+    await hass.config_entries.async_unload(entry.entry_id)
+
+    with pytest.raises(HomeAssistantError, match="did not match any entities"):
+        await add_command(hass, NUMBER, action="on", delay=5)
+
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("delay", [15.0, "15", "15.0"], ids=repr)
+async def test_add_command_accepts_a_delay_in_any_whole_form(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    delay: float | str,
+) -> None:
+    """A template may hand over 15.0 or "15" as the delay, as it does for minutes."""
+    await setup_target()
+
+    await add_command(hass, NUMBER, action="on", delay=delay)
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:15:00+00:00"
+
+
+@pytest.mark.parametrize(
+    ("written", "before", "service"),
+    [("on", "off", TURN_ON), ("off", "on", TURN_OFF)],
+    ids=["on", "off"],
+)
+async def test_add_command_accepts_an_action_written_without_quotes_in_yaml(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    written: str,
+    before: str,
+    service: tuple[str, str],
+) -> None:
+    """Home Assistant reads YAML 1.1, where an unquoted `on` or `off` is a boolean: an
+    automation written by hand with `action: on` makes the command it meant."""
+    await fake_target.set_state(before)
+    await setup_target()
+    data = parse_yaml(f"action: {written}\ndelay: 5\n")
+    assert isinstance(data["action"], bool)
+
+    await add_command(hass, NUMBER, **data)
+    await advance(hass, freezer, minutes=5)
+
+    assert fake_target.calls == [service]
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"action": "pause", "delay": 5},
+        {"action": 1, "delay": 5},
+        {"action": "on", "delay": 0},
+        {"action": "on", "delay": MAX_DELAY_MINUTES + 1},
+        {"action": "on", "delay": 2.5},
+        {"action": "on", "delay": True},
+        {"action": "on", "delay": 5, "minutes": 0},
+        {"action": "on", "delay": 5, "minutes": MAX_MINUTES + 1},
+        {"action": "on", "delay": 5, "minutes": 2.5},
+        {"action": "on", "at": "tomorrow evening"},
+        {"action": "on", "delay": 5, "temperature": "warm"},
+    ],
+    ids=[
+        "missing",
+        "unknown_action",
+        "action_number",
+        "delay_zero",
+        "delay_above_a_week",
+        "delay_not_whole",
+        "delay_boolean",
+        "minutes_zero",
+        "minutes_above_a_day",
+        "minutes_not_whole",
+        "at_not_a_time",
+        "setting_of_the_wrong_type",
+    ],
+)
+async def test_add_command_rejects_invalid_values(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    data: dict[str, Any],
+) -> None:
+    """A call with a value out of range or of the wrong kind makes no command."""
+    await setup_target()
+
+    with pytest.raises(probatio.Invalid):
+        await add_command(hass, NUMBER, **data)
+
+    assert state_of(hass, NEXT) == "unknown"
+    assert fake_target.calls == []
+
+
+async def test_cancel_command_needs_the_command_id(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Cancelling without saying which command is not guessed at."""
+    await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=5)
+
+    with pytest.raises(probatio.Invalid):
+        await call_service(hass, "cancel_command", {"entity_id": NUMBER})
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:05:00+00:00"
 
 
 async def test_services_are_described_for_the_ui(hass: HomeAssistant) -> None:
@@ -297,4 +412,36 @@ async def test_services_are_described_for_the_ui(hass: HomeAssistant) -> None:
     assert minutes["required"] is True
     assert minutes["selector"]["number"]["min"] == -MAX_MINUTES
     assert minutes["selector"]["number"]["max"] == MAX_MINUTES
-    assert descriptions["run"]["fields"] == {}
+    run_for = descriptions["run"]["fields"]["minutes"]
+    assert run_for["selector"]["number"]["min"] == 1
+    assert run_for["selector"]["number"]["max"] == MAX_MINUTES
+    settings = descriptions["run"]["fields"]["settings"]
+    assert settings["collapsed"] is True
+    assert settings["fields"].keys() == {
+        "hvac_mode",
+        "temperature",
+        "fan_mode",
+        "preset_mode",
+        "mode",
+        "operation_mode",
+        "brightness_pct",
+        "percentage",
+        "humidity",
+    }
+
+    assert descriptions["add_command"]["target"] == target
+    command = descriptions["add_command"]["fields"]
+    assert command.keys() == {"action", "delay", "at", "minutes", "settings"}
+    assert command["action"]["required"] is True
+    assert command["action"]["selector"]["select"]["options"] == ["on", "off"]
+    assert command["delay"]["selector"]["number"]["min"] == 1
+    assert command["delay"]["selector"]["number"]["max"] == MAX_DELAY_MINUTES
+    assert command["at"]["selector"].keys() == {"datetime"}
+    assert command["minutes"]["selector"]["number"]["min"] == 1
+    assert command["minutes"]["selector"]["number"]["max"] == MAX_MINUTES
+    assert command["settings"] == settings
+
+    assert descriptions["cancel_command"]["target"] == target
+    cancel = descriptions["cancel_command"]["fields"]["command_id"]
+    assert cancel["required"] is True
+    assert cancel["selector"].keys() == {"text"}

@@ -2,9 +2,47 @@
 # compose.yaml mounts this file read-only over the throwaway ./config/configuration.yaml.
 default_config:
 
-# The switch the timer runs, declared here rather than created over the API: it is a
-# registry entry on no device, which is the path of a target that has no device of its own.
-# No `initial`: the state is restored on a restart, as a real switch keeps its state.
+# Home Assistant's demo integration. The smoke test uses its `switch.decorative_lights`,
+# which sits on a device of its own: the path of a target that has a device.
+demo:
+
+# The switch the first timer runs, declared here rather than created over the API: it is
+# a registry entry on no device, which is the path of a target that has no device of its
+# own. No `initial`: the state is restored on a restart, as a real switch keeps its state.
 input_boolean:
   smoke_boiler:
     name: Smoke boiler
+  # What the thermostat below switches, through the template switch.
+  smoke_heater_relay:
+    name: Smoke heater relay
+
+# A target that takes settings: a generic thermostat over a heater switch and a
+# temperature sensor, both built from templates so no device is needed.
+template:
+  - switch:
+      - name: Smoke heater
+        unique_id: smoke_heater
+        state: "{{ is_state('input_boolean.smoke_heater_relay', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.smoke_heater_relay
+        turn_off:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.smoke_heater_relay
+    sensor:
+      - name: Smoke temperature
+        unique_id: smoke_temperature
+        state: "18"
+        device_class: temperature
+        unit_of_measurement: "°C"
+
+climate:
+  - platform: generic_thermostat
+    name: Smoke thermostat
+    unique_id: smoke_thermostat
+    heater: switch.smoke_heater
+    target_sensor: sensor.smoke_temperature
+    min_temp: 7
+    max_temp: 35

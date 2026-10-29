@@ -1,12 +1,20 @@
 """Smoke test: Timerify in a real Home Assistant container.
 
 Starts Home Assistant from compose.yaml with a fresh configuration, onboards it through
-its HTTP API, adds a Timerify timer for the switch that configuration.yaml declares (an
-input_boolean) through the config flow, and then checks what a user would see:
+its HTTP API, adds Timerify timers through the config flow for the entities that
+configuration.yaml declares or the demo integration provides, and then checks what a
+user would see:
 
-1. "Run for" 2 minutes: the switch turns on, and turns off when the countdown ends.
-2. "Run for" 3 minutes, then the container restarts: the countdown carries on and the
-   switch turns off at the end it had before the restart.
+1. "Run for" 2 minutes on a switch that sits on no device (an input_boolean): the switch
+   turns on, and turns off when the countdown ends.
+2. A pending command on the switch of the demo integration, which sits on a device: the
+   timer's entities sit on that device, and a command to turn on in 1 minute for
+   1 minute turns the switch on at its time, clears the "Next command" sensor, and
+   turns the switch off one minute later.
+3. "Run for" 1 minute with a mode and a temperature on a generic thermostat: it is set
+   to heat and 23 degrees, and turned off when the countdown ends.
+4. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
+   carries on and the switch turns off at the end it had before the restart.
 
 Everything is observed over the WebSocket API by subscribing to state changes.
 
@@ -36,13 +44,20 @@ REDIRECT_URI = f"{BASE_URL}/?auth_callback=1"
 USERNAME = "smoke"
 PASSWORD = "smoke-test-password"
 SWITCH = "input_boolean.smoke_boiler"
-"""The switch the timer runs; configuration.yaml declares it."""
+"""The switch the first timer runs; configuration.yaml declares it, on no device."""
+DEMO_SWITCH = "switch.decorative_lights"
+"""A switch of the demo integration, which sits on a device of its own."""
+THERMOSTAT = "climate.smoke_thermostat"
+"""A generic thermostat that configuration.yaml declares, over template entities."""
+THERMOSTAT_TEMPERATURE = 23
 DOMAIN = "timerify"
 KEEP_MINUTES = 60
 
 STARTUP_TIMEOUT = 240.0
 CALL_TIMEOUT = 30.0
 TURN_ON_TIMEOUT = 15.0
+COMMAND_DELAY = timedelta(minutes=1)
+"""How far ahead the pending command of the demo switch is set."""
 START_SLACK = timedelta(seconds=5)
 """How far the end of a countdown may be from `minutes` after the switch turned on."""
 EXPIRY_SLACK = timedelta(seconds=5)
@@ -62,8 +77,11 @@ class Timer:
     """The entities of the timer under test."""
 
     entry_id: str
+    target: str
+    """The entity the timer runs."""
     run_for: str
     ends_at: str
+    next_command: str
     device_id: str
     """The device the entities sit on, from the entity registry."""
 
@@ -83,6 +101,15 @@ def has_minutes(minutes: int) -> Matcher:
             return False
 
     return matches
+
+
+def heating_to(temperature: float) -> Matcher:
+    """Match a thermostat that is in heat mode with `temperature` as its target."""
+    return lambda state: (
+        state is not None
+        and state["state"] == "heat"
+        and state["attributes"].get("temperature") == temperature
+    )
 
 
 def is_known(state: State | None) -> bool:
@@ -334,15 +361,24 @@ async def open_socket(
 
 
 async def add_timer(
-    session: aiohttp.ClientSession, socket: Socket, access_token: str
+    session: aiohttp.ClientSession,
+    socket: Socket,
+    access_token: str,
+    target: str,
+    *,
+    on_target_device: bool = False,
 ) -> Timer:
-    """Add the switch in Timerify the way the integrations page does."""
+    """Add a timer for `target` in Timerify the way the integrations page does.
+
+    With `on_target_device` the target must sit on a device, and the timer's entities
+    must sit on that same device.
+    """
     flow_path = "/api/config/config_entries/flow"
     flow = await request_json(
         session, "POST", flow_path, access_token, json={"handler": DOMAIN}
     )
     for step_id, user_input in (
-        ("user", {"target": SWITCH, "mode": "strict"}),
+        ("user", {"target": target, "mode": "strict"}),
         ("duration", {"default_duration": 30}),
     ):
         if flow["type"] != "form" or flow["step_id"] != step_id:
@@ -360,30 +396,67 @@ async def add_timer(
     registry = await socket.call("config/entity_registry/list")
     rows = {row["unique_id"]: row for row in registry if row["platform"] == DOMAIN}
     try:
-        run_for, ends_at = rows[f"{entry_id}_run_for"], rows[f"{entry_id}_ends_at"]
+        run_for = rows[f"{entry_id}_run_for"]
+        ends_at = rows[f"{entry_id}_ends_at"]
+        next_command = rows[f"{entry_id}_next_command"]
     except KeyError as missing:
         raise SmokeFailure(f"The timer has no entity {missing}: {list(rows)}") from None
-    if not (device_id := run_for["device_id"]) or ends_at["device_id"] != device_id:
+    device_ids = {row["device_id"] for row in (run_for, ends_at, next_command)}
+    if len(device_ids) != 1 or None in device_ids:
         raise SmokeFailure(
             "The timer's entities should share one device, "
-            f"but are on {run_for['device_id']} and {ends_at['device_id']}"
+            f"but are on {sorted(map(str, device_ids))}"
         )
-    return Timer(entry_id, run_for["entity_id"], ends_at["entity_id"], device_id)
-
-
-async def start_countdown(socket: Socket, timer: Timer, minutes: int) -> datetime:
-    """Set "Run for" and check the switch turns on and the end is `minutes` away.
-
-    Returns the end of the countdown, as "Ends at" reports it.
-    """
-    await socket.call(
-        "call_service",
-        domain="number",
-        service="set_value",
-        service_data={"value": minutes},
-        target={"entity_id": timer.run_for},
+    (device_id,) = device_ids
+    if on_target_device:
+        await expect_on_device_of(socket, registry, target, device_id)
+    return Timer(
+        entry_id,
+        target,
+        run_for["entity_id"],
+        ends_at["entity_id"],
+        next_command["entity_id"],
+        device_id,
     )
-    on = await socket.wait_for_state(SWITCH, has_state("on"), "on", TURN_ON_TIMEOUT)
+
+
+async def expect_on_device_of(
+    socket: Socket, registry: list[State], target: str, device_id: str
+) -> None:
+    """Check `target` sits on a device that exists, and that it is `device_id`."""
+    rows = [row for row in registry if row["entity_id"] == target]
+    if not rows:
+        raise SmokeFailure(f"{target} is not in the entity registry")
+    if (target_device := rows[0]["device_id"]) is None:
+        raise SmokeFailure(f"{target} sits on no device, but this test needs one")
+    devices = await socket.call("config/device_registry/list")
+    if not any(device["id"] == target_device for device in devices):
+        raise SmokeFailure(f"{target} sits on device {target_device}, which is missing")
+    if target_device != device_id:
+        raise SmokeFailure(
+            f"The timer sits on device {device_id}, not on that of {target}, "
+            f"{target_device}"
+        )
+
+
+async def expect_started(
+    socket: Socket,
+    timer: Timer,
+    minutes: int,
+    *,
+    is_on: Matcher | None = None,
+    expected: str = "on",
+    wait: float = TURN_ON_TIMEOUT,
+) -> tuple[State, datetime]:
+    """Check the target is on within `wait` seconds and the end is `minutes` away.
+
+    `is_on` says what "on" is for this target; the default is the state `on`. Returns
+    the state of the target as it turned on and the end of the countdown, as "Ends at"
+    reports it.
+    """
+    on = await socket.wait_for_state(
+        timer.target, is_on or has_state("on"), expected, wait
+    )
     ends_at = await socket.wait_for_state(
         timer.ends_at, is_known, "a time", TURN_ON_TIMEOUT
     )
@@ -393,23 +466,35 @@ async def start_countdown(socket: Socket, timer: Timer, minutes: int) -> datetim
     end = timestamp(ends_at["state"])
     away = end - timestamp(on["last_changed"])
     if abs(away - timedelta(minutes=minutes)) > START_SLACK:
-        raise SmokeFailure(f"The end is {away} after the switch turned on")
-    say(f"  {SWITCH} on, ends at {end:%H:%M:%S}")
-    return end
+        raise SmokeFailure(f"The end is {away} after {timer.target} turned on")
+    say(f"  {timer.target} {expected}, ends at {end:%H:%M:%S}")
+    return on, end
+
+
+async def start_countdown(socket: Socket, timer: Timer, minutes: int) -> datetime:
+    """Set "Run for" and check the target turns on and the end is `minutes` away."""
+    await socket.call(
+        "call_service",
+        domain="number",
+        service="set_value",
+        service_data={"value": minutes},
+        target={"entity_id": timer.run_for},
+    )
+    return (await expect_started(socket, timer, minutes))[1]
 
 
 async def expect_off_at(socket: Socket, timer: Timer, end: datetime) -> None:
-    """Check the switch turns off at `end`, and the timer is idle after that."""
+    """Check the target turns off at `end`, and the timer is idle after that."""
     wait = (end - datetime.now(UTC)).total_seconds() + 60
-    off = await socket.wait_for_state(SWITCH, has_state("off"), "off", wait)
+    off = await socket.wait_for_state(timer.target, has_state("off"), "off", wait)
     stopped = timestamp(off["last_changed"])
     if not end - CLOCK_TOLERANCE <= stopped <= end + EXPIRY_SLACK:
-        raise SmokeFailure(f"The switch turned off at {stopped}, not at {end}")
+        raise SmokeFailure(f"{timer.target} turned off at {stopped}, not at {end}")
     await socket.wait_for_state(timer.run_for, has_minutes(0), "0", CALL_TIMEOUT)
     await socket.wait_for_state(
         timer.ends_at, has_state("unknown"), "unknown", CALL_TIMEOUT
     )
-    say(f"  {SWITCH} off {(stopped - end).total_seconds():+.1f}s from the end")
+    say(f"  {timer.target} off {(stopped - end).total_seconds():+.1f}s from the end")
 
 
 async def scenario_expiry(
@@ -418,6 +503,114 @@ async def scenario_expiry(
     say("Run for 2 minutes, wait for the switch to turn off")
     async with open_socket(session, refresh_token) as socket:
         end = await start_countdown(socket, timer, 2)
+        await expect_off_at(socket, timer, end)
+
+
+async def scenario_command(session: aiohttp.ClientSession, refresh_token: str) -> None:
+    say(f"Add a command for {DEMO_SWITCH}: on in 1 minute, for 1 minute")
+    async with open_socket(session, refresh_token) as socket:
+        await socket.wait_for_state(
+            DEMO_SWITCH, is_known, "the demo switch", STARTUP_TIMEOUT
+        )
+        # The demo switch starts on, and a strict timer would count down from the
+        # moment it is added. Switch it off first, so the timer starts idle.
+        await socket.call(
+            "call_service",
+            domain="switch",
+            service="turn_off",
+            target={"entity_id": DEMO_SWITCH},
+        )
+        await socket.wait_for_state(DEMO_SWITCH, has_state("off"), "off", CALL_TIMEOUT)
+        timer = await add_timer(
+            session,
+            socket,
+            await new_access_token(session, refresh_token),
+            DEMO_SWITCH,
+            on_target_device=True,
+        )
+        say(f"  timer on the device of {DEMO_SWITCH}")
+        await socket.wait_for_state(timer.run_for, has_minutes(0), "0", CALL_TIMEOUT)
+
+        asked = datetime.now(UTC)
+        result = await socket.call(
+            "call_service",
+            domain=DOMAIN,
+            service="add_command",
+            service_data={
+                "action": "on",
+                "delay": int(COMMAND_DELAY.total_seconds() // 60),
+                "minutes": 1,
+            },
+            target={"entity_id": timer.run_for},
+            return_response=True,
+        )
+        try:
+            command_id = result["response"][timer.run_for]["command_id"]
+        except KeyError, TypeError:
+            raise SmokeFailure(f"add_command gave no command id: {result}") from None
+        pending = await socket.wait_for_state(
+            timer.next_command, is_known, "the time of the command", CALL_TIMEOUT
+        )
+        commands = pending["attributes"].get("commands")
+        if not isinstance(commands, list) or [c.get("id") for c in commands] != [
+            command_id
+        ]:
+            raise SmokeFailure(f"The Next command sensor lists {commands}")
+        due = timestamp(pending["state"])
+        # The state of a timestamp sensor is cut to whole seconds, the attribute is not.
+        if abs(timestamp(commands[0]["at"]) - due) > CLOCK_TOLERANCE:
+            raise SmokeFailure(
+                f"The sensor says {due}, its command {commands[0]['at']}"
+            )
+        if abs(due - (asked + COMMAND_DELAY)) > START_SLACK:
+            raise SmokeFailure(f"The command is due at {due}, asked at {asked}")
+        say(f"  command due at {due:%H:%M:%S}")
+
+        wait = (due - datetime.now(UTC)).total_seconds() + TURN_ON_TIMEOUT
+        on, end = await expect_started(socket, timer, 1, wait=wait)
+        started = timestamp(on["last_changed"])
+        if (
+            not due - CLOCK_TOLERANCE
+            <= started
+            <= due + timedelta(seconds=TURN_ON_TIMEOUT)
+        ):
+            raise SmokeFailure(f"{DEMO_SWITCH} turned on at {started}, not at {due}")
+        await socket.wait_for_state(
+            timer.next_command, has_state("unknown"), "unknown", CALL_TIMEOUT
+        )
+        await expect_off_at(socket, timer, end)
+
+
+async def scenario_settings(session: aiohttp.ClientSession, refresh_token: str) -> None:
+    say(f"Run {THERMOSTAT} for 1 minute: heat, {THERMOSTAT_TEMPERATURE} degrees")
+    async with open_socket(session, refresh_token) as socket:
+        await socket.wait_for_state(
+            THERMOSTAT, has_state("off"), "off", STARTUP_TIMEOUT
+        )
+        timer = await add_timer(
+            session,
+            socket,
+            await new_access_token(session, refresh_token),
+            THERMOSTAT,
+        )
+        await socket.call(
+            "call_service",
+            domain=DOMAIN,
+            service="run",
+            service_data={
+                "minutes": 1,
+                "hvac_mode": "heat",
+                "temperature": THERMOSTAT_TEMPERATURE,
+            },
+            target={"entity_id": timer.run_for},
+        )
+        _, end = await expect_started(
+            socket,
+            timer,
+            1,
+            is_on=heating_to(THERMOSTAT_TEMPERATURE),
+            expected=f"heat at {THERMOSTAT_TEMPERATURE}",
+        )
         await expect_off_at(socket, timer, end)
 
 
@@ -438,7 +631,7 @@ async def scenario_restart(
             raise SmokeFailure(f"The countdown ended at {end}, now at {kept}")
         if datetime.now(UTC) > end - EXPIRY_SLACK:
             raise SmokeFailure("Home Assistant came back too late to test the restart")
-        await socket.wait_for_state(SWITCH, has_state("on"), "on", CALL_TIMEOUT)
+        await socket.wait_for_state(timer.target, has_state("on"), "on", CALL_TIMEOUT)
         say("  back up, countdown kept")
         await expect_off_at(socket, timer, end)
 
@@ -459,10 +652,15 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
     async with open_socket(session, refresh_token) as socket:
         await socket.wait_for_state(SWITCH, has_state("off"), "off", CALL_TIMEOUT)
         timer = await add_timer(
-            session, socket, await new_access_token(session, refresh_token)
+            session,
+            socket,
+            await new_access_token(session, refresh_token),
+            SWITCH,
         )
     say(f"Added a timer for {SWITCH}")
     await scenario_expiry(session, refresh_token, timer)
+    await scenario_command(session, refresh_token)
+    await scenario_settings(session, refresh_token)
     await scenario_restart(session, refresh_token, timer)
     if keep:
         await leave_running(session, refresh_token, timer)

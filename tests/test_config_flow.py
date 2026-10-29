@@ -7,12 +7,16 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant import config_entries
 from homeassistant.components.climate.const import ClimateEntityFeature
+from homeassistant.components.fan.const import FanEntityFeature
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature
+from homeassistant.components.siren.const import SirenEntityFeature
 from homeassistant.components.water_heater.const import WaterHeaterEntityFeature
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, InvalidData
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.translation import async_get_translations
+from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
@@ -25,7 +29,7 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.domains import SUPPORTED_DOMAINS
 
-from .conftest import FakeTarget, SetupTarget
+from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
     NUMBER,
     TARGET_ID,
@@ -82,6 +86,29 @@ def default_value(result: FlowResult, key: str) -> Any:
     marker = next(marker for marker in result["data_schema"].schema if marker == key)
     default = marker.default
     return default() if callable(default) else default
+
+
+def picker_of(result: FlowResult) -> dict[str, Any]:
+    """The entity picker of the form `result` shows, as the frontend gets it."""
+    (marker,) = (key for key in result["data_schema"].schema if key == CONF_TARGET)
+    return result["data_schema"].schema[marker].serialize()["selector"]["entity"]
+
+
+async def _ignore(_call: ServiceCall) -> None:
+    """A service that does nothing."""
+
+
+def provide_services(hass: HomeAssistant, domain: str, *services: str) -> None:
+    """Register `services` of `domain`, as the integration of that domain does."""
+    for service in services:
+        hass.services.async_register(domain, service, _ignore)
+
+
+@pytest.fixture
+def kettle(provide_target: ProvideTarget) -> FakeTarget:
+    """`kettle.tea` on a device called Tea, switched off: a domain Timerify has no row
+    for, whose services are `kettle.turn_on` and `kettle.turn_off`."""
+    return provide_target("kettle.tea", SWITCH_SERVICES, name="Tea")
 
 
 async def change_options(
@@ -251,12 +278,19 @@ async def test_registry_id_is_stored_as_the_entity_id(
         ("climate.heating", ClimateEntityFeature.TURN_OFF),
         ("water_heater.tank", 0),
         ("water_heater.tank", WaterHeaterEntityFeature.TARGET_TEMPERATURE),
+        ("fan.ceiling", 0),
+        ("fan.ceiling", FanEntityFeature.TURN_ON),
+        ("media_player.tv", 0),
+        ("media_player.tv", MediaPlayerEntityFeature.TURN_OFF),
+        ("siren.yard", 0),
+        ("siren.yard", SirenEntityFeature.TURN_ON),
     ],
 )
 async def test_entity_that_cannot_be_turned_on_and_off_is_rejected(
     hass: HomeAssistant, entity_id: str, features: int
 ) -> None:
-    """A thermostat that only has a mode is not a target; the form says so."""
+    """A thermostat that only has a mode, or a fan, player or siren that cannot be
+    switched, is not a target; the form says so."""
     hass.states.async_set(entity_id, "off", {"supported_features": int(features)})
 
     result = await submit(
@@ -276,13 +310,20 @@ async def test_entity_that_cannot_be_turned_on_and_off_is_rejected(
             ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF,
         ),
         ("water_heater.tank", WaterHeaterEntityFeature.ON_OFF),
+        ("fan.ceiling", FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF),
+        (
+            "media_player.tv",
+            MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF,
+        ),
+        ("siren.yard", SirenEntityFeature.TURN_ON | SirenEntityFeature.TURN_OFF),
         ("light.hall", 0),
     ],
 )
 async def test_entity_that_can_be_turned_on_and_off_is_accepted(
     hass: HomeAssistant, entity_id: str, features: int
 ) -> None:
-    """Climate and water heater entities qualify when they can be switched."""
+    """Entities qualify when they advertise the features their domain's turn_on and
+    turn_off need; a light needs none."""
     hass.states.async_set(entity_id, "off", {"supported_features": int(features)})
 
     result = await submit(
@@ -337,19 +378,178 @@ async def test_registry_id_of_an_unsupported_entity_is_rejected(
         assert result["errors"] == {"base": "target_not_supported"}
 
 
+@pytest.mark.parametrize(
+    ("domain", "services"),
+    [("sensor", ()), ("scene_like", ("turn_on",)), ("scene_like", ("turn_off",))],
+)
+async def test_domain_without_turn_on_and_off_is_not_supported(
+    hass: HomeAssistant, domain: str, services: tuple[str, ...]
+) -> None:
+    """A sensor, or a domain that can only be turned on or only off, is no target,
+    although the entity reads "on": the state is not what decides."""
+    provide_services(hass, domain, *services)
+    entity = er.async_get(hass).async_get_or_create(domain, "tester", "temp")
+    hass.states.async_set(entity.entity_id, "on")
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: entity.id, CONF_MODE: "strict"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "target_not_supported"}
+
+
+@pytest.mark.parametrize("state", ["on", "off"])
+async def test_fallback_entity_in_on_off_state_is_accepted(
+    hass: HomeAssistant, kettle: FakeTarget, state: str
+) -> None:
+    """An entity of a domain without a row is a target while it reads on or off."""
+    await kettle.set_state(state)
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: "kettle.tea", CONF_MODE: "strict"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "duration"
+
+
+@pytest.mark.parametrize("state", ["idle", "streaming", "unavailable", "unknown"])
+async def test_fallback_entity_in_other_state_is_rejected(
+    hass: HomeAssistant, kettle: FakeTarget, state: str
+) -> None:
+    """A camera is idle or streaming, and an entity that does not answer has no state
+    to read: a timer could not tell on from off, so the form says to pick another."""
+    await kettle.set_state(state)
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: "kettle.tea", CONF_MODE: "strict"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {"base": "not_switchable"}
+
+
+async def test_fallback_entity_without_a_state_is_rejected(
+    hass: HomeAssistant, kettle: FakeTarget
+) -> None:
+    """A registered entity that has no state, a disabled one, cannot be read either."""
+    hass.states.async_remove("kettle.tea")
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: "kettle.tea", CONF_MODE: "strict"}
+    )
+
+    assert result["errors"] == {"base": "not_switchable"}
+
+
+@pytest.mark.parametrize(
+    ("state", "step_id", "errors"),
+    [
+        ("on", "duration", None),
+        ("off", "duration", None),
+        ("open", "user", {"base": "not_switchable"}),
+        ("home", "user", {"base": "not_switchable"}),
+        ("unavailable", "user", {"base": "not_switchable"}),
+    ],
+)
+async def test_group_is_judged_by_its_state(
+    hass: HomeAssistant, state: str, step_id: str, errors: dict[str, str] | None
+) -> None:
+    """A group of lights reads on or off; one of covers or locks reports open or home,
+    which a timer would read as off, so such a group is refused."""
+    hass.states.async_set("group.shutters", state)
+
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: "group.shutters", CONF_MODE: "strict"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == step_id
+    assert result["errors"] == errors
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "state", "features"),
+    [
+        (
+            "climate.heating",
+            "heat",
+            ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF,
+        ),
+        ("water_heater.tank", "eco", WaterHeaterEntityFeature.ON_OFF),
+        (
+            "media_player.tv",
+            "playing",
+            MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF,
+        ),
+        ("switch.heater", "unavailable", 0),
+    ],
+)
+async def test_table_domain_is_not_judged_by_its_state(
+    hass: HomeAssistant, entity_id: str, state: str, features: int
+) -> None:
+    """A thermostat heats, a player plays, and a switch may be out of reach for now:
+    their state says nothing against them."""
+    hass.states.async_set(entity_id, state, {"supported_features": int(features)})
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: entity_id, CONF_MODE: "strict"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "duration"
+
+
+async def test_not_switchable_is_explained_in_words(hass: HomeAssistant) -> None:
+    """The form shows a text for the error, not its key."""
+    texts = await async_get_translations(hass, "en", "config", [DOMAIN])
+
+    assert texts[f"component.{DOMAIN}.config.error.not_switchable"]
+
+
+async def test_fallback_target_runs_through_homeassistant_services(
+    hass: HomeAssistant, kettle: FakeTarget
+) -> None:
+    """A kettle is added from the picker and run for ten minutes; homeassistant.turn_on
+    passes the call on to the kettle's own domain. Switching it off by hand clears the
+    timer without another call."""
+    await async_setup_component(hass, "homeassistant", {})
+    await add_target(hass, target="kettle.tea", mode="strict")
+
+    await set_number(hass, "number.tea_run_for", 10)
+
+    assert kettle.state == "on"
+    assert kettle.calls == [("turn_on", ["kettle.tea"])]
+
+    await kettle.set_state("off")
+
+    assert state_of(hass, "number.tea_run_for") == "0"
+    assert kettle.calls == [("turn_on", ["kettle.tea"])]
+
+
 async def test_picker_offers_only_entities_that_can_be_switched(
     hass: HomeAssistant,
 ) -> None:
-    """The entity picker lists the supported domains; of the climate and water
-    heater entities only those that advertise turning on and off."""
-    result = await start_flow(hass)
-    (marker,) = (key for key in result["data_schema"].schema if key == CONF_TARGET)
-    picker = result["data_schema"].schema[marker].serialize()["selector"]["entity"]
+    """The entity picker lists the supported domains; of the climate, water heater,
+    fan, media player and siren entities only those that advertise turning on and
+    off."""
+    picker = picker_of(await start_flow(hass))
 
     assert picker["domain"] == list(SUPPORTED_DOMAINS)
     on_off = {
         "climate": [ClimateEntityFeature.TURN_ON, ClimateEntityFeature.TURN_OFF],
         "water_heater": [WaterHeaterEntityFeature.ON_OFF],
+        "fan": [FanEntityFeature.TURN_ON, FanEntityFeature.TURN_OFF],
+        "media_player": [
+            MediaPlayerEntityFeature.TURN_ON,
+            MediaPlayerEntityFeature.TURN_OFF,
+        ],
+        "siren": [SirenEntityFeature.TURN_ON, SirenEntityFeature.TURN_OFF],
     }
     filtered = {
         f["domain"][0]: f["supported_features"]
@@ -360,6 +560,56 @@ async def test_picker_offers_only_entities_that_can_be_switched(
     unfiltered = [f for f in picker["filter"] if "supported_features" not in f]
     assert len(unfiltered) == 1
     assert set(unfiltered[0]["domain"]) == set(SUPPORTED_DOMAINS) - set(on_off)
+
+
+async def test_picker_offers_domains_that_can_be_turned_on_and_off(
+    hass: HomeAssistant,
+) -> None:
+    """A domain Timerify has no row for is offered when it has both a turn_on and a
+    turn_off service, whatever it is called: not one that can only be turned on, not
+    homeassistant itself, and no domain twice."""
+    await async_setup_component(hass, "homeassistant", {})
+    provide_services(hass, "kettle", "turn_on", "turn_off")
+    provide_services(hass, "aquarium", "turn_off", "turn_on")
+    provide_services(hass, "switch", "turn_on", "turn_off")
+    provide_services(hass, "scene_like", "turn_on")
+
+    picker = picker_of(await start_flow(hass))
+
+    offered = [*SUPPORTED_DOMAINS, "aquarium", "kettle"]
+    assert picker["domain"] == offered
+    featured = {f["domain"][0] for f in picker["filter"] if "supported_features" in f}
+    assert featured == {"climate", "water_heater", "fan", "media_player", "siren"}
+    unfiltered = [f for f in picker["filter"] if "supported_features" not in f]
+    assert len(unfiltered) == 1
+    assert unfiltered[0]["domain"] == [d for d in offered if d not in featured]
+
+
+async def test_entity_id_is_taken_when_its_domain_has_both_services(
+    hass: HomeAssistant,
+) -> None:
+    """The form offers the domains that have both services when it opens: the entity
+    id of a domain that has only one is refused by the form itself, and the same id is
+    accepted in a form that opens once the domain has the other service too."""
+    provide_services(hass, "lamp_like", "turn_on")
+    hass.states.async_set("lamp_like.hall", "on")
+
+    with pytest.raises(InvalidData):
+        await submit(
+            hass,
+            await start_flow(hass),
+            {CONF_TARGET: "lamp_like.hall", CONF_MODE: "strict"},
+        )
+
+    provide_services(hass, "lamp_like", "turn_off")
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: "lamp_like.hall", CONF_MODE: "strict"},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "duration"
 
 
 @pytest.mark.parametrize("minutes", [0, MAX_MINUTES + 1])

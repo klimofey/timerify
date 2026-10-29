@@ -23,6 +23,7 @@ from .helpers import (
     advance,
     set_number,
     state_of,
+    timerify_warnings,
 )
 
 
@@ -152,16 +153,6 @@ async def test_ignored_call_is_not_a_warning(
     assert noisy == []
 
 
-def timerify_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """What Timerify said at warning level or above."""
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.name.startswith("custom_components.timerify")
-        and record.levelno >= logging.WARNING
-    ]
-
-
 async def run_into_a_refusing_device(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, fake_target: FakeTarget
 ) -> None:
@@ -260,3 +251,34 @@ async def test_service_that_keeps_raising_logs_its_traceback_once_per_wish(
     await advance(hass, freezer, minutes=10)
 
     assert len([record for record in caplog.records if record.exc_info]) == 2
+
+
+async def test_media_player_is_not_turned_on_again_by_repeated_reports(
+    hass: HomeAssistant,
+    fake_media_player: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A player that is slow to wake, or a toggle that a second turn_on would switch
+    off again, is told once: reports that repeat its state send nothing, and the
+    timer says so in the log. Only a change of its state is answered."""
+    await setup_target(target="media_player.tv")
+    fake_media_player.ignore_calls()
+
+    await set_number(hass, "number.tv_run_for", 30)
+
+    assert fake_media_player.calls == [("turn_on", "media_player.tv")]
+
+    for signal in range(3):
+        await fake_media_player.set_state("off", signal=signal)
+
+    assert fake_media_player.calls == [("turn_on", "media_player.tv")]
+    assert timerify_warnings(caplog) == [
+        "media_player.tv did not turn on after 1 attempt; Timerify will try again"
+        " when it reports a change or on the next command"
+    ]
+
+    await fake_media_player.set_state("unavailable")
+    await fake_media_player.set_state("off")
+
+    assert fake_media_player.calls == [("turn_on", "media_player.tv")] * 2

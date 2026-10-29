@@ -4,29 +4,42 @@ import asyncio
 import copy
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Final
 
+import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import (
+    STATE_OFF,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    WEEKDAYS,
+)
 from homeassistant.core import (
     Context,
     HomeAssistant,
     Service,
     ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
     split_entity_id,
 )
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
     DOMAIN,
     Mode,
 )
@@ -262,6 +275,125 @@ class FakeTarget:
         return handle
 
 
+@dataclass
+class FakeWorkday:
+    """The Workday integration as the other integrations see it: a binary sensor of
+    platform `workday` that says whether today is a working day, and the
+    `workday.check_date` service that says it of any day.
+
+    The service answers as the real one does: `{entity_id: {"workday": ...}}`, and
+    while the sensor is unavailable it raises the error that a call for an entity that
+    is not there gets, since Home Assistant cannot tell the two apart.
+    """
+
+    hass: HomeAssistant
+    entity_id: str = "binary_sensor.workday_sensor"
+    workdays: set[str] = field(
+        default_factory=lambda: {"sun", "mon", "tue", "wed", "thu"}
+    )
+    """The weekdays that are working days: Israel's week."""
+    holidays: set[date] = field(default_factory=set)
+    """The days that are not working days though their weekday is."""
+    asked: list[date] = field(default_factory=list)
+    """The day of every `check_date` call received, failed ones included."""
+    _available: bool = True
+    _state: str = STATE_ON
+    _failure: HomeAssistantError | None = None
+    _held: HeldCall | None = None
+
+    def is_workday(self, day: date) -> bool:
+        """Whether `day` is a working day by the week and the holidays."""
+        return WEEKDAYS[day.weekday()] in self.workdays and day not in self.holidays
+
+    def write(self, available: bool | None = None) -> None:
+        """Write the state of the sensor, which is that of today when it comes back
+        and unchanged otherwise: with `available` left out it is a report of what it
+        already says, which Workday makes at every local midnight."""
+        if available is not None:
+            self._available = available
+            if available:
+                today = dt_util.now().date()
+                self._state = STATE_ON if self.is_workday(today) else STATE_OFF
+        self.hass.states.async_set(
+            self.entity_id, self._state if self._available else STATE_UNAVAILABLE
+        )
+
+    async def set_available(self, on: bool) -> None:
+        """Make the sensor unavailable, as a reloading Workday is, or bring it back,
+        and let everything that follows settle."""
+        self.write(on)
+        await self.hass.async_block_till_done()
+
+    async def report(self) -> None:
+        """Rewrite the state of the sensor as it is, and let everything that follows
+        settle."""
+        self.write()
+        await self.hass.async_block_till_done()
+
+    def fail_next_call(self, error: HomeAssistantError | None = None) -> None:
+        """Make the next `check_date` fail, with `error` or as a sensor that could not
+        answer."""
+        self._failure = error or HomeAssistantError("The sensor could not answer")
+
+    def hold_next_call(self) -> HeldCall:
+        """Make the next `check_date` slow: it has its answer, or its error, and waits
+        before it gives it."""
+        self._held = HeldCall()
+        return self._held
+
+    async def check_date(self, call: ServiceCall) -> ServiceResponse:
+        """The service `workday.check_date`."""
+        day: date = call.data["check_date"]
+        self.asked.append(day)
+        failure, self._failure = self._failure, None
+        if failure is None and (
+            call.data["entity_id"] != self.entity_id or not self._available
+        ):
+            failure = HomeAssistantError(
+                "Service call requested response data but did not match any entities"
+            )
+        if self._held is not None:
+            held, self._held = self._held, None
+            held.reached.set()
+            await held.release.wait()
+        if failure is not None:
+            raise failure
+        return {self.entity_id: {"workday": self.is_workday(day)}}
+
+
+@pytest.fixture
+def fake_workday(hass: HomeAssistant) -> FakeWorkday:
+    """A Workday sensor, `binary_sensor.workday_sensor`, for a working week from
+    Sunday to Thursday and no holidays: registered under the platform `workday` with
+    its `check_date` service."""
+    provider = MockConfigEntry(domain="workday")
+    provider.add_to_hass(hass)
+    workday = FakeWorkday(hass)
+    object_id = split_entity_id(workday.entity_id)[1]
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        provider.domain,
+        object_id,
+        config_entry=provider,
+        original_name="Workday Sensor",
+        suggested_object_id=object_id,
+    )
+    workday.write(True)
+    hass.services.async_register(
+        provider.domain,
+        "check_date",
+        workday.check_date,
+        schema=probatio.Schema(
+            {
+                probatio.Required("entity_id"): cv.entity_id,
+                probatio.Required("check_date"): cv.date,
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    return workday
+
+
 type ProvideTarget = Callable[..., FakeTarget]
 
 
@@ -376,9 +508,9 @@ async def setup_target(
     """Set up a Timerify entry for `switch.boiler`; it returns the loaded entry.
 
     `stored` is what an earlier run left in the entry's storage file, in the form
-    of `stored_version`; the entry then starts the way it does after a restart. A
-    test that sets up a target provides it first, through one of the `fake_*`
-    fixtures.
+    of `stored_version`; the entry then starts the way it does after a restart.
+    `workday_sensor` is the Workday sensor the timer asks about the days. A test that
+    sets up a target provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -387,16 +519,17 @@ async def setup_target(
         target: str = TARGET_ID,
         stored: dict[str, Any] | None = None,
         stored_version: int = TimerStore.STORAGE_VERSION,
+        workday_sensor: str | None = None,
     ) -> MockConfigEntry:
+        options: dict[str, Any] = {
+            CONF_TARGET: target,
+            CONF_MODE: mode,
+            CONF_DEFAULT_DURATION: default_duration,
+        }
+        if workday_sensor is not None:
+            options[CONF_WORKDAY_SENSOR] = workday_sensor
         entry = MockConfigEntry(
-            domain=DOMAIN,
-            version=1,
-            title="Boiler",
-            options={
-                CONF_TARGET: target,
-                CONF_MODE: mode,
-                CONF_DEFAULT_DURATION: default_duration,
-            },
+            domain=DOMAIN, version=1, title="Boiler", options=options
         )
         entry.add_to_hass(hass)
         if stored is not None:

@@ -1,9 +1,9 @@
 """Config and options flows: pick a target, bind it, set the default duration.
 
-Adding a timer takes the entity and the binding mode, and in strict mode a default
-duration. The options flow changes the mode and the duration; the target stays.
-Schedule intervals are subentries of the timer's entry, added, edited and deleted one
-by one from its page.
+Adding a timer takes the entity and the binding mode, in strict mode a default
+duration, and, in a house that has a Workday sensor, that sensor. The options flow
+changes the mode, the duration and the sensor; the target stays. Schedule intervals are
+subentries of the timer's entry, added, edited and deleted one by one from its page.
 
 The picker offers the domains of the table in `domains.py` and, for any entity that
 can be turned on and off, every other domain that has both services.
@@ -18,6 +18,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
     ConfigSubentryFlow,
+    OptionsFlow,
     SubentryFlowResult,
 )
 from homeassistant.const import (
@@ -52,10 +53,12 @@ from .const import (
     CONF_START,
     CONF_TARGET,
     CONF_WEEKDAYS,
+    CONF_WORKDAY_SENSOR,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_MINUTES,
     SUBENTRY_INTERVAL,
+    WORKDAY_DOMAIN,
     DaysMode,
     Mode,
 )
@@ -211,9 +214,60 @@ async def _validate_duration(
     return {**user_input, CONF_DEFAULT_DURATION: int(minutes)}
 
 
-async def _after_mode(options: dict[str, Any]) -> str | None:
+def _workday_selector() -> selector.EntitySelector:
+    return selector.EntitySelector(
+        selector.EntitySelectorConfig(
+            domain="binary_sensor", integration=WORKDAY_DOMAIN
+        )
+    )
+
+
+async def _workday_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema | None:
+    """The form that names the Workday sensor, or None, which skips it, when there is
+    nothing to pick and nothing to take away: no Workday sensor in the house and none
+    set on the timer.
+
+    A sensor that is set stays on offer after its integration is gone, so that the user
+    can still remove it.
+    """
+    hass = handler.parent_handler.hass
+    if CONF_WORKDAY_SENSOR not in handler.options and not any(
+        registered.domain == "binary_sensor" and registered.platform == WORKDAY_DOMAIN
+        for registered in er.async_get(hass).entities.values()
+    ):
+        return None
+    return probatio.Schema(
+        {probatio.Optional(CONF_WORKDAY_SENSOR): _workday_selector()}
+    )
+
+
+async def _validate_workday(
+    handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the sensor while an interval follows the working days it tells."""
+    flow = handler.parent_handler
+    if (
+        CONF_WORKDAY_SENSOR not in user_input
+        and isinstance(flow, OptionsFlow)
+        and any(
+            subentry.data[CONF_DAYS] != "weekdays"
+            for subentry in flow.config_entry.get_subentries_of_type(SUBENTRY_INTERVAL)
+        )
+    ):
+        raise SchemaFlowError("workday_in_use")
+    return user_input
+
+
+async def _after_mode(options: dict[str, Any]) -> str:
     """Strict mode needs a default duration; loose mode has no use for one."""
-    return "duration" if options[CONF_MODE] == "strict" else None
+    return "duration" if options[CONF_MODE] == "strict" else "workday"
+
+
+async def _after_duration(_options: dict[str, Any]) -> str:
+    """The Workday sensor comes last. A function, not the step's name, so that the
+    form does not announce a next step that a house without a Workday sensor never
+    gets: it says "Submit" either way."""
+    return "workday"
 
 
 _DURATION_STEP = SchemaFlowFormStep(
@@ -225,6 +279,11 @@ _DURATION_STEP = SchemaFlowFormStep(
         }
     ),
     validate_user_input=_validate_duration,
+    next_step=_after_duration,
+)
+
+_WORKDAY_STEP = SchemaFlowFormStep(
+    _workday_schema, validate_user_input=_validate_workday
 )
 
 CONFIG_FLOW: Final = {
@@ -234,6 +293,7 @@ CONFIG_FLOW: Final = {
         next_step=_after_mode,
     ),
     "duration": _DURATION_STEP,
+    "workday": _WORKDAY_STEP,
 }
 
 OPTIONS_FLOW: Final = {
@@ -242,6 +302,7 @@ OPTIONS_FLOW: Final = {
         next_step=_after_mode,
     ),
     "duration": _DURATION_STEP,
+    "workday": _WORKDAY_STEP,
 }
 
 
@@ -251,6 +312,10 @@ _SETTING_TYPES: Final = probatio.Schema(SETTINGS_SCHEMA)
 _WEEKDAY_SELECTOR: Final = "weekday"
 """The key of the weekday names in the `selector` translations: the list the user
 picks days from and the words of an interval's title."""
+_DAYS_SELECTOR: Final = "interval_days"
+"""The key of the kinds of days in the `selector` translations: the list the user picks
+from and the words of the title of an interval that follows working days."""
+_DAYS_MODES: Final[tuple[DaysMode, ...]] = get_args(DaysMode.__value__)
 
 
 def _setting_selector(
@@ -285,8 +350,9 @@ def _whole_minute(value: str) -> str | None:
 
 
 class IntervalSubentryFlow(ConfigSubentryFlow):
-    """Add a schedule interval to a timer, or edit one: the days, a start and an end,
-    and what the target is turned on with when the interval starts.
+    """Add a schedule interval to a timer, or edit one: the kind of days and, for
+    weekdays, which, a start and an end, and what the target is turned on with when the
+    interval starts.
 
     Both steps show the same form, built for the target's capabilities.
     """
@@ -344,15 +410,28 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         )
 
     def _interval_schema(self, entry: ConfigEntry, *, opened: bool) -> probatio.Schema:
-        """The form: days, start, end and, when the target can be turned on with any,
-        a section of its settings.
+        """The form: the kind of days, the weekdays, start, end and, when the target can
+        be turned on with any, a section of its settings.
+
+        The kind of days is the working days of the Workday sensor from the start when
+        the timer has one: those are what a house with a sensor schedules by.
 
         The section is open when the form shows settings, which are then not hidden
         from the user nor the fields an error about them is about, and closed when it
         shows none. It has no default: a default on a section makes the frontend skip
         the settings inside it, and an edit would clear them.
         """
+        has_sensor = CONF_WORKDAY_SENSOR in entry.options
         fields: dict[Any, Any] = {
+            probatio.Required(
+                CONF_DAYS, default="workdays" if has_sensor else "weekdays"
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(_DAYS_MODES),
+                    mode=selector.SelectSelectorMode.LIST,
+                    translation_key=_DAYS_SELECTOR,
+                )
+            ),
             probatio.Required(
                 CONF_WEEKDAYS, default=lambda: list(WEEKDAYS)
             ): selector.SelectSelector(
@@ -385,9 +464,14 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         with it by field, `base` for the settings as a whole; the data is whole only
         when nothing is wrong."""
         errors: dict[str, str] = {}
-        weekdays = [day for day in WEEKDAYS if day in user_input[CONF_WEEKDAYS]]
-        if not weekdays:
-            errors[CONF_WEEKDAYS] = "no_weekdays"
+        days: DaysMode = user_input[CONF_DAYS]
+        weekdays: list[str] = []
+        if days == "weekdays":
+            weekdays = [day for day in WEEKDAYS if day in user_input[CONF_WEEKDAYS]]
+            if not weekdays:
+                errors[CONF_WEEKDAYS] = "no_weekdays"
+        elif CONF_WORKDAY_SENSOR not in entry.options:
+            errors[CONF_DAYS] = "needs_workday_sensor"
         times: dict[str, str] = {}
         for field in (CONF_START, CONF_END):
             if (time := _whole_minute(user_input[field])) is None:
@@ -409,7 +493,6 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             errors["base"] = "settings_not_whole"
         except ServiceValidationError:
             errors["base"] = "settings_not_supported"
-        days: DaysMode = "weekdays"
         data = {
             CONF_DAYS: days,
             CONF_WEEKDAYS: weekdays,
@@ -419,13 +502,23 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return data, errors
 
     async def _async_day_labels(self) -> dict[str, str]:
-        """The short names of the weekdays in the language of the house."""
+        """The words of an interval's title in the language of the house: the short
+        names of the weekdays, by their names, and the names of the kinds of days, by
+        their `DaysMode`."""
         words = await async_get_translations(
             self.hass, self.hass.config.language, "selector", [DOMAIN]
         )
+        prefix = f"component.{DOMAIN}.selector"
         return {
-            day: words[f"component.{DOMAIN}.selector.{_WEEKDAY_SELECTOR}.options.{day}"]
-            for day in WEEKDAYS
+            **{
+                day: words[f"{prefix}.{_WEEKDAY_SELECTOR}.options.{day}"]
+                for day in WEEKDAYS
+            },
+            **{
+                days: words[f"{prefix}.{_DAYS_SELECTOR}.options.{days}"]
+                for days in _DAYS_MODES
+                if days != "weekdays"
+            },
         }
 
 

@@ -6,7 +6,7 @@ through a change to or from summer time and an interval that crosses midnight be
 to the day it starts on.
 """
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any, Final
@@ -97,6 +97,29 @@ def weekday_window(interval: Interval, now: datetime, zone: tzinfo) -> Window | 
             continue
         window = window_on(interval, day, zone)
         if window is not None and window.end > now:
+            return window
+    return None
+
+
+async def workday_window(
+    interval: Interval,
+    now: datetime,
+    zone: tzinfo,
+    is_workday: Callable[[date], Awaitable[bool]],
+) -> Window | None:
+    """The window of `interval` that is open at `now` or comes next, on the days that
+    `is_workday` calls working days if the interval runs on those, on the others if it
+    runs on the days off; None when there is none within `WINDOW_SEARCH_DAYS`.
+
+    Only a day whose window has not ended is asked about. Whatever `is_workday` raises
+    ends the search: the interval's window is not known then.
+    """
+    wanted = interval.days == "workdays"
+    for day in days_around(now, zone):
+        window = window_on(interval, day, zone)
+        if window is None or window.end <= now:
+            continue
+        if await is_workday(day) == wanted:
             return window
     return None
 

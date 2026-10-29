@@ -19,7 +19,13 @@ from custom_components.timerify.const import DOMAIN, SUBENTRY_INTERVAL
 from custom_components.timerify.schedule import interval_title
 from custom_components.timerify.services import SETTINGS_SCHEMA
 
-from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
+from .conftest import (
+    SWITCH_SERVICES,
+    FakeTarget,
+    FakeWorkday,
+    ProvideTarget,
+    SetupTarget,
+)
 from .helpers import (
     AC_ID,
     NUMBER,
@@ -197,15 +203,19 @@ async def test_title_is_in_the_language_of_the_house(
 async def test_new_interval_form_offers_every_day_and_no_times(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
-    """The form lists the days, the start and the end, in that order; every day is
+    """The form lists the kind of days, the weekdays, the start and the end, in that
+    order; a target without a Workday sensor starts on its weekdays, every day is
     ticked and the times are left to the user."""
     entry = await setup_target()
 
     form = await open_form(hass, entry)
 
     schema = form["data_schema"]
-    assert list(fields_of(schema)) == ["weekdays", "start", "end"]
-    assert prefilled(schema) == {"weekdays": list(WEEK)}
+    assert list(fields_of(schema)) == ["days", "weekdays", "start", "end"]
+    assert prefilled(schema) == {"days": "weekdays", "weekdays": list(WEEK)}
+    days = fields_of(schema)["days"]
+    assert days.config["options"] == ["weekdays", "workdays", "non_workdays"]
+    assert days.config["translation_key"] == "interval_days"
     weekdays = fields_of(schema)["weekdays"]
     assert weekdays.config["options"] == list(WEEK)
     assert weekdays.config["multiple"] is True
@@ -255,6 +265,7 @@ async def test_a_refused_form_keeps_what_was_typed(
     )
 
     assert prefilled(result["data_schema"]) == {
+        "days": "weekdays",
         "weekdays": ["mon", "tue"],
         "start": "06:30",
         "end": "06:30",
@@ -309,6 +320,7 @@ async def test_form_reaches_the_frontend(
     fields = frontend_fields(form)
 
     assert [field["name"] for field in fields] == [
+        "days",
         "weekdays",
         "start",
         "end",
@@ -481,8 +493,9 @@ async def test_every_field_of_the_form_is_labelled(hass: HomeAssistant) -> None:
     for step in ("user", "reconfigure"):
         step_prefix = f"{prefix}.step.{step}"
         assert texts[f"{step_prefix}.title"]
-        for name in ("weekdays", "start", "end"):
+        for name in ("days", "weekdays", "start", "end"):
             assert texts[f"{step_prefix}.data.{name}"], (step, name)
+            assert texts[f"{step_prefix}.data_description.{name}"], (step, name)
         assert texts[f"{step_prefix}.sections.settings.name"]
         for name in settings:
             section_prefix = f"{step_prefix}.sections.settings"
@@ -533,6 +546,7 @@ async def test_edit_form_shows_the_current_values(
 
     assert form["step_id"] == "reconfigure"
     assert prefilled(form["data_schema"]) == {
+        "days": "weekdays",
         "weekdays": ["sat", "sun"],
         "start": "06:30",
         "end": "07:15",
@@ -715,3 +729,199 @@ async def test_deleting_an_interval_keeps_a_running_countdown(
     assert fake_target.calls == [TURN_ON]
     await advance(hass, freezer, minutes=20)
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+# --- Working days and days off --------------------------------------------------------
+
+
+async def test_days_default_to_working_days_with_a_sensor(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """A house that has a Workday sensor schedules by working days: a new interval
+    starts on them, and an interval that is edited shows what it has."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    form = await open_form(hass, entry)
+
+    assert prefilled(form["data_schema"]) == {
+        "days": "workdays",
+        "weekdays": list(WEEK),
+    }
+
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", weekdays=["mon"]
+    )
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+
+    assert prefilled(form["data_schema"])["days"] == "weekdays"
+
+
+@pytest.mark.parametrize("days", ["workdays", "non_workdays"])
+async def test_workday_modes_need_a_workday_sensor(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    days: str,
+) -> None:
+    """Nobody can say which days are working days on a timer without a sensor: the form
+    comes back with the reason, in words, on the field that is wrong and with what was
+    typed; nothing is added, and an interval already there is not edited."""
+    entry = await setup_target()
+
+    result = await submit_interval(hass, entry, start="06:30", end="07:15", days=days)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"days": "needs_workday_sensor"}
+    assert prefilled(result["data_schema"])["days"] == days
+    assert not entry.subentries
+    texts = await async_get_translations(hass, "en", "config_subentries", [DOMAIN])
+    error = f"component.{DOMAIN}.config_subentries.interval.error.needs_workday_sensor"
+    assert texts[error]
+
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+    result = await edit_interval(hass, entry, subentry_id, days=days)
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"days": "needs_workday_sensor"}
+    assert entry.subentries[subentry_id].data["days"] == "weekdays"
+
+
+@pytest.mark.parametrize(
+    ("days", "title"),
+    [
+        ("workdays", "06:30–07:15, Working days"),
+        ("non_workdays", "06:30–07:15, Non-working days"),
+    ],
+)
+async def test_workday_interval_titles(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    days: str,
+    title: str,
+) -> None:
+    """An interval of working days is named by its times and the kind of days, and keeps
+    no weekdays, which it has no use for."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", days=days, weekdays=[]
+    )
+
+    subentry = entry.subentries[subentry_id]
+    assert subentry.title == title
+    assert dict(subentry.data) == {
+        "days": days,
+        "weekdays": [],
+        "start": "06:30",
+        "end": "07:15",
+        "settings": {},
+    }
+
+
+async def test_weekdays_that_working_days_do_not_use_are_not_kept(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The days of the week that are ticked on the form do not count when the interval
+    follows the sensor, and do not stay in it."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", days="workdays", weekdays=["mon"]
+    )
+
+    assert entry.subentries[subentry_id].data["weekdays"] == []
+
+
+async def test_weekdays_are_still_needed_when_the_days_are_the_weekdays(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """A timer with a sensor still asks for the days of an interval that names them."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+
+    result = await submit_interval(hass, entry, start="06:30", end="07:15", weekdays=[])
+
+    assert result["errors"] == {"weekdays": "no_weekdays"}
+    assert not entry.subentries
+
+
+async def test_editing_the_kind_of_days_renames_the_interval(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """Working days instead of the weekdays: the data and the name follow, and the
+    weekdays go. Back to the weekdays, the user names them again."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+
+    result = await edit_interval(hass, entry, subentry_id, days="workdays")
+
+    assert result["type"] is FlowResultType.ABORT
+    subentry = entry.subentries[subentry_id]
+    assert subentry.data["days"] == "workdays"
+    assert subentry.data["weekdays"] == []
+    assert subentry.title == "06:30–07:15, Working days"
+
+    result = await edit_interval(hass, entry, subentry_id, days="weekdays")
+
+    assert result["errors"] == {"weekdays": "no_weekdays"}
+    result = await edit_interval(
+        hass, entry, subentry_id, days="weekdays", weekdays=["sat", "sun"]
+    )
+    assert result["type"] is FlowResultType.ABORT
+    assert entry.subentries[subentry_id].title == "06:30–07:15, Sat, Sun"
+
+
+async def test_workday_title_is_in_the_language_of_the_house(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The kind of days in the title is said in the language of the house."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    hass.config.language = "ru"
+    words = await async_get_translations(hass, "ru", "selector", [DOMAIN])
+    working = words[f"component.{DOMAIN}.selector.interval_days.options.workdays"]
+
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", days="workdays"
+    )
+
+    assert working != "Working days"
+    assert entry.subentries[subentry_id].title == f"06:30–07:15, {working}"
+
+
+async def test_kind_of_days_reaches_the_frontend(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The kind of days is a list of three choices, worded by the selector texts, that
+    starts on the working days of a house that has a sensor."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+
+    (days, *_) = frontend_fields(await open_form(hass, entry))
+
+    assert days["name"] == "days"
+    assert days["default"] == "workdays"
+    assert days["selector"]["select"] == {
+        "options": ["weekdays", "workdays", "non_workdays"],
+        "multiple": False,
+        "custom_value": False,
+        "sort": False,
+        "mode": "list",
+        "translation_key": "interval_days",
+    }

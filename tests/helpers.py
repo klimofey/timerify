@@ -19,7 +19,7 @@ from homeassistant.helpers.event import (
 )
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-from custom_components.timerify.const import DOMAIN, SUBENTRY_INTERVAL
+from custom_components.timerify.const import DOMAIN, SUBENTRY_INTERVAL, DaysMode
 
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
@@ -111,6 +111,7 @@ async def submit_interval(
     *,
     start: str,
     end: str,
+    days: DaysMode = "weekdays",
     weekdays: Sequence[str] = WEEK,
     settings: dict[str, Any] | None = None,
 ) -> SubentryFlowResult:
@@ -120,6 +121,7 @@ async def submit_interval(
         (entry.entry_id, SUBENTRY_INTERVAL), context={"source": "user"}
     )
     user_input: dict[str, Any] = {
+        "days": days,
         "weekdays": list(weekdays),
         "start": start,
         "end": end,
@@ -139,6 +141,7 @@ async def add_interval(
     *,
     start: str,
     end: str,
+    days: DaysMode = "weekdays",
     weekdays: Sequence[str] = WEEK,
     settings: dict[str, Any] | None = None,
 ) -> str:
@@ -146,7 +149,13 @@ async def add_interval(
     new subentry."""
     known = set(entry.subentries)
     result = await submit_interval(
-        hass, entry, start=start, end=end, weekdays=weekdays, settings=settings
+        hass,
+        entry,
+        start=start,
+        end=end,
+        days=days,
+        weekdays=weekdays,
+        settings=settings,
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     (subentry_id,) = set(entry.subentries) - known
@@ -156,8 +165,9 @@ async def add_interval(
 async def edit_interval(
     hass: HomeAssistant, entry: ConfigEntry, subentry_id: str, **fields: Any
 ) -> SubentryFlowResult:
-    """Press "Edit" on an interval, change `fields` of the form it shows (`weekdays`,
-    `start`, `end`, `settings`) and submit it; return what the flow answers."""
+    """Press "Edit" on an interval, change `fields` of the form it shows (`days`,
+    `weekdays`, `start`, `end`, `settings`) and submit it; return what the flow
+    answers."""
     result = await hass.config_entries.subentries.async_init(
         (entry.entry_id, SUBENTRY_INTERVAL),
         context={"source": "reconfigure", "subentry_id": subentry_id},

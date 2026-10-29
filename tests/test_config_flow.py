@@ -22,6 +22,7 @@ from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_MINUTES,
@@ -29,12 +30,19 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.domains import SUPPORTED_DOMAINS
 
-from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
+from .conftest import (
+    SWITCH_SERVICES,
+    FakeTarget,
+    FakeWorkday,
+    ProvideTarget,
+    SetupTarget,
+)
 from .helpers import (
     NUMBER,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_interval,
     advance,
     set_number,
     state_of,
@@ -746,3 +754,220 @@ async def test_removing_entry_deletes_stored_state(
     await hass.config_entries.async_remove(entry.entry_id)
 
     assert key not in hass_storage
+
+
+# --- The Workday sensor --------------------------------------------------------------
+
+
+def sensor_picker_of(result: FlowResult) -> dict[str, Any]:
+    """The Workday sensor picker of the form `result` shows, as the frontend gets it."""
+    (marker,) = (
+        key for key in result["data_schema"].schema if key == CONF_WORKDAY_SENSOR
+    )
+    return result["data_schema"].schema[marker].serialize()["selector"]["entity"]
+
+
+async def test_workday_step_is_skipped_without_a_workday_sensor(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """Nobody is asked about a sensor there is none to pick: the flows end where they
+    did, and the form that comes last says "Submit"."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"}
+    )
+    assert result["step_id"] == "duration"
+    assert result["last_step"] is not False
+
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 45})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"] == {
+        CONF_TARGET: TARGET_ID,
+        CONF_MODE: "strict",
+        CONF_DEFAULT_DURATION: 45,
+    }
+    entry = result["result"]
+    result = await change_options(
+        hass, entry, {CONF_MODE: "strict"}, {CONF_DEFAULT_DURATION: 20}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_WORKDAY_SENSOR not in entry.options
+    result = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_workday_sensor_is_asked_after_the_duration(
+    hass: HomeAssistant, fake_target: FakeTarget, fake_workday: FakeWorkday
+) -> None:
+    """With a Workday sensor in the house, the last form of a strict timer asks for
+    it, among the Workday sensors and nothing else."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"}
+    )
+
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 45})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "workday"
+    assert result["last_step"] is True
+    picker = sensor_picker_of(result)
+    assert picker["domain"] == ["binary_sensor"]
+    assert picker["integration"] == "workday"
+    assert picker["multiple"] is False
+
+    result = await submit(hass, result, {CONF_WORKDAY_SENSOR: fake_workday.entity_id})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"] == {
+        CONF_TARGET: TARGET_ID,
+        CONF_MODE: "strict",
+        CONF_DEFAULT_DURATION: 45,
+        CONF_WORKDAY_SENSOR: fake_workday.entity_id,
+    }
+    await hass.async_block_till_done()
+    assert result["result"].state is ConfigEntryState.LOADED
+
+
+async def test_workday_sensor_can_be_left_out(
+    hass: HomeAssistant, fake_target: FakeTarget, fake_workday: FakeWorkday
+) -> None:
+    """The sensor is for the intervals that follow working days; a timer without any
+    of them needs none, and the form is submitted as it is."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"}
+    )
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 45})
+
+    result = await submit(hass, result, {})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_WORKDAY_SENSOR not in result["options"]
+
+
+async def test_loose_mode_asks_for_the_workday_sensor_after_the_mode(
+    hass: HomeAssistant, fake_target: FakeTarget, fake_workday: FakeWorkday
+) -> None:
+    """A loose timer has no default duration to ask for, so its second form is the
+    Workday sensor's."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "workday"
+
+    result = await submit(hass, result, {CONF_WORKDAY_SENSOR: fake_workday.entity_id})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"] == {
+        CONF_TARGET: TARGET_ID,
+        CONF_MODE: "loose",
+        CONF_WORKDAY_SENSOR: fake_workday.entity_id,
+    }
+
+
+async def test_options_set_and_remove_the_workday_sensor(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The options end with the sensor: set it, see it there the next time, take it
+    away by leaving the field empty."""
+    entry = await setup_target()
+
+    result = await change_options(
+        hass, entry, {CONF_MODE: "strict"}, {CONF_DEFAULT_DURATION: 45}
+    )
+    assert result["step_id"] == "workday"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_WORKDAY_SENSOR: fake_workday.entity_id}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_WORKDAY_SENSOR] == fake_workday.entity_id
+    assert entry.state is ConfigEntryState.LOADED
+
+    result = await change_options(
+        hass, entry, {CONF_MODE: "strict"}, {CONF_DEFAULT_DURATION: 45}
+    )
+    assert result["step_id"] == "workday"
+    assert suggested_value(result, CONF_WORKDAY_SENSOR) == fake_workday.entity_id
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_WORKDAY_SENSOR not in entry.options
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_a_workday_sensor_that_is_gone_can_still_be_removed(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The Workday integration was deleted, and the timer still names its sensor: the
+    form keeps showing it, so that the user can take it away."""
+    entry = await setup_target(workday_sensor="binary_sensor.workday_sensor")
+
+    result = await change_options(hass, entry, {CONF_MODE: "loose"})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "workday"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_WORKDAY_SENSOR not in entry.options
+
+
+async def test_workday_sensor_in_use_cannot_be_removed(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """An interval of working days cannot be left without the sensor that says which
+    they are: the form is shown again with the reason, in words, and the timer keeps
+    the sensor."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "workday"
+    assert result["errors"] == {"base": "workday_in_use"}
+    texts = await async_get_translations(hass, "en", "options", [DOMAIN])
+    assert texts[f"component.{DOMAIN}.options.error.workday_in_use"]
+    assert entry.options[CONF_WORKDAY_SENSOR] == fake_workday.entity_id
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_WORKDAY_SENSOR: fake_workday.entity_id}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+
+async def test_workday_sensor_can_be_removed_when_only_weekdays_are_used(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """Intervals that name their weekdays do not need the sensor."""
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    await add_interval(hass, entry, start="06:30", end="07:15", weekdays=["mon"])
+
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_WORKDAY_SENSOR not in entry.options
+
+
+async def test_workday_step_is_worded_in_both_flows(hass: HomeAssistant) -> None:
+    """Adding a timer and changing one both explain the Workday sensor they ask for."""
+    for category in ("config", "options"):
+        texts = await async_get_translations(hass, "en", category, [DOMAIN])
+        prefix = f"component.{DOMAIN}.{category}.step.workday"
+
+        assert texts[f"{prefix}.title"], category
+        assert texts[f"{prefix}.description"], category
+        assert texts[f"{prefix}.data.{CONF_WORKDAY_SENSOR}"], category
+        assert texts[f"{prefix}.data_description.{CONF_WORKDAY_SENSOR}"], category

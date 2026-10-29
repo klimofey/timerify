@@ -19,6 +19,16 @@
         "data": {
           "default_duration": "Default duration"
         }
+      },
+      "workday": {
+        "title": "Workday sensor",
+        "description": "Schedule intervals can run on working days or on non-working days, as a Workday sensor tells them. Pick the sensor, or leave this empty if no interval of this timer needs one.",
+        "data": {
+          "workday_sensor": "Workday sensor"
+        },
+        "data_description": {
+          "workday_sensor": "A sensor of the Workday integration, set up for your country and working week. Give it a day offset of 0: the schedule asks it about the day itself."
+        }
       }
     },
     "error": {
@@ -48,10 +58,21 @@
         "data": {
           "default_duration": "Default duration"
         }
+      },
+      "workday": {
+        "title": "Workday sensor",
+        "description": "Schedule intervals can run on working days or on non-working days, as a Workday sensor tells them. Pick the sensor, or leave this empty if no interval of this timer needs one.",
+        "data": {
+          "workday_sensor": "Workday sensor"
+        },
+        "data_description": {
+          "workday_sensor": "A sensor of the Workday integration, set up for your country and working week. Give it a day offset of 0: the schedule asks it about the day itself."
+        }
       }
     },
     "error": {
-      "duration_not_whole": "The duration must be a whole number of minutes."
+      "duration_not_whole": "The duration must be a whole number of minutes.",
+      "workday_in_use": "A schedule interval of this timer runs on working days or non-working days, which the Workday sensor tells. Change or delete that interval first, or keep the sensor."
     }
   },
   "config_subentries": {
@@ -66,12 +87,14 @@
           "title": "Add schedule interval",
           "description": "The entity runs from the start time to the end time on the days you pick. An end time earlier than the start time carries the interval past midnight into the next day.",
           "data": {
-            "weekdays": "Days",
+            "days": "Days",
+            "weekdays": "Weekdays",
             "start": "Start time",
             "end": "End time"
           },
           "data_description": {
-            "weekdays": "The days the interval starts on. An interval that crosses midnight belongs to the day it starts on.",
+            "days": "The weekdays you pick below, or the working days or non-working days that the timer's Workday sensor tells. The last two need a Workday sensor in the timer's settings.",
+            "weekdays": "The weekdays the interval starts on; used when the days are the weekdays. An interval that crosses midnight belongs to the day it starts on.",
             "start": "When the interval begins, in whole minutes.",
             "end": "When the interval ends, in whole minutes. Earlier than the start means the next day."
           },
@@ -107,12 +130,14 @@
           "title": "Edit schedule interval",
           "description": "The entity runs from the start time to the end time on the days you pick. An end time earlier than the start time carries the interval past midnight into the next day.",
           "data": {
-            "weekdays": "Days",
+            "days": "Days",
+            "weekdays": "Weekdays",
             "start": "Start time",
             "end": "End time"
           },
           "data_description": {
-            "weekdays": "The days the interval starts on. An interval that crosses midnight belongs to the day it starts on.",
+            "days": "The weekdays you pick below, or the working days or non-working days that the timer's Workday sensor tells. The last two need a Workday sensor in the timer's settings.",
+            "weekdays": "The weekdays the interval starts on; used when the days are the weekdays. An interval that crosses midnight belongs to the day it starts on.",
             "start": "When the interval begins, in whole minutes.",
             "end": "When the interval ends, in whole minutes. Earlier than the start means the next day."
           },
@@ -150,7 +175,8 @@
         "same_start_and_end": "The end time must differ from the start time. To run past midnight, give an end time that is earlier than the start time.",
         "whole_minutes_only": "The time must be a whole minute, without seconds.",
         "settings_not_supported": "The entity cannot be turned on with these settings. Check that each one is something it can do and that its value is one it accepts.",
-        "settings_not_whole": "A setting must be a whole number, without decimals."
+        "settings_not_whole": "A setting must be a whole number, without decimals.",
+        "needs_workday_sensor": "This timer has no Workday sensor. Set one in the timer's settings, or pick the weekdays."
       }
     }
   },
@@ -186,6 +212,13 @@
         "fri": "Fri",
         "sat": "Sat",
         "sun": "Sun"
+      }
+    },
+    "interval_days": {
+      "options": {
+        "weekdays": "The weekdays picked below",
+        "workdays": "Working days",
+        "non_workdays": "Non-working days"
       }
     }
   },
@@ -386,6 +419,9 @@
     },
     "timer_unloaded": {
       "message": "This timer was unloaded while the call waited, so nothing was changed. Try again once the timer is loaded."
+    },
+    "workday_sensor_missing": {
+      "message": "A schedule interval of this timer runs on working days or non-working days, but the timer has no Workday sensor. Set the sensor in the timer's settings, or change those intervals to weekdays."
     }
   }
 }

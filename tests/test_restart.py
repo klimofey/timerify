@@ -312,20 +312,23 @@ type TargetAppears = Literal["before_started", "after_started"]
 TARGET_APPEARS: Final[tuple[TargetAppears, ...]] = ("before_started", "after_started")
 
 
-async def cold_start(
-    hass: HomeAssistant,
-    fake_target: FakeTarget,
-    setup_target: SetupTarget,
-    stored: dict[str, Any],
-    target_appears: TargetAppears,
+async def set_up_while_starting(
+    hass: HomeAssistant, setup_target: SetupTarget, stored: dict[str, Any]
 ) -> ConfigEntry:
     """Set up the timer while Home Assistant is still starting and the target's own
-    integration is not up yet; the target turns up, switched on, before or after
-    Home Assistant announces that it is running."""
+    integration has not created its entity yet."""
     hass.set_state(CoreState.not_running)
     hass.states.async_remove(TARGET_ID)
     entry = await setup_target(stored=stored)
     assert hass.state is CoreState.not_running
+    return entry
+
+
+async def finish_start_up(
+    hass: HomeAssistant, fake_target: FakeTarget, target_appears: TargetAppears
+) -> None:
+    """Let Home Assistant announce that it is running. The target's integration comes
+    up, with the target switched on, before or after that."""
     if target_appears == "before_started":
         await fake_target.set_state("on")
     await hass.async_start()
@@ -333,7 +336,6 @@ async def cold_start(
     assert hass.state is CoreState.running
     if target_appears == "after_started":
         await fake_target.set_state("on")
-    return entry
 
 
 @pytest.mark.parametrize("target_appears", TARGET_APPEARS)
@@ -346,13 +348,10 @@ async def test_countdown_restored_in_a_cold_start_ends_on_time(
 ) -> None:
     """A countdown stored before a restart is shown while Home Assistant is still
     starting, and runs out at its end whenever the target shows up."""
-    await cold_start(
-        hass,
-        fake_target,
-        setup_target,
-        {"end": at(20), "pending": None},
-        target_appears,
-    )
+    await set_up_while_starting(hass, setup_target, {"end": at(20), "pending": None})
+    assert state_of(hass, NUMBER) == "20"
+
+    await finish_start_up(hass, fake_target, target_appears)
 
     assert state_of(hass, NUMBER) == "20"
     assert fake_target.calls == []
@@ -376,13 +375,12 @@ async def test_countdown_that_ended_before_a_cold_start_switches_off_once(
     target_appears: TargetAppears,
 ) -> None:
     """A target found on after its countdown ended is switched off, exactly once."""
-    entry = await cold_start(
-        hass,
-        fake_target,
-        setup_target,
-        {"end": at(-5), "pending": None},
-        target_appears,
+    entry = await set_up_while_starting(
+        hass, setup_target, {"end": at(-5), "pending": None}
     )
+    assert fake_target.calls == []
+
+    await finish_start_up(hass, fake_target, target_appears)
 
     assert fake_target.calls == [TURN_OFF]
     assert state_of(hass, TARGET_ID) == "off"

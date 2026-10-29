@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, InvalidData
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.translation import async_get_translations
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
@@ -162,6 +163,26 @@ async def test_same_target_twice_aborts(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
+
+
+async def test_second_flow_for_a_target_aborts_while_the_first_is_open(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """Two browser tabs adding the same target: the second is told one is under way,
+    in words the user can read."""
+    first = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"}
+    )
+    assert first["step_id"] == "duration"
+
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_in_progress"
+    texts = await async_get_translations(hass, "en", "config", [DOMAIN])
+    assert texts[f"component.{DOMAIN}.config.abort.already_in_progress"]
 
 
 async def test_renamed_target_is_still_the_same_target(

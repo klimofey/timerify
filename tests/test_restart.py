@@ -6,12 +6,12 @@ is there before the entry is set up, or the entry is unloaded and set up again.
 
 import asyncio
 from datetime import timedelta
-from typing import Any
+from typing import Any, Final, Literal
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 
 from .conftest import START, TARGET_ID, FakeTarget, SetupTarget
 from .helpers import NUMBER, SENSOR, TURN_OFF, TURN_ON, advance, set_number, state_of
@@ -295,3 +295,88 @@ async def test_timer_set_during_a_slow_call_survives_a_restart(
     assert fake_target.calls == [TURN_ON]
     await advance(hass, freezer, minutes=30)
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+type TargetAppears = Literal["before_started", "after_started"]
+
+TARGET_APPEARS: Final[tuple[TargetAppears, ...]] = ("before_started", "after_started")
+
+
+async def cold_start(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    stored: dict[str, Any],
+    target_appears: TargetAppears,
+) -> ConfigEntry:
+    """Set up the timer while Home Assistant is still starting and the target's own
+    integration is not up yet; the target turns up, switched on, before or after
+    Home Assistant announces that it is running."""
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    entry = await setup_target(stored=stored)
+    assert hass.state is CoreState.not_running
+    if target_appears == "before_started":
+        await fake_target.set_state("on")
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert hass.state is CoreState.running
+    if target_appears == "after_started":
+        await fake_target.set_state("on")
+    return entry
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+async def test_countdown_restored_in_a_cold_start_ends_on_time(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    target_appears: TargetAppears,
+) -> None:
+    """A countdown stored before a restart is shown while Home Assistant is still
+    starting, and runs out at its end whenever the target shows up."""
+    await cold_start(
+        hass,
+        fake_target,
+        setup_target,
+        {"end": at(20), "pending": None},
+        target_appears,
+    )
+
+    assert state_of(hass, NUMBER) == "20"
+    assert fake_target.calls == []
+    await advance(hass, freezer, minutes=19)
+    assert fake_target.calls == []
+
+    await advance(hass, freezer, minutes=1)
+
+    assert fake_target.calls == [TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, NUMBER) == "0"
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+async def test_countdown_that_ended_before_a_cold_start_switches_off_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    target_appears: TargetAppears,
+) -> None:
+    """A target found on after its countdown ended is switched off, exactly once."""
+    entry = await cold_start(
+        hass,
+        fake_target,
+        setup_target,
+        {"end": at(-5), "pending": None},
+        target_appears,
+    )
+
+    assert fake_target.calls == [TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, NUMBER) == "0"
+    assert saved(hass_storage, entry) == {"end": None, "pending": None}
+    await advance(hass, freezer, hours=1)
+    assert fake_target.calls == [TURN_OFF]

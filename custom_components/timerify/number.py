@@ -85,15 +85,15 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         `delay` and `at` is wanted.
         """
         if at is not None and delay is None:
-            due = at
+            when: datetime | timedelta = at
         elif delay is not None and at is None:
-            due = dt_util.utcnow() + timedelta(minutes=delay)
+            when = timedelta(minutes=delay)
         else:
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="delay_or_at"
             )
         command_id = await self._controller.async_add_command(
-            action, due, minutes, settings
+            action, when, minutes, settings
         )
         return {"command_id": command_id}
 

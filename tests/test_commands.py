@@ -7,6 +7,7 @@ look at them on the "Next command" sensor.
 
 import logging
 import re
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -16,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.timerify.const import CONF_TARGET, MAX_COMMANDS
+from custom_components.timerify.const import CONF_TARGET, DOMAIN, MAX_COMMANDS
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -691,6 +692,58 @@ async def test_command_the_week_ahead_is_accepted(
     assert [c["at"] for c in listed(hass, NEXT)] == [
         "2026-01-12T07:00:00+00:00",
         "2026-01-12T07:00:00+00:00",
+    ]
+
+
+async def test_delay_of_a_command_that_waited_for_a_slow_device_counts_from_its_turn(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A cloud air conditioner takes 25 seconds for each of the three calls that turn
+    it on cooling, at 24, with a fan mode. A command for one minute from now that waits
+    behind them is not refused as already passed: it is due a minute after its turn."""
+    await setup_target(target=AC_ID)
+    slow = fake_climate.hold_next_call()
+    running = hass.async_create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "run",
+            {
+                "entity_id": AC_NUMBER,
+                "hvac_mode": "cool",
+                "temperature": 24,
+                "fan_mode": "high",
+            },
+            blocking=True,
+        )
+    )
+    await slow.reached.wait()
+    adding = hass.async_create_task(
+        hass.services.async_call(
+            DOMAIN,
+            "add_command",
+            {"entity_id": AC_NUMBER, "action": "off", "delay": 1},
+            blocking=True,
+            return_response=True,
+        )
+    )
+
+    for _ in range(2):
+        freezer.tick(timedelta(seconds=25))
+        finished, slow = slow, fake_climate.hold_next_call()
+        finished.release.set()
+        await slow.reached.wait()
+    freezer.tick(timedelta(seconds=25))
+    slow.release.set()
+    await running
+    response = await adding
+    await hass.async_block_till_done()
+
+    assert response is not None
+    assert [(c["id"], c["at"]) for c in listed(hass, AC_NEXT)] == [
+        (response[AC_NUMBER]["command_id"], "2026-01-05T07:02:15+00:00")
     ]
 
 

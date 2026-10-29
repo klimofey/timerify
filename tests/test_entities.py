@@ -22,7 +22,6 @@ from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     NUMBER,
     SENSOR,
-    START,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
@@ -474,34 +473,55 @@ async def test_unloaded_entry_stays_quiet_after_a_slow_call_ends(
     assert hass_storage.get(key) == stored
 
 
-@pytest.mark.parametrize("change", ["add", "cancel"])
-async def test_command_made_after_unloading_fails_instead_of_pretending(
+@pytest.mark.parametrize(
+    ("service", "data"),
+    [
+        ("number.set_value", {"value": 20}),
+        (f"{DOMAIN}.add_time", {"minutes": 5}),
+        (f"{DOMAIN}.run", {"minutes": 20}),
+        (f"{DOMAIN}.add_command", {"action": "on", "delay": 5}),
+        (f"{DOMAIN}.cancel_command", {"command_id": "waiting"}),
+    ],
+    ids=["set_value", "add_time", "run", "add_command", "cancel_command"],
+)
+async def test_call_waiting_behind_a_slow_device_fails_when_the_timer_unloads(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
     hass_storage: dict[str, Any],
-    change: str,
+    service: str,
+    data: dict[str, Any],
 ) -> None:
-    """A service call that reached the timer as it was unloaded neither adds nor
-    cancels a command, and says so: an id for a command that was never kept, or a
-    cancel that was not carried out, would be a lie."""
+    """A call that waits its turn while the timer is unloaded changes nothing and says
+    so: reporting success for a countdown that was never moved, an id for a command
+    that was never kept, or a cancel that was not carried out would be a lie."""
     entry = await setup_target(
         stored=payload(commands=[command_json(at(60), id="waiting")])
     )
-    controller = entry.runtime_data
+    slow = fake_target.hold_next_call()
+    starting = hass.async_create_task(
+        hass.services.async_call(
+            "number", "set_value", {"entity_id": NUMBER, "value": 10}, blocking=True
+        )
+    )
+    await slow.reached.wait()
+    domain, name = service.split(".")
+    waiting = hass.async_create_task(
+        hass.services.async_call(
+            domain, name, {"entity_id": NUMBER, **data}, blocking=True
+        )
+    )
     await hass.config_entries.async_unload(entry.entry_id)
     stored = copy.deepcopy(hass_storage[storage_key(entry)])
 
-    change_it = (
-        controller.async_add_command("on", START + timedelta(minutes=30), None, None)
-        if change == "add"
-        else controller.async_cancel_command("waiting")
-    )
-
+    slow.release.set()
+    await starting
     with pytest.raises(HomeAssistantError) as raised:
-        await change_it
+        await waiting
 
+    assert raised.value.translation_domain == DOMAIN
     assert raised.value.translation_key == "timer_unloaded"
+    assert fake_target.calls == [TURN_ON]
     assert hass_storage[storage_key(entry)] == stored
 
 

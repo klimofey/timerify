@@ -182,14 +182,16 @@ class TargetController:
     async def async_add_command(
         self,
         action: Literal["on", "off"],
-        at: datetime,
+        when: datetime | timedelta,
         minutes: int | None,
         settings: Mapping[str, Any] | None,
     ) -> str:
-        """Keep a command to turn the target `action` at `at`, and return its id.
+        """Keep a command to turn the target `action` and return its id.
 
-        `minutes` is how long an "on" runs and `settings` what it turns the target on
-        with; an "off" takes neither.
+        `when` is the moment it is due, or how long from now: a delay is counted from
+        the moment the command gets its turn, so a call that waits behind a slow
+        device is not found to be late. `minutes` is how long an "on" runs and
+        `settings` what it turns the target on with; an "off" takes neither.
 
         Raises ServiceValidationError, before anything is kept, for an "off" with
         either, for settings that the target cannot take, for a time that is not
@@ -202,9 +204,10 @@ class TargetController:
                 translation_key="off_takes_no_duration_or_settings",
             )
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
-        command = Command(uuid4().hex, at, action, minutes, owed)
+        command_id = uuid4().hex
 
         def add(now: datetime) -> list[Effect]:
+            at = now + when if isinstance(when, timedelta) else when
             if at <= now:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
@@ -226,11 +229,12 @@ class TargetController:
                         "limit": str(MAX_COMMANDS),
                     },
                 )
-            return self._core.add_command(now, command)
+            return self._core.add_command(
+                now, Command(command_id, at, action, minutes, owed)
+            )
 
-        if not await self._command(add):
-            raise self._unloaded()
-        return command.id
+        await self._command(add)
+        return command_id
 
     async def async_cancel_command(self, command_id: str) -> None:
         """Forget the pending command with that id.
@@ -248,8 +252,7 @@ class TargetController:
                     translation_placeholders={"command_id": command_id},
                 ) from err
 
-        if not await self._command(cancel):
-            raise self._unloaded()
+        await self._command(cancel)
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -262,21 +265,19 @@ class TargetController:
 
         return remove
 
-    async def _command(self, command: Callable[[datetime], list[Effect]]) -> bool:
-        """Run `command` with the time now and carry out its effects; False, having
-        done nothing, if the timer was unloaded before its turn came."""
+    async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
+        """Run `command` with the time now and carry out its effects.
+
+        Raises HomeAssistantError, having done nothing, if the timer was unloaded
+        before its turn came: the call reached the timer, so returning as if the
+        change had been made would be a lie.
+        """
         async with self._lock:
             if self._stopped:
-                return False
+                raise HomeAssistantError(
+                    translation_domain=DOMAIN, translation_key="timer_unloaded"
+                )
             await self._execute(command(dt_util.utcnow()))
-            return True
-
-    @staticmethod
-    def _unloaded() -> HomeAssistantError:
-        """The error for a command that the timer, unloaded meanwhile, did not take."""
-        return HomeAssistantError(
-            translation_domain=DOMAIN, translation_key="timer_unloaded"
-        )
 
     async def _handle_started(self, _hass: HomeAssistant) -> None:
         """Take stock of the target once, with Home Assistant fully started."""

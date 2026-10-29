@@ -14,6 +14,21 @@ CONF_MODE: Final = "mode"
 CONF_DEFAULT_DURATION: Final = "default_duration"
 """Option holding the default duration in whole minutes."""
 
+SUBENTRY_INTERVAL: Final = "interval"
+"""Type of the config subentries that each hold one schedule interval of a timer."""
+CONF_DAYS: Final = "days"
+"""Subentry data: which days an interval runs on, a `DaysMode`."""
+CONF_WEEKDAYS: Final = "weekdays"
+"""Subentry data: the weekdays (`homeassistant.const.WEEKDAYS` names, in week order) of
+an interval whose days are `weekdays`."""
+CONF_START: Final = "start"
+"""Subentry data: when an interval begins, as `HH:MM` on the wall clock."""
+CONF_END: Final = "end"
+"""Subentry data: when an interval ends, as `HH:MM`; earlier than the start for an
+interval that crosses midnight."""
+CONF_SETTINGS: Final = "settings"
+"""Subentry data: what the target is turned on with when the interval starts."""
+
 DEFAULT_DURATION_MINUTES: Final = 30
 MAX_MINUTES: Final = 1440
 """The longest timer: one day."""
@@ -37,6 +52,10 @@ command and answers it with a report of its old state would be commanded for eve
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may
 also run with the timer at zero."""
+
+type DaysMode = Literal["weekdays", "workdays", "non_workdays"]
+"""Which days an interval runs on: the weekdays it names, the working days of the
+Workday sensor, or the days that are not."""
 
 type SettingValue = str | float | int
 """The value of one setting, as the service of the target's domain takes it."""

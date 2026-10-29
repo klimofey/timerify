@@ -30,10 +30,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) -> 
     store = TimerStore(hass, entry.entry_id)
     controller = TargetController(hass, entry, store, await store.async_load())
     entry.runtime_data = controller
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await controller.async_start()
     return True
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+    """Reload the timer whenever its entry changes, its options or its intervals (which
+    are subentries) alike, so that everything is read again from the entry."""
+    hass.config_entries.async_schedule_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:
@@ -49,16 +56,16 @@ async def async_remove_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) ->
 def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_TYPE:
     """Keep the entry in step with its target in the entity registry.
 
-    A renamed target is followed by updating the `target` option and reloading;
-    a target that moves to another device, or off its device, takes the entities
-    along; the entities of a removed target are left on no device.
+    A renamed target is followed by updating the `target` option, which reloads the
+    entry through its update listener; a target that moves to another device, or off
+    its device, takes the entities along; the entities of a removed target are left
+    on no device.
     """
 
     def set_target(entity_id: str) -> None:
         hass.config_entries.async_update_entry(
             entry, options={**entry.options, CONF_TARGET: entity_id}
         )
-        hass.config_entries.async_schedule_reload(entry.entry_id)
 
     return async_handle_source_entity_changes(
         hass,

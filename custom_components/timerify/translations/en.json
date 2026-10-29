@@ -54,6 +54,106 @@
       "duration_not_whole": "The duration must be a whole number of minutes."
     }
   },
+  "config_subentries": {
+    "interval": {
+      "initiate_flow": {
+        "user": "Add schedule interval",
+        "reconfigure": "Edit schedule interval"
+      },
+      "entry_type": "Schedule interval",
+      "step": {
+        "user": {
+          "title": "Add schedule interval",
+          "description": "The entity runs from the start time to the end time on the days you pick. An end time earlier than the start time carries the interval past midnight into the next day.",
+          "data": {
+            "weekdays": "Days",
+            "start": "Start time",
+            "end": "End time"
+          },
+          "data_description": {
+            "weekdays": "The days the interval starts on. An interval that crosses midnight belongs to the day it starts on.",
+            "start": "When the interval begins, in whole minutes.",
+            "end": "When the interval ends, in whole minutes. Earlier than the start means the next day."
+          },
+          "sections": {
+            "settings": {
+              "name": "Settings",
+              "data": {
+                "hvac_mode": "HVAC mode",
+                "temperature": "Temperature",
+                "fan_mode": "Fan mode",
+                "preset_mode": "Preset mode",
+                "mode": "Mode",
+                "operation_mode": "Operation mode",
+                "brightness_pct": "Brightness",
+                "percentage": "Speed",
+                "humidity": "Humidity"
+              },
+              "data_description": {
+                "hvac_mode": "The mode to turn a climate entity on in.",
+                "temperature": "The target temperature of a climate entity or a water heater.",
+                "fan_mode": "The fan mode of a climate entity.",
+                "preset_mode": "The preset mode of a fan.",
+                "mode": "The mode of a humidifier.",
+                "operation_mode": "The operation mode of a water heater.",
+                "brightness_pct": "The brightness of a light, in percent.",
+                "percentage": "The speed of a fan, in whole percent.",
+                "humidity": "The target humidity of a humidifier, in whole percent."
+              }
+            }
+          }
+        },
+        "reconfigure": {
+          "title": "Edit schedule interval",
+          "description": "The entity runs from the start time to the end time on the days you pick. An end time earlier than the start time carries the interval past midnight into the next day.",
+          "data": {
+            "weekdays": "Days",
+            "start": "Start time",
+            "end": "End time"
+          },
+          "data_description": {
+            "weekdays": "The days the interval starts on. An interval that crosses midnight belongs to the day it starts on.",
+            "start": "When the interval begins, in whole minutes.",
+            "end": "When the interval ends, in whole minutes. Earlier than the start means the next day."
+          },
+          "sections": {
+            "settings": {
+              "name": "Settings",
+              "data": {
+                "hvac_mode": "HVAC mode",
+                "temperature": "Temperature",
+                "fan_mode": "Fan mode",
+                "preset_mode": "Preset mode",
+                "mode": "Mode",
+                "operation_mode": "Operation mode",
+                "brightness_pct": "Brightness",
+                "percentage": "Speed",
+                "humidity": "Humidity"
+              },
+              "data_description": {
+                "hvac_mode": "The mode to turn a climate entity on in.",
+                "temperature": "The target temperature of a climate entity or a water heater.",
+                "fan_mode": "The fan mode of a climate entity.",
+                "preset_mode": "The preset mode of a fan.",
+                "mode": "The mode of a humidifier.",
+                "operation_mode": "The operation mode of a water heater.",
+                "brightness_pct": "The brightness of a light, in percent.",
+                "percentage": "The speed of a fan, in whole percent.",
+                "humidity": "The target humidity of a humidifier, in whole percent."
+              }
+            }
+          }
+        }
+      },
+      "error": {
+        "no_weekdays": "Pick at least one day.",
+        "same_start_and_end": "The end time must differ from the start time. To run past midnight, give an end time that is earlier than the start time.",
+        "whole_minutes_only": "The time must be a whole minute, without seconds.",
+        "settings_not_supported": "The entity cannot be turned on with these settings. Check that each one is something it can do and that its value is one it accepts.",
+        "settings_not_whole": "A speed and a humidity are whole numbers of percent, without decimals."
+      }
+    }
+  },
   "selector": {
     "mode": {
       "options": {
@@ -75,6 +175,17 @@
       "options": {
         "on": "Turn on",
         "off": "Turn off"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
       }
     }
   },

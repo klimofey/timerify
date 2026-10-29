@@ -26,6 +26,8 @@ extend-exclude = ["docs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF", "PT"]
+# The title of a schedule interval has an en dash between its times, as in 06:30–07:15.
+allowed-confusables = ["–"]
 
 [tool.mypy]
 python_version = "3.14"

@@ -2,6 +2,8 @@
 
 Adding a timer takes the entity and the binding mode, and in strict mode a default
 duration. The options flow changes the mode and the duration; the target stays.
+Schedule intervals are subentries of the timer's entry, added, edited and deleted one
+by one from its page.
 
 The picker offers the domains of the table in `domains.py` and, for any entity that
 can be turned on and off, every other domain that has both services.
@@ -11,16 +13,25 @@ from collections.abc import Mapping
 from typing import Any, Final, get_args, override
 
 import probatio
-from homeassistant.config_entries import ConfigFlow
+from homeassistant.config_entries import (
+    SOURCE_RECONFIGURE,
+    ConfigEntry,
+    ConfigFlow,
+    ConfigSubentryFlow,
+    SubentryFlowResult,
+)
 from homeassistant.const import (
     SERVICE_TURN_OFF,
     SERVICE_TURN_ON,
     STATE_OFF,
     STATE_ON,
+    WEEKDAYS,
     UnitOfTime,
 )
 from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN
-from homeassistant.core import HomeAssistant, split_entity_id
+from homeassistant.core import HomeAssistant, callback, split_entity_id
+from homeassistant.data_entry_flow import section
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 from homeassistant.helpers.schema_config_entry_flow import (
@@ -29,21 +40,35 @@ from homeassistant.helpers.schema_config_entry_flow import (
     SchemaFlowError,
     SchemaFlowFormStep,
 )
+from homeassistant.helpers.translation import async_get_translations
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_DAYS,
     CONF_DEFAULT_DURATION,
+    CONF_END,
     CONF_MODE,
+    CONF_SETTINGS,
+    CONF_START,
     CONF_TARGET,
+    CONF_WEEKDAYS,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_MINUTES,
+    SUBENTRY_INTERVAL,
+    DaysMode,
     Mode,
 )
 from .domains import (
     SUPPORTED_DOMAINS,
+    SettingChoice,
     behaviour_for_domain,
+    supported_settings,
     switchable_by_features,
+    validate_settings,
 )
+from .schedule import interval_title
+from .services import SETTINGS_SCHEMA
 from .target import target_name
 
 
@@ -220,12 +245,192 @@ OPTIONS_FLOW: Final = {
 }
 
 
+_SETTING_TYPES: Final = probatio.Schema(SETTINGS_SCHEMA)
+"""Gives the settings of an interval the types they have when a service makes them."""
+
+_WEEKDAY_SELECTOR: Final = "weekday"
+"""The key of the weekday names in the `selector` translations: the list the user
+picks days from and the words of an interval's title."""
+
+
+def _setting_selector(
+    choice: SettingChoice,
+) -> selector.SelectSelector | selector.NumberSelector:
+    """The field for one setting: a list of the values the entity lists, or a number
+    in the range it accepts."""
+    if choice.low is not None and choice.high is not None:
+        return selector.NumberSelector(
+            selector.NumberSelectorConfig(
+                min=choice.low,
+                max=choice.high,
+                step=0.5 if choice.name == "temperature" else 1,
+                mode=selector.NumberSelectorMode.BOX,
+            )
+        )
+    config = selector.SelectSelectorConfig(
+        options=list(choice.options), mode=selector.SelectSelectorMode.DROPDOWN
+    )
+    if choice.name == "hvac_mode":
+        config["translation_key"] = "hvac_mode"
+    return selector.SelectSelector(config)
+
+
+def _whole_minute(value: str) -> str | None:
+    """A time of day as `HH:MM`; None when it has seconds, which the schedule has no
+    use for. The time picker sends `HH:MM:SS` whatever the user picks."""
+    parsed = dt_util.parse_time(value)
+    if parsed is None or parsed.second or parsed.microsecond:
+        return None
+    return f"{parsed:%H:%M}"
+
+
+class IntervalSubentryFlow(ConfigSubentryFlow):
+    """Add a schedule interval to a timer, or edit one: the days, a start and an end,
+    and what the target is turned on with when the interval starts.
+
+    Both steps show the same form, built for the target's capabilities.
+    """
+
+    async def async_step_user(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Add an interval."""
+        return await self._async_interval_step("user", user_input)
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Edit an interval."""
+        return await self._async_interval_step("reconfigure", user_input)
+
+    async def _async_interval_step(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> SubentryFlowResult:
+        """Show the form, then take what was filled in.
+
+        A refused form is shown again with what was typed, so that the user corrects
+        the mistake and nothing more. An edit keeps the title the user gave the
+        interval; one that is still the generated title follows the new data.
+        """
+        entry = self._get_entry()
+        subentry = (
+            self._get_reconfigure_subentry()
+            if self.source == SOURCE_RECONFIGURE
+            else None
+        )
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            data, errors = self._interval_from(entry, user_input)
+            if not errors:
+                labels = await self._async_day_labels()
+                title = interval_title(data, labels)
+                if subentry is None:
+                    return self.async_create_entry(title=title, data=data)
+                if subentry.title != interval_title(subentry.data, labels):
+                    title = subentry.title
+                return self.async_update_and_abort(
+                    entry, subentry, data=data, title=title
+                )
+        shown = (
+            user_input if user_input is not None else subentry.data if subentry else {}
+        )
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=self.add_suggested_values_to_schema(
+                self._interval_schema(entry), shown
+            ),
+            errors=errors,
+        )
+
+    def _interval_schema(self, entry: ConfigEntry) -> probatio.Schema:
+        """The form: days, start, end and, when the target can be turned on with any,
+        a closed section of its settings."""
+        fields: dict[Any, Any] = {
+            probatio.Required(
+                CONF_WEEKDAYS, default=lambda: list(WEEKDAYS)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=list(WEEKDAYS),
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.LIST,
+                    translation_key=_WEEKDAY_SELECTOR,
+                )
+            ),
+            probatio.Required(CONF_START): selector.TimeSelector(),
+            probatio.Required(CONF_END): selector.TimeSelector(),
+        }
+        if choices := supported_settings(self.hass, entry.options[CONF_TARGET]):
+            fields[probatio.Optional(CONF_SETTINGS, default=dict)] = section(
+                probatio.Schema(
+                    {
+                        probatio.Optional(choice.name): _setting_selector(choice)
+                        for choice in choices
+                    }
+                ),
+                {"collapsed": True},
+            )
+        return probatio.Schema(fields)
+
+    def _interval_from(
+        self, entry: ConfigEntry, user_input: dict[str, Any]
+    ) -> tuple[dict[str, Any], dict[str, str]]:
+        """The data of the interval a filled-in form describes, and what is wrong
+        with it by field, `base` for the settings as a whole; the data is whole only
+        when nothing is wrong."""
+        errors: dict[str, str] = {}
+        weekdays = [day for day in WEEKDAYS if day in user_input[CONF_WEEKDAYS]]
+        if not weekdays:
+            errors[CONF_WEEKDAYS] = "no_weekdays"
+        times: dict[str, str] = {}
+        for field in (CONF_START, CONF_END):
+            if (time := _whole_minute(user_input[field])) is None:
+                errors[field] = "whole_minutes_only"
+            else:
+                times[field] = time
+        if len(times) == 2 and times[CONF_START] == times[CONF_END]:
+            errors[CONF_END] = "same_start_and_end"
+        settings: dict[str, Any] = {}
+        try:
+            settings = dict(
+                validate_settings(
+                    self.hass,
+                    entry.options[CONF_TARGET],
+                    _SETTING_TYPES(user_input.get(CONF_SETTINGS, {})),
+                )
+            )
+        except probatio.Invalid:
+            errors["base"] = "settings_not_whole"
+        except ServiceValidationError:
+            errors["base"] = "settings_not_supported"
+        days: DaysMode = "weekdays"
+        data = {
+            CONF_DAYS: days,
+            CONF_WEEKDAYS: weekdays,
+            **times,
+            CONF_SETTINGS: settings,
+        }
+        return data, errors
+
+    async def _async_day_labels(self) -> dict[str, str]:
+        """The short names of the weekdays in the language of the house."""
+        words = await async_get_translations(
+            self.hass, self.hass.config.language, "selector", [DOMAIN]
+        )
+        return {
+            day: words[f"component.{DOMAIN}.selector.{_WEEKDAY_SELECTOR}.options.{day}"]
+            for day in WEEKDAYS
+        }
+
+
 class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
-    """Handle the config and options flows of Timerify."""
+    """Handle the config, options and interval flows of Timerify."""
 
     config_flow = CONFIG_FLOW
     options_flow = OPTIONS_FLOW
-    options_flow_reloads = True
+    options_flow_reloads = False
+    """The entry reloads on any change of itself, its options and its intervals
+    alike, through the update listener (see `_async_entry_updated` in `__init__`);
+    Home Assistant does not combine that with a flow that reloads by itself."""
 
     VERSION = 1
 
@@ -233,3 +438,12 @@ class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     def async_config_entry_title(self, options: Mapping[str, Any]) -> str:
         """Name the entry after its target."""
         return target_name(self.hass, options[CONF_TARGET])
+
+    @classmethod
+    @callback
+    @override
+    def async_get_supported_subentry_types(
+        cls, config_entry: ConfigEntry
+    ) -> dict[str, type[ConfigSubentryFlow]]:
+        """A timer holds its schedule intervals as subentries."""
+        return {SUBENTRY_INTERVAL: IntervalSubentryFlow}

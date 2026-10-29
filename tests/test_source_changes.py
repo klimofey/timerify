@@ -1,5 +1,7 @@
 """The target changes in the registry: renamed, moved to another device or removed."""
 
+from unittest.mock import patch
+
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -42,6 +44,26 @@ async def test_target_rename_keeps_timer(
     await advance(hass, freezer, minutes=20)
     assert fake_target.calls == [TURN_ON, ("turn_off", RENAMED_ID)]
     assert state_of(hass, NUMBER) == "0"
+
+
+async def test_target_rename_reloads_the_entry_once(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Following a renamed target changes the options, which the entry reloads for;
+    it does not ask for a second reload on top."""
+    entry = await setup_target()
+
+    with patch.object(
+        hass.config_entries, "async_reload", wraps=hass.config_entries.async_reload
+    ) as reload:
+        er.async_get(hass).async_update_entity(TARGET_ID, new_entity_id=RENAMED_ID)
+        hass.states.async_remove(TARGET_ID)
+        hass.states.async_set(RENAMED_ID, "off")
+        await hass.async_block_till_done()
+
+    reload.assert_called_once_with(entry.entry_id)
+    assert entry.options[CONF_TARGET] == RENAMED_ID
+    assert entry.state is ConfigEntryState.LOADED
 
 
 async def test_target_moved_to_another_device_takes_timer_entities_along(

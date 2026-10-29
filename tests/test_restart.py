@@ -232,6 +232,7 @@ async def test_version_1_store_is_migrated(
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
     assert saved(hass_storage, entry)["commands"] == []
+    assert saved(hass_storage, entry)["owed_turn_on_only"] is False
 
     await set_number(hass, NUMBER, 45)
 
@@ -239,6 +240,33 @@ async def test_version_1_store_is_migrated(
     assert saved(hass_storage, entry) == payload(
         end=at(45), owed_settings={}, commands=[]
     )
+
+
+async def test_version_2_store_is_migrated(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A timer stored before schedules existed owes settings that a command asked for,
+    so they still reach an AC that is running; the file is written in the current form
+    and no longer says anything else of them."""
+    await fake_climate.set_state("heat")
+    entry = await setup_target(
+        target=AC_ID,
+        stored={
+            "end": at(30),
+            "pending": None,
+            "owed_settings": {"hvac_mode": "cool"},
+            "commands": [],
+        },
+        stored_version=2,
+    )
+
+    assert fake_climate.call_data == [("set_hvac_mode", {"hvac_mode": "cool"})]
+    assert state_of(hass, AC_ID) == "cool"
+    assert hass_storage[storage_key(entry)]["version"] == 3
+    assert saved(hass_storage, entry) == payload(end=at(30))
 
 
 def test_command_is_stored_as_plain_data_in_utc() -> None:
@@ -311,6 +339,87 @@ async def test_owed_settings_are_stored_until_the_ac_confirms_them(
     await hass.async_block_till_done()
 
     assert saved(hass_storage, entry) == payload(end=at(60))
+
+
+async def test_turn_on_only_settings_survive_a_restart_and_skip_a_running_ac(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """§5.4: a schedule window owed its settings to a turn-on that had not happened when
+    Home Assistant stopped; the AC is found running, so nobody pushes them onto it."""
+    await fake_climate.set_state("heat")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == []
+    assert state_of(hass, AC_ID) == "heat"
+    assert state_of(hass, AC_NUMBER) == "30"
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_turn_on_only_settings_survive_a_restart_and_turn_an_off_ac_on(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The same file with the AC off: the turn-on that was owed goes out with them."""
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == [("set_hvac_mode", {"hvac_mode": "cool"})]
+    assert state_of(hass, AC_ID) == "cool"
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_turn_on_only_settings_are_stored_while_the_ac_is_away(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The file keeps the marker with the settings across changes of the timer, so the
+    AC that comes back running is still not given them."""
+    await fake_climate.set_state("unavailable")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    await entry.runtime_data.async_add_minutes(15)
+
+    assert saved(hass_storage, entry) == payload(
+        end=at(45),
+        pending="on",
+        owed_settings={"hvac_mode": "cool"},
+        owed_turn_on_only=True,
+    )
+
+    await fake_climate.set_state("heat")
+
+    assert fake_climate.call_data == []
+    assert saved(hass_storage, entry) == payload(end=at(45))
 
 
 async def test_expiry_is_saved(

@@ -120,6 +120,7 @@ def payload(
     pending: str | None = None,
     owed_settings: dict[str, Any] | None = None,
     commands: Sequence[dict[str, Any]] = (),
+    owed_turn_on_only: bool = False,
 ) -> dict[str, Any]:
     """What the storage file of a timer holds: the stored form of its snapshot."""
     return {
@@ -127,6 +128,7 @@ def payload(
         "pending": pending,
         "owed_settings": owed_settings or {},
         "commands": list(commands),
+        "owed_turn_on_only": owed_turn_on_only,
     }
 
 

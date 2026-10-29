@@ -72,6 +72,10 @@ class Snapshot:
     owed_settings: Settings = NO_SETTINGS
     """The settings the target was asked to run with and has not yet confirmed to
     have taken. Never set while `pending` is "off"."""
+    owed_turn_on_only: bool = False
+    """The owed settings may reach the target only inside a `TurnOn`: a schedule window
+    owes them, and a target that is already on was set up by someone (§5.4). Never set
+    without owed settings."""
     commands: tuple[Command, ...] = ()
     """The pending commands, ordered by `at` and then by when they were added."""
     scheduled_by: str | None = None
@@ -317,21 +321,14 @@ class TimerCore:
         now: datetime,
         duration: timedelta,
         settings: Settings = NO_SETTINGS,
-        *,
-        apply_if_on: bool = True,
     ) -> list[Effect]:
         """Count down `duration` from now; zero or less stops the timer.
 
-        Non-empty `settings` replace the ones that are owed and are sent with the
-        turn-on, or on their own to a target that is on. With `apply_if_on` false they
-        are not sent on their own to a target that is on, or whose turn-on is in
-        flight, when the command arrives. That is all it promises for now: the choice
-        is not kept with the owed settings, so settings that are still owed because
-        the target was away or its turn-on failed go to it when it is next found
-        running, however it came to run (see `docs/followups.md`).
+        Non-empty `settings` replace the ones that are owed, whoever owed them, and are
+        sent with the turn-on, or on their own to a target that is on (P1).
         """
         now = _utc(now)
-        return self._run_until(now, now + duration, settings, apply_if_on=apply_if_on)
+        return self._run_until(now, now + duration, settings)
 
     @_reports_change
     def add(self, now: datetime, delta: timedelta) -> list[Effect]:
@@ -351,13 +348,7 @@ class TimerCore:
         return self._stop()
 
     @_reports_change
-    def run_open(
-        self,
-        now: datetime,
-        settings: Settings = NO_SETTINGS,
-        *,
-        apply_if_on: bool = True,
-    ) -> list[Effect]:
+    def run_open(self, now: datetime, settings: Settings = NO_SETTINGS) -> list[Effect]:
         """Switch the target on without a duration, with `settings` as `set_duration`
         takes them.
 
@@ -366,14 +357,9 @@ class TimerCore:
         """
         now = _utc(now)
         if self._mode == "strict":
-            return self._run_until(
-                now, now + self._default_duration, settings, apply_if_on=apply_if_on
-            )
+            return self._run_until(now, now + self._default_duration, settings)
         self._set_end(None)
-        return [
-            self._wakeup(),
-            *self._want("on", settings, apply_if_on=apply_if_on),
-        ]
+        return [self._wakeup(), *self._want("on", settings)]
 
     @_reports_change
     def add_command(self, now: datetime, command: Command) -> list[Effect]:
@@ -602,7 +588,9 @@ class TimerCore:
         set; the window never starts again either way.
 
         The window's settings are owed only if the target does not run as of this item
-        (§5.4): a window that opens on a running target pushes nothing.
+        (§5.4: a window that opens on a running target pushes nothing), and only to go
+        with a turn-on: a target that is found running before one goes out never gets
+        them.
         """
         windows = tuple(
             replace(w, started=True) if w == window else w
@@ -614,7 +602,7 @@ class TimerCore:
             return False
         self._set_end(window.end, by=window.interval_id)
         if not self._runs_as_of(wish):
-            self._owe(window.settings)
+            self._owe(window.settings, turn_on_only=True)
         return True
 
     def _realign(self, at: datetime, *, may_stop: bool) -> Literal["on", "off"] | None:
@@ -698,17 +686,12 @@ class TimerCore:
         now: datetime,
         end: datetime,
         settings: Settings = NO_SETTINGS,
-        *,
-        apply_if_on: bool = True,
     ) -> list[Effect]:
         """Count down to `end`, at most a day from now, or stop if it is not ahead."""
         if end <= now:
             return self._stop()
         self._set_end(_capped(now, end))
-        return [
-            self._wakeup(),
-            *self._want("on", settings, apply_if_on=apply_if_on),
-        ]
+        return [self._wakeup(), *self._want("on", settings)]
 
     def _stop(self) -> list[Effect]:
         self._end_timer()
@@ -741,8 +724,6 @@ class TimerCore:
         self,
         target: Literal["on", "off"],
         settings: Settings = NO_SETTINGS,
-        *,
-        apply_if_on: bool = True,
     ) -> list[Effect]:
         """Ask for the target to be switched, once per direction, and for the settings
         to be set when the target is wanted on.
@@ -752,16 +733,15 @@ class TimerCore:
         the target is not in flight: it is sent again, or dropped if the target
         is already where the new wish wants it. Settings go with the turn-on this
         causes; a target that needs none, because it is on or its turn-on is on its
-        way, gets them alone, unless `apply_if_on` is false (which holds only as far as
-        `set_duration` says).
+        way, gets them alone, unless they may only go with a turn-on.
         """
         state = self._snapshot
         in_flight = state.pending is not None and not self._unsent
         if in_flight and state.pending == target:
-            return self._settings_for_running_target(settings, apply_if_on)
+            return self._settings_for_running_target(settings)
         if not in_flight and state.last_actual == target:
             self._settle()
-            return self._settings_for_running_target(settings, apply_if_on)
+            return self._settings_for_running_target(settings)
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
         self._wish_allowance.reset()  # a command always sends, whatever reports did
         self._owe(settings)  # they ride with the turn-on this causes
@@ -770,13 +750,11 @@ class TimerCore:
             return []  # applied when the target is back
         return self._send(target)
 
-    def _settings_for_running_target(
-        self, settings: Settings, apply_if_on: bool
-    ) -> list[Effect]:
+    def _settings_for_running_target(self, settings: Settings) -> list[Effect]:
         """The settings of a command that needs no turn-on: owed and sent to a target
-        that runs, unless the command must not push them onto a running target."""
-        if apply_if_on:
-            self._owe(settings)
+        that runs. Settings that may only go with a turn-on, owed earlier and still
+        owed, are dropped by `_deliver_settings`, not sent."""
+        self._owe(settings)
         return self._deliver_settings(repeated=False)
 
     def _send(self, target: Literal["on", "off"]) -> list[Effect]:
@@ -801,10 +779,13 @@ class TimerCore:
                     return []
         return self._send(wish)
 
-    def _owe(self, settings: Settings) -> None:
-        """Make `settings`, if there are any, the ones the target has yet to take."""
+    def _owe(self, settings: Settings, *, turn_on_only: bool = False) -> None:
+        """Make `settings`, if there are any, the ones the target has yet to take, and
+        say whether they may only go with a turn-on. Empty settings change nothing."""
         if settings:
-            self._snapshot = replace(self._snapshot, owed_settings=settings)
+            self._snapshot = replace(
+                self._snapshot, owed_settings=settings, owed_turn_on_only=turn_on_only
+            )
             self._settings_unsent = True
             self._settings_allowance.reset()
 
@@ -812,14 +793,21 @@ class TimerCore:
         """Send the owed settings that have not reached the target, if it can take them.
 
         A target that is away gets nothing, and a turn-on that is yet to go out takes
-        the settings itself. `repeated` says a report that merely repeated the target's
-        state asked: it is answered within the allowance, like a wish.
+        the settings itself. Settings that may only go with a turn-on are never sent on
+        their own: a target that runs without the turn-on that was to carry them (it
+        came back on, someone switched it on, the one on its way carries none) has been
+        set up by someone, so they are dropped (§5.4). `repeated` says a report that
+        merely repeated the target's state asked: it is answered within the allowance,
+        like a wish.
         """
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):
             return []
         runs = state.last_actual == "on" or (state.pending == "on" and not self._unsent)
         if state.last_actual == "unavailable" or not runs:
+            return []
+        if state.owed_turn_on_only:
+            self._clear_settings()
             return []
         if repeated:
             match self._settings_allowance.take():
@@ -852,7 +840,9 @@ class TimerCore:
 
     def _clear_settings(self) -> None:
         """Nothing is owed: the target took the settings, or they no longer apply."""
-        self._snapshot = replace(self._snapshot, owed_settings=NO_SETTINGS)
+        self._snapshot = replace(
+            self._snapshot, owed_settings=NO_SETTINGS, owed_turn_on_only=False
+        )
         self._settings_unsent = False
         self._settings_allowance.reset()
 

@@ -34,7 +34,8 @@ def _command_from_json(data: dict[str, Any]) -> Command:
 
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
     """What is stored of a snapshot: the countdown, the wish not yet confirmed, the
-    settings not yet confirmed and the pending commands.
+    settings not yet confirmed with whether they may only go with a turn-on, and the
+    pending commands.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
@@ -45,6 +46,7 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
         "pending": snapshot.pending,
         "owed_settings": dict(snapshot.owed_settings),
         "commands": [command_to_json(command) for command in snapshot.commands],
+        "owed_turn_on_only": snapshot.owed_turn_on_only,
     }
 
 
@@ -60,17 +62,25 @@ class _TimerFile(Store[dict[str, Any]]):
         """Bring the stored timer of an older version to the current one.
 
         Version 1 knew no settings and no commands, so nothing was owed and nothing
-        waited.
+        waited. Version 2 knew no schedules, so every setting that was owed came from a
+        command and may reach a running target (P1).
         """
         if old_major_version == 1:
-            return {**old_data, "owed_settings": {}, "commands": []}
+            return {
+                **old_data,
+                "owed_settings": {},
+                "commands": [],
+                "owed_turn_on_only": False,
+            }
+        if old_major_version == 2:
+            return {**old_data, "owed_turn_on_only": False}
         raise NotImplementedError
 
 
 class TimerStore:
     """The stored timer of one config entry, in a versioned file of its own."""
 
-    STORAGE_VERSION: Final = 2
+    STORAGE_VERSION: Final = 3
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store = _TimerFile(hass, self.STORAGE_VERSION, f"timerify.{entry_id}")
@@ -89,6 +99,7 @@ class TimerStore:
                 end=None if end is None else datetime.fromisoformat(end),
                 pending=data["pending"],
                 owed_settings=freeze_settings(data["owed_settings"]),
+                owed_turn_on_only=data["owed_turn_on_only"],
                 commands=tuple(_command_from_json(c) for c in data["commands"]),
             )
         self._saved = _payload(snapshot)

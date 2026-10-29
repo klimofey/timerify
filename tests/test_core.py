@@ -968,46 +968,6 @@ def test_settings_on_running_target_are_applied() -> None:
     assert c.snapshot.owed_settings == COOL24
 
 
-def test_apply_if_on_false_leaves_running_target_alone() -> None:
-    """A command that must not push settings onto a running target sends none."""
-    c = core("strict", "on")
-
-    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
-
-    assert fx == [Arm(NOW + minutes(60)), Changed()]
-    assert c.snapshot.owed_settings == NO_SETTINGS
-
-
-def test_apply_if_on_false_still_sends_settings_with_the_turn_on_it_causes() -> None:
-    """The settings go to a target that is switched on by the command itself."""
-    c = core("strict", "off")
-
-    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
-
-    assert fx == [Arm(NOW + minutes(60)), TurnOn(COOL24), Changed()]
-
-
-def test_apply_if_on_false_keeps_settings_for_a_turn_on_that_waits() -> None:
-    """The command causes a turn-on that waits for the target; the settings wait too."""
-    c = core("strict", "unavailable")
-
-    c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
-
-    assert c.snapshot.owed_settings == COOL24
-    assert c.observe(NOW, "off", by_us=False) == [TurnOn(COOL24), Changed()]
-
-
-def test_apply_if_on_false_sends_no_settings_while_a_turn_on_is_in_flight() -> None:
-    """A turn-on that another command started is not this command's: no settings."""
-    c = core("strict", "off")
-    c.set_duration(NOW, minutes(10))
-
-    fx = c.set_duration(NOW, minutes(60), COOL24, apply_if_on=False)
-
-    assert fx == [Arm(NOW + minutes(60)), Changed()]
-    assert c.snapshot.owed_settings == NO_SETTINGS
-
-
 def test_loose_open_run_with_settings_on_running_target_applies_them() -> None:
     """Running without a countdown on a target that is on still sets the settings."""
     c = core("loose", "on")
@@ -2062,6 +2022,7 @@ def test_window_settings_go_with_the_turn_on() -> None:
 
     assert fx == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
     assert c.snapshot.owed_settings == COOL24
+    assert c.snapshot.owed_turn_on_only
 
 
 def test_window_settings_skip_a_running_target() -> None:
@@ -2107,7 +2068,26 @@ def test_window_start_while_a_turn_on_is_in_flight_keeps_the_commands_settings()
 
     assert fx == [Arm(NOW + minutes(45)), Changed()]
     assert c.snapshot.owed_settings == COOL24
+    assert not c.snapshot.owed_turn_on_only
     assert c.snapshot.scheduled_by == "x"
+
+
+def test_window_start_while_a_plain_turn_on_is_in_flight_pushes_no_settings() -> None:
+    """A turn-on on its way already wants the target running, whoever asked for it:
+    the window only extends the timer."""
+    c = core("strict", "off")
+    assert c.set_duration(NOW, minutes(10)) == [
+        Arm(NOW + minutes(10)),
+        TurnOn(),
+        Changed(),
+    ]
+    c.set_windows(NOW, [window("x", 5, 45, COOL24)], configured={"x"})
+
+    fx = c.tick(NOW + minutes(5))
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
 
 
 def test_window_start_after_a_failed_turn_on_keeps_the_settings_that_are_owed() -> None:
@@ -2211,6 +2191,199 @@ def test_window_start_while_the_target_is_unavailable_turns_on_when_it_is_back()
     back = c.observe(NOW + minutes(2), "off", by_us=False)
 
     assert back == [TurnOn(COOL24), Changed()]
+
+
+def away_until_the_window_owes(settings: Settings = COOL24) -> TimerCore:
+    """A core whose target is away when the window of `x` opens, so the window's
+    settings are owed to a turn-on that waits (R10)."""
+    c = core("strict", "unavailable")
+    c.set_windows(NOW, [window("x", 0, 45, settings)], configured={"x"})
+    assert c.tick(NOW) == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.owed_settings == settings
+    assert c.snapshot.owed_turn_on_only
+    return c
+
+
+def test_turn_on_only_settings_are_dropped_when_the_target_comes_back_on() -> None:
+    """§5.4: the AC was away when the window opened and comes back running, so someone
+    chose its settings; the window's are not pushed onto it."""
+    c = away_until_the_window_owes()
+
+    back = c.observe(NOW + minutes(2), "on", by_us=False)
+
+    assert back == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
+    assert c.snapshot.pending is None
+    assert c.snapshot.end == NOW + minutes(45)
+
+
+def test_turn_on_only_settings_go_with_the_turn_on_when_the_target_comes_back_off() -> (
+    None
+):
+    """The same window, the AC back off: it is turned on with the window's settings."""
+    c = away_until_the_window_owes()
+
+    back = c.observe(NOW + minutes(2), "off", by_us=False)
+
+    assert back == [TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_settings_applied_clears_the_marker_with_the_settings() -> None:
+    """Once the turn-on that carried them went through, nothing is owed any more."""
+    c = away_until_the_window_owes()
+    c.observe(NOW + minutes(2), "off", by_us=False)
+
+    fx = c.settings_applied(NOW + minutes(2))
+
+    assert fx == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
+
+
+def test_a_turn_on_that_failed_takes_turn_on_only_settings_again() -> None:
+    """The target is still off, so the settings still have a turn-on to ride on."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 45, COOL24)], configured={"x"})
+    assert c.tick(NOW) == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "off", by_us=False)
+
+    assert fx == [TurnOn(COOL24)]
+    assert c.snapshot.owed_settings == COOL24
+    assert c.snapshot.owed_turn_on_only
+
+
+def test_manual_on_after_a_failed_turn_on_drops_turn_on_only_settings() -> None:
+    """The window's turn-on never reached the AC and someone switched it on by hand:
+    its settings were chosen, and the window's are not pushed onto it."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 45, COOL24)], configured={"x"})
+    assert c.tick(NOW) == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=False)
+
+    assert fx == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
+    assert c.snapshot.pending is None
+
+
+@pytest.mark.parametrize(
+    "ask",
+    [
+        pytest.param(
+            lambda c: c.set_duration(NOW + minutes(1), minutes(30), HEAT22), id="set"
+        ),
+        pytest.param(lambda c: c.run_open(NOW + minutes(1), HEAT22), id="run-open"),
+        pytest.param(
+            lambda c: (
+                c.add_command(NOW, cmd(1, minutes=30, settings=HEAT22)),
+                c.tick(NOW + minutes(1)),
+            ),
+            id="pending-command",
+        ),
+    ],
+)
+def test_a_command_with_settings_replaces_the_marker(
+    ask: Callable[[TimerCore], object],
+) -> None:
+    """P1: what a command asks the target to run with is never turn-on-only, so the AC
+    that comes back running gets heating 22 and not cooling 24."""
+    c = away_until_the_window_owes()
+
+    ask(c)
+
+    assert c.snapshot.owed_settings == HEAT22
+    assert not c.snapshot.owed_turn_on_only
+    back = c.observe(NOW + minutes(2), "on", by_us=False)
+    assert back == [ApplySettings(HEAT22), Changed()]
+    assert c.snapshot.owed_settings == HEAT22
+
+
+def test_a_command_without_settings_leaves_the_marker_alone() -> None:
+    """A plain command neither invents settings nor makes the window's go anywhere
+    else than with a turn-on."""
+    c = away_until_the_window_owes()
+
+    c.set_duration(NOW + minutes(1), minutes(60))
+
+    assert c.snapshot.owed_settings == COOL24
+    assert c.snapshot.owed_turn_on_only
+    assert c.observe(NOW + minutes(2), "on", by_us=False) == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+@pytest.mark.parametrize(
+    "ending",
+    [
+        pytest.param(lambda c, now: c.stop(now), id="stop"),
+        pytest.param(lambda c, now: c.set_duration(now, timedelta(0)), id="zero"),
+        pytest.param(lambda c, now: c.tick(now + minutes(45)), id="expiry"),
+    ],
+)
+def test_every_end_of_the_timer_drops_turn_on_only_settings(
+    ending: Callable[[TimerCore, datetime], object],
+) -> None:
+    """A timer that stops runs with nothing: the window's settings go with it."""
+    c = away_until_the_window_owes()
+
+    ending(c, NOW + minutes(1))
+
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
+
+
+def test_restored_turn_on_only_settings_skip_a_running_target() -> None:
+    """Home Assistant restarted with the window's settings owed to a turn-on; the AC
+    is found running, so nothing is pushed onto it."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(30),
+            pending="on",
+            owed_settings=COOL24,
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert c.observe(NOW, "on", by_us=False) == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
+
+
+def test_restored_turn_on_only_settings_go_with_the_turn_on_of_an_off_target() -> None:
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(30),
+            pending="on",
+            owed_settings=COOL24,
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert c.observe(NOW, "off", by_us=False) == [TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_turn_on_only
+
+
+def test_restored_turn_on_only_settings_without_a_wish_skip_a_running_target() -> None:
+    """Whatever left them behind, settings that may only ride on a turn-on never wait
+    for a target that already runs."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(end=NOW + minutes(30), owed_settings=COOL24, owed_turn_on_only=True),
+    )
+
+    assert c.observe(NOW, "on", by_us=False) == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
 
 
 def test_window_start_cuts_a_loose_open_run_at_the_window_end() -> None:
@@ -2902,6 +3075,36 @@ def test_fold_across_window_end_and_next_start_has_one_wish() -> None:
     assert c.snapshot.end == NOW + minutes(1455)
     assert c.snapshot.scheduled_by == "x"
     assert c.snapshot.pending is None
+
+
+def test_fold_across_window_end_and_next_start_pushes_no_settings_onto_the_target() -> (
+    None
+):
+    """The same night with a window that carries settings: the timer ended and the
+    next window opened in one fold, which sees the target as wanted off at that
+    moment, but it stayed on all night and nobody asked it to turn on."""
+    monday = window("x", -30, 15, started=True)
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(15),
+            scheduled_by="x",
+            windows=(monday,),
+            last_actual="on",
+        ),
+    )
+    tuesday = window("x", 1410, 1455, COOL24)
+    c.set_windows(NOW + minutes(1425), [tuesday], configured={"x"})
+
+    fx = c.observe(NOW + minutes(1425), "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(1455)), Changed()]
+    assert c.snapshot.end == NOW + minutes(1455)
+    assert c.snapshot.scheduled_by == "x"
+    assert c.snapshot.pending is None
+    assert c.snapshot.owed_settings == NO_SETTINGS
+    assert not c.snapshot.owed_turn_on_only
 
 
 def test_window_start_that_leaves_the_timer_alone_lets_a_manual_off_clear_it() -> None:

@@ -79,8 +79,8 @@ repeated beside its successor.
   unavailable, the controller logs what was due, comparing the snapshot before and after
   `tick`: "ended" only when the countdown really ended and the target is wanted off (a
   command due at that instant that extended it, or that turns the target on, does not
-  count), "command came due" for a command that was carried out, unless its run is over
-  by the time the target is back. A command dropped because the run it asked for is over
+  count), and "command came due" for every command that was carried out (what it wants
+  is applied when the target is back, if it is still relevant then, as R10 says). A command dropped because the run it asked for is over
   is an effect of the core (`CommandDropped`) that the controller logs at info level; the
   core stays pure and emits no other signal. Cost if wrong: none.
 

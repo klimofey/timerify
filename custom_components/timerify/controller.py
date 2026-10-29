@@ -346,10 +346,11 @@ class TargetController:
         dropped = {e.command.id for e in effects if isinstance(e, CommandDropped)}
         kept = {command.id for command in after.commands}
         if any(c.id not in kept and c.id not in dropped for c in before.commands):
-            # Its run may end before the target is back, and then nothing is started.
+            # What it wants is applied when the target is back, if still relevant
+            # then (R10): a run that is over by then starts nothing.
             _LOGGER.info(
                 "A pending command for %s came due while it is unavailable;"
-                " it is carried out when it is back, unless its run is over by then",
+                " it is applied when it is back, if it is still relevant then",
                 self.target_entity_id,
             )
 

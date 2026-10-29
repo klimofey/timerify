@@ -53,7 +53,7 @@ DROPPED = (
 in the local time of the tests, US/Pacific."""
 CAME_DUE_WHILE_UNAVAILABLE = (
     "A pending command for switch.boiler came due while it is unavailable;"
-    " it is carried out when it is back, unless its run is over by then"
+    " it is applied when it is back, if it is still relevant then"
 )
 """What is logged for a command that falls due while the target is away."""
 

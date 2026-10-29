@@ -24,13 +24,14 @@ repeated beside its successor.
   domain is added by a row, not by new code paths. The fallback reads every state but `on`
   as off, so it would misread a group of covers or locks (`open`, `locked`): a fallback
   entity or a group whose state is not `on` or `off` when the timer is added is
-  `not_switchable`, and so is one that is unavailable or has no state then. Entities of
-  the table's other rows are never judged by state (a switch may be unavailable at
-  setup). The picker cannot filter by state, so it shows cameras (they have both
-  services) and refuses them on submit as `not_switchable`; vacuums are not offered at all
-  because they have no `turn_on` / `turn_off` in 2026.10.4. Cost if wrong: a group of
-  covers or locks, and a fallback entity that is unavailable while it is added, cannot be
-  targets; the user tries again once the entity is back.
+  `not_switchable`, and so is one that is unavailable or has no state then (the row
+  field `judged_by_state`, set on the fallback). Entities of the table's other rows are
+  never judged by state (a switch may be unavailable at setup). The picker cannot filter
+  by state, so it shows cameras (they have both services) and refuses them on submit as
+  `not_switchable`; vacuums are not offered at all because they have no `turn_on` /
+  `turn_off` in 2026.10.4. Cost if wrong: a group of covers or locks, and a fallback
+  entity that is unavailable while it is added, cannot be targets; the user tries again
+  once the entity is back.
 - **Climate, water heater, fan, media player and siren targets are filtered by their
   features.** Climate needs `ClimateEntityFeature.TURN_ON` and `TURN_OFF`; water heaters
   need `WaterHeaterEntityFeature.ON_OFF`; fans, media players and sirens need their
@@ -76,11 +77,12 @@ repeated beside its successor.
   Cost if wrong: users who need longer timers.
 - **R10 logging lives in the controller.** When a wake-up comes due while the target is
   unavailable, the controller logs what was due, comparing the snapshot before and after
-  `tick`: "ended" only when the countdown really ended (a command due at that instant that
-  extended it does not count), "command came due" for a command that was carried out. A
-  command dropped because the run it asked for is over is an effect of the core
-  (`CommandDropped`) that the controller logs at info level; the core stays pure and
-  emits no other signal. Cost if wrong: none.
+  `tick`: "ended" only when the countdown really ended and the target is wanted off (a
+  command due at that instant that extended it, or that turns the target on, does not
+  count), "command came due" for a command that was carried out, unless its run is over
+  by the time the target is back. A command dropped because the run it asked for is over
+  is an effect of the core (`CommandDropped`) that the controller logs at info level; the
+  core stays pure and emits no other signal. Cost if wrong: none.
 
 ### Restarts and storage
 
@@ -111,17 +113,20 @@ repeated beside its successor.
   target resolution would duplicate Home Assistant. The one exception is
   `timerify.add_command` called with a response variable: Home Assistant itself raises
   "did not match any entities" there instead of the warning.
-- **`add_command` and `cancel_command` raise `timer_unloaded` when the timer unloads while
-  their call waits for the device.** The call reached the timer, so answering with the id
-  of a command that was never kept, or cancelling nothing, would be a lie. Cost if wrong:
-  none.
+- **Every command (the "Run for" number, `add_time`, `run`, `add_command` and
+  `cancel_command`) raises `timer_unloaded` when the timer unloads while its call waits
+  for the lock.** The call reached the timer, so returning as if the change had been made,
+  answering with the id of a command that was never kept, or cancelling nothing, would be
+  a lie. Cost if wrong: none.
 
 ### Translations
 
 - **The Russian texts were written by the implementer**: the entity names ("turn on for",
-  "turns off at", "next command"), the service and field texts, the settings section, the
-  HVAC mode names and the error messages in `translations/ru.json`. The spec gives only
-  English. Cost if wrong: the owner rewords a string.
+  "turns off at", "next command"), the service and field texts, the settings section and
+  the error messages in `translations/ru.json`; the HVAC mode names are Home Assistant's
+  own Russian ones. The spec gives only English. A message that names the target avoids a
+  grammatical case, since the name is a friendly name in the nominative. Cost if wrong: the
+  owner rewords a string.
 
 ### Verification
 
@@ -217,11 +222,31 @@ repeated beside its successor.
   schema errors are not translatable per key. Cost if wrong: none.
 - **A naive `at` is Home Assistant's local time** (`dt_util.as_utc`), because the UI
   datetime picker sends no zone. Cost if wrong: none.
+- **A `delay` counts from the moment the command gets its turn.** The controller takes it
+  as a time span and makes a time of it under the timer's lock, so a call that waits
+  behind a slow device (each call may take 30 seconds, and a climate turn-on with mode,
+  temperature and fan mode is three) is not refused as already passed. `at` is taken as
+  given. Cost if wrong: a delay of one minute that waited ninety seconds is due ninety
+  seconds after the call, not sixty.
+- **`action` accepts the booleans that YAML 1.1 makes of an unquoted `on` and `off`**
+  (true is "on", false is "off"), because Home Assistant's own loader does so and a
+  hand-written `action: on` would otherwise fail. The README quotes the words anyway. Cost
+  if wrong: none.
+- **`temperature` and `brightness_pct` refuse a boolean**, as the whole-number settings
+  do: `true` would be 1 % for a lamp. Home Assistant's own `light.turn_on` coerces it.
+  Cost if wrong: none.
 - **`at` keeps its seconds**; `delay` gives whole minutes anyway, and rounding an explicit
   time would surprise. Cost if wrong: none.
 - **An unknown command id raises `KeyError` in the core and the controller maps it to
   `unknown_command`**, so the snapshot stays the single source of truth. Cost if wrong:
   none.
+- **A loose-mode command to turn on without minutes that came due during downtime is
+  carried out however late.** An open run has no end, so "for whatever is left of it"
+  never runs out (§5.7), and P1 makes a command a firm promise: "turn the boiler on at
+  07:00" with Home Assistant back at 18:00 turns it on at 18:00, with no countdown.
+  Strict mode counts the default duration from the command's time, so a stale one is
+  dropped; a command to turn off is always carried out. Cost if wrong: a boiler started
+  hours late; the user can cancel the command, or give it minutes.
 - **One alarm sits at `next_wakeup`, the earlier of the end and the first command**, and
   the core's `tick` (formerly `expire`) handles both kinds of due items. One wake-up path
   for both. Cost if wrong: none.

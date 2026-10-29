@@ -89,14 +89,19 @@ features and lists such as the HVAC modes it has), and checks a request against 
 you make it, so a wrong request is refused at once with a message, not when the device
 is already waiting for it.
 
-Settings are applied in these cases, and only in these:
+Settings are applied in these cases:
 
 - `timerify.run` with settings turns the target on with them. If the target is already
   running, it gets them anyway: you asked for them.
 - A pending command that turns the target on carries its settings the same way, at its time,
   whether the target is running then or not.
-- Never on a manual turn-on, and never when you set "Run for" or use `timerify.add_time`:
-  those turn the target on plainly.
+- Settings that still wait for the device (see below) go out with the next turn-on of any
+  kind, whatever causes it: setting "Run for", `timerify.add_time` on a timer that is not
+  running, a command that gives no settings of its own. If the target is found running
+  instead, even when you turned it on by hand, they are set then.
+
+When no settings wait, a manual turn-on, setting "Run for" and `timerify.add_time` turn the
+target on plainly.
 
 An air conditioner (any climate entity) is turned on by setting the HVAC mode when one is
 given, and by `climate.turn_on` otherwise. The calls go one after the other: the turn-on
@@ -108,7 +113,7 @@ What happens when the device cannot take them yet:
   same limits as a refused turn-on, when the target reports again. The countdown runs
   meanwhile.
 - Settings given later replace the ones that wait. A command that gives none leaves them
-  alone.
+  alone, so they go out with the next turn-on, whatever causes it.
 - The countdown ending, or you turning the target off by hand, drops them.
 
 Timerify trusts what the device accepts: a settings call that returns without an error counts
@@ -191,7 +196,8 @@ the history database.
 
 All of them act on the "Run for" entities of timers. Pick them, or their devices or areas,
 as the target. Settings are written next to the other fields in YAML; the service form
-folds them into a collapsed "Settings" section.
+folds them into a collapsed "Settings" section. A call that waits behind a slow device
+while its timer is unloaded fails with a message instead of reporting success.
 
 `timerify.add_time` moves the end of the countdown by a number of minutes, negative to
 take time off, up to a day either way. Adding to a timer that is not running starts it;
@@ -244,9 +250,11 @@ of the command, per timer, which is what cancels it:
     command_id: "{{ cmd['number.ac_run_for'].command_id }}"
 ```
 
-Quote `"on"` and `"off"` in YAML: unquoted, `on` is read as the boolean true.
+In YAML an unquoted `on` is the boolean true. Timerify reads true as `"on"` and false as
+`"off"`, so `action: on` works too; the examples quote the words anyway.
 
-A command at a moment looks like this:
+A command at a moment looks like this. `at` must lie ahead and at most a week away, so
+this one is refused once 22:30 has passed:
 
 ```yaml
 action: timerify.add_command
@@ -254,13 +262,23 @@ target:
   entity_id: number.boiler_run_for
 data:
   action: "off"
-  at: "2026-01-05 22:30:00"
+  at: "{{ today_at('22:30') }}"
 ```
 
+`timerify.add_command` is refused, with a message and nothing kept, when:
+
+- neither or both of `delay` and `at` are given (`delay_or_at`);
+- `at` has already passed (`command_in_past`) or is more than 7 days ahead
+  (`command_too_far`);
+- `action` is `"off"` and `minutes` or settings are given
+  (`off_takes_no_duration_or_settings`);
+- the target cannot take a setting, as for `timerify.run`;
+- the timer already keeps 20 commands (`too_many_commands`).
+
 `timerify.cancel_command` removes one pending command by its id. Aim it at the timer that
-holds the command: another timer does not know the id and says so. The id is in the
-response of `timerify.add_command` and in the `commands` attribute of the
-[Next command sensor](#next-command-sensor).
+holds the command: another timer does not know the id and says so
+(`unknown_command`). The id is in the response of `timerify.add_command` and in the
+`commands` attribute of the [Next command sensor](#next-command-sensor).
 
 ## Installation
 

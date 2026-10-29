@@ -197,6 +197,9 @@ class TargetController:
             # Saved ahead of the effects: a service call may take up to
             # SERVICE_CALL_TIMEOUT, and a restart meanwhile must find the new timer.
             await self._store.async_save(self.snapshot)
+            if not self._stopped:
+                # Shown at once too: the entities must not wait for a slow device.
+                self._refresh_entities()
         for effect in effects:
             if self._stopped:
                 return  # Unloaded while an earlier effect was under way.
@@ -210,13 +213,16 @@ class TargetController:
                 case Disarm():
                     self._disarm()
                 case Changed():
-                    self._schedule_refresh()
-                    # The entities show the end of the countdown; the rest of the
-                    # snapshot is bookkeeping that needs no state write.
-                    if self.snapshot.end != self._notified_end:
-                        self._notify()
+                    pass  # Saved and shown ahead of the other effects.
                 case _:
                     assert_never(effect)
+
+    def _refresh_entities(self) -> None:
+        self._schedule_refresh()
+        # The entities show the end of the countdown; the rest of the snapshot is
+        # bookkeeping that needs no state write.
+        if self.snapshot.end != self._notified_end:
+            self._notify()
 
     async def _switch(self, wish: Literal["on", "off"]) -> None:
         domain, service = (

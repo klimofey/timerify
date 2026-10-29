@@ -296,6 +296,35 @@ async def test_starting_again_while_the_target_is_still_switching_off(
     assert state_of(hass, NUMBER) == "30"
 
 
+async def test_entities_show_the_new_timer_while_the_device_is_still_answering(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A slow device does not make the slider look ignored: "Run for" and "Ends at"
+    move at once, the target follows when it has switched."""
+    await setup_target()
+    slow = fake_target.hold_next_call()
+    setting = hass.async_create_task(
+        hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": NUMBER, "value": 10},
+            blocking=True,
+        )
+    )
+    await slow.reached.wait()
+
+    assert state_of(hass, NUMBER) == "10"
+    assert state_of(hass, SENSOR) == "2026-01-05T07:10:00+00:00"
+    assert state_of(hass, TARGET_ID) == "off"
+
+    slow.release.set()
+    await setting
+    await hass.async_block_till_done()
+
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, NUMBER) == "10"
+
+
 async def test_timer_across_dst_change(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,

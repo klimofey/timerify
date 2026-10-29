@@ -217,6 +217,53 @@ async def test_settings_wait_while_ac_unavailable(
     assert state_of(hass, AC_ID) == "cool"
 
 
+async def test_settings_that_wait_go_out_with_a_later_plain_run_for(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Cooling at 24 was asked for while the air conditioner was away. The user then
+    sets Run for by hand, which says nothing of settings; the turn-on that follows when
+    the device is back still carries what was asked for."""
+    await setup_target(target=AC_ID)
+    await fake_climate.set_state("unavailable")
+    await call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=60,
+        hvac_mode="cool",
+        temperature=24,
+    )
+
+    await set_number(hass, AC_NUMBER, 30)
+    assert fake_climate.call_data == []
+    await fake_climate.set_state("off")
+
+    assert fake_climate.call_data == COOL_24
+    assert state_of(hass, AC_NUMBER) == "30"
+
+
+async def test_settings_that_wait_are_set_when_the_target_is_found_running(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The air conditioner is turned on by hand while it is away from Home Assistant:
+    when it is back, running, the cooling and the 24 that were asked for are set."""
+    await setup_target(target=AC_ID)
+    await fake_climate.set_state("unavailable")
+    await call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=60,
+        hvac_mode="cool",
+        temperature=24,
+    )
+
+    await fake_climate.set_state("heat")
+
+    assert fake_climate.call_data == COOL_24
+    assert state_of(hass, AC_ID) == "cool"
+
+
 async def test_settings_are_not_resent_once_applied(
     hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
 ) -> None:

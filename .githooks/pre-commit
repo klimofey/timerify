@@ -3,6 +3,7 @@
 # The exceptions are translations of the product itself: README.ru.md, and every
 # language but English under custom_components/timerify/translations/<lang>.json
 # and custom_components/timerify/sentences/<lang>/.
+set -o pipefail  # a failing `git diff` must refuse the commit, not pass it unchecked
 status=0
 
 cyrillic_allowed() {
@@ -20,17 +21,41 @@ cyrillic_allowed() {
 }
 
 # Git reports a binary file as "-<tab>-<tab>path" in --numstat: images carry no text to check.
+# The path is a literal one: a name such as "a[1].bin" is not a glob here.
 is_binary() {
-  [[ $(git diff --cached --numstat -- "$1") == $'-\t-\t'* ]]
+  [[ $(git --literal-pathspecs -c core.quotepath=off diff --cached --numstat -- "$1") == $'-\t-\t'* ]]
 }
 
-git diff --cached --name-only --diff-filter=ACMR -z | while IFS= read -r -d '' path; do
+# Exit status of the Cyrillic scan of a staged file: 0 clean, 1 Cyrillic found, 2 the
+# scan itself failed (the file could not be read, or perl is missing or broke).
+scan_for_cyrillic() {
+  local statuses
+  git show ":$1" | perl -CSD -ne 'exit 1 if /\p{Cyrillic}/'
+  statuses=("${PIPESTATUS[@]}")
+  # perl stops reading at the first match, which can end `git show` with SIGPIPE, so
+  # perl's verdict comes first and git's status only counts when perl read everything.
+  case ${statuses[1]} in
+    0) [[ ${statuses[0]} -eq 0 ]] || return 2 ;;
+    1) return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+git -c core.quotepath=off diff --cached --name-only --diff-filter=ACMR -z | while IFS= read -r -d '' path; do
   cyrillic_allowed "$path" && continue
   is_binary "$path" && continue
-  if git show ":$path" | perl -CSD -ne 'exit 1 if /\p{Cyrillic}/'; then :; else
-    echo "pre-commit: $path contains Cyrillic text; the repository is English-only." >&2
-    exit 1
-  fi
+  scan_for_cyrillic "$path"
+  case $? in
+    0) ;;
+    1)
+      echo "pre-commit: $path contains Cyrillic text; the repository is English-only." >&2
+      exit 1
+      ;;
+    *)
+      echo "pre-commit: could not check $path for Cyrillic text (git or perl failed); commit refused." >&2
+      exit 1
+      ;;
+  esac
 done || status=1
 
 exit $status

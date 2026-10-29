@@ -330,8 +330,7 @@ class TargetController:
                 # The tick folds what fell due while this call waited for its turn. A
                 # window that it finds over is replaced like any other (the interval
                 # that was switched off is not: its window left with the flag).
-                before = self.snapshot
-                await self._execute_fold(before, effects + self._core.tick(now))
+                await self._fold_due(now, effects)
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -411,11 +410,14 @@ class TargetController:
 
         Raises _WorkdayUnknown, having logged why (once per outage), when the sensor
         cannot say: the call fails, which it does for a sensor that is unavailable or
-        gone, or takes longer than a service call may, or the answer is not one.
+        gone, or takes longer than a service call may, or the answer is not one. A call
+        that raises something else, a bug in the integration or a change to its service,
+        is a call that fails too: it must not stop the timer.
         """
         sensor = self._workday_sensor
         assert sensor is not None  # An interval that asks has a sensor: see __init__.
         reason: object
+        unexpected: Exception | None = None
         try:
             async with asyncio.timeout(SERVICE_CALL_TIMEOUT.total_seconds()):
                 response = await self._hass.services.async_call(
@@ -429,18 +431,23 @@ class TargetController:
             reason = err
         except TimeoutError:
             reason = f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
+        except Exception as err:
+            reason = f"{type(err).__name__}: {err}"
+            unexpected = err
         else:
             if (answer := _workday_answer(response, sensor)) is not None:
                 self._workday_unanswered = False
                 return answer
             reason = f"it answered {response!r}"
-        self._log_workday_unknown(day, reason)
+        self._log_workday_unknown(day, reason, unexpected)
         raise _WorkdayUnknown
 
-    def _log_workday_unknown(self, day: date, reason: object) -> None:
+    def _log_workday_unknown(
+        self, day: date, reason: object, unexpected: Exception | None
+    ) -> None:
         """Say that the Workday sensor could not be asked about `day`, once for as long
         as it cannot be: the next answer ends the outage, and a later one is logged
-        again."""
+        again. An error nobody expected is logged with its traceback."""
         if not self._workday_unanswered:
             self._workday_unanswered = True
             _LOGGER.warning(
@@ -450,6 +457,7 @@ class TargetController:
                 day,
                 reason,
                 self.target_entity_id,
+                exc_info=unexpected,
             )
 
     def _set_windows(
@@ -480,9 +488,7 @@ class TargetController:
         if self._stopped:
             return False
         now = dt_util.utcnow()
-        merged = [*effects, *self._set_windows(now, windows, unknown)]
-        before = self.snapshot
-        await self._execute_fold(before, merged + self._core.tick(now))
+        await self._fold_due(now, [*effects, *self._set_windows(now, windows, unknown)])
         return True
 
     async def _refresh_windows(self) -> None:
@@ -564,11 +570,17 @@ class TargetController:
         async with self._lock:
             if self._stopped:
                 return
-            now = dt_util.utcnow()
-            before = self.snapshot
-            effects = self._core.tick(now)
-            self._log_due_while_unavailable(before, now, effects)
-            await self._execute_fold(before, effects)
+            await self._fold_due(dt_util.utcnow(), [])
+
+    async def _fold_due(self, now: datetime, effects: list[Effect]) -> None:
+        """Carry out `effects`, which the caller has just made the core produce, and
+        whatever falls due at `now` on top of them, and say what came due while the
+        target is unavailable. Every event that folds what is due goes through here:
+        the alarm, the refresh of the windows and the switching off of an interval."""
+        before = self.snapshot
+        effects = effects + self._core.tick(now)
+        self._log_due_while_unavailable(before, now, effects)
+        await self._execute_fold(before, effects)
 
     async def _execute_fold(self, before: Snapshot, effects: list[Effect]) -> None:
         """Carry out the effects of a fold of what fell due, which `tick` and `observe`

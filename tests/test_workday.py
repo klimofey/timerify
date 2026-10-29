@@ -8,6 +8,7 @@ to each event with its own jump: one jump is one catch-up.
 """
 
 import copy
+import logging
 from datetime import date, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -37,9 +38,10 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.schedule import Interval, workday_window
 
-from .conftest import FakeTarget, FakeWorkday, SetupTarget
+from .conftest import NO_ENTITY_MATCHED, FakeTarget, FakeWorkday, SetupTarget
 from .helpers import (
     JERUSALEM,
+    NUMBER,
     SENSOR,
     SUNDAY,
     TARGET_ID,
@@ -53,9 +55,11 @@ from .helpers import (
     open_sunday,
     restart,
     saved,
+    set_number,
     set_switch,
     state_of,
     storage_key,
+    timerify_info,
     timerify_warnings,
 )
 
@@ -70,6 +74,11 @@ WORKING_DAYS_SWITCH = "switch.boiler_schedule_06_30_07_15_working_days"
 
 NOT_ASKED = "Could not ask binary_sensor.workday_sensor whether"
 """How the warning about a day the sensor could not answer for begins."""
+
+WINDOW_STARTED_WHILE_UNAVAILABLE = (
+    "A schedule window of switch.boiler started while it is unavailable;"
+    " it is turned on when it is back, if the window is still open then"
+)
 
 
 async def set_up_boiler(
@@ -109,8 +118,11 @@ async def test_owner_boiler_week(
         await advance_to(hass, freezer, local(day, "07:15"))
         expected.append(TURN_OFF)
         assert fake_target.calls == expected
+        await advance_to(hass, freezer, local(day, "08:00"))
+        assert fake_target.calls == expected  # A working day has no morning off.
+        assert state_of(hass, SENSOR) == "unknown"
         await advance_to(hass, freezer, local(day, "09:00"))
-        assert fake_target.calls == expected  # No day off in the week yet.
+        assert fake_target.calls == expected
 
     for day in (FRIDAY, SATURDAY):
         await advance_to(hass, freezer, local(day, "06:30"))
@@ -579,6 +591,65 @@ async def test_answer_that_is_not_about_the_sensor_is_unknown(
     assert fake_target.calls == []
 
 
+async def test_sensor_that_breaks_does_not_stop_a_running_countdown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The boiler runs a ten-minute countdown when Home Assistant restarts, and the
+    Workday integration, which has a bug, raises something nobody expected when it is
+    asked. The windows wait, the log says why, and the boiler still goes off when its
+    countdown is over: a timer is not the thing to break because of a sensor."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await set_number(hass, NUMBER, 10)
+    fake_workday.fail_next_call(ValueError("Workday is broken"))
+
+    await restart(hass, entry)
+
+    (warning,) = timerify_warnings(caplog)
+    assert warning.startswith(NOT_ASKED)
+    assert "ValueError: Workday is broken" in warning
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "06:10")
+    await advance_to(hass, freezer, local(SUNDAY, "06:10"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]  # Its window was known.
+
+
+async def test_switching_on_when_the_sensor_breaks_changes_the_flag_and_nothing_else(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The flip succeeds, as it does when the sensor is away: the interval is on, in the
+    file and on the dashboard alike, and its window comes when the sensor is heard
+    from."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await set_switch(hass, WORKING_DAYS_SWITCH, False)
+    fake_workday.fail_next_call(ValueError("Workday is broken"))
+
+    await set_switch(hass, WORKING_DAYS_SWITCH, True)
+
+    assert state_of(hass, WORKING_DAYS_SWITCH) == "on"
+    assert saved(hass_storage, entry)["disabled_intervals"] == []
+    assert saved(hass_storage, entry)["windows"] == []
+    (warning,) = timerify_warnings(caplog)
+    assert warning.startswith(NOT_ASKED)
+    await fake_workday.report()
+    assert len(saved(hass_storage, entry)["windows"]) == 1
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+
+
 async def test_timer_without_a_sensor_does_not_load_with_intervals_that_need_one(
     hass: HomeAssistant, fake_target: FakeTarget
 ) -> None:
@@ -678,6 +749,70 @@ async def test_window_that_ends_while_the_sensor_is_slow_is_replaced_by_tomorrow
     await advance_to(hass, freezer, local(MONDAY, "06:30"))
     assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
     assert state_of(hass, SENSOR) == iso(MONDAY, "07:15")
+
+
+async def test_window_that_starts_while_the_sensor_is_slow_is_logged_when_unavailable(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The boiler is away and the sensor reports slowly across the start of the window:
+    the answer comes when the window is open, the window starts at once, and the log
+    says that the boiler is switched on only when it is back, as it does for a window
+    that starts at its own time."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await fake_target.set_state("unavailable")
+    freezer.move_to(local(SUNDAY, "06:29:45"))
+    slow = fake_workday.hold_next_call()
+    fake_workday.write()
+    await slow.reached.wait()
+    freezer.move_to(local(SUNDAY, "06:30:10"))
+    async_fire_time_changed(hass)
+
+    slow.release.set()
+    await hass.async_block_till_done()
+
+    assert timerify_info(caplog) == [WINDOW_STARTED_WHILE_UNAVAILABLE]
+    await fake_target.set_state("off")
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+
+async def test_window_that_opens_while_the_sensor_is_slow_comes_before_a_later_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The window opens at 06:30 while the sensor is being asked, and at ten past the
+    user asks for half an hour; the call waits for the answer. The window opened first
+    and goes first, so the half hour is the later word and replaces its end: the boiler
+    runs until 07:00:10, not until the window's 07:15."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    freezer.move_to(local(SUNDAY, "06:29:45"))
+    slow = fake_workday.hold_next_call()
+    fake_workday.write()
+    await slow.reached.wait()
+    freezer.move_to(local(SUNDAY, "06:30:10"))
+    running = hass.async_create_task(
+        hass.services.async_call(
+            DOMAIN, "run", {"entity_id": NUMBER, "minutes": 30}, blocking=True
+        )
+    )
+
+    slow.release.set()
+    await running
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:00:10")
 
 
 async def test_sensor_that_comes_back_while_the_timer_starts_is_not_missed(
@@ -1056,9 +1191,15 @@ def test_holidays_is_the_version_the_workday_integration_requires() -> None:
     assert manifest["requirements"] == [f"holidays=={holidays.__version__}"]
 
 
-async def real_workday(hass: HomeAssistant, days_offset: int = 0) -> str:
+REAL_SENSOR = "binary_sensor.workday_sensor"
+"""The sensor of the real Workday integration, named after its entry."""
+
+
+async def real_workday_entry(
+    hass: HomeAssistant, days_offset: int = 0
+) -> MockConfigEntry:
     """Set up the Workday integration of Home Assistant for Israel, its sensor looking
-    `days_offset` days ahead, and return the entity id of the sensor."""
+    `days_offset` days ahead, and return its config entry."""
     entry = MockConfigEntry(
         domain="workday",
         title="Workday Sensor",
@@ -1069,7 +1210,14 @@ async def real_workday(hass: HomeAssistant, days_offset: int = 0) -> str:
     entry.add_to_hass(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    return "binary_sensor.workday_sensor"
+    return entry
+
+
+async def real_workday(hass: HomeAssistant, days_offset: int = 0) -> str:
+    """Set up the Workday integration for Israel and return the entity id of its
+    sensor."""
+    await real_workday_entry(hass, days_offset)
+    return REAL_SENSOR
 
 
 async def test_real_workday_integration_answers_for_israel(hass: HomeAssistant) -> None:
@@ -1146,3 +1294,43 @@ async def test_day_offset_of_the_sensor_shifts_the_days_as_it_answers(
     assert fake_target.calls == []
     await advance_to(hass, freezer, local(SATURDAY, "06:30"))
     assert fake_target.calls == [TURN_ON]
+
+
+async def test_real_workday_that_is_unloaded_cannot_answer_and_the_window_waits_for_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A Workday integration that is being reloaded leaves its sensor unavailable, and a
+    question about it fails with the error that `FakeWorkday` models, which is why the
+    timer takes it for a sensor that is away: the window of the morning waits, and when
+    the integration is back the boiler runs for the rest of it."""
+    workday_entry = await real_workday_entry(hass)
+    await open_sunday(hass, freezer)
+    await hass.config_entries.async_unload(workday_entry.entry_id)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.async_call(
+            "workday",
+            "check_date",
+            {"entity_id": REAL_SENSOR, "check_date": SUNDAY},
+            blocking=True,
+            return_response=True,
+        )
+    assert str(raised.value) == NO_ENTITY_MATCHED
+    entry = await setup_target(workday_sensor=REAL_SENSOR)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    (warning,) = timerify_warnings(caplog)
+    assert warning.startswith(NOT_ASKED)
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == []
+
+    freezer.move_to(local(SUNDAY, "06:40"))
+    await hass.config_entries.async_setup(workday_entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")

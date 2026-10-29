@@ -275,6 +275,14 @@ class FakeTarget:
         return handle
 
 
+NO_ENTITY_MATCHED: Final = (
+    "Service call requested response data but did not match any entities"
+)
+"""What Home Assistant raises when an entity service is asked for a response and no
+entity answers it, as for a sensor that is unavailable. A test against the real Workday
+integration pins that this is what it raises."""
+
+
 @dataclass
 class FakeWorkday:
     """The Workday integration as the other integrations see it: a binary sensor of
@@ -298,7 +306,7 @@ class FakeWorkday:
     """The day of every `check_date` call received, failed ones included."""
     _available: bool = True
     _state: str = STATE_ON
-    _failure: HomeAssistantError | None = None
+    _failure: Exception | None = None
     _held: HeldCall | None = None
 
     def is_workday(self, day: date) -> bool:
@@ -330,9 +338,9 @@ class FakeWorkday:
         self.write()
         await self.hass.async_block_till_done()
 
-    def fail_next_call(self, error: HomeAssistantError | None = None) -> None:
-        """Make the next `check_date` fail, with `error` or as a sensor that could not
-        answer."""
+    def fail_next_call(self, error: Exception | None = None) -> None:
+        """Make the next `check_date` fail, with `error` (a bug of the integration may
+        raise anything) or as a sensor that could not answer."""
         self._failure = error or HomeAssistantError("The sensor could not answer")
 
     def hold_next_call(self) -> HeldCall:
@@ -349,9 +357,7 @@ class FakeWorkday:
         if failure is None and (
             call.data["entity_id"] != self.entity_id or not self._available
         ):
-            failure = HomeAssistantError(
-                "Service call requested response data but did not match any entities"
-            )
+            failure = HomeAssistantError(NO_ENTITY_MATCHED)
         if self._held is not None:
             held, self._held = self._held, None
             held.reached.set()

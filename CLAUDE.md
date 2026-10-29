@@ -6,8 +6,9 @@ entities, the way Powercalc attaches virtual power sensors to existing devices. 
 pending commands, a weekly schedule and a remaining-time sensor — plus Assist voice
 intents ("turn on the boiler for 10 minutes", "how long is left on the boiler").
 
-Status: phase 1 (the core timer: countdown, `number` and `sensor` entities, config and options
-flow, restarts, services) is built; the later phases follow section 7 of the spec. Specs live in
+Status: phases 1 and 2 (the core timer: countdown, `number` and `sensor` entities, config and
+options flow, restarts, services; settings for turning on, pending commands and the "Next command"
+sensor) are built; the later phases follow section 7 of the spec. Specs live in
 `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes in `docs/research/`,
 decisions made where the spec was silent in `RULINGS.md`, and open items in `docs/followups.md`.
 

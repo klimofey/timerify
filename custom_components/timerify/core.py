@@ -122,11 +122,12 @@ def next_wakeup(snapshot: Snapshot) -> datetime | None:
     return min(times, default=None)
 
 
-def _utc(now: datetime) -> datetime:
-    """`now` in UTC, so every end is UTC whatever zone the caller works in."""
-    if now.utcoffset() is None:
-        raise ValueError("now must be timezone-aware")
-    return now.astimezone(UTC)
+def _utc(moment: datetime, what: str = "now") -> datetime:
+    """`moment` in UTC, so every end and every command's time is UTC whatever zone the
+    caller works in. A naive one is refused, naming it `what`."""
+    if moment.utcoffset() is None:
+        raise ValueError(f"{what} must be timezone-aware")
+    return moment.astimezone(UTC)
 
 
 def _capped(now: datetime, end: datetime) -> datetime:
@@ -193,7 +194,11 @@ class TimerCore:
         a wish, or the owed settings, again before the core gives up."""
         self._mode = mode
         self._default_duration = default_duration
-        self._snapshot = snapshot
+        # Only the first command is ever looked at, so a snapshot that comes from
+        # elsewhere is put in order: by time, equal times as they came.
+        self._snapshot = replace(
+            snapshot, commands=tuple(sorted(snapshot.commands, key=lambda c: c.at))
+        )
         self._unsent = False
         """The pending wish has not reached the target (its call failed or changed
         nothing, or the target was away). Only true while a wish is pending; never
@@ -278,8 +283,7 @@ class TimerCore:
     def add_command(self, now: datetime, command: Command) -> list[Effect]:
         """Keep `command` until its time, after those that are due at the same time."""
         _utc(now)  # unused, but every command rejects a naive time alike
-        if command.at.utcoffset() is None:
-            raise ValueError("the command's time must be timezone-aware")
+        command = replace(command, at=_utc(command.at, "the command's time"))
         commands = sorted((*self._snapshot.commands, command), key=lambda c: c.at)
         self._snapshot = replace(self._snapshot, commands=tuple(commands))
         return [self._wakeup()]

@@ -1382,6 +1382,34 @@ def test_commands_ordered_by_time_then_insertion() -> None:
     assert tuple(command.id for command in c.snapshot.commands) == ("c1", "c3", "c2")
 
 
+def test_command_time_is_kept_in_utc() -> None:
+    """A command made for a moment in another zone is stored, and armed, in UTC: the
+    end and the commands share one representation."""
+    c = core("strict", "off")
+    local = (NOW + minutes(15)).astimezone(ZoneInfo("Asia/Jerusalem"))
+
+    fx = c.add_command(NOW, Command("c1", local, "on"))
+
+    assert c.snapshot.commands == (cmd(15),)
+    assert c.snapshot.commands[0].at.tzinfo is UTC
+    arm = fx[0]
+    assert isinstance(arm, Arm)
+    assert arm.at.tzinfo is UTC
+
+
+def test_restored_commands_are_ordered_by_time_then_by_their_order() -> None:
+    """A timer that starts with its commands in any order still wakes up, and runs,
+    the earliest first; commands at the same time keep the order they came in."""
+    late, first, second = cmd(30, id="late"), cmd(10, id="a"), cmd(10, id="b")
+
+    c = holding("strict", "off", late, first, second)
+
+    assert [command.id for command in c.snapshot.commands] == ["a", "b", "late"]
+    assert next_wakeup(c.snapshot) == NOW + minutes(10)
+    c.tick(NOW + minutes(10))
+    assert [command.id for command in c.snapshot.commands] == ["late"]
+
+
 def test_cancel_unknown_command_raises() -> None:
     """Cancelling what is not there is an error, and changes nothing."""
     c = core("strict", "off")

@@ -224,3 +224,39 @@ async def test_refusing_device_is_commanded_again_when_it_changes_or_on_a_comman
 
     assert fake_target.calls == [TURN_ON] + [TURN_OFF] * (asked + 1)
     assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_service_that_keeps_raising_logs_its_traceback_once_per_wish(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A bug in the target's integration is shown in full the first time, then as a
+    line for each retry; a later wish that fails again gets the traceback again."""
+    await setup_target(mode="strict")
+    await set_number(hass, NUMBER, 10)
+    fake_target.fail_next_call(ConnectionError("The hub is unreachable"))
+    await advance(hass, freezer, minutes=10)
+    fake_target.fail_next_call(ConnectionError("The hub is unreachable"))
+
+    await fake_target.set_state("on", rssi=-80)
+
+    tracebacks = [record for record in caplog.records if record.exc_info]
+    assert len(tracebacks) == 1
+    assert timerify_warnings(caplog)[-1] == (
+        "Could not turn switch.boiler off: its service raised"
+        " ConnectionError('The hub is unreachable') again"
+    )
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_OFF]
+
+    await fake_target.set_state("on", rssi=-70)
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_OFF, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+    await set_number(hass, NUMBER, 10)
+    fake_target.fail_next_call(ConnectionError("The hub is unreachable"))
+    await advance(hass, freezer, minutes=10)
+
+    assert len([record for record in caplog.records if record.exc_info]) == 2

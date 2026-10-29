@@ -103,6 +103,8 @@ class TargetController:
         self._notified_end = snapshot.end
         self._expiry_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
+        self._raised_for: Literal["on", "off"] | None = None
+        """The pending wish whose failure was logged with a traceback."""
 
     @cached_property
     def device_name(self) -> str:
@@ -203,6 +205,8 @@ class TargetController:
         self._notify()
 
     async def _execute(self, effects: list[Effect]) -> None:
+        if self.snapshot.pending != self._raised_for:
+            self._raised_for = None  # that wish settled or was replaced
         if any(isinstance(effect, Changed) for effect in effects):
             # Saved ahead of the effects: a service call may take up to
             # SERVICE_CALL_TIMEOUT, and a restart meanwhile must find the new timer.
@@ -263,15 +267,11 @@ class TargetController:
             await self._call_failed(
                 wish, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
             )
-        except Exception:
+        except Exception as err:
             # Another integration's bug. It must not stop the effects that follow
             # or leave the wish counted as on its way: it is sent again like one
             # the device rejected.
-            _LOGGER.exception(
-                "Could not turn %s %s: its service raised an unexpected error",
-                self.target_entity_id,
-                wish,
-            )
+            self._log_raised(wish, err)
             await self._not_delivered()
         else:
             actual = actual_state(self._hass.states.get(self.target_entity_id))
@@ -286,6 +286,26 @@ class TargetController:
                     actual,
                 )
                 await self._not_delivered()
+
+    def _log_raised(self, wish: Literal["on", "off"], err: Exception) -> None:
+        """Log what another integration's service raised: the traceback the first time
+        for a wish, a line for each repeat, as a bug that persists repeats on every
+        report of the target."""
+        if self._raised_for == wish:
+            _LOGGER.warning(
+                "Could not turn %s %s: its service raised %r again",
+                self.target_entity_id,
+                wish,
+                err,
+            )
+            return
+        self._raised_for = wish
+        _LOGGER.error(
+            "Could not turn %s %s: its service raised an unexpected error",
+            self.target_entity_id,
+            wish,
+            exc_info=err,
+        )
 
     async def _call_failed(self, wish: Literal["on", "off"], reason: object) -> None:
         _LOGGER.warning("Could not turn %s %s: %s", self.target_entity_id, wish, reason)

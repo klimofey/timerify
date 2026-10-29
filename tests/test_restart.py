@@ -414,6 +414,21 @@ async def test_window_stopped_by_hand_is_stored_as_suppressed(
             "turn-on-only marker is set without owed settings",
             id="marker-without-settings",
         ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15"))
+                ],
+                disabled_intervals=["a"],
+            ),
+            "the interval a is switched off but has a window",
+            id="window-of-a-switched-off-interval",
+        ),
+        pytest.param(
+            {**payload(), "disabled_intervals": ["a", "a"]},
+            "the interval a is switched off twice",
+            id="interval-switched-off-twice",
+        ),
     ],
 )
 async def test_file_that_contradicts_itself_is_refused(

@@ -1829,6 +1829,9 @@ NAIVE = datetime(2026, 1, 5, 7, 0)
         pytest.param(lambda c: c.stop(NAIVE), id="stop"),
         pytest.param(lambda c: c.run_open(NAIVE), id="run-open"),
         pytest.param(lambda c: c.tick(NAIVE), id="tick"),
+        pytest.param(
+            lambda c: c.set_interval_enabled(NAIVE, "x", False), id="set-interval"
+        ),
         pytest.param(lambda c: c.add_command(NAIVE, cmd(10)), id="add-command"),
         pytest.param(lambda c: c.cancel_command(NAIVE, "c1"), id="cancel-command"),
         pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
@@ -3305,3 +3308,166 @@ def test_next_wakeup_includes_window_starts_and_ends(
     snapshot: Snapshot, expected: datetime | None
 ) -> None:
     assert next_wakeup(snapshot) == expected
+
+
+# Disabled intervals: the flag is kept in the snapshot, and disabling is an edit for S2.
+
+
+def test_disabling_the_scheduling_interval_stops_the_timer() -> None:
+    """S2: the interval whose window carries the timer is switched off, so the window
+    is gone and the timer, which nobody changed by hand, stops with it."""
+    c = following(
+        "strict", "on", window("x", -15, 45, started=True), end=NOW + minutes(45)
+    )
+
+    disabled = c.set_interval_enabled(NOW, "x", False)
+
+    assert disabled == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.disabled_intervals == frozenset({"x"})
+    assert c.snapshot.windows == ()
+    assert c.snapshot.end == NOW + minutes(45)
+
+    stopped = c.tick(NOW)
+
+    assert stopped == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.scheduled_by is None
+    assert c.snapshot.pending == "off"
+
+
+def test_disabling_takes_only_the_window_of_that_interval() -> None:
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 5, 45), window("y", 30, 75)], configured={"x", "y"})
+
+    fx = c.set_interval_enabled(NOW, "x", False)
+
+    assert fx == [Arm(NOW + minutes(30)), Changed()]
+    assert c.snapshot.windows == (window("y", 30, 75),)
+
+
+def test_disabling_after_a_manual_change_leaves_the_timer() -> None:
+    """S3: once the timer was changed by hand, switching an interval off does not touch
+    it, whichever interval's window it once followed."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("x", 0, 60)], configured={"x"})
+    c.tick(NOW)
+    c.add(NOW + minutes(10), minutes(30))
+
+    c.set_interval_enabled(NOW + minutes(20), "x", False)
+
+    assert c.tick(NOW + minutes(20)) == []
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(90), None)
+
+
+def test_disabling_the_interval_that_carries_the_timer_hands_it_to_the_other() -> None:
+    """S2 stops the timer only when no window is open: with a still open, the target
+    keeps running to a's end, which a now carries."""
+    c = overlapping()
+
+    c.set_interval_enabled(NOW + minutes(40), "b", False)
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+
+def test_disabling_an_interval_that_does_not_carry_the_timer_leaves_it() -> None:
+    c = overlapping()
+
+    c.set_interval_enabled(NOW + minutes(40), "a", False)
+
+    assert c.tick(NOW + minutes(40)) == []
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+
+
+def test_disabling_an_interval_whose_window_is_not_open_leaves_the_timer() -> None:
+    """A manual run goes on when an interval that was to start later is switched off."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    c.set_windows(NOW, [window("x", 60, 120)], configured={"x"})
+
+    c.set_interval_enabled(NOW, "x", False)
+
+    assert c.tick(NOW) == []
+    assert c.snapshot.end == NOW + minutes(30)
+    assert c.snapshot.windows == ()
+
+
+def test_enabling_forgets_the_flag_and_adds_no_window() -> None:
+    """Which window an interval has is worked out by the caller, and merged with
+    `set_windows`; the flag alone brings none back."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 5, 45)], configured={"x"})
+    c.set_interval_enabled(NOW, "x", False)
+
+    fx = c.set_interval_enabled(NOW, "x", True)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.disabled_intervals == frozenset()
+    assert c.snapshot.windows == ()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_setting_a_flag_to_where_it_is_changes_nothing(enabled: bool) -> None:
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 5, 45)], configured={"x"})
+    c.set_interval_enabled(NOW, "x", enabled)
+    before = c.snapshot
+
+    fx = c.set_interval_enabled(NOW, "x", enabled)
+
+    assert Changed() not in fx
+    assert c.snapshot == before
+
+
+def test_a_flag_is_kept_by_what_changes_the_timer() -> None:
+    c = core("strict", "off")
+    c.set_interval_enabled(NOW, "x", False)
+
+    c.set_duration(NOW, minutes(30))
+    c.add(NOW, minutes(5))
+    c.add_command(NOW, cmd(10))
+    c.observe(NOW + minutes(20), "on", by_us=True)
+    c.set_duration(NOW + minutes(20), minutes(0))
+
+    assert c.snapshot.disabled_intervals == frozenset({"x"})
+
+
+def test_disabled_intervals_are_pruned_to_configured() -> None:
+    """The flag of an interval that was deleted goes when the windows are merged."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(disabled_intervals=frozenset({"x", "gone"}), last_actual="off"),
+    )
+
+    fx = c.set_windows(NOW, [], configured={"x": None, "y": None}.keys())
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.disabled_intervals == frozenset({"x"})
+    assert isinstance(c.snapshot.disabled_intervals, frozenset)
+
+
+def test_windows_of_disabled_intervals_are_not_kept() -> None:
+    """The core holds the invariant: a disabled interval has no window, whoever
+    computed one, and whether it asked for the old one to be kept."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            windows=(window("old", 10, 50),),
+            disabled_intervals=frozenset({"x", "old"}),
+            last_actual="off",
+        ),
+    )
+
+    fx = c.set_windows(
+        NOW,
+        [window("x", 5, 45), window("y", 30, 75)],
+        configured={"x", "y", "old"},
+        keep={"old"},
+    )
+
+    assert fx == [Arm(NOW + minutes(30)), Changed()]
+    assert c.snapshot.windows == (window("y", 30, 75),)
+    assert c.snapshot.disabled_intervals == frozenset({"x", "old"})

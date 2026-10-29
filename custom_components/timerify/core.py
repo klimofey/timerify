@@ -83,7 +83,10 @@ class Snapshot:
     timer since (S2, S3). Always None while `end` is."""
     windows: tuple[Window, ...] = ()
     """The current or next window of every interval, ordered by `start`; at most one
-    per interval."""
+    per interval, and none for a disabled one."""
+    disabled_intervals: frozenset[str] = frozenset()
+    """The intervals the user switched off. Only intervals that exist stay in it; an
+    interval is on until it is named here."""
     last_actual: Actual | None = None
     """The target's last observed state; None until it has been observed."""
 
@@ -392,12 +395,13 @@ class TimerCore:
     ) -> list[Effect]:
         """Replace the windows with the current or next one of each interval.
 
-        `configured` names the intervals that exist: the windows of any other go. An
-        interval in `keep` keeps the window it has, started or not, whatever is given
-        for it: its occurrence could not be worked out this time. A new window that
-        is open now and replaces a started one that is open now is the same
-        occurrence, perhaps edited, so it does not start again. Any other new window
-        is a new occurrence and starts at its start.
+        `configured` names the intervals that exist: the windows of any other go, and
+        so does the flag of any other that is switched off. A switched off interval has
+        no window, whatever is given for it. An interval in `keep` keeps the window it
+        has, started or not, whatever is given for it: its occurrence could not be
+        worked out this time. A new window that is open now and replaces a started one
+        that is open now is the same occurrence, perhaps edited, so it does not start
+        again. Any other new window is a new occurrence and starts at its start.
 
         This only merges: the alarm is re-armed, and the next `tick` or `observe`
         folds what the new windows make due and follows an edit (S2).
@@ -409,20 +413,58 @@ class TimerCore:
                 raise ValueError(f"two windows of the interval {window.interval_id}")
             fresh[window.interval_id] = window
         old = {window.interval_id: window for window in self._snapshot.windows}
+        disabled = frozenset(
+            interval_id
+            for interval_id in self._snapshot.disabled_intervals
+            if interval_id in configured
+        )
+
+        def runs(interval_id: str) -> bool:
+            return interval_id in configured and interval_id not in disabled
+
         kept = [
             window
             for window in old.values()
-            if window.interval_id in keep and window.interval_id in configured
+            if window.interval_id in keep and runs(window.interval_id)
         ]
         merged = [
             _inheriting(window, old.get(window.interval_id), now)
             for window in fresh.values()
-            if window.interval_id in configured and window.interval_id not in keep
+            if window.interval_id not in keep and runs(window.interval_id)
         ]
         self._snapshot = replace(
             self._snapshot,
             windows=tuple(sorted(kept + merged, key=lambda w: w.start)),
+            disabled_intervals=disabled,
         )
+        return [self._wakeup()]
+
+    @_reports_change
+    def set_interval_enabled(
+        self, now: datetime, interval_id: str, enabled: bool
+    ) -> list[Effect]:
+        """Switch an interval on or off.
+
+        Switching off removes its window, which is an edit for S2: the next `tick`
+        realigns the timer, or leaves it if somebody changed it since (S3). Switching
+        on brings no window back: the caller works it out and merges it with
+        `set_windows`.
+
+        Like `set_windows`, this only merges: the alarm is re-armed, and the caller
+        follows with `tick`.
+        """
+        _utc(now)  # unused, but every command rejects a naive time alike
+        state = self._snapshot
+        if enabled:
+            self._snapshot = replace(
+                state, disabled_intervals=state.disabled_intervals - {interval_id}
+            )
+        else:
+            self._snapshot = replace(
+                state,
+                disabled_intervals=state.disabled_intervals | {interval_id},
+                windows=tuple(w for w in state.windows if w.interval_id != interval_id),
+            )
         return [self._wakeup()]
 
     @_reports_change

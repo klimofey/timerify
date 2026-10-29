@@ -294,6 +294,7 @@ def payload(
     owed_turn_on_only: bool = False,
     scheduled_by: str | None = None,
     windows: Sequence[dict[str, Any]] = (),
+    disabled_intervals: Sequence[str] = (),
 ) -> dict[str, Any]:
     """What the storage file of a timer holds: the stored form of its snapshot."""
     return {
@@ -304,6 +305,7 @@ def payload(
         "owed_turn_on_only": owed_turn_on_only,
         "scheduled_by": scheduled_by,
         "windows": list(windows),
+        "disabled_intervals": sorted(disabled_intervals),
     }
 
 

@@ -1,5 +1,6 @@
 """Persistence of one target's timer, saved whenever it changes."""
 
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -72,6 +73,10 @@ def _validated(snapshot: Snapshot) -> Snapshot:
             raise ValueError(
                 f"the window of {window.interval_id} is suppressed but has not started"
             )
+    if switched_off := snapshot.disabled_intervals & seen:
+        raise ValueError(
+            f"the interval {min(switched_off)} is switched off but has a window"
+        )
     if snapshot.scheduled_by is not None and snapshot.end is None:
         raise ValueError("the timer is scheduled by an interval but has no end")
     if snapshot.owed_turn_on_only and not snapshot.owed_settings:
@@ -79,10 +84,19 @@ def _validated(snapshot: Snapshot) -> Snapshot:
     return snapshot
 
 
+def _disabled_from_json(interval_ids: list[str]) -> frozenset[str]:
+    """The intervals that are switched off; each is named once."""
+    for interval_id, times in Counter(interval_ids).items():
+        if times > 1:
+            raise ValueError(f"the interval {interval_id} is switched off twice")
+    return frozenset(interval_ids)
+
+
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
     """What is stored of a snapshot: the countdown and the interval whose window end it
     carries, the wish not yet confirmed, the settings not yet confirmed with whether
-    they may only go with a turn-on, the pending commands and the schedule windows.
+    they may only go with a turn-on, the pending commands, the schedule windows and the
+    intervals that are switched off.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
@@ -96,6 +110,7 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
         "owed_turn_on_only": snapshot.owed_turn_on_only,
         "scheduled_by": snapshot.scheduled_by,
         "windows": [window_to_json(window) for window in snapshot.windows],
+        "disabled_intervals": sorted(snapshot.disabled_intervals),
     }
 
 
@@ -113,7 +128,7 @@ class _TimerFile(Store[dict[str, Any]]):
         Version 1 knew no settings and no commands, so nothing was owed and nothing
         waited. Version 2 knew no schedules, so every setting that was owed came from a
         command and may reach a running target (P1), and no window existed for a timer
-        to be carried by.
+        to be carried by, nor an interval to be switched off.
         """
         if old_major_version == 1:
             return {
@@ -123,6 +138,7 @@ class _TimerFile(Store[dict[str, Any]]):
                 "owed_turn_on_only": False,
                 "scheduled_by": None,
                 "windows": [],
+                "disabled_intervals": [],
             }
         if old_major_version == 2:
             return {
@@ -130,6 +146,7 @@ class _TimerFile(Store[dict[str, Any]]):
                 "owed_turn_on_only": False,
                 "scheduled_by": None,
                 "windows": [],
+                "disabled_intervals": [],
             }
         raise NotImplementedError
 
@@ -164,6 +181,7 @@ class TimerStore:
                     commands=tuple(_command_from_json(c) for c in data["commands"]),
                     scheduled_by=data["scheduled_by"],
                     windows=tuple(_window_from_json(w) for w in data["windows"]),
+                    disabled_intervals=_disabled_from_json(data["disabled_intervals"]),
                 )
             )
         self._saved = _payload(snapshot)

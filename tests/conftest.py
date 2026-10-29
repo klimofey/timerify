@@ -10,10 +10,17 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import Context, HomeAssistant, ServiceCall, split_entity_id
+from homeassistant.core import (
+    Context,
+    HomeAssistant,
+    Service,
+    ServiceCall,
+    split_entity_id,
+)
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import (
@@ -138,6 +145,12 @@ class FakeTarget:
     _echoes: int = 0
     _held: HeldCall | None = None
 
+    def _is_timerify_entity(self, entity_id: str) -> bool:
+        """Whether `entity_id` is an entity of Timerify's own, not of the target's
+        integration: the target may have been renamed, so its id is not a test."""
+        registered = er.async_get(self.hass).async_get(entity_id)
+        return registered is not None and registered.platform == DOMAIN
+
     @property
     def state(self) -> str:
         """The state the entity is in now."""
@@ -201,19 +214,33 @@ class FakeTarget:
         return self._held
 
     def provide_services(self, services: Mapping[str, Obey]) -> None:
-        """Provide the services of the entity's domain."""
+        """Provide the services of the entity's domain.
+
+        A domain has one set of services for all its entities, so a call for an entity
+        of Timerify's own (the switch of an interval) goes on to the service that was
+        there before, which is the domain's own.
+        """
         domain, _ = split_entity_id(self.entity_id)
         for service, obey in services.items():
+            elsewhere = self.hass.services.async_services_for_domain(domain).get(
+                service
+            )
             self.hass.services.async_register(
-                domain, service, self._handler(service, obey)
+                domain, service, self._handler(service, obey, elsewhere)
             )
 
     def _handler(
-        self, service: str, obey: Obey
+        self, service: str, obey: Obey, elsewhere: Service | None
     ) -> Callable[[ServiceCall], Awaitable[None]]:
         async def handle(call: ServiceCall) -> None:
             data = dict(call.data)
             entity_id = data.pop("entity_id")
+            if elsewhere is not None and self._is_timerify_entity(entity_id):
+                if (
+                    running := self.hass.async_run_hass_job(elsewhere.job, call)
+                ) is not None:
+                    await running
+                return
             self.calls.append((service, entity_id))
             self.call_data.append((service, data))
             if self._held is not None:
@@ -239,12 +266,15 @@ type ProvideTarget = Callable[..., FakeTarget]
 
 
 @pytest.fixture
-def provide_target(
+async def provide_target(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> ProvideTarget:
     """Make an entity the way another integration provides it, switched off, at
     `START`: `provide(entity_id, services, device_name=..., ...)`."""
     freezer.move_to(START)
+    # Timerify adds switches, so the switch component runs whenever it does. It sets its
+    # services up with itself, and would replace those of a fake that came before it.
+    assert await async_setup_component(hass, "switch", {})
 
     def provide(
         entity_id: str,

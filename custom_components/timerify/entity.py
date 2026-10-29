@@ -41,9 +41,21 @@ class TimerifyEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: TimerifyConfigEntry,
+        *,
+        unique_id: str | None = None,
+    ) -> None:
+        """`unique_id` is the entity's own; without one it is the timer's id and the
+        key of the entity's description, for an entity that a timer has one of."""
         self._controller = entry.runtime_data
-        self._attr_unique_id = f"{entry.entry_id}_{self.entity_description.key}"
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{self.entity_description.key}"
+            if unique_id is None
+            else unique_id
+        )
         self.device_entry = timer_device(hass, entry)
 
     async def async_added_to_hass(self) -> None:

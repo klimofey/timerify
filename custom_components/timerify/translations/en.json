@@ -207,6 +207,11 @@
           }
         }
       }
+    },
+    "switch": {
+      "interval": {
+        "name": "Schedule {interval}"
+      }
     }
   },
   "services": {

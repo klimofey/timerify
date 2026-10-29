@@ -12,6 +12,14 @@
       "next_command": {
         "default": "mdi:calendar-clock"
       }
+    },
+    "switch": {
+      "interval": {
+        "default": "mdi:calendar-check",
+        "state": {
+          "off": "mdi:calendar-remove"
+        }
+      }
     }
   },
   "services": {

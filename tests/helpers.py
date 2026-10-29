@@ -181,6 +181,17 @@ async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
     await hass.async_block_till_done()
 
 
+async def set_switch(hass: HomeAssistant, entity_id: str, on: bool) -> None:
+    """Flip a switch, as the dashboard does, and let everything that follows settle."""
+    await hass.services.async_call(
+        "switch",
+        "turn_on" if on else "turn_off",
+        {"entity_id": entity_id},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+
 async def advance(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory, **delta: float
 ) -> None:

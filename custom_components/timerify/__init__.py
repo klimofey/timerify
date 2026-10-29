@@ -14,7 +14,7 @@ from .controller import TargetController, TimerifyConfigEntry
 from .services import async_setup_services
 from .store import TimerStore
 
-PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR)
+PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
 
 CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 

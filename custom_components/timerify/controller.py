@@ -90,12 +90,19 @@ def _local_time(moment: datetime) -> str:
     return dt_util.as_local(moment).isoformat(sep=" ", timespec="seconds")
 
 
+def _unloaded_error() -> HomeAssistantError:
+    return HomeAssistantError(
+        translation_domain=DOMAIN, translation_key="timer_unloaded"
+    )
+
+
 class TargetController:
     """Runs the timer of one target entity.
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
-    `async_add_command`, `async_cancel_command`) waits for its turn and raises
-    HomeAssistantError (`timer_unloaded`) if the timer was unloaded meanwhile.
+    `async_add_command`, `async_cancel_command`, `async_set_interval_enabled`) waits
+    for its turn and raises HomeAssistantError (`timer_unloaded`) if the timer was
+    unloaded meanwhile.
     """
 
     def __init__(
@@ -138,6 +145,7 @@ class TargetController:
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
         self._notified_commands = self.snapshot.commands
+        self._notified_disabled = self.snapshot.disabled_intervals
         self._wakeup_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
         self._raised_for: tuple[Label, object] | None = None
@@ -268,6 +276,31 @@ class TargetController:
 
         await self._command(cancel)
 
+    async def async_set_interval_enabled(self, interval_id: str, enabled: bool) -> None:
+        """Switch a schedule interval on or off.
+
+        Switching off is an edit of the schedule (S2): the window goes and the timer,
+        if the schedule's, follows at once. Switching on brings the interval's window
+        back, and the boiler runs for the rest of it if it is open. The flag is kept in
+        the timer's file; nothing is reloaded.
+        """
+        async with self._lock:
+            self._raise_if_unloaded()
+            now = dt_util.utcnow()
+            effects = self._core.set_interval_enabled(now, interval_id, enabled)
+            if enabled:
+                # The flag is kept and shown before the window is worked out, which
+                # may take a while.
+                await self._execute(effects)
+                if not await self._async_refresh_windows_locked():
+                    raise _unloaded_error()
+            else:
+                # The tick folds what fell due while this call waited for its turn. A
+                # window that it finds over is replaced like any other (the interval
+                # that was switched off is not: its window left with the flag).
+                before = self.snapshot
+                await self._execute_fold(before, effects + self._core.tick(now))
+
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
         """Call `listener` whenever what the entities show may have changed."""
@@ -287,23 +320,31 @@ class TargetController:
         change had been made would be a lie.
         """
         async with self._lock:
-            if self._stopped:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN, translation_key="timer_unloaded"
-                )
+            self._raise_if_unloaded()
             await self._execute(command(dt_util.utcnow()))
+
+    def _raise_if_unloaded(self) -> None:
+        """Raise HomeAssistantError (`timer_unloaded`) if the timer was unloaded: a call
+        that reached it and waited for its turn would otherwise be reported as done."""
+        if self._stopped:
+            raise _unloaded_error()
 
     async def _async_windows(
         self, now: datetime
     ) -> tuple[list[Window], frozenset[str]]:
-        """The window of each interval that is open at `now` or comes next, in the time
-        zone of Home Assistant, and the ids of the intervals whose occurrence could not
-        be worked out, whose windows are then left as they are."""
+        """The window of each interval that is switched on and open at `now` or comes
+        next, in the time zone of Home Assistant, and the ids of the intervals whose
+        occurrence could not be worked out, whose windows are then left as they are.
+
+        An interval that is switched off has no window, and nothing is asked to work one
+        out."""
         zone = dt_util.get_default_time_zone()
+        disabled = self.snapshot.disabled_intervals
         windows = [
             window
             for interval in self._intervals.values()
-            if (window := weekday_window(interval, now, zone)) is not None
+            if interval.id not in disabled
+            and (window := weekday_window(interval, now, zone)) is not None
         ]
         return windows, frozenset()
 
@@ -512,11 +553,13 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown and the pending commands; the
-        # rest of the snapshot is bookkeeping that needs no state write.
+        # The entities show the end of the countdown, the pending commands and which
+        # intervals are switched off; the rest of the snapshot is bookkeeping that
+        # needs no state write.
         if (
             self.snapshot.end != self._notified_end
             or self.snapshot.commands != self._notified_commands
+            or self.snapshot.disabled_intervals != self._notified_disabled
         ):
             self._notify()
 
@@ -704,5 +747,6 @@ class TargetController:
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
         self._notified_commands = self.snapshot.commands
+        self._notified_disabled = self.snapshot.disabled_intervals
         for listener in list(self._listeners):
             listener()

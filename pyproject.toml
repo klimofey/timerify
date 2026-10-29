@@ -1,6 +1,6 @@
 [project]
 name = "timerify"
-version = "0.0.0"
+version = "0.1.0"
 description = "Home Assistant integration that attaches countdowns, auto-off and schedules to existing entities"
 readme = "README.md"
 license = "MIT"

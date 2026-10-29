@@ -582,8 +582,35 @@ NO_TEMPERATURE = {
         ("climate.ac", AC_ATTRS, {"brightness_pct": 50}, "setting_not_supported"),
         ("climate.ac", NO_TEMPERATURE, {"temperature": 22}, "setting_not_supported"),
         ("climate.ac", NO_TEMPERATURE, {"fan_mode": "low"}, "setting_not_supported"),
-        # An entity that does not say which modes it has cannot be asked for one.
+        # An entity that does not say which modes it has cannot be asked for one,
+        # and one that can only be off has no mode to turn on in.
         ("climate.ac", {}, {"hvac_mode": "cool"}, "setting_not_supported"),
+        (
+            "climate.ac",
+            {**AC_ATTRS, "hvac_modes": ["off"]},
+            {"hvac_mode": "cool"},
+            "setting_not_supported",
+        ),
+        (
+            "water_heater.tank",
+            {
+                "supported_features": features(WaterHeaterEntityFeature.OPERATION_MODE),
+                "operation_list": ["off"],
+            },
+            {"operation_mode": "eco"},
+            "setting_not_supported",
+        ),
+        # Types are the schema's business at the services, but a caller that skips
+        # the schema gets an error the user can read, not a TypeError.
+        ("climate.ac", AC_ATTRS, {"temperature": "24"}, "setting_out_of_range"),
+        ("climate.ac", AC_ATTRS, {"temperature": True}, "setting_out_of_range"),
+        ("climate.ac", AC_ATTRS, {"fan_mode": 3}, "setting_not_an_option"),
+        (
+            "light.hall",
+            {"supported_color_modes": ["brightness"]},
+            {"brightness_pct": True},
+            "setting_out_of_range",
+        ),
         (
             "light.hall",
             {"supported_color_modes": ["onoff"]},

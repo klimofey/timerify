@@ -122,7 +122,9 @@ class _Between:
     def check(self, capabilities: _Capabilities, setting: str, value: Any) -> None:
         low = _bound(capabilities, self.low)
         high = _bound(capabilities, self.high)
-        if not low <= value <= high:
+        # A boolean is a number to Python, not to the user.
+        is_number = isinstance(value, int | float) and not isinstance(value, bool)
+        if not (is_number and low <= value <= high):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="setting_out_of_range",
@@ -143,16 +145,21 @@ class _OneOf:
     excluded: frozenset[str] = frozenset()
     """Values the entity lists but a turn-on must not use: `off` turns it off."""
 
-    def known(self, capabilities: _Capabilities) -> bool:
-        """Whether the entity lists its options."""
-        return capabilities.attribute(self.attribute) is not None
-
-    def check(self, capabilities: _Capabilities, setting: str, value: Any) -> None:
-        options = [
+    def _options(self, capabilities: _Capabilities) -> list[str]:
+        """The values the entity lists that a turn-on may use."""
+        return [
             option
-            for option in capabilities.attribute(self.attribute)
+            for option in capabilities.attribute(self.attribute) or ()
             if option not in self.excluded
         ]
+
+    def known(self, capabilities: _Capabilities) -> bool:
+        """Whether the entity lists an option a turn-on may use: one that lists only
+        `off` offers no setting."""
+        return bool(self._options(capabilities))
+
+    def check(self, capabilities: _Capabilities, setting: str, value: Any) -> None:
+        options = self._options(capabilities)
         if value not in options:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -475,7 +482,8 @@ def validate_settings(
     The entity's capabilities decide: its state, or the entity registry when it has
     none. Both survive an outage, so a command can be made for a device that is
     unavailable now. An entity that is in neither says nothing about what it can do,
-    so nothing is supported for it. The types of the values are the schema's business.
+    so nothing is supported for it. A value of the wrong type is out of range or not
+    an option like any other.
 
     Raises ServiceValidationError for the first setting the entity cannot take or whose
     value it does not accept.

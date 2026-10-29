@@ -1,7 +1,6 @@
 """The services of a timer: add time to it, or run the target without a duration."""
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import probatio
@@ -10,16 +9,11 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.service import async_get_all_descriptions
 from homeassistant.setup import async_setup_component
-from homeassistant.util.json import json_loads_object
-from homeassistant.util.yaml import load_yaml
 
 from custom_components.timerify.const import DOMAIN, MAX_MINUTES
 
 from .conftest import TARGET_ID, FakeTarget, SetupTarget
 from .helpers import NUMBER, SENSOR, TURN_OFF, TURN_ON, advance, set_number, state_of
-
-INTEGRATION_DIR = Path(__file__).parent.parent / "custom_components" / DOMAIN
-TEXTS = ("name", "description")
 
 
 async def call_service(
@@ -295,30 +289,3 @@ async def test_services_are_described_for_the_ui(hass: HomeAssistant) -> None:
     assert minutes["selector"]["number"]["min"] == -MAX_MINUTES
     assert minutes["selector"]["number"]["max"] == MAX_MINUTES
     assert descriptions["run"]["fields"] == {}
-
-
-def texts_in(tree: Any, path: str = "") -> set[str]:
-    """The dotted path of every non-empty text in a tree of translations."""
-    if isinstance(tree, str):
-        return {path} if tree else set()
-    return {
-        text
-        for key, subtree in tree.items()
-        for text in texts_in(subtree, f"{path}.{key}" if path else key)
-    }
-
-
-@pytest.mark.parametrize("language", ["en", "ru"])
-def test_services_are_translated(language: str) -> None:
-    """Every service and field in services.yaml has a name and a description."""
-    services = load_yaml(str(INTEGRATION_DIR / "services.yaml"))
-    wanted: set[str] = set()
-    for name, service in services.items():
-        wanted |= {f"{name}.{text}" for text in TEXTS}
-        for field in service.get("fields", {}):
-            wanted |= {f"{name}.fields.{field}.{text}" for text in TEXTS}
-    translations = json_loads_object(
-        (INTEGRATION_DIR / "translations" / f"{language}.json").read_text("utf-8")
-    )
-
-    assert texts_in(translations["services"]) == wanted

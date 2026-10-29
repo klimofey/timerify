@@ -23,6 +23,7 @@
     },
     "error": {
       "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
+      "not_switchable": "This entity does not report on or off right now, so a timer cannot tell whether it is running. Pick another one, or try again when it is available.",
       "duration_not_whole": "The duration must be a whole number of minutes."
     },
     "abort": {

@@ -783,24 +783,33 @@ async def test_window_that_starts_while_the_sensor_is_slow_is_logged_when_unavai
     assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
 
 
-async def test_window_that_opens_while_the_sensor_is_slow_comes_before_a_later_command(
+async def test_window_made_by_a_slow_refresh_comes_before_a_later_command(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     fake_workday: FakeWorkday,
     setup_target: SetupTarget,
 ) -> None:
-    """The window opens at 06:30 while the sensor is being asked, and at ten past the
-    user asks for half an hour; the call waits for the answer. The window opened first
-    and goes first, so the half hour is the later word and replaces its end: the boiler
-    runs until 07:00:10, not until the window's 07:15."""
+    """The user switches the morning interval on at 06:29:45 and the sensor is slow to
+    answer, so the window comes from that very refresh. The answer arrives after 06:30,
+    and the half hour the user asked for at 06:30:10 queues behind it. The window
+    opened first and goes first, so the half hour is the later word and sets the end:
+    the boiler runs until 07:00:10, not until the window's 07:15. Every time event is
+    delivered."""
     entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
     await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await set_switch(hass, WORKING_DAYS_SWITCH, False)
     freezer.move_to(local(SUNDAY, "06:29:45"))
+    async_fire_time_changed(hass)
     slow = fake_workday.hold_next_call()
-    fake_workday.write()
+    enabling = hass.async_create_task(
+        hass.services.async_call(
+            "switch", "turn_on", {"entity_id": WORKING_DAYS_SWITCH}, blocking=True
+        )
+    )
     await slow.reached.wait()
     freezer.move_to(local(SUNDAY, "06:30:10"))
+    async_fire_time_changed(hass)
     running = hass.async_create_task(
         hass.services.async_call(
             DOMAIN, "run", {"entity_id": NUMBER, "minutes": 30}, blocking=True
@@ -808,6 +817,7 @@ async def test_window_that_opens_while_the_sensor_is_slow_comes_before_a_later_c
     )
 
     slow.release.set()
+    await enabling
     await running
     await hass.async_block_till_done()
 

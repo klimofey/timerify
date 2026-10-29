@@ -1,7 +1,7 @@
 [project]
 name = "timerify"
 version = "0.1.0"
-description = "Home Assistant integration that attaches countdowns, auto-off and schedules to existing entities"
+description = "Timers for any Home Assistant entity"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.14.2"
@@ -30,4 +30,4 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "ASYNC", "RUF", "PT"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["custom_components"]
+files = ["custom_components", "scripts"]

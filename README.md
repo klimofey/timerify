@@ -27,8 +27,8 @@ Timerify switches the target, so the rules never contradict each other:
   such a target running without a countdown.
 - A target that drops off Wi-Fi keeps its countdown. What came due meanwhile is applied
   when it reports again: a countdown that ended turns it off.
-- A command the device rejects is not forgotten: it is sent again when the target next
-  reports its state.
+- A command the device rejects, or accepts without doing anything, is not forgotten: it is
+  sent again when the target next reports its state, or when you ask for the same thing again.
 - A countdown survives a Home Assistant restart: it is stored on every change, and on
   start-up the end time is checked against the clock. A countdown that ended while Home
   Assistant was down turns the target off.

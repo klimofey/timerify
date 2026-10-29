@@ -55,6 +55,10 @@ class Window:
     """The opening has been dealt with: it set the timer, left it alone because the
     timer ends later, or found the window over. It never applies again, so a target
     that was turned off during the window stays off until the next one (S4)."""
+    suppressed: bool = False
+    """The timer was zeroed after the window started (S4): the window no longer wants
+    the target running, so the timer is never handed to it. Only a started window can
+    be suppressed."""
 
 
 @dataclass(frozen=True)
@@ -186,11 +190,11 @@ def _active(window: Window, now: datetime) -> bool:
 
 
 def _inheriting(window: Window, old: Window | None, now: datetime) -> Window:
-    """`window`, started if it is the occurrence that `old` already started."""
-    same_occurrence = (
-        old is not None and old.started and _active(old, now) and _active(window, now)
-    )
-    return replace(window, started=True) if same_occurrence else window
+    """`window`, started and suppressed as `old` is if it is the occurrence that `old`
+    already started."""
+    if old is None or not (old.started and _active(old, now) and _active(window, now)):
+        return window
+    return replace(window, started=True, suppressed=window.suppressed or old.suppressed)
 
 
 def _reports_change[**P](
@@ -519,7 +523,7 @@ class TimerCore:
     def _catch_up(self, now: datetime) -> tuple[list[Effect], bool]:
         """Fold everything that is due by `now` into the timer, in the order it fell
         due: the ends and starts of windows, the commands and the end of the timer at
-        or before `now`; then follow the window the timer is tied to (S2).
+        or before `now`; then realign the timer with the windows (S2).
 
         Items that fall due together go in the order of `_Rank`. The end is an item
         only if it is still `<= now` once the items before it are folded in. Each item
@@ -611,27 +615,32 @@ class TimerCore:
         return True
 
     def _realign(self, now: datetime) -> Literal["on", "off"] | None:
-        """Apply S2: while the timer's end was set by an interval, it follows that
-        interval's window as it is now. Returns the wish this leaves, None when the
-        timer is as it should be."""
+        """Apply S2: while the timer's end was set by an interval, editing that interval
+        moves the timer. If the interval's window still ends where the timer does,
+        nothing changes; otherwise the timer follows the latest end among the windows
+        that are open and not suppressed, and stops only if there is none.
+
+        Returns the wish this leaves, None when the timer's end stays as it is.
+        """
         interval_id = self._snapshot.scheduled_by
         if interval_id is None:
             return None
-        window = next(
-            (
-                w
-                for w in self._snapshot.windows
-                if w.interval_id == interval_id and _active(w, now)
-            ),
+        windows = self._snapshot.windows
+        carrier = next(
+            (w for w in windows if w.interval_id == interval_id and _active(w, now)),
             None,
         )
-        if window is None:
+        if carrier is not None and carrier.end == self._snapshot.end:
+            return None
+        # A window that is open has started: the fold ran its start before this.
+        open_windows = [w for w in windows if _active(w, now) and not w.suppressed]
+        if not open_windows:
             self._end_timer()
             return "off"
-        if window.end == self._snapshot.end:
-            return None
-        self._set_end(window.end, by=interval_id)
-        return "on"
+        latest = max(open_windows, key=lambda w: (w.end, w.interval_id == interval_id))
+        moved = latest.end != self._snapshot.end
+        self._set_end(latest.end, by=latest.interval_id)
+        return "on" if moved else None
 
     def _run_command(
         self, now: datetime, command: Command
@@ -668,6 +677,7 @@ class TimerCore:
         self._settle()
         if actual == "off":
             self._clear_settings()  # a target that is off runs with nothing
+            self._suppress_windows()
             if self._snapshot.end is None:
                 return []
             self._set_end(None)
@@ -701,6 +711,16 @@ class TimerCore:
         """The countdown is over: there is no end, and nothing to run with."""
         self._set_end(None)
         self._clear_settings()
+        self._suppress_windows()
+
+    def _suppress_windows(self) -> None:
+        """The target is wanted off: a window that has started does not turn it on
+        again before its next occurrence (S4), whoever stopped it."""
+        windows = tuple(
+            replace(w, suppressed=True) if w.started else w
+            for w in self._snapshot.windows
+        )
+        self._snapshot = replace(self._snapshot, windows=windows)
 
     def _set_end(self, end: datetime | None, *, by: str | None = None) -> None:
         """The only writer of the end. `by` names the interval whose window end it is
@@ -791,7 +811,8 @@ class TimerCore:
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):
             return []
-        if state.last_actual == "unavailable" or not self._runs_as_of(None):
+        runs = state.last_actual == "on" or (state.pending == "on" and not self._unsent)
+        if state.last_actual == "unavailable" or not runs:
             return []
         if repeated:
             match self._settings_allowance.take():
@@ -805,13 +826,22 @@ class TimerCore:
         return [ApplySettings(state.owed_settings)]
 
     def _runs_as_of(self, wish: Literal["on", "off"] | None) -> bool:
-        """Whether the target runs as of a fold item: the wish so far is "on" or, with
-        no wish yet, it is on or its turn-on is on its way (not one that never went
-        out)."""
+        """Whether the target is wanted running as of a fold item: the wish so far says
+        so or, with no wish yet, the pending wish does, or, with none pending, the
+        target is on.
+
+        This is the desired state, not what has reached the target: a turn-on that
+        failed, or waits for an unavailable target, or is a restored wish, is still
+        wanted, and what it carries (P1, R8) is not for a window to replace. Whether
+        owed settings can be sent now is another question, which `_deliver_settings`
+        answers.
+        """
         if wish is not None:
             return wish == "on"
         state = self._snapshot
-        return state.last_actual == "on" or (state.pending == "on" and not self._unsent)
+        if state.pending is not None:
+            return state.pending == "on"
+        return state.last_actual == "on"
 
     def _clear_settings(self) -> None:
         """Nothing is owed: the target took the settings, or they no longer apply."""

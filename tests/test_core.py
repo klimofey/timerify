@@ -66,6 +66,7 @@ def window(
     end_minutes: int,
     settings: Settings = NO_SETTINGS,
     started: bool = False,
+    suppressed: bool = False,
 ) -> Window:
     """A window of an interval that opens `start_minutes` after `NOW` and closes
     `end_minutes` after it; negative: before."""
@@ -75,6 +76,7 @@ def window(
         NOW + timedelta(minutes=end_minutes),
         settings,
         started,
+        suppressed,
     )
 
 
@@ -2108,15 +2110,88 @@ def test_window_start_while_a_turn_on_is_in_flight_keeps_the_commands_settings()
     assert c.snapshot.scheduled_by == "x"
 
 
-def test_window_start_after_a_turn_on_that_never_went_out_pushes_its_settings() -> None:
-    """A turn-on that failed is not on its way, so the window's turn-on carries its
-    own settings."""
+def test_window_start_after_a_failed_turn_on_keeps_the_settings_that_are_owed() -> None:
+    """A turn-on that never reached the target is still wanted (R8: the set was made by
+    hand, and it wins): the window does not replace its settings, and the turn-on that
+    is sent again carries them."""
     c = core("strict", "off")
     c.set_duration(NOW, minutes(30), COOL24)
     c.call_failed(NOW)
     c.set_windows(NOW, [window("x", 5, 45, HEAT22)], configured={"x"})
 
     fx = c.tick(NOW + minutes(5))
+
+    assert fx == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_window_start_while_a_turn_on_waits_for_the_target_keeps_its_settings() -> None:
+    """P1, R10: the 06:20 command turned the target on first, so the 06:30 window found
+    it wanted on and pushes nothing, however the folds fall; when the target is back,
+    it gets cooling 24, never heating 22."""
+    c = core("strict", "unavailable")
+    c.add_command(NOW, cmd(-40, minutes=15, settings=COOL24))
+    c.set_windows(NOW, [window("x", -30, 15, HEAT22)], configured={"x"})
+    c.tick(NOW + minutes(-40))
+
+    c.tick(NOW + minutes(-30))
+
+    assert c.snapshot.owed_settings == COOL24
+    assert c.snapshot.end == NOW + minutes(15)
+    back = c.observe(NOW + minutes(-20), "off", by_us=False)
+    assert back == [TurnOn(COOL24), Changed()]
+
+
+def test_command_and_window_folded_while_the_target_is_away_keep_the_settings() -> None:
+    """The same, when Home Assistant was down and both fall due in one fold."""
+    c = core("strict", "unavailable")
+    c.add_command(NOW, cmd(-40, minutes=15, settings=COOL24))
+    c.set_windows(NOW, [window("x", -30, 15, HEAT22)], configured={"x"})
+
+    c.tick(NOW + minutes(-30))
+
+    assert c.snapshot.owed_settings == COOL24
+    back = c.observe(NOW + minutes(-20), "off", by_us=False)
+    assert back == [TurnOn(COOL24), Changed()]
+
+
+def test_window_start_after_a_restart_keeps_the_settings_of_an_unconfirmed_on() -> None:
+    """A restored wish counts as not delivered, which must not make the window win:
+    the command ran before the restart, the window opens in the start-up fold, and the
+    target that comes back off gets cooling 24."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(-10),
+            pending="on",
+            owed_settings=COOL24,
+            windows=(window("x", -30, 15, HEAT22),),
+        ),
+    )
+
+    assert c.observe(NOW + minutes(-25), "unavailable", by_us=False) == [
+        Arm(NOW + minutes(15)),
+        Changed(),
+    ]
+    back = c.observe(NOW + minutes(-20), "off", by_us=False)
+
+    assert c.snapshot.owed_settings == COOL24
+    assert back == [TurnOn(COOL24), Changed()]
+
+
+def test_window_start_while_a_turn_off_is_in_flight_turns_on_with_its_settings() -> (
+    None
+):
+    """The timer ended and its turn-off is on its way, so the target is wanted off:
+    the window that opens now turns it on with its own settings, though the target
+    still reports on."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.tick(NOW + minutes(10))
+    c.set_windows(NOW, [window("x", 11, 45, HEAT22)], configured={"x"})
+
+    fx = c.tick(NOW + minutes(11))
 
     assert fx == [Arm(NOW + minutes(45)), TurnOn(HEAT22), Changed()]
     assert c.snapshot.owed_settings == HEAT22
@@ -2252,6 +2327,185 @@ def test_realign_after_a_move_ahead_stops_then_starts_at_the_new_start() -> None
     assert c.snapshot.scheduled_by == "x"
 
 
+def overlapping() -> TimerCore:
+    """Two intervals started in turn: a (06:00 to 07:00) and b (06:30 to 08:00), whose
+    end the timer carries."""
+    c = core("strict", "on")
+    c.set_windows(
+        NOW,
+        [window("a", 0, 60), window("b", 30, 120)],
+        configured={"a", "b"},
+    )
+    c.tick(NOW)
+    c.tick(NOW + minutes(30))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+    return c
+
+
+def test_removing_the_interval_that_carries_the_end_hands_the_timer_to_the_other() -> (
+    None
+):
+    """S2 stops the timer only when no window is open: with a still open, the target
+    keeps running to a's end, which a now carries."""
+    c = overlapping()
+
+    c.set_windows(
+        NOW + minutes(40), [window("a", 0, 60, started=True)], configured={"a"}
+    )
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+
+def test_shortening_the_interval_that_carries_the_end_follows_the_latest_open_one() -> (
+    None
+):
+    c = overlapping()
+
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60, started=True), window("b", 30, 50, started=True)],
+        configured={"a", "b"},
+    )
+    c.tick(NOW + minutes(40))
+
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+
+def test_shortening_the_carrier_to_a_later_end_than_the_other_keeps_it() -> None:
+    c = overlapping()
+
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60, started=True), window("b", 30, 90, started=True)],
+        configured={"a", "b"},
+    )
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]  # a's window still ends first
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(90), "b")
+
+
+def test_editing_an_interval_that_does_not_carry_the_end_leaves_the_timer_alone() -> (
+    None
+):
+    """S2 follows the interval whose end the timer carries, not every overlapping
+    one."""
+    c = overlapping()
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60, started=True), window("b", 30, 50, started=True)],
+        configured={"a", "b"},
+    )
+    c.tick(NOW + minutes(40))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+    c.set_windows(
+        NOW + minutes(41),
+        [window("a", 0, 60, started=True), window("b", 30, 120, started=True)],
+        configured={"a", "b"},
+    )
+
+    assert c.tick(NOW + minutes(41)) == []
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+
+def test_shortening_the_carrier_to_where_the_other_ends_keeps_it_the_carrier() -> None:
+    """On a tie the interval that was edited stays the one S2 follows."""
+    c = overlapping()
+
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60, started=True), window("b", 30, 60, started=True)],
+        configured={"a", "b"},
+    )
+    c.tick(NOW + minutes(40))
+
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "b")
+
+
+def test_a_window_that_starts_after_the_stop_is_handed_the_timer() -> None:
+    """Only windows that had started when the target was switched off are suppressed
+    (S4): c, which starts later, is as good as any."""
+    c = core("strict", "on")
+    c.set_windows(
+        NOW,
+        [window("a", 0, 60), window("b", 30, 120), window("c", 35, 100)],
+        configured={"a", "b", "c"},
+    )
+    c.tick(NOW)
+    c.observe(NOW + minutes(10), "off", by_us=False)
+    c.tick(NOW + minutes(30))
+    c.tick(NOW + minutes(35))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60), window("c", 35, 100)],
+        configured={"a", "c"},
+    )
+    c.tick(NOW + minutes(40))
+
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(100), "c")
+
+
+def test_removing_the_only_open_interval_stops_the_timer() -> None:
+    """The other interval is not open yet, so there is nothing to hand the timer to."""
+    c = overlapping()
+
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 100, 160)],
+        configured={"a"},
+    )
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Arm(NOW + minutes(100)), TurnOff(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.scheduled_by is None
+
+
+def test_a_window_that_was_stopped_is_not_handed_the_timer() -> None:
+    """S4: the user switched the target off during a, so a stays off however b comes
+    and goes."""
+    c = core("strict", "on")
+    c.set_windows(
+        NOW, [window("a", 0, 60), window("b", 30, 120)], configured={"a", "b"}
+    )
+    c.tick(NOW)
+    c.observe(NOW + minutes(10), "off", by_us=False)
+    c.tick(NOW + minutes(30))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+
+    c.set_windows(NOW + minutes(40), [window("a", 0, 90)], configured={"a"})
+    fx = c.tick(NOW + minutes(40))
+
+    assert TurnOff() in fx
+    assert c.snapshot.end is None
+    assert c.snapshot.scheduled_by is None
+
+
+def test_the_timer_changes_hands_without_a_wish_when_both_windows_end_together() -> (
+    None
+):
+    """The carrier is gone, but the other window ends with it: the timer does not move,
+    b carries it from now on, and S2 follows b's edits."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("a", 0, 60), window("b", 30, 60)], configured={"a", "b"})
+    c.tick(NOW)
+    c.tick(NOW + minutes(30))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+
+    c.set_windows(
+        NOW + minutes(40), [window("b", 30, 60, started=True)], configured={"b"}
+    )
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "b")
+
+
 def test_a_new_window_that_is_open_now_does_not_start_again_after_an_edit() -> None:
     """The same occurrence, edited, was started already: a timer the user changed
     stays as they left it (S3)."""
@@ -2374,6 +2628,46 @@ def test_target_off_during_a_window_stays_off_until_the_next_window() -> None:
     assert fx == [Arm(NOW + minutes(1485)), TurnOn(), Changed()]
 
 
+@pytest.mark.parametrize(
+    "stop",
+    [
+        pytest.param(lambda c: c.stop(NOW + minutes(10)), id="stop"),
+        pytest.param(
+            lambda c: c.set_duration(NOW + minutes(10), timedelta(0)), id="run-for-zero"
+        ),
+        pytest.param(
+            lambda c: (
+                c.add_command(NOW, cmd(10, "off")),
+                c.tick(NOW + minutes(10)),
+            ),
+            id="off-command",
+        ),
+    ],
+)
+def test_any_stop_during_a_window_keeps_the_target_off_until_the_next_window(
+    stop: Callable[[TimerCore], object],
+) -> None:
+    """S4 is not only about the target switched off by hand: whoever zeroes the timer
+    during a window, the window does not turn it on again (not even after an edit)."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 45)], configured={"x"})
+    c.tick(NOW)
+    c.observe(NOW, "on", by_us=True)
+
+    stop(c)
+
+    assert c.snapshot.end is None
+    c.set_windows(NOW + minutes(10), [window("x", 0, 45)], configured={"x"})
+    assert c.tick(NOW + minutes(10)) == []
+    assert c.tick(NOW + minutes(45)) == [Disarm(), Changed()]
+    c.set_windows(NOW + minutes(45), [window("x", 1440, 1485)], configured={"x"})
+    assert c.tick(NOW + minutes(1440)) == [
+        Arm(NOW + minutes(1485)),
+        TurnOn(),
+        Changed(),
+    ]
+
+
 def test_restored_started_window_does_not_start_again() -> None:
     """§5.7: a restart does not bring back a window that was started already, whatever
     became of the timer since."""
@@ -2471,7 +2765,7 @@ def test_tie_order_at_one_instant() -> None:
     assert fx == [Arm(NOW + minutes(75)), TurnOff(), Changed()]
     assert c.snapshot.end is None
     assert c.snapshot.scheduled_by is None
-    assert c.snapshot.windows == (window("b", 30, 75, started=True),)
+    assert c.snapshot.windows == (window("b", 30, 75, started=True, suppressed=True),)
 
 
 def test_fold_across_window_end_and_next_start_has_one_wish() -> None:
@@ -2572,6 +2866,20 @@ def test_kept_window_wins_over_a_new_one() -> None:
     c.set_windows(NOW, [window("x", 90, 120)], configured={"x"}, keep={"x"})
 
     assert c.snapshot.windows == (window("x", 30, 75),)
+
+
+def test_configured_beats_keep() -> None:
+    """An interval that no longer exists loses its window even when its occurrence
+    could not be worked out this time, and the timer that window carried stops."""
+    c = following(
+        "strict", "on", window("x", -15, 30, started=True), end=NOW + minutes(30)
+    )
+
+    c.set_windows(NOW, [], configured=set(), keep={"x"})
+    fx = c.tick(NOW)
+
+    assert c.snapshot.windows == ()
+    assert fx == [Disarm(), TurnOff(), Changed()]
 
 
 def test_window_of_an_unconfigured_interval_is_dropped_and_its_timer_stops() -> None:

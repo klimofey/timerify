@@ -23,6 +23,7 @@ from .helpers import (
     advance,
     set_number,
     state_of,
+    timerify_warnings,
 )
 
 
@@ -150,16 +151,6 @@ async def test_ignored_call_is_not_a_warning(
         and record.levelno >= logging.WARNING
     ]
     assert noisy == []
-
-
-def timerify_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
-    """What Timerify said at warning level or above."""
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.name.startswith("custom_components.timerify")
-        and record.levelno >= logging.WARNING
-    ]
 
 
 async def run_into_a_refusing_device(

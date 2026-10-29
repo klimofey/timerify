@@ -20,17 +20,10 @@ from .helpers import (
     TURN_OFF,
     TURN_ON,
     advance,
+    call_service,
     set_number,
     state_of,
 )
-
-
-async def call_service(
-    hass: HomeAssistant, service: str, target: dict[str, Any], **data: Any
-) -> None:
-    """Call a Timerify service the way an automation or the UI does."""
-    await hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
-    await hass.async_block_till_done()
 
 
 async def test_add_time_extends_running_timer(

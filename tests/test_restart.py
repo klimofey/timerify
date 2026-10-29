@@ -13,7 +13,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 
-from .conftest import START, FakeTarget, SetupTarget
+from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     NUMBER,
     SENSOR,
@@ -21,20 +21,12 @@ from .helpers import (
     TURN_OFF,
     TURN_ON,
     advance,
+    at,
+    saved,
     set_number,
     state_of,
     storage_key,
 )
-
-
-def at(minutes: float) -> str:
-    """The stored form of the moment `minutes` after `START`: ISO-8601 in UTC."""
-    return (START + timedelta(minutes=minutes)).isoformat()
-
-
-def saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> dict[str, Any]:
-    """What the storage file of `entry` holds."""
-    return hass_storage[storage_key(entry)]["data"]
 
 
 async def restart(hass: HomeAssistant, entry: ConfigEntry) -> None:

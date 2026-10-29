@@ -490,6 +490,11 @@ class TimerCore:
         if pending is not None and self._unsent:
             if pending == actual:
                 self._settle()
+                if by_us:
+                    # Our own call switched the target on, but the list did not get
+                    # through: the settings that did not follow are no longer
+                    # turn-on-only, and are sent again on their own.
+                    self._snapshot = replace(self._snapshot, owed_turn_on_only=False)
             else:
                 effects += self._resend(pending, repeated=repeated)
         elif by_us:
@@ -796,9 +801,10 @@ class TimerCore:
         the settings itself. Settings that may only go with a turn-on are never sent on
         their own: a target that runs without the turn-on that was to carry them (it
         came back on, someone switched it on, the one on its way carries none) has been
-        set up by someone, so they are dropped (§5.4). `repeated` says a report that
-        merely repeated the target's state asked: it is answered within the allowance,
-        like a wish.
+        set up by someone, so they are dropped (§5.4). Only a turn-on of ours that
+        switched the target on but did not get its settings through releases them
+        (`observe`). `repeated` says a report that merely repeated the target's state
+        asked: it is answered within the allowance, like a wish.
         """
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):

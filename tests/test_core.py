@@ -2337,6 +2337,27 @@ def test_every_end_of_the_timer_drops_turn_on_only_settings(
     assert not c.snapshot.owed_turn_on_only
 
 
+def test_window_turn_on_that_took_but_not_its_settings_resends_the_settings() -> None:
+    """The window's turn-on switched the AC on and a later settings call failed: the AC
+    runs because of our own turn-on, so what did not follow is retried on its own, as
+    a command's would be, and is no longer turn-on-only."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 45, HEAT22)], configured={"x"})
+    assert c.tick(NOW) == [Arm(NOW + minutes(45)), TurnOn(HEAT22), Changed()]
+    c.call_failed(NOW)
+
+    fx = c.observe(NOW + minutes(1), "on", by_us=True)
+
+    assert fx == [ApplySettings(HEAT22), Changed()]
+    assert c.snapshot.owed_settings == HEAT22
+    assert not c.snapshot.owed_turn_on_only
+    assert c.snapshot.pending is None
+    c.call_failed(NOW + minutes(1))
+    assert c.observe(NOW + minutes(2), "on", by_us=False) == [ApplySettings(HEAT22)]
+    assert c.settings_applied(NOW + minutes(2)) == [Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
 def test_restored_turn_on_only_settings_skip_a_running_target() -> None:
     """Home Assistant restarted with the window's settings owed to a turn-on; the AC
     is found running, so nothing is pushed onto it."""

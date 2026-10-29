@@ -388,6 +388,36 @@ async def test_turn_on_only_settings_survive_a_restart_and_turn_an_off_ac_on(
     assert saved(hass_storage, entry) == payload(end=at(30))
 
 
+async def test_partly_applied_window_settings_are_retried_on_the_ac_it_turned_on(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The window's turn-on switches the AC to heat, and setting the temperature fails:
+    the AC runs because of that turn-on, so the temperature is tried again instead of
+    being dropped as settings pushed onto a running AC."""
+    fake_climate.fail_next_call(service="set_temperature")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "heat", "temperature": 22.0},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "heat"}),
+        ("set_temperature", {"temperature": 22.0}),
+        ("set_hvac_mode", {"hvac_mode": "heat"}),
+        ("set_temperature", {"temperature": 22.0}),
+    ]
+    assert fake_climate.state_attributes["temperature"] == 22.0
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
 async def test_turn_on_only_settings_are_stored_while_the_ac_is_away(
     hass: HomeAssistant,
     fake_climate: FakeTarget,

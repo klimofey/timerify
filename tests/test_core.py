@@ -2328,7 +2328,7 @@ def test_realign_after_a_move_ahead_stops_then_starts_at_the_new_start() -> None
 
 
 def overlapping() -> TimerCore:
-    """Two intervals started in turn: a (06:00 to 07:00) and b (06:30 to 08:00), whose
+    """Two intervals started in turn: a (07:00 to 08:00) and b (07:30 to 09:00), whose
     end the timer carries."""
     c = core("strict", "on")
     c.set_windows(
@@ -2387,28 +2387,139 @@ def test_shortening_the_carrier_to_a_later_end_than_the_other_keeps_it() -> None
     assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(90), "b")
 
 
-def test_editing_an_interval_that_does_not_carry_the_end_leaves_the_timer_alone() -> (
-    None
-):
-    """S2 follows the interval whose end the timer carries, not every overlapping
-    one."""
-    c = overlapping()
+def a_carries_b_is_open() -> TimerCore:
+    """Interval a (07:00 to 08:00) carries the timer; b (07:30 to 07:50) started while
+    it ran and was left alone."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("a", 0, 60), window("b", 30, 50)], configured={"a", "b"})
+    c.tick(NOW)
+    c.tick(NOW + minutes(30))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+    return c
+
+
+def test_extending_an_interval_that_does_not_carry_the_end_takes_the_timer() -> None:
+    """A schedule-owned timer ends with the latest open window, whichever interval it
+    was edited in: b, open until 07:50, is extended to 09:00 at 07:40."""
+    c = a_carries_b_is_open()
+
     c.set_windows(
         NOW + minutes(40),
-        [window("a", 0, 60, started=True), window("b", 30, 50, started=True)],
+        [window("a", 0, 60), window("b", 30, 120)],
         configured={"a", "b"},
     )
-    c.tick(NOW + minutes(40))
-    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+    fx = c.tick(NOW + minutes(40))
+
+    assert fx == [Arm(NOW + minutes(60)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+
+
+def test_shortening_an_interval_that_does_not_carry_the_end_leaves_the_timer() -> None:
+    c = overlapping()
 
     c.set_windows(
-        NOW + minutes(41),
-        [window("a", 0, 60, started=True), window("b", 30, 120, started=True)],
+        NOW + minutes(40),
+        [window("a", 0, 45), window("b", 30, 120)],
         configured={"a", "b"},
     )
 
-    assert c.tick(NOW + minutes(41)) == []
-    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(60), "a")
+    assert c.tick(NOW + minutes(40)) == []
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+
+
+def test_a_manual_timer_is_not_realigned_when_an_open_window_is_edited() -> None:
+    """S3: once the timer was changed by hand, no edit of any interval touches it."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("x", 0, 60)], configured={"x"})
+    c.tick(NOW)
+    c.add(NOW + minutes(10), minutes(30))
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(90), None)
+
+    c.set_windows(NOW + minutes(20), [window("x", 0, 150)], configured={"x"})
+
+    assert c.tick(NOW + minutes(20)) == []
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(90), None)
+
+
+def test_the_carriers_window_end_hands_the_timer_to_the_open_window_that_lasts() -> (
+    None
+):
+    """The carrier's window ends at 08:00 while b, extended since, is open until
+    09:00: the target keeps running to b's end and b is not suppressed, though the
+    timer's own end falls at the same instant (the window end goes first)."""
+    c = a_carries_b_is_open()
+    c.set_windows(
+        NOW + minutes(40),
+        [window("a", 0, 60), window("b", 30, 120)],
+        configured={"a", "b"},
+    )
+
+    fx = c.tick(NOW + minutes(60))
+
+    assert fx == [Arm(NOW + minutes(120)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "b")
+    assert c.snapshot.windows == (window("b", 30, 120, started=True),)
+    assert c.snapshot.pending is None
+
+
+def test_hand_over_at_a_window_end_is_judged_as_of_that_instant() -> None:
+    """Home Assistant was down until 08:40: a's window ended at 08:00 while b (extended
+    since) was open until 08:10, and c opened at 08:05 in between. As of 08:00 the
+    target kept running, so c pushes no settings onto it."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(60),
+            scheduled_by="a",
+            windows=(
+                window("a", 0, 60, started=True),
+                window("b", 30, 70, started=True),
+                window("c", 65, 120, HEAT22),
+            ),
+            last_actual="on",
+        ),
+    )
+
+    fx = c.tick(NOW + minutes(100))
+
+    assert fx == [Arm(NOW + minutes(120)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "c")
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_the_carriers_window_end_with_no_other_window_open_turns_the_target_off() -> (
+    None
+):
+    c = core("strict", "on")
+    c.set_windows(
+        NOW, [window("a", 0, 60), window("c", 100, 160)], configured={"a", "c"}
+    )
+    c.tick(NOW)
+
+    fx = c.tick(NOW + minutes(60))
+
+    assert fx == [Arm(NOW + minutes(100)), TurnOff(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.scheduled_by is None
+
+
+def test_window_starting_as_the_carrier_ends_extends_without_flap_or_settings() -> None:
+    """At 07:30 a ends and b opens: the timer goes on to b's end, nothing is switched,
+    and b pushes no settings onto a target that is running."""
+    c = core("strict", "on")
+    c.set_windows(
+        NOW,
+        [window("a", 0, 30), window("b", 30, 75, HEAT22)],
+        configured={"a", "b"},
+    )
+    c.tick(NOW)
+
+    fx = c.tick(NOW + minutes(30))
+
+    assert fx == [Arm(NOW + minutes(75)), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(75), "b")
+    assert c.snapshot.owed_settings == NO_SETTINGS
 
 
 def test_shortening_the_carrier_to_where_the_other_ends_keeps_it_the_carrier() -> None:

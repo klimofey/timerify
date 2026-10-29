@@ -544,6 +544,9 @@ class TimerCore:
             match item:
                 case _WindowEnds(window):
                     self._remove_window(window)
+                    handed = self._realign(window.end, may_stop=False)
+                    if handed is not None:
+                        wish = handed
                 case _WindowStarts(window):
                     if self._start_window(now, window, wish):
                         wish = "on"
@@ -559,7 +562,7 @@ class TimerCore:
                     wish = "off"
                 case unreachable:
                     assert_never(unreachable)
-        if (aligned := self._realign(now)) is not None:
+        if (aligned := self._realign(now, may_stop=True)) is not None:
             wish = aligned
         if not due and wish is None:
             return [], False
@@ -614,27 +617,31 @@ class TimerCore:
             self._owe(window.settings)
         return True
 
-    def _realign(self, now: datetime) -> Literal["on", "off"] | None:
-        """Apply S2: while the timer's end was set by an interval, editing that interval
-        moves the timer. If the interval's window still ends where the timer does,
-        nothing changes; otherwise the timer follows the latest end among the windows
-        that are open and not suppressed, and stops only if there is none.
+    def _realign(self, at: datetime, *, may_stop: bool) -> Literal["on", "off"] | None:
+        """Apply S2: while the timer is the schedule's (`scheduled_by` is set: nobody
+        has changed it since, S3), its end is the latest end among the windows that are
+        open at `at` and not suppressed, whichever interval was edited; the interval of
+        that window carries it. A timer that someone changed is never realigned.
+
+        With no such window the timer stops, but only if `may_stop`: when a window
+        ends, the end of the timer that follows it decides (and a window that opens
+        just then extends it without an off).
 
         Returns the wish this leaves, None when the timer's end stays as it is.
         """
         interval_id = self._snapshot.scheduled_by
         if interval_id is None:
             return None
-        windows = self._snapshot.windows
-        carrier = next(
-            (w for w in windows if w.interval_id == interval_id and _active(w, now)),
-            None,
-        )
-        if carrier is not None and carrier.end == self._snapshot.end:
-            return None
-        # A window that is open has started: the fold ran its start before this.
-        open_windows = [w for w in windows if _active(w, now) and not w.suppressed]
+        # Only a window whose start has been folded counts: in the middle of a fold, a
+        # window that opens later is not one yet.
+        open_windows = [
+            w
+            for w in self._snapshot.windows
+            if w.started and not w.suppressed and _active(w, at)
+        ]
         if not open_windows:
+            if not may_stop:
+                return None
             self._end_timer()
             return "off"
         latest = max(open_windows, key=lambda w: (w.end, w.interval_id == interval_id))

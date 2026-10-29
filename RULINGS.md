@@ -34,6 +34,12 @@ tooling) are not listed; only decisions that shape the product or its code.
   switch out of range, a cloud integration that only acknowledges) is sent it again. This
   is how "pending commands are firm promises" holds. Cost if wrong: a device that confirms
   its state only after the call returns may get one duplicate, idempotent command.
+  Reports that merely repeat the target's state send an unsent wish at most three times
+  (`MAX_AUTOMATIC_RESENDS`), then one warning is logged and nothing more is sent; the count
+  starts again when the target's state changes (including a return from unavailable and
+  start-up) or when a command wants the wish, which always sends. Without the bound, a
+  device that refuses a command and answers it with a report of its old state would be
+  commanded for ever.
 - **The generic domain fallback of spec §5.4 is built in phase 2**, together with the rest
   of §5.4; phase 1 supported only the listed domains.
 - **A service call that takes longer than 30 seconds counts as failed**

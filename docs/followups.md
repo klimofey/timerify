@@ -8,8 +8,15 @@ were made on purpose are in `RULINGS.md`, not here.
 
 - **Mixed groups read as off.** A group's state counts as on only when it is `on`, so a group
   of covers or locks that reports `home`/`open` is read as off.
-  `custom_components/timerify/domains.py:68-71` (the `group` row). Fix it with the domain
-  table work of phase 2.
+  `custom_components/timerify/domains.py:68-71` (the `group` row). After a `turn_on` the
+  group never reads as on, so each of its reports sends `homeassistant.turn_on` again, up to
+  `MAX_AUTOMATIC_RESENDS` times. Fix it with the domain table work of phase 2.
+- **Remotes and media players may get up to 3 extra `turn_on` calls.** An IR or toggle-based
+  remote cannot show whether it obeyed, and a media player that boots through `standby`/`off`
+  reports a state that is not on for a while; reports that repeat that state send the unsent
+  `turn_on` again, up to `MAX_AUTOMATIC_RESENDS` times (3), and for a toggle device a repeat
+  can switch it back off. `custom_components/timerify/domains.py:65` (`remote`) and `:77`
+  (`media_player`). Consider a per-domain "no automatic resend" in the domain table; phase 2.
 - **`actual_state` raises for an unsupported domain, but returns "unavailable" for a state that
   is unknown.** An entity of an unsupported domain with no state is quietly "unavailable"; with
   a state it raises `ValueError`. `custom_components/timerify/domains.py:95-103`. The generic
@@ -21,7 +28,7 @@ were made on purpose are in `RULINGS.md`, not here.
   entities with on/off states; phase 2 does the domain table work anyway.
 - **A deleted target gives no sign.** `er.async_resolve_entity_id` returns the id even when the
   entity is gone from the registry, so a timer whose target was deleted still loads and drives
-  nothing, with no message. `custom_components/timerify/controller.py:81-84`. It needs a
+  nothing, with no message. `custom_components/timerify/controller.py:83-86`. It needs a
   repairs issue; the owner decides whether it is phase 2 or later.
 - **The smoke test covers only the target without a device.** The input_boolean in
   `scripts/smoke/configuration.yaml:8` sits on no device, so the path of a target on a device

@@ -88,7 +88,12 @@ def _local_time(moment: datetime) -> str:
 
 
 class TargetController:
-    """Runs the timer of one target entity."""
+    """Runs the timer of one target entity.
+
+    Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
+    `async_add_command`, `async_cancel_command`) waits for its turn and raises
+    HomeAssistantError (`timer_unloaded`) if the timer was unloaded meanwhile.
+    """
 
     def __init__(
         self,

@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.service import async_get_all_descriptions
 from homeassistant.setup import async_setup_component
+from homeassistant.util.yaml import parse_yaml
 
 from custom_components.timerify.const import DOMAIN, MAX_DELAY_MINUTES, MAX_MINUTES
 
@@ -311,10 +312,38 @@ async def test_add_command_accepts_a_delay_in_any_whole_form(
 
 
 @pytest.mark.parametrize(
+    ("written", "before", "service"),
+    [("on", "off", TURN_ON), ("off", "on", TURN_OFF)],
+    ids=["on", "off"],
+)
+async def test_add_command_accepts_an_action_written_without_quotes_in_yaml(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    written: str,
+    before: str,
+    service: tuple[str, str],
+) -> None:
+    """Home Assistant reads YAML 1.1, where an unquoted `on` or `off` is a boolean: an
+    automation written by hand with `action: on` makes the command it meant."""
+    await fake_target.set_state(before)
+    await setup_target()
+    data = parse_yaml(f"action: {written}\ndelay: 5\n")
+    assert isinstance(data["action"], bool)
+
+    await add_command(hass, NUMBER, **data)
+    await advance(hass, freezer, minutes=5)
+
+    assert fake_target.calls == [service]
+
+
+@pytest.mark.parametrize(
     "data",
     [
         {},
         {"action": "pause", "delay": 5},
+        {"action": 1, "delay": 5},
         {"action": "on", "delay": 0},
         {"action": "on", "delay": MAX_DELAY_MINUTES + 1},
         {"action": "on", "delay": 2.5},
@@ -328,6 +357,7 @@ async def test_add_command_accepts_a_delay_in_any_whole_form(
     ids=[
         "missing",
         "unknown_action",
+        "action_number",
         "delay_zero",
         "delay_above_a_week",
         "delay_not_whole",

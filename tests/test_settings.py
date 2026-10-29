@@ -6,12 +6,13 @@ from typing import Any
 
 import probatio
 import pytest
+from homeassistant.components.light.const import ColorMode
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.timerify.const import DOMAIN, MAX_AUTOMATIC_RESENDS, MAX_MINUTES
 
-from .conftest import FakeTarget, SetupTarget
+from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
     AC_ID,
     AC_NUMBER,
@@ -419,8 +420,18 @@ async def test_run_minutes_outside_range_are_rejected(
 
 @pytest.mark.parametrize(
     "data",
-    [{"percentage": 50.5}, {"percentage": True}, {"temperature": "warm"}],
-    ids=["fractional_speed", "boolean_speed", "text_temperature"],
+    [
+        {"percentage": 50.5},
+        {"percentage": True},
+        {"temperature": "warm"},
+        {"temperature": True},
+    ],
+    ids=[
+        "fractional_speed",
+        "boolean_speed",
+        "text_temperature",
+        "boolean_temperature",
+    ],
 )
 async def test_settings_of_the_wrong_type_are_rejected(
     hass: HomeAssistant,
@@ -436,6 +447,31 @@ async def test_settings_of_the_wrong_type_are_rejected(
         await call_service(hass, "run", {"entity_id": AC_NUMBER}, **data)
 
     assert fake_climate.calls == []
+
+
+async def test_brightness_given_as_a_boolean_is_rejected(
+    hass: HomeAssistant, provide_target: ProvideTarget, setup_target: SetupTarget
+) -> None:
+    """`true` is not a brightness: Python would count it as 1 %, and the lamp would
+    light up at the dimmest setting."""
+    lamp = provide_target(
+        "light.lamp",
+        SWITCH_SERVICES,
+        name="Lamp",
+        capability_attributes={"supported_color_modes": [ColorMode.BRIGHTNESS]},
+    )
+    await setup_target(target="light.lamp")
+
+    with pytest.raises(probatio.Invalid):
+        await call_service(
+            hass, "run", {"entity_id": "number.lamp_run_for"}, brightness_pct=True
+        )
+
+    assert lamp.calls == []
+    await call_service(
+        hass, "run", {"entity_id": "number.lamp_run_for"}, brightness_pct=40
+    )
+    assert lamp.call_data == [("turn_on", {"brightness_pct": 40.0})]
 
 
 async def test_settings_given_as_text_are_understood(

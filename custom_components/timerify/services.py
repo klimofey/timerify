@@ -30,29 +30,43 @@ ATTR_AT = "at"
 ATTR_COMMAND_ID = "command_id"
 
 
+def _number(message: str) -> Callable[[Any], float]:
+    """A validator of numbers that gives them as a float and refuses the rest with
+    `message`.
+
+    Templates hand numbers over as text: "24" is 24.0. A boolean is refused, which
+    Python would count as 1: `true` is not a temperature or a brightness.
+    """
+
+    def number(value: Any) -> float:
+        if isinstance(value, bool):
+            raise probatio.Invalid(message)
+        try:
+            return float(value)
+        except (TypeError, ValueError, OverflowError) as err:
+            raise probatio.Invalid(message) from err
+
+    return number
+
+
 def _whole(message: str) -> Callable[[Any], int]:
     """A validator of whole numbers that gives them as an int and refuses the rest
     with `message`.
 
-    Templates hand numbers over as they were rendered: an input_number gives 15.0
-    or "15.0", and 30 / 2 is 15.0. Those are whole and accepted; 2.5 is rejected
-    rather than rounded, and so is a boolean, which Python would count as 1.
+    A template gives an input_number as 15.0 or "15.0", and 30 / 2 is 15.0: those are
+    whole and accepted. 2.5 is rejected rather than rounded.
     """
+    number = _number(message)
 
     def whole(value: Any) -> int:
-        if isinstance(value, bool):
+        if not (whole_value := number(value)).is_integer():
             raise probatio.Invalid(message)
-        try:
-            number = float(value)
-        except (TypeError, ValueError, OverflowError) as err:
-            raise probatio.Invalid(message) from err
-        if not number.is_integer():
-            raise probatio.Invalid(message)
-        return int(number)
+        return int(whole_value)
 
     return whole
 
 
+setting_number = _number("expected a number")
 whole_minutes = _whole("expected a whole number of minutes")
 whole_number = _whole("expected a whole number")
 
@@ -64,12 +78,12 @@ ADD_TIME_SCHEMA: VolDictType = {
 
 SETTINGS_SCHEMA: VolDictType = {
     probatio.Optional("hvac_mode"): cv.string,
-    probatio.Optional("temperature"): probatio.Coerce(float),
+    probatio.Optional("temperature"): setting_number,
     probatio.Optional("fan_mode"): cv.string,
     probatio.Optional("preset_mode"): cv.string,
     probatio.Optional("mode"): cv.string,
     probatio.Optional("operation_mode"): cv.string,
-    probatio.Optional("brightness_pct"): probatio.Coerce(float),
+    probatio.Optional("brightness_pct"): setting_number,
     probatio.Optional("percentage"): whole_number,
     probatio.Optional("humidity"): whole_number,
 }
@@ -85,8 +99,19 @@ RUN_SCHEMA: VolDictType = {
     **SETTINGS_SCHEMA,
 }
 
+
+def _unquoted_yaml_action(value: Any) -> Any:
+    """`on` and `off` as hand-written YAML gives them: Home Assistant reads YAML 1.1,
+    where an unquoted `on` is the boolean true and `off` is false."""
+    if isinstance(value, bool):
+        return "on" if value else "off"
+    return value
+
+
 ADD_COMMAND_SCHEMA: VolDictType = {
-    probatio.Required(ATTR_ACTION): probatio.In(["on", "off"]),
+    probatio.Required(ATTR_ACTION): probatio.All(
+        _unquoted_yaml_action, probatio.In(["on", "off"])
+    ),
     probatio.Optional(ATTR_DELAY): probatio.All(
         whole_minutes, probatio.Range(min=1, max=MAX_DELAY_MINUTES)
     ),

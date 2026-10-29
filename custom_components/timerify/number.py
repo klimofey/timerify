@@ -7,10 +7,11 @@ from homeassistant.components.number import (
 )
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import MAX_MINUTES
+from .const import DOMAIN, MAX_MINUTES
 from .controller import TimerifyConfigEntry
 from .core import remaining_minutes
 from .entity import TimerifyEntity
@@ -47,7 +48,14 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         return remaining_minutes(self._controller.snapshot, dt_util.utcnow())
 
     async def async_set_native_value(self, value: float) -> None:
-        """Count down `value` minutes from now."""
+        """Count down `value` minutes from now; a part of a minute is refused, not
+        rounded, as `add_time` does."""
+        if not value.is_integer():
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="not_whole_minutes",
+                translation_placeholders={"minutes": f"{value:g}"},
+            )
         await self._controller.async_set_minutes(int(value))
 
     async def async_add_time(self, minutes: int) -> None:

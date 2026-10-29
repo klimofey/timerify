@@ -10,6 +10,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
@@ -323,6 +324,42 @@ async def test_entities_show_the_new_timer_while_the_device_is_still_answering(
 
     assert state_of(hass, TARGET_ID) == "on"
     assert state_of(hass, NUMBER) == "10"
+
+
+@pytest.mark.parametrize("value", [0.5, 2.5, 44.99])
+async def test_run_for_rejects_a_part_of_a_minute(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    value: float,
+) -> None:
+    """A fraction of a minute is refused with a reason, not rounded: 0.5 does not
+    turn the target off and leaves the countdown that was running alone."""
+    await setup_target()
+    await set_number(hass, NUMBER, 10)
+
+    with pytest.raises(ServiceValidationError) as refused:
+        await set_number(hass, NUMBER, value)
+
+    assert refused.value.translation_domain == DOMAIN
+    assert refused.value.translation_key == "not_whole_minutes"
+    assert f"takes a whole number of minutes; {value:g} is not one" in str(
+        refused.value
+    )
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, NUMBER) == "10"
+
+
+async def test_run_for_accepts_a_whole_number_given_as_a_float(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A template or an input_number hands over 15.0: that is 15 whole minutes."""
+    await setup_target()
+
+    await set_number(hass, NUMBER, 15.0)
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, NUMBER) == "15"
 
 
 async def test_timer_across_dst_change(

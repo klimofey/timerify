@@ -1,17 +1,19 @@
-"""Pure timer state machine: commands, pending commands and expiry become effects for
-a controller.
+"""Pure timer state machine: commands, pending commands, schedule windows and expiry
+become effects for a controller.
 
 Nothing here touches Home Assistant, the clock or the event loop. Every command
 and every observation of the target takes the current time, updates the snapshot
 and returns the effects the caller must carry out, in order.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from enum import IntEnum
 from functools import wraps
 from math import ceil
-from typing import Concatenate, Final, Literal
+from typing import Concatenate, Final, Literal, assert_never
 
 from .const import MAX_AUTOMATIC_RESENDS, MAX_MINUTES, NO_SETTINGS, Mode, Settings
 from .domains import Actual
@@ -37,6 +39,25 @@ class Command:
 
 
 @dataclass(frozen=True)
+class Window:
+    """One occurrence of a schedule interval: the target is to run from `start` to
+    `end`. The caller works the occurrence out; the core only folds it into the timer
+    (S1 to S4)."""
+
+    interval_id: str
+    start: datetime
+    """When the window opens (timezone-aware UTC)."""
+    end: datetime
+    """When it closes (timezone-aware UTC): after `start`, at most a day later."""
+    settings: Settings = NO_SETTINGS
+    """What a target that is off is turned on with when the window opens."""
+    started: bool = False
+    """The opening has been dealt with: it set the timer, left it alone because the
+    timer ends later, or found the window over. It never applies again, so a target
+    that was turned off during the window stays off until the next one (S4)."""
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """The state of the timer; a store keeps everything but `last_actual`."""
 
@@ -49,6 +70,12 @@ class Snapshot:
     have taken. Never set while `pending` is "off"."""
     commands: tuple[Command, ...] = ()
     """The pending commands, ordered by `at` and then by when they were added."""
+    scheduled_by: str | None = None
+    """The interval whose window end the timer carries, while nobody has changed the
+    timer since (S2, S3). Always None while `end` is."""
+    windows: tuple[Window, ...] = ()
+    """The current or next window of every interval, ordered by `start`; at most one
+    per interval."""
     last_actual: Actual | None = None
     """The target's last observed state; None until it has been observed."""
 
@@ -114,11 +141,16 @@ type Effect = (
 
 
 def next_wakeup(snapshot: Snapshot) -> datetime | None:
-    """When the timer must next be looked at: the end or the first command, whichever
-    comes first; None when neither is there."""
+    """When the timer must next be looked at: the earliest of the end, the first
+    command, the start of every window not yet started and the end of every window;
+    None when there is none."""
     times = [snapshot.end] if snapshot.end is not None else []
     if snapshot.commands:
         times.append(snapshot.commands[0].at)
+    for window in snapshot.windows:
+        if not window.started:
+            times.append(window.start)
+        times.append(window.end)
     return min(times, default=None)
 
 
@@ -135,6 +167,32 @@ def _capped(now: datetime, end: datetime) -> datetime:
     return min(end, now + _MAX_DURATION)
 
 
+def _checked(window: Window) -> Window:
+    """`window` in UTC, so every start and end is UTC whatever zone the caller works
+    in. A naive time, or a window that does not start before it ends or lasts longer
+    than a day, is refused."""
+    start = _utc(window.start, "the window's start")
+    end = _utc(window.end, "the window's end")
+    if not start < end <= start + _MAX_DURATION:
+        raise ValueError(
+            f"the window of {window.interval_id} must start before it ends and last"
+            " at most a day"
+        )
+    return replace(window, start=start, end=end)
+
+
+def _active(window: Window, now: datetime) -> bool:
+    return window.start <= now < window.end
+
+
+def _inheriting(window: Window, old: Window | None, now: datetime) -> Window:
+    """`window`, started if it is the occurrence that `old` already started."""
+    same_occurrence = (
+        old is not None and old.started and _active(old, now) and _active(window, now)
+    )
+    return replace(window, started=True) if same_occurrence else window
+
+
 def _reports_change[**P](
     command: Callable[Concatenate[TimerCore, P], list[Effect]],
 ) -> Callable[Concatenate[TimerCore, P], list[Effect]]:
@@ -149,6 +207,33 @@ def _reports_change[**P](
         return effects
 
     return wrapper
+
+
+class _Rank(IntEnum):
+    """Which of the items that fall due at one instant goes first. A command goes after
+    a window that starts, as P3 makes it the same as setting the timer by hand, and
+    before the end of the timer, as it may move it; a window that starts as the timer
+    ends extends it, so the end of the timer goes last."""
+
+    WINDOW_END = 0
+    WINDOW_START = 1
+    COMMAND = 2
+    TIMER_END = 3
+
+
+@dataclass(frozen=True)
+class _WindowEnds:
+    window: Window
+
+
+@dataclass(frozen=True)
+class _WindowStarts:
+    window: Window
+
+
+type _Item = _WindowEnds | _WindowStarts | Command | Literal["end"]
+"""Something that fell due and is folded into the timer: the end of a window, the
+start of one, a pending command or the end of the timer."""
 
 
 class _Allowance:
@@ -195,9 +280,12 @@ class TimerCore:
         self._mode = mode
         self._default_duration = default_duration
         # Only the first command is ever looked at, so a snapshot that comes from
-        # elsewhere is put in order: by time, equal times as they came.
+        # elsewhere is put in order: by time, equal times as they came. Windows are
+        # folded by their start, so they are put in order too.
         self._snapshot = replace(
-            snapshot, commands=tuple(sorted(snapshot.commands, key=lambda c: c.at))
+            snapshot,
+            commands=tuple(sorted(snapshot.commands, key=lambda c: c.at)),
+            windows=tuple(sorted(snapshot.windows, key=lambda w: w.start)),
         )
         self._unsent = False
         """The pending wish has not reached the target (its call failed or changed
@@ -277,7 +365,7 @@ class TimerCore:
             return self._run_until(
                 now, now + self._default_duration, settings, apply_if_on=apply_if_on
             )
-        self._snapshot = replace(self._snapshot, end=None)
+        self._set_end(None)
         return [
             self._wakeup(),
             *self._want("on", settings, apply_if_on=apply_if_on),
@@ -304,10 +392,56 @@ class TimerCore:
         return [self._wakeup()]
 
     @_reports_change
-    def tick(self, now: datetime) -> list[Effect]:
-        """Handle the wake-up alarm: carry out the end and the commands that are due.
+    def set_windows(
+        self,
+        now: datetime,
+        windows: Iterable[Window],
+        *,
+        configured: AbstractSet[str],
+        keep: AbstractSet[str] = frozenset(),
+    ) -> list[Effect]:
+        """Replace the windows with the current or next one of each interval.
 
-        An alarm that fires with nothing due is a stale leftover and does nothing.
+        `configured` names the intervals that exist: the windows of any other go. An
+        interval in `keep` keeps the window it has, started or not, whatever is given
+        for it: its occurrence could not be worked out this time. A new window that
+        is open now and replaces a started one that is open now is the same
+        occurrence, perhaps edited, so it does not start again. Any other new window
+        is a new occurrence and starts at its start.
+
+        This only merges: the alarm is re-armed, and the next `tick` or `observe`
+        folds what the new windows make due and follows an edit (S2).
+        """
+        now = _utc(now)
+        fresh: dict[str, Window] = {}
+        for window in map(_checked, windows):
+            if window.interval_id in fresh:
+                raise ValueError(f"two windows of the interval {window.interval_id}")
+            fresh[window.interval_id] = window
+        old = {window.interval_id: window for window in self._snapshot.windows}
+        kept = [
+            window
+            for window in old.values()
+            if window.interval_id in keep and window.interval_id in configured
+        ]
+        merged = [
+            _inheriting(window, old.get(window.interval_id), now)
+            for window in fresh.values()
+            if window.interval_id in configured and window.interval_id not in keep
+        ]
+        self._snapshot = replace(
+            self._snapshot,
+            windows=tuple(sorted(kept + merged, key=lambda w: w.start)),
+        )
+        return [self._wakeup()]
+
+    @_reports_change
+    def tick(self, now: datetime) -> list[Effect]:
+        """Handle the wake-up alarm: carry out the end, the commands and the windows
+        that are due, and follow an edited window.
+
+        An alarm that fires with nothing due and nothing to follow is a stale leftover
+        and does nothing.
         """
         effects, _ = self._catch_up(_utc(now))
         return effects
@@ -384,50 +518,120 @@ class TimerCore:
 
     def _catch_up(self, now: datetime) -> tuple[list[Effect], bool]:
         """Fold everything that is due by `now` into the timer, in the order it fell
-        due: the end and every command at or before `now`.
+        due: the ends and starts of windows, the commands and the end of the timer at
+        or before `now`; then follow the window the timer is tied to (S2).
 
-        A command goes before the end that is due at the same moment, as it may move
-        the end. The end is an item only if it is still `<= now` once the items before
-        it are folded in. Each item leaves the timer as it would have if it had been
-        carried out when it fell due, but the target is asked once, for the last wish:
-        a turn-on and an off that were due together switch nothing.
+        Items that fall due together go in the order of `_Rank`. The end is an item
+        only if it is still `<= now` once the items before it are folded in. Each item
+        leaves the timer as it would have if it had been carried out when it fell due,
+        but the target is asked once, for the last wish: a turn-on and an off that
+        were due together switch nothing.
 
-        Returns the effects, and whether an item moved the timer: the end or an
-        executed command. A command dropped for coming too late leaves it as it was.
+        Returns the effects, and whether the timer was moved: by the end, an executed
+        command, a window that set it or the realignment. A window that left it alone,
+        one that was over before it was noticed, a window end and a command dropped
+        for coming too late leave it as it was.
         """
         effects: list[Effect] = []
         wish: Literal["on", "off"] | None = None
         due = False
         while (item := self._next_due(now)) is not None:
             due = True
-            if isinstance(item, Command):
-                commands = self._snapshot.commands[1:]
-                self._snapshot = replace(self._snapshot, commands=commands)
-                if (command_wish := self._run_command(now, item)) is None:
-                    effects.append(CommandDropped(item))
-                else:
-                    wish = command_wish
-            else:
-                self._end_timer()
-                wish = "off"
-        if not due:
+            match item:
+                case _WindowEnds(window):
+                    self._remove_window(window)
+                case _WindowStarts(window):
+                    if self._start_window(now, window, wish):
+                        wish = "on"
+                case Command():
+                    commands = self._snapshot.commands[1:]
+                    self._snapshot = replace(self._snapshot, commands=commands)
+                    if (command_wish := self._run_command(now, item)) is None:
+                        effects.append(CommandDropped(item))
+                    else:
+                        wish = command_wish
+                case "end":
+                    self._end_timer()
+                    wish = "off"
+                case unreachable:
+                    assert_never(unreachable)
+        if (aligned := self._realign(now)) is not None:
+            wish = aligned
+        if not due and wish is None:
             return [], False
         effects.append(self._wakeup())
         if wish is not None:
             effects += self._want(wish)
         return effects, wish is not None
 
-    def _next_due(self, now: datetime) -> Command | Literal["end"] | None:
-        """The item to fold in next: the first command or the end, whichever fell due
-        first, the command on a tie; None when neither is due."""
+    def _next_due(self, now: datetime) -> _Item | None:
+        """The item to fold in next: the one that fell due first, by `_Rank` on a tie;
+        None when nothing is due."""
         state = self._snapshot
-        command = state.commands[0] if state.commands else None
-        if command is not None and command.at > now:
-            command = None
-        end = state.end
-        if end is not None and end <= now and (command is None or end < command.at):
-            return "end"
-        return command
+        items: list[tuple[datetime, _Rank, _Item]] = []
+        for window in state.windows:
+            if window.end <= now:
+                items.append((window.end, _Rank.WINDOW_END, _WindowEnds(window)))
+            if not window.started and window.start <= now:
+                items.append((window.start, _Rank.WINDOW_START, _WindowStarts(window)))
+        if state.commands and state.commands[0].at <= now:
+            items.append((state.commands[0].at, _Rank.COMMAND, state.commands[0]))
+        if state.end is not None and state.end <= now:
+            items.append((state.end, _Rank.TIMER_END, "end"))
+        if not items:
+            return None
+        return min(items, key=lambda entry: entry[:2])[2]
+
+    def _remove_window(self, window: Window) -> None:
+        """The window is over."""
+        windows = tuple(w for w in self._snapshot.windows if w != window)
+        self._snapshot = replace(self._snapshot, windows=windows)
+
+    def _start_window(
+        self, now: datetime, window: Window, wish: Literal["on", "off"] | None
+    ) -> bool:
+        """Apply S1 to a window that opens: the timer is set to the window's end,
+        unless it ends later, or the window is already over. Returns whether it was
+        set; the window never starts again either way.
+
+        The window's settings are owed only if the target does not run as of this item
+        (§5.4): a window that opens on a running target pushes nothing.
+        """
+        windows = tuple(
+            replace(w, started=True) if w == window else w
+            for w in self._snapshot.windows
+        )
+        self._snapshot = replace(self._snapshot, windows=windows)
+        end = self._snapshot.end
+        if window.end <= now or (end is not None and end >= window.end):
+            return False
+        self._set_end(window.end, by=window.interval_id)
+        if not self._runs_as_of(wish):
+            self._owe(window.settings)
+        return True
+
+    def _realign(self, now: datetime) -> Literal["on", "off"] | None:
+        """Apply S2: while the timer's end was set by an interval, it follows that
+        interval's window as it is now. Returns the wish this leaves, None when the
+        timer is as it should be."""
+        interval_id = self._snapshot.scheduled_by
+        if interval_id is None:
+            return None
+        window = next(
+            (
+                w
+                for w in self._snapshot.windows
+                if w.interval_id == interval_id and _active(w, now)
+            ),
+            None,
+        )
+        if window is None:
+            self._end_timer()
+            return "off"
+        if window.end == self._snapshot.end:
+            return None
+        self._set_end(window.end, by=interval_id)
+        return "on"
 
     def _run_command(
         self, now: datetime, command: Command
@@ -444,9 +648,7 @@ class TimerCore:
         end = self._command_end(command)
         if end is not None and end <= now:
             return None
-        self._snapshot = replace(
-            self._snapshot, end=None if end is None else _capped(now, end)
-        )
+        self._set_end(None if end is None else _capped(now, end))
         self._owe(command.settings)
         return "on"
 
@@ -468,7 +670,7 @@ class TimerCore:
             self._clear_settings()  # a target that is off runs with nothing
             if self._snapshot.end is None:
                 return []
-            self._snapshot = replace(self._snapshot, end=None)
+            self._set_end(None)
             return [self._wakeup()]
         if self._mode == "strict" and self._snapshot.end is None:
             return self._run_until(now, now + self._default_duration)
@@ -485,7 +687,7 @@ class TimerCore:
         """Count down to `end`, at most a day from now, or stop if it is not ahead."""
         if end <= now:
             return self._stop()
-        self._snapshot = replace(self._snapshot, end=_capped(now, end))
+        self._set_end(_capped(now, end))
         return [
             self._wakeup(),
             *self._want("on", settings, apply_if_on=apply_if_on),
@@ -497,8 +699,16 @@ class TimerCore:
 
     def _end_timer(self) -> None:
         """The countdown is over: there is no end, and nothing to run with."""
-        self._snapshot = replace(self._snapshot, end=None)
+        self._set_end(None)
         self._clear_settings()
+
+    def _set_end(self, end: datetime | None, *, by: str | None = None) -> None:
+        """The only writer of the end. `by` names the interval whose window end it is
+        (S1, S2); every other write, whoever made it, leaves the timer to nobody's
+        schedule (S3), and a timer with no end is nobody's."""
+        self._snapshot = replace(
+            self._snapshot, end=end, scheduled_by=None if end is None else by
+        )
 
     def _want(
         self,
@@ -581,8 +791,7 @@ class TimerCore:
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):
             return []
-        runs = state.last_actual == "on" or (state.pending == "on" and not self._unsent)
-        if state.last_actual == "unavailable" or not runs:
+        if state.last_actual == "unavailable" or not self._runs_as_of(None):
             return []
         if repeated:
             match self._settings_allowance.take():
@@ -594,6 +803,15 @@ class TimerCore:
             self._settings_allowance.reset()  # a command or a change always sends
         self._settings_unsent = False
         return [ApplySettings(state.owed_settings)]
+
+    def _runs_as_of(self, wish: Literal["on", "off"] | None) -> bool:
+        """Whether the target runs as of a fold item: the wish so far is "on" or, with
+        no wish yet, it is on or its turn-on is on its way (not one that never went
+        out)."""
+        if wish is not None:
+            return wish == "on"
+        state = self._snapshot
+        return state.last_actual == "on" or (state.pending == "on" and not self._unsent)
 
     def _clear_settings(self) -> None:
         """Nothing is owed: the target took the settings, or they no longer apply."""

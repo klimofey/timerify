@@ -1,5 +1,7 @@
 """What the recorder keeps of a timer's entities."""
 
+import logging
+from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
@@ -22,6 +24,19 @@ def auto_enable_custom_integrations(
     recorder's database is ready: the recorder fixtures need that order, and the
     autouse fixture of the same name in conftest.py would set Home Assistant up
     first."""
+
+
+@pytest.fixture(autouse=True)
+def quiet_sql_engine() -> Iterator[None]:
+    """Keep the SQL the recorder runs out of the test output: the plugin sets
+    `sqlalchemy.engine` to INFO for the whole session, and the recorder's thread
+    prints each statement, some of them after the test is over. Set up before the
+    recorder's fixtures, this one is also torn down after them."""
+    engine = logging.getLogger("sqlalchemy.engine")
+    level = engine.level
+    engine.setLevel(logging.WARNING)
+    yield
+    engine.setLevel(level)
 
 
 async def test_command_list_is_not_recorded(

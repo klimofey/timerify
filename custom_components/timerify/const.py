@@ -6,8 +6,8 @@ from typing import Final, Literal
 DOMAIN: Final = "timerify"
 
 CONF_TARGET: Final = "target"
-"""Option holding the target entity: an entity id, or a registry UUID once the
-entity is registered."""
+"""Option holding the entity id of the target. A renamed target is followed by
+updating the option (see `_follow_target` in `__init__`), not by a registry id."""
 CONF_MODE: Final = "mode"
 CONF_DEFAULT_DURATION: Final = "default_duration"
 """Option holding the default duration in whole minutes."""

@@ -5,19 +5,14 @@ duration. The options flow changes the mode and the duration; the target stays.
 """
 
 from collections.abc import Mapping
-from enum import IntFlag
 from typing import Any, Final, get_args, override
 
 import probatio
-from homeassistant.components.climate.const import ClimateEntityFeature
-from homeassistant.components.water_heater.const import WaterHeaterEntityFeature
 from homeassistant.config_entries import ConfigFlow
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant, split_entity_id
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
-from homeassistant.helpers.entity import get_supported_features
 from homeassistant.helpers.schema_config_entry_flow import (
     SchemaCommonFlowHandler,
     SchemaConfigFlowHandler,
@@ -34,26 +29,25 @@ from .const import (
     MAX_MINUTES,
     Mode,
 )
-from .domains import SUPPORTED_DOMAINS
+from .domains import SUPPORTED_DOMAINS, behaviour_for_domain, switchable_by_features
 from .target import target_name
-
-_REQUIRED_FEATURES: Final[Mapping[str, tuple[IntFlag, ...]]] = {
-    "climate": (ClimateEntityFeature.TURN_ON, ClimateEntityFeature.TURN_OFF),
-    "water_heater": (WaterHeaterEntityFeature.ON_OFF,),
-}
-"""Domains whose entities may not be switchable: the features an entity of the
-domain must advertise to be a target. Other supported domains always can."""
 
 
 def _target_selector() -> selector.EntitySelector:
-    """Offer the supported domains; of the climate and water heater entities, those
-    that look switchable.
+    """Offer the supported domains; of those whose services need features, the
+    entities that advertise some of them.
 
     The picker takes an entity that has any one of a filter's features, so it can
     not require several. The exact rule is checked on submit by `_validate_target`;
     that check is needed anyway, since the selector validates only the domain.
     """
-    always_switchable = [d for d in SUPPORTED_DOMAINS if d not in _REQUIRED_FEATURES]
+    required = {
+        domain: behaviour_for_domain(domain).required_features
+        for domain in SUPPORTED_DOMAINS
+    }
+    always_switchable = [
+        domain for domain, features in required.items() if not features
+    ]
     filters = [selector.EntityWithDeviceFilterSelectorConfig(domain=always_switchable)]
     filters.extend(
         selector.EntityWithDeviceFilterSelectorConfig(
@@ -63,7 +57,8 @@ def _target_selector() -> selector.EntitySelector:
                 f"{domain}.{type(f).__name__}.{f.name}" for f in features
             ],
         )
-        for domain, features in _REQUIRED_FEATURES.items()
+        for domain, features in required.items()
+        if features
     )
     return selector.EntitySelector(
         selector.EntitySelectorConfig(domain=list(SUPPORTED_DOMAINS), filter=filters)
@@ -92,21 +87,6 @@ def _duration_selector() -> selector.NumberSelector:
     )
 
 
-def _supports_switching(hass: HomeAssistant, entity_id: str) -> bool:
-    """Whether a timer can turn the entity on and off."""
-    domain = split_entity_id(entity_id)[0]
-    if domain not in SUPPORTED_DOMAINS:
-        return False
-    required = _REQUIRED_FEATURES.get(domain, ())
-    if not required:
-        return True
-    try:
-        features = get_supported_features(hass, entity_id)
-    except HomeAssistantError:  # Neither a state nor a registry entry: unknown.
-        return False
-    return all(features & feature == feature for feature in required)
-
-
 async def _validate_target(
     handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
 ) -> dict[str, Any]:
@@ -120,7 +100,11 @@ async def _validate_target(
     assert isinstance(flow, ConfigFlow)
     registry = er.async_get(flow.hass)
     entity_id = er.async_resolve_entity_id(registry, user_input[CONF_TARGET])
-    if entity_id is None or not _supports_switching(flow.hass, entity_id):
+    if (
+        entity_id is None
+        or split_entity_id(entity_id)[0] not in SUPPORTED_DOMAINS
+        or not switchable_by_features(flow.hass, entity_id)
+    ):
         raise SchemaFlowError("target_not_supported")
     registered = registry.async_get(entity_id)
     await flow.async_set_unique_id(registered.id if registered else entity_id)

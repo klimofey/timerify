@@ -7,6 +7,9 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant import config_entries
 from homeassistant.components.climate.const import ClimateEntityFeature
+from homeassistant.components.fan.const import FanEntityFeature
+from homeassistant.components.media_player.const import MediaPlayerEntityFeature
+from homeassistant.components.siren.const import SirenEntityFeature
 from homeassistant.components.water_heater.const import WaterHeaterEntityFeature
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -251,12 +254,19 @@ async def test_registry_id_is_stored_as_the_entity_id(
         ("climate.heating", ClimateEntityFeature.TURN_OFF),
         ("water_heater.tank", 0),
         ("water_heater.tank", WaterHeaterEntityFeature.TARGET_TEMPERATURE),
+        ("fan.ceiling", 0),
+        ("fan.ceiling", FanEntityFeature.TURN_ON),
+        ("media_player.tv", 0),
+        ("media_player.tv", MediaPlayerEntityFeature.TURN_OFF),
+        ("siren.yard", 0),
+        ("siren.yard", SirenEntityFeature.TURN_ON),
     ],
 )
 async def test_entity_that_cannot_be_turned_on_and_off_is_rejected(
     hass: HomeAssistant, entity_id: str, features: int
 ) -> None:
-    """A thermostat that only has a mode is not a target; the form says so."""
+    """A thermostat that only has a mode, or a fan, player or siren that cannot be
+    switched, is not a target; the form says so."""
     hass.states.async_set(entity_id, "off", {"supported_features": int(features)})
 
     result = await submit(
@@ -276,13 +286,20 @@ async def test_entity_that_cannot_be_turned_on_and_off_is_rejected(
             ClimateEntityFeature.TURN_ON | ClimateEntityFeature.TURN_OFF,
         ),
         ("water_heater.tank", WaterHeaterEntityFeature.ON_OFF),
+        ("fan.ceiling", FanEntityFeature.TURN_ON | FanEntityFeature.TURN_OFF),
+        (
+            "media_player.tv",
+            MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF,
+        ),
+        ("siren.yard", SirenEntityFeature.TURN_ON | SirenEntityFeature.TURN_OFF),
         ("light.hall", 0),
     ],
 )
 async def test_entity_that_can_be_turned_on_and_off_is_accepted(
     hass: HomeAssistant, entity_id: str, features: int
 ) -> None:
-    """Climate and water heater entities qualify when they can be switched."""
+    """Entities qualify when they advertise the features their domain's turn_on and
+    turn_off need; a light needs none."""
     hass.states.async_set(entity_id, "off", {"supported_features": int(features)})
 
     result = await submit(
@@ -340,8 +357,9 @@ async def test_registry_id_of_an_unsupported_entity_is_rejected(
 async def test_picker_offers_only_entities_that_can_be_switched(
     hass: HomeAssistant,
 ) -> None:
-    """The entity picker lists the supported domains; of the climate and water
-    heater entities only those that advertise turning on and off."""
+    """The entity picker lists the supported domains; of the climate, water heater,
+    fan, media player and siren entities only those that advertise turning on and
+    off."""
     result = await start_flow(hass)
     (marker,) = (key for key in result["data_schema"].schema if key == CONF_TARGET)
     picker = result["data_schema"].schema[marker].serialize()["selector"]["entity"]
@@ -350,6 +368,12 @@ async def test_picker_offers_only_entities_that_can_be_switched(
     on_off = {
         "climate": [ClimateEntityFeature.TURN_ON, ClimateEntityFeature.TURN_OFF],
         "water_heater": [WaterHeaterEntityFeature.ON_OFF],
+        "fan": [FanEntityFeature.TURN_ON, FanEntityFeature.TURN_OFF],
+        "media_player": [
+            MediaPlayerEntityFeature.TURN_ON,
+            MediaPlayerEntityFeature.TURN_OFF,
+        ],
+        "siren": [SirenEntityFeature.TURN_ON, SirenEntityFeature.TURN_OFF],
     }
     filtered = {
         f["domain"][0]: f["supported_features"]

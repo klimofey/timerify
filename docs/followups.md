@@ -31,7 +31,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `observe`) and `:552-565` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
-  `custom_components/timerify/controller.py:424-443` (`_log_gave_up`) and
+  `custom_components/timerify/controller.py:425-444` (`_log_gave_up`) and
   `custom_components/timerify/core.py:154-179` (`_Allowance`).
 - **`type Actual` has no runtime arguments.** `typing.get_args(Actual)` is `()` because the alias
   is a PEP 695 `type`; use `Actual.__value__` if the values are ever enumerated (for example

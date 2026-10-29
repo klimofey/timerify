@@ -254,8 +254,9 @@ class TargetController:
                 wish, f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
             )
         except Exception:
-            # Another integration's bug, which must not freeze this timer: its
-            # entities are refreshed and the wish is sent again like a failed one.
+            # Another integration's bug. It must not stop the effects that follow
+            # or leave the wish counted as on its way: it is sent again like one
+            # the device rejected.
             _LOGGER.exception(
                 "Could not turn %s %s: its service raised an unexpected error",
                 self.target_entity_id,

@@ -51,6 +51,11 @@ DROPPED = (
 )
 """What is logged for a command whose run was over before it could start: its time is
 in the local time of the tests, US/Pacific."""
+CAME_DUE_WHILE_UNAVAILABLE = (
+    "A pending command for switch.boiler came due while it is unavailable;"
+    " it is carried out when it is back, unless its run is over by then"
+)
+"""What is logged for a command that falls due while the target is away."""
 
 
 def listed(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
@@ -197,10 +202,7 @@ async def test_command_due_while_unavailable_runs_when_back(
 
     assert fake_target.calls == []
     assert state_of(hass, NUMBER) == "30"
-    assert timerify_info(caplog) == [
-        "A pending command for switch.boiler came due while it is unavailable;"
-        " it is carried out when it is back"
-    ]
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
 
     await fake_target.set_state("off")
 
@@ -345,11 +347,61 @@ async def test_command_extending_the_timer_while_unavailable_is_not_logged_as_it
 
     await advance(hass, freezer, minutes=10)
 
-    assert timerify_info(caplog) == [
-        "A pending command for switch.boiler came due while it is unavailable;"
-        " it is carried out when it is back"
-    ]
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
     assert state_of(hass, NUMBER) == "30"
+
+
+async def test_open_run_command_at_the_end_while_unavailable_is_not_logged_as_its_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A loose-mode command to turn on without minutes, due as the countdown ends,
+    leaves the timer at zero but wants the target on: the log must not say that the
+    target is turned off when it is back, and it is turned on."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await fake_target.set_state("on")
+    await setup_target(
+        mode="loose", stored=payload(end=at(10), commands=[command_json(at(10))])
+    )
+    await fake_target.set_state("unavailable")
+
+    await advance(hass, freezer, minutes=10)
+    await fake_target.set_state("off")
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert state_of(hass, NUMBER) == "0"
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_command_whose_run_ends_while_unavailable_never_turns_the_target_on(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A five minute run that was due when the target dropped off Wi-Fi is over before
+    it is back: the target is not switched on late, and the log says what happened."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await setup_target(stored=payload(commands=[command_json(at(10), minutes=5)]))
+    await fake_target.set_state("unavailable")
+
+    await advance(hass, freezer, minutes=10)
+    assert state_of(hass, NUMBER) == "5"
+    await advance(hass, freezer, minutes=5)
+    assert state_of(hass, NUMBER) == "0"
+    await fake_target.set_state("off")
+
+    assert fake_target.calls == []
+    assert state_of(hass, TARGET_ID) == "off"
+    assert timerify_info(caplog) == [
+        CAME_DUE_WHILE_UNAVAILABLE,
+        "The timer of switch.boiler ended while it is unavailable;"
+        " it is turned off when it is back",
+    ]
 
 
 async def test_command_dropped_while_unavailable_is_only_logged_as_dropped(

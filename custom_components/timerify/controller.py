@@ -325,7 +325,14 @@ class TargetController:
         after = self.snapshot
         if after.last_actual != "unavailable":
             return
-        if before.end is not None and before.end <= now and after.end is None:
+        # A countdown that ended is one that wants the target off; a command that was
+        # due with it may have moved the end or made the target wanted on instead.
+        if (
+            before.end is not None
+            and before.end <= now
+            and after.end is None
+            and after.pending == "off"
+        ):
             _LOGGER.info(
                 "The timer of %s ended while it is unavailable;"
                 " it is turned off when it is back",
@@ -334,9 +341,10 @@ class TargetController:
         dropped = {e.command.id for e in effects if isinstance(e, CommandDropped)}
         kept = {command.id for command in after.commands}
         if any(c.id not in kept and c.id not in dropped for c in before.commands):
+            # Its run may end before the target is back, and then nothing is started.
             _LOGGER.info(
                 "A pending command for %s came due while it is unavailable;"
-                " it is carried out when it is back",
+                " it is carried out when it is back, unless its run is over by then",
                 self.target_entity_id,
             )
 

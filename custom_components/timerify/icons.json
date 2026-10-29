@@ -8,6 +8,9 @@
     "sensor": {
       "ends_at": {
         "default": "mdi:clock-end"
+      },
+      "next_command": {
+        "default": "mdi:calendar-clock"
       }
     }
   },
@@ -17,6 +20,12 @@
     },
     "run": {
       "service": "mdi:timer-play-outline"
+    },
+    "add_command": {
+      "service": "mdi:clock-plus-outline"
+    },
+    "cancel_command": {
+      "service": "mdi:clock-remove-outline"
     }
   }
 }

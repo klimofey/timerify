@@ -1,6 +1,7 @@
 """The "Run for" number: remaining minutes of the countdown, writable."""
 
-from typing import Any
+from datetime import datetime, timedelta
+from typing import Any, Literal
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -8,7 +9,7 @@ from homeassistant.components.number import (
     NumberMode,
 )
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -68,3 +69,34 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         """Switch the target on for `minutes`, or without a duration, with the settings
         the service was given."""
         await self._controller.async_run(minutes, settings)
+
+    async def async_add_command(
+        self,
+        action: Literal["on", "off"],
+        delay: int | None = None,
+        at: datetime | None = None,
+        minutes: int | None = None,
+        **settings: Any,
+    ) -> ServiceResponse:
+        """Keep a command to turn the target on or off, `delay` minutes from now or at
+        the time `at`; the response is its id.
+
+        An "on" runs for `minutes` and with the `settings` given. Exactly one of
+        `delay` and `at` is wanted.
+        """
+        if at is not None and delay is None:
+            due = at
+        elif delay is not None and at is None:
+            due = dt_util.utcnow() + timedelta(minutes=delay)
+        else:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="delay_or_at"
+            )
+        command_id = await self._controller.async_add_command(
+            action, due, minutes, settings
+        )
+        return {"command_id": command_id}
+
+    async def async_cancel_command(self, command_id: str) -> None:
+        """Forget the pending command with that id; it must be this timer's own."""
+        await self._controller.async_cancel_command(command_id)

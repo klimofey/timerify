@@ -1,35 +1,45 @@
-"""Pending commands: what a timer does with the commands that wait in its storage.
+"""Pending commands: what a timer does with the commands that wait for their time.
 
-Commands reach the timer through the storage file here, as they do after a restart;
-the services that create them are a later addition.
+Most commands reach the timer through the storage file, as they do after a restart;
+the last tests make them the way the user does, with `timerify.add_command`, and
+look at them on the "Next command" sensor.
 """
 
 import logging
+import re
 from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
-from custom_components.timerify.const import CONF_TARGET
+from custom_components.timerify.const import CONF_TARGET, MAX_COMMANDS
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
+    AC_ENDS_AT,
     AC_ID,
+    AC_NEXT,
     AC_NUMBER,
+    NEXT,
     NUMBER,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_command,
     advance,
     at,
+    call_service,
     command_json,
     payload,
+    record_writes,
     saved,
     set_number,
     state_of,
+    storage_key,
     timerify_info,
 )
 
@@ -40,6 +50,14 @@ DROPPED = (
 )
 """What is logged for a command whose run was over before it could start: its time is
 in the local time of the tests, US/Pacific."""
+
+
+def listed(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
+    """The commands a "Next command" sensor lists in its attributes."""
+    state = hass.states.get(entity_id)
+    assert state is not None
+    commands: list[dict[str, Any]] = state.attributes["commands"]
+    return commands
 
 
 async def test_stored_command_runs_on_time(
@@ -399,3 +417,415 @@ async def test_stored_commands_are_kept_as_they_were_written(
     await set_number(hass, AC_NUMBER, 10)
 
     assert saved(hass_storage, entry) == payload(end=at(10), commands=commands)
+
+
+async def test_ac_in_15_minutes_for_an_hour_cooling_24(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """ "Turn on in 15 minutes for an hour, cooling, 24": the AC is running by remote
+    meanwhile, and at the time it is put into cooling at 24 with an hour on the clock
+    (P1)."""
+    await setup_target(target=AC_ID)
+    await fake_climate.set_state("heat")  # on by remote: strict gives it 45 minutes
+
+    response = await add_command(
+        hass,
+        AC_NUMBER,
+        action="on",
+        delay=15,
+        minutes=60,
+        hvac_mode="cool",
+        temperature=24,
+    )
+
+    command_id = response[AC_NUMBER]["command_id"]
+    assert re.fullmatch(r"[0-9a-f]{32}", command_id)
+    assert state_of(hass, AC_NEXT) == "2026-01-05T07:15:00+00:00"
+    assert listed(hass, AC_NEXT) == [
+        command_json(
+            "2026-01-05T07:15:00+00:00",
+            minutes=60,
+            settings={"hvac_mode": "cool", "temperature": 24.0},
+            id=command_id,
+        )
+    ]
+
+    await advance(hass, freezer, minutes=15)
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "cool"}),
+        ("set_temperature", {"temperature": 24.0}),
+    ]
+    assert state_of(hass, AC_NUMBER) == "60"
+    assert state_of(hass, AC_ENDS_AT) == "2026-01-05T08:15:00+00:00"
+    assert state_of(hass, AC_NEXT) == "unknown"
+
+
+async def test_manual_use_between_now_and_the_command_does_not_cancel_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Someone switches the boiler on and off by hand before the command is due: the
+    timer follows them (45 minutes, then none), and the command still turns the boiler
+    on for 30 at its time (P2)."""
+    await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=10, minutes=30)
+
+    await fake_target.set_state("on")
+    assert state_of(hass, NUMBER) == "45"
+    await advance(hass, freezer, minutes=5)
+    await fake_target.set_state("off")
+    assert state_of(hass, NUMBER) == "0"
+    assert state_of(hass, NEXT) == "2026-01-05T07:10:00+00:00"
+
+    await advance(hass, freezer, minutes=5)
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, NUMBER) == "30"
+    assert state_of(hass, NEXT) == "unknown"
+
+
+async def test_cancel_command_removes_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A cancelled command is gone from the sensor and the file, and nothing happens
+    at its time."""
+    entry = await setup_target()
+    response = await add_command(hass, NUMBER, action="on", delay=10, minutes=30)
+    command_id = response[NUMBER]["command_id"]
+    assert state_of(hass, NEXT) == "2026-01-05T07:10:00+00:00"
+
+    await call_service(
+        hass, "cancel_command", {"entity_id": NUMBER}, command_id=command_id
+    )
+
+    assert state_of(hass, NEXT) == "unknown"
+    assert listed(hass, NEXT) == []
+    assert saved(hass_storage, entry) == payload()
+    await advance(hass, freezer, minutes=10)
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "0"
+
+
+async def test_cancel_unknown_command_is_rejected(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Cancelling a command that is not there says so, and leaves the others."""
+    await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=10)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await call_service(
+            hass, "cancel_command", {"entity_id": NUMBER}, command_id="nope"
+        )
+
+    assert raised.value.translation_key == "unknown_command"
+    assert raised.value.translation_placeholders == {"command_id": "nope"}
+    assert state_of(hass, NEXT) == "2026-01-05T07:10:00+00:00"
+
+
+async def test_cancel_through_another_timer_is_rejected(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A command belongs to the timer that made it: asking another timer to cancel it
+    fails, and the owner's command still runs."""
+    await setup_target()
+    await setup_target(target=AC_ID)
+    response = await add_command(hass, NUMBER, action="on", delay=10, minutes=30)
+    command_id = response[NUMBER]["command_id"]
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await call_service(
+            hass, "cancel_command", {"entity_id": AC_NUMBER}, command_id=command_id
+        )
+
+    assert raised.value.translation_key == "unknown_command"
+    assert state_of(hass, NEXT) == "2026-01-05T07:10:00+00:00"
+    await advance(hass, freezer, minutes=10)
+    assert fake_target.calls == [TURN_ON]
+    assert fake_climate.calls == []
+
+
+async def test_off_command_turns_target_off_on_time(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A running timer is stopped by a command to turn off at its time."""
+    await setup_target()
+    await set_number(hass, NUMBER, 45)
+    await add_command(hass, NUMBER, action="off", delay=10)
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, NUMBER) == "0"
+
+
+async def test_command_at_is_local_time(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The date and time picker gives no zone: it means the time on the wall of the
+    house, in Home Assistant's time zone, not UTC."""
+    await hass.config.async_set_time_zone("Asia/Jerusalem")
+    await setup_target()
+
+    await add_command(hass, NUMBER, action="on", at="2026-01-05 09:30:00")
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:30:00+00:00"
+
+
+async def test_command_at_names_its_own_zone(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A time that carries its zone is taken as it says, and shown in UTC."""
+    await setup_target()
+
+    await add_command(hass, NUMBER, action="on", at="2026-01-05T09:30:00+02:00")
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:30:00+00:00"
+
+
+@pytest.mark.parametrize(
+    ("data", "key", "placeholders"),
+    [
+        (
+            {"action": "on", "delay": 5, "at": "2026-01-05T08:00:00+00:00"},
+            "delay_or_at",
+            None,
+        ),
+        ({"action": "on"}, "delay_or_at", None),
+        (
+            {"action": "on", "at": "2026-01-05T06:59:00+00:00"},
+            "command_in_past",
+            {"at": "2026-01-04 22:59:00-08:00"},
+        ),
+        (
+            {"action": "on", "at": "2026-01-05T07:00:00+00:00"},
+            "command_in_past",
+            {"at": "2026-01-04 23:00:00-08:00"},
+        ),
+        (
+            {"action": "on", "at": "2026-01-12T07:01:00+00:00"},
+            "command_too_far",
+            {"days": "7"},
+        ),
+        (
+            {"action": "off", "delay": 5, "minutes": 10},
+            "off_takes_no_duration_or_settings",
+            None,
+        ),
+        (
+            {"action": "off", "delay": 5, "hvac_mode": "cool"},
+            "off_takes_no_duration_or_settings",
+            None,
+        ),
+        (
+            {"action": "on", "delay": 5, "hvac_mode": "cool"},
+            "setting_not_supported",
+            {"target": "Boiler", "setting": "hvac_mode"},
+        ),
+    ],
+    ids=[
+        "delay_and_at",
+        "neither",
+        "past",
+        "now",
+        "too_far",
+        "off_with_minutes",
+        "off_with_settings",
+        "settings_the_target_cannot_take",
+    ],
+)
+async def test_invalid_commands_are_rejected(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    data: dict[str, Any],
+    key: str,
+    placeholders: dict[str, str] | None,
+) -> None:
+    """A command that cannot be kept is refused with a reason when it is made, and
+    nothing is stored; `at` must lie after now and within a week."""
+    entry = await setup_target()
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await add_command(hass, NUMBER, **data)
+
+    assert raised.value.translation_key == key
+    assert raised.value.translation_placeholders == placeholders
+    assert state_of(hass, NEXT) == "unknown"
+    assert storage_key(entry) not in hass_storage
+    await advance(hass, freezer, hours=1)
+    assert fake_target.calls == []
+
+
+async def test_command_the_week_ahead_is_accepted(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The last moment a command may be set for is a week from now, and the longest
+    delay is that week in minutes."""
+    await setup_target()
+
+    await add_command(hass, NUMBER, action="on", at="2026-01-12T07:00:00+00:00")
+    await add_command(hass, NUMBER, action="on", delay=10080)
+
+    assert [c["at"] for c in listed(hass, NEXT)] == [
+        "2026-01-12T07:00:00+00:00",
+        "2026-01-12T07:00:00+00:00",
+    ]
+
+
+async def test_command_with_settings_the_target_refuses_is_rejected_when_made(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The AC has no dry mode: the user hears it now, not when the command comes due."""
+    await setup_target(target=AC_ID)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await add_command(hass, AC_NUMBER, action="on", delay=5, hvac_mode="dry")
+
+    assert raised.value.translation_key == "setting_not_an_option"
+    assert state_of(hass, AC_NEXT) == "unknown"
+
+
+async def test_twenty_first_command_is_rejected(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A timer keeps twenty commands; the next one is refused and the twenty stay."""
+    await setup_target()
+    for minute in range(1, MAX_COMMANDS + 1):
+        await add_command(hass, NUMBER, action="on", delay=minute)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await add_command(hass, NUMBER, action="on", delay=30)
+
+    assert raised.value.translation_key == "too_many_commands"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "limit": str(MAX_COMMANDS),
+    }
+    assert len(listed(hass, NEXT)) == MAX_COMMANDS
+
+
+async def test_command_for_several_timers_returns_one_id_each(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Aimed at two timers at once, the service gives each its own command and answers
+    with the id of each, by timer."""
+    await setup_target()
+    await setup_target(target=AC_ID)
+
+    response = await add_command(
+        hass, [NUMBER, AC_NUMBER], action="on", delay=5, minutes=20
+    )
+
+    assert response.keys() == {NUMBER, AC_NUMBER}
+    assert response[NUMBER]["command_id"] != response[AC_NUMBER]["command_id"]
+    await advance(hass, freezer, minutes=5)
+    assert fake_target.calls == [TURN_ON]
+    assert fake_climate.calls == [("turn_on", AC_ID)]
+    assert state_of(hass, NUMBER) == "20"
+    assert state_of(hass, AC_NUMBER) == "20"
+
+
+async def test_next_command_shows_a_command_on_an_idle_timer(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """With no countdown running, a new command still appears on the sensor at once."""
+    await setup_target()
+    assert state_of(hass, NEXT) == "unknown"
+
+    await add_command(hass, NUMBER, action="on", delay=30)
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:30:00+00:00"
+    assert state_of(hass, NUMBER) == "0"
+
+
+async def test_next_command_shows_the_earliest_command_first(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Commands made out of order are listed by time, and when the first has run the
+    sensor moves on to the next."""
+    await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=30, minutes=5)
+    await add_command(hass, NUMBER, action="off", delay=10)
+
+    assert [(c["at"], c["action"]) for c in listed(hass, NEXT)] == [
+        ("2026-01-05T07:10:00+00:00", "off"),
+        ("2026-01-05T07:30:00+00:00", "on"),
+    ]
+    assert state_of(hass, NEXT) == "2026-01-05T07:10:00+00:00"
+
+    await advance(hass, freezer, minutes=10)
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:30:00+00:00"
+    assert len(listed(hass, NEXT)) == 1
+
+
+async def test_next_command_shows_the_commands_kept_through_a_restart(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A timer that starts with commands in its file lists them at once."""
+    await setup_target(
+        stored=payload(commands=[command_json(at(20), minutes=30, id="stored")])
+    )
+
+    assert state_of(hass, NEXT) == "2026-01-05T07:20:00+00:00"
+    assert [c["id"] for c in listed(hass, NEXT)] == ["stored"]
+
+
+async def test_next_command_is_written_only_when_commands_change(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The countdown refreshes its entities every minute, but the list of commands has
+    not changed, so the sensor stays quiet; adding and cancelling write it once each."""
+    await setup_target(target=AC_ID)
+    response = await add_command(hass, AC_NUMBER, action="on", delay=60)
+    await set_number(hass, AC_NUMBER, 10)
+    next_writes = record_writes(hass, AC_NEXT)
+    number_writes = record_writes(hass, AC_NUMBER)
+
+    for _ in range(10):
+        await advance(hass, freezer, minutes=1)
+
+    assert len(number_writes) >= 10  # the countdown did notify its entities
+    assert next_writes == []
+
+    await add_command(hass, AC_NUMBER, action="off", delay=30)
+    await call_service(
+        hass,
+        "cancel_command",
+        {"entity_id": AC_NUMBER},
+        command_id=response[AC_NUMBER]["command_id"],
+    )
+
+    assert next_writes == ["2026-01-05T07:40:00+00:00", "2026-01-05T07:40:00+00:00"]

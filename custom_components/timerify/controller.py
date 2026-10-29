@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
+from uuid import uuid4
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID
@@ -23,7 +24,11 @@ from homeassistant.core import (
     HomeAssistant,
     callback,
 )
-from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
+from homeassistant.exceptions import (
+    ConfigEntryError,
+    HomeAssistantError,
+    ServiceValidationError,
+)
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
@@ -38,6 +43,8 @@ from .const import (
     CONF_TARGET,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
+    MAX_COMMAND_AHEAD,
+    MAX_COMMANDS,
     SERVICE_CALL_TIMEOUT,
 )
 from .core import (
@@ -72,6 +79,12 @@ type Label = Literal["on", "off", "settings"]
 what it runs with."""
 
 type TimerifyConfigEntry = ConfigEntry[TargetController]
+
+
+def _local_time(moment: datetime) -> str:
+    """`moment` the way the user reads the clock: Home Assistant's time zone, with its
+    offset."""
+    return dt_util.as_local(moment).isoformat(sep=" ", timespec="seconds")
 
 
 class TargetController:
@@ -109,7 +122,8 @@ class TargetController:
         self._stopped = False
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
-        self._notified_end = snapshot.end
+        self._notified_end = self.snapshot.end
+        self._notified_commands = self.snapshot.commands
         self._wakeup_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
         self._raised_for: tuple[Label, object] | None = None
@@ -165,6 +179,78 @@ class TargetController:
                 lambda now: self._core.set_duration(now, duration, owed)
             )
 
+    async def async_add_command(
+        self,
+        action: Literal["on", "off"],
+        at: datetime,
+        minutes: int | None,
+        settings: Mapping[str, Any] | None,
+    ) -> str:
+        """Keep a command to turn the target `action` at `at`, and return its id.
+
+        `minutes` is how long an "on" runs and `settings` what it turns the target on
+        with; an "off" takes neither.
+
+        Raises ServiceValidationError, before anything is kept, for an "off" with
+        either, for settings that the target cannot take, for a time that is not
+        ahead or is more than `MAX_COMMAND_AHEAD` ahead, and when the timer already
+        keeps `MAX_COMMANDS`.
+        """
+        if action == "off" and (minutes is not None or settings):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="off_takes_no_duration_or_settings",
+            )
+        owed = validate_settings(self._hass, self.target_entity_id, settings or {})
+        command = Command(uuid4().hex, at, action, minutes, owed)
+
+        def add(now: datetime) -> list[Effect]:
+            if at <= now:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="command_in_past",
+                    translation_placeholders={"at": _local_time(at)},
+                )
+            if at > now + MAX_COMMAND_AHEAD:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="command_too_far",
+                    translation_placeholders={"days": str(MAX_COMMAND_AHEAD.days)},
+                )
+            if len(self.snapshot.commands) >= MAX_COMMANDS:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="too_many_commands",
+                    translation_placeholders={
+                        "target": target_name(self._hass, self.target_entity_id),
+                        "limit": str(MAX_COMMANDS),
+                    },
+                )
+            return self._core.add_command(now, command)
+
+        if not await self._command(add):
+            raise self._unloaded()
+        return command.id
+
+    async def async_cancel_command(self, command_id: str) -> None:
+        """Forget the pending command with that id.
+
+        Raises ServiceValidationError when this timer keeps no such command.
+        """
+
+        def cancel(now: datetime) -> list[Effect]:
+            try:
+                return self._core.cancel_command(now, command_id)
+            except KeyError as err:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="unknown_command",
+                    translation_placeholders={"command_id": command_id},
+                ) from err
+
+        if not await self._command(cancel):
+            raise self._unloaded()
+
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
         """Call `listener` whenever what the entities show may have changed."""
@@ -176,11 +262,21 @@ class TargetController:
 
         return remove
 
-    async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
+    async def _command(self, command: Callable[[datetime], list[Effect]]) -> bool:
+        """Run `command` with the time now and carry out its effects; False, having
+        done nothing, if the timer was unloaded before its turn came."""
         async with self._lock:
             if self._stopped:
-                return
+                return False
             await self._execute(command(dt_util.utcnow()))
+            return True
+
+    @staticmethod
+    def _unloaded() -> HomeAssistantError:
+        """The error for a command that the timer, unloaded meanwhile, did not take."""
+        return HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="timer_unloaded"
+        )
 
     async def _handle_started(self, _hass: HomeAssistant) -> None:
         """Take stock of the target once, with Home Assistant fully started."""
@@ -294,9 +390,12 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown; the rest of the snapshot is
-        # bookkeeping that needs no state write.
-        if self.snapshot.end != self._notified_end:
+        # The entities show the end of the countdown and the pending commands; the
+        # rest of the snapshot is bookkeeping that needs no state write.
+        if (
+            self.snapshot.end != self._notified_end
+            or self.snapshot.commands != self._notified_commands
+        ):
             self._notify()
 
     def _log_dropped(self, command: Command) -> None:
@@ -305,7 +404,7 @@ class TargetController:
             " the run it asked for was already over",
             self.target_entity_id,
             command.action,
-            dt_util.as_local(command.at).isoformat(sep=" ", timespec="seconds"),
+            _local_time(command.at),
         )
 
     def _log_gave_up(self, what: Label) -> None:
@@ -482,5 +581,6 @@ class TargetController:
 
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
+        self._notified_commands = self.snapshot.commands
         for listener in list(self._listeners):
             listener()

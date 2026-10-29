@@ -9,14 +9,10 @@ from typing import Any
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import Event, HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import (
-    async_track_state_change_event,
-    async_track_state_report_event,
-)
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -26,29 +22,19 @@ from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     NUMBER,
     SENSOR,
+    START,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
     advance,
+    at,
+    command_json,
+    payload,
+    record_writes,
     set_number,
     state_of,
     storage_key,
 )
-
-
-def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:
-    """The state every write to `entity_id` carried, changed or not."""
-    writes: list[str] = []
-
-    @callback
-    def record(
-        event: Event[Any],
-    ) -> None:
-        writes.append(event.data["new_state"].state)
-
-    async_track_state_change_event(hass, entity_id, record)
-    async_track_state_report_event(hass, entity_id, record)
-    return writes
 
 
 async def test_setting_run_for_turns_target_on(
@@ -486,6 +472,37 @@ async def test_unloaded_entry_stays_quiet_after_a_slow_call_ends(
 
     assert fake_target.calls == [TURN_ON]
     assert hass_storage.get(key) == stored
+
+
+@pytest.mark.parametrize("change", ["add", "cancel"])
+async def test_command_made_after_unloading_fails_instead_of_pretending(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    change: str,
+) -> None:
+    """A service call that reached the timer as it was unloaded neither adds nor
+    cancels a command, and says so: an id for a command that was never kept, or a
+    cancel that was not carried out, would be a lie."""
+    entry = await setup_target(
+        stored=payload(commands=[command_json(at(60), id="waiting")])
+    )
+    controller = entry.runtime_data
+    await hass.config_entries.async_unload(entry.entry_id)
+    stored = copy.deepcopy(hass_storage[storage_key(entry)])
+
+    change_it = (
+        controller.async_add_command("on", START + timedelta(minutes=30), None, None)
+        if change == "add"
+        else controller.async_cancel_command("waiting")
+    )
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await change_it
+
+    assert raised.value.translation_key == "timer_unloaded"
+    assert hass_storage[storage_key(entry)] == stored
 
 
 async def test_number_is_written_once_at_expiry(

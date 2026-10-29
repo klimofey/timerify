@@ -92,3 +92,52 @@ run:
               max: 100
               mode: slider
               unit_of_measurement: "%"
+add_command:
+  target:
+    entity:
+      integration: timerify
+      domain: number
+  fields:
+    action:
+      required: true
+      example: "on"
+      selector:
+        select:
+          translation_key: command_action
+          options:
+            - "on"
+            - "off"
+    delay:
+      example: 15
+      selector:
+        number:
+          min: 1
+          max: 10080
+          step: 1
+          mode: box
+          unit_of_measurement: min
+    at:
+      example: "2026-01-05 19:30:00"
+      selector:
+        datetime:
+    minutes:
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+          unit_of_measurement: min
+    settings: *settings
+cancel_command:
+  target:
+    entity:
+      integration: timerify
+      domain: number
+  fields:
+    command_id:
+      required: true
+      example: "0f5c1e2a7d9b4c3e8a6b1d2c3e4f5a6b"
+      selector:
+        text:

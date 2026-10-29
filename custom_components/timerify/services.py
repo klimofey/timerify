@@ -10,17 +10,24 @@ from typing import Any
 
 import probatio
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, SupportsResponse, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import service
 from homeassistant.helpers.typing import VolDictType
+from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MAX_MINUTES
+from .const import DOMAIN, MAX_DELAY_MINUTES, MAX_MINUTES
 
 SERVICE_ADD_TIME = "add_time"
 SERVICE_RUN = "run"
+SERVICE_ADD_COMMAND = "add_command"
+SERVICE_CANCEL_COMMAND = "cancel_command"
 
 ATTR_MINUTES = "minutes"
+ATTR_ACTION = "action"
+ATTR_DELAY = "delay"
+ATTR_AT = "at"
+ATTR_COMMAND_ID = "command_id"
 
 
 def _whole(message: str) -> Callable[[Any], int]:
@@ -78,6 +85,24 @@ RUN_SCHEMA: VolDictType = {
     **SETTINGS_SCHEMA,
 }
 
+ADD_COMMAND_SCHEMA: VolDictType = {
+    probatio.Required(ATTR_ACTION): probatio.In(["on", "off"]),
+    probatio.Optional(ATTR_DELAY): probatio.All(
+        whole_minutes, probatio.Range(min=1, max=MAX_DELAY_MINUTES)
+    ),
+    # A time without a zone, as the UI's date and time picker gives it, is the time
+    # on the wall of the house: Home Assistant's own time zone.
+    probatio.Optional(ATTR_AT): probatio.All(cv.datetime, dt_util.as_utc),
+    probatio.Optional(ATTR_MINUTES): probatio.All(
+        whole_minutes, probatio.Range(min=1, max=MAX_MINUTES)
+    ),
+    **SETTINGS_SCHEMA,
+}
+"""Which of `delay` and `at` is given is checked by the service itself, so that the
+refusal is translated."""
+
+CANCEL_COMMAND_SCHEMA: VolDictType = {probatio.Required(ATTR_COMMAND_ID): cv.string}
+
 
 @callback
 def async_setup_services(hass: HomeAssistant) -> None:
@@ -97,4 +122,21 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entity_domain=NUMBER_DOMAIN,
         schema=RUN_SCHEMA,
         func="async_run",
+    )
+    service.async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_ADD_COMMAND,
+        entity_domain=NUMBER_DOMAIN,
+        schema=ADD_COMMAND_SCHEMA,
+        func="async_add_command",
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    service.async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_CANCEL_COMMAND,
+        entity_domain=NUMBER_DOMAIN,
+        schema=CANCEL_COMMAND_SCHEMA,
+        func="async_cancel_command",
     )

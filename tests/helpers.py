@@ -9,7 +9,11 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_state_report_event,
+)
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import DOMAIN
@@ -20,6 +24,7 @@ START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 TARGET_ID = "switch.boiler"
 NUMBER = "number.boiler_run_for"
 SENSOR = "sensor.boiler_ends_at"
+NEXT = "sensor.boiler_next_command"
 TURN_ON = ("turn_on", TARGET_ID)
 TURN_OFF = ("turn_off", TARGET_ID)
 
@@ -40,6 +45,7 @@ AC_ATTRS: Final[dict[str, Any]] = {
 Assistant keeps on its state, also while it is unavailable."""
 AC_NUMBER = "number.ac_run_for"
 AC_ENDS_AT = "sensor.ac_ends_at"
+AC_NEXT = "sensor.ac_next_command"
 
 
 async def call_service(
@@ -48,6 +54,23 @@ async def call_service(
     """Call a Timerify service the way an automation or the UI does."""
     await hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
     await hass.async_block_till_done()
+
+
+async def add_command(
+    hass: HomeAssistant, number: str | list[str], **data: Any
+) -> dict[str, Any]:
+    """Add a pending command to the timers of the "Run for" number(s) `number` and
+    return the response of the service: the new command's id for each number."""
+    response = await hass.services.async_call(
+        DOMAIN,
+        "add_command",
+        {"entity_id": number, **data},
+        blocking=True,
+        return_response=True,
+    )
+    await hass.async_block_till_done()
+    assert response is not None
+    return response
 
 
 async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
@@ -110,6 +133,19 @@ def payload(
 def saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> dict[str, Any]:
     """What the storage file of `entry` holds."""
     return hass_storage[storage_key(entry)]["data"]
+
+
+def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:
+    """The state every write to `entity_id` carried, changed or not."""
+    writes: list[str] = []
+
+    @callback
+    def record(event: Event[Any]) -> None:
+        writes.append(event.data["new_state"].state)
+
+    async_track_state_change_event(hass, entity_id, record)
+    async_track_state_report_event(hass, entity_id, record)
+    return writes
 
 
 def state_of(hass: HomeAssistant, entity_id: str) -> str:

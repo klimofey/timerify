@@ -1,6 +1,7 @@
 """Shared fixtures for Timerify tests."""
 
 import asyncio
+import copy
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -281,7 +282,7 @@ def provide_target(
             hass,
             device_id,
             entity_id,
-            capability_attributes=dict(capability_attributes or {}),
+            capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
             state_attributes=state_attributes or {},
         )
         target.write("off")

@@ -1,8 +1,8 @@
 """Smoke test: Timerify in a real Home Assistant container.
 
 Starts Home Assistant from compose.yaml with a fresh configuration, onboards it through
-its HTTP API, creates a switch (an input_boolean helper), adds a Timerify timer for it
-through the config flow, and then checks what a user would see:
+its HTTP API, adds a Timerify timer for the switch that configuration.yaml declares (an
+input_boolean) through the config flow, and then checks what a user would see:
 
 1. "Run for" 2 minutes: the switch turns on, and turns off when the countdown ends.
 2. "Run for" 3 minutes, then the container restarts: the countdown carries on and the
@@ -35,8 +35,8 @@ REDIRECT_URI = f"{BASE_URL}/?auth_callback=1"
 
 USERNAME = "smoke"
 PASSWORD = "smoke-test-password"
-SWITCH_NAME = "Smoke boiler"
 SWITCH = "input_boolean.smoke_boiler"
+"""The switch the timer runs; configuration.yaml declares it."""
 DOMAIN = "timerify"
 KEEP_MINUTES = 60
 
@@ -64,6 +64,8 @@ class Timer:
     entry_id: str
     run_for: str
     ends_at: str
+    device_id: str
+    """The device the entities sit on, from the entity registry."""
 
 
 def has_state(*values: str) -> Matcher:
@@ -211,6 +213,7 @@ class Socket:
         self._pending: dict[int, asyncio.Future[Any]] = {}
         self._states: dict[str, State] = {}
         self._changed = asyncio.Condition()
+        self._closed = False
         self._reader = asyncio.create_task(self._read())
 
     async def close(self) -> None:
@@ -219,15 +222,22 @@ class Socket:
 
     async def call(self, command: str, **fields: Any) -> Any:
         """Send a command and return its result."""
+        if self._closed:
+            raise SmokeFailure(f"{command}: the WebSocket is closed")
         message_id = self._next_id
         self._next_id += 1
         future = asyncio.get_running_loop().create_future()
         self._pending[message_id] = future
-        await self._ws.send_json({"id": message_id, "type": command, **fields})
         try:
+            await self._ws.send_json({"id": message_id, "type": command, **fields})
             return await asyncio.wait_for(future, CALL_TIMEOUT)
         except TimeoutError:
             raise SmokeFailure(f"{command} got no answer in {CALL_TIMEOUT}s") from None
+        except ConnectionError as err:
+            raise SmokeFailure(f"{command}: the WebSocket broke: {err}") from err
+        finally:
+            # A late answer finds no waiter and is dropped, see `_handle`.
+            self._pending.pop(message_id, None)
 
     async def watch_states(self) -> None:
         """Start following the states of all entities."""
@@ -247,7 +257,11 @@ class Socket:
         async def satisfied() -> State:
             async with self._changed:
                 await self._changed.wait_for(
-                    lambda: matches(self._states.get(entity_id))
+                    lambda: self._closed or matches(self._states.get(entity_id))
+                )
+            if not matches(self._states.get(entity_id)):
+                raise SmokeFailure(
+                    f"{entity_id}: the WebSocket closed while waiting for {expected}"
                 )
             return self._states[entity_id]
 
@@ -266,14 +280,19 @@ class Socket:
                 if message.type is aiohttp.WSMsgType.TEXT:
                     await self._handle(message.json())
         finally:
+            # Wake everything that waits for the socket: calls and state waits alike.
+            self._closed = True
             for future in self._pending.values():
                 if not future.done():
                     future.set_exception(SmokeFailure("The WebSocket closed"))
+            async with self._changed:
+                self._changed.notify_all()
 
     async def _handle(self, message: dict[str, Any]) -> None:
         match message:
             case {"type": "result", "id": int(message_id)}:
-                future = self._pending.pop(message_id)
+                if (future := self._pending.pop(message_id, None)) is None:
+                    return  # Its caller gave up waiting.
                 if message["success"]:
                     future.set_result(message["result"])
                 else:
@@ -314,12 +333,6 @@ async def open_socket(
         await socket.close()
 
 
-async def create_switch(socket: Socket) -> None:
-    """Add the switch that the timer will run: a helper, so it needs no hardware."""
-    await socket.call("input_boolean/create", name=SWITCH_NAME)
-    await socket.wait_for_state(SWITCH, has_state("off"), "off", CALL_TIMEOUT)
-
-
 async def add_timer(
     session: aiohttp.ClientSession, socket: Socket, access_token: str
 ) -> Timer:
@@ -345,17 +358,17 @@ async def add_timer(
         raise SmokeFailure(f"The flow should create the timer, but gave {flow}")
     entry_id = flow["result"]["entry_id"]
     registry = await socket.call("config/entity_registry/list")
-    entities = {
-        entity["unique_id"]: entity["entity_id"]
-        for entity in registry
-        if entity["platform"] == DOMAIN
-    }
+    rows = {row["unique_id"]: row for row in registry if row["platform"] == DOMAIN}
     try:
-        return Timer(
-            entry_id, entities[f"{entry_id}_run_for"], entities[f"{entry_id}_ends_at"]
-        )
+        run_for, ends_at = rows[f"{entry_id}_run_for"], rows[f"{entry_id}_ends_at"]
     except KeyError as missing:
-        raise SmokeFailure(f"The timer has no entity {missing}: {entities}") from None
+        raise SmokeFailure(f"The timer has no entity {missing}: {list(rows)}") from None
+    if not (device_id := run_for["device_id"]) or ends_at["device_id"] != device_id:
+        raise SmokeFailure(
+            "The timer's entities should share one device, "
+            f"but are on {run_for['device_id']} and {ends_at['device_id']}"
+        )
+    return Timer(entry_id, run_for["entity_id"], ends_at["entity_id"], device_id)
 
 
 async def start_countdown(socket: Socket, timer: Timer, minutes: int) -> datetime:
@@ -436,11 +449,7 @@ async def leave_running(
     """Start a long countdown and say where to look at it."""
     async with open_socket(session, refresh_token) as socket:
         await start_countdown(socket, timer, KEEP_MINUTES)
-        devices = await socket.call("config/device_registry/list")
-    (device,) = (
-        d for d in devices if [DOMAIN, timer.entry_id] in map(list, d["identifiers"])
-    )
-    say(f"Left running: {BASE_URL}/config/devices/device/{device['id']}")
+    say(f"Left running: {BASE_URL}/config/devices/device/{timer.device_id}")
     say(f"Log in as {USERNAME!r} with password {PASSWORD!r}.")
 
 
@@ -448,7 +457,7 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
     await wait_until_up(session)
     refresh_token = await onboard(session)
     async with open_socket(session, refresh_token) as socket:
-        await create_switch(socket)
+        await socket.wait_for_state(SWITCH, has_state("off"), "off", CALL_TIMEOUT)
         timer = await add_timer(
             session, socket, await new_access_token(session, refresh_token)
         )
@@ -468,7 +477,11 @@ async def main(keep: bool) -> int:
             await run(session, keep)
     except SmokeFailure as failure:
         say(f"FAILED: {failure}")
-        await compose("logs", "--tail", "80", "homeassistant")
+        try:
+            await compose("logs", "--tail", "80", "homeassistant")
+        except SmokeFailure as logs_failure:
+            # The failure above is the one to fix; this only says the logs are lost.
+            say(f"(the logs of Home Assistant could not be read: {logs_failure})")
         return 1
     finally:
         if not keep:

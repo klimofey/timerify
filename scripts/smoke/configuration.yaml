@@ -1,0 +1,10 @@
+# The Home Assistant configuration of the smoke test (scripts/smoke/run.py).
+# compose.yaml mounts this file read-only over the throwaway ./config/configuration.yaml.
+default_config:
+
+# The switch the timer runs, declared here rather than created over the API: it is a
+# registry entry on no device, which is the path of a target that has no device of its own.
+# No `initial`: the state is restored on a restart, as a real switch keeps its state.
+input_boolean:
+  smoke_boiler:
+    name: Smoke boiler

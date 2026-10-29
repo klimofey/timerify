@@ -1,5 +1,6 @@
 # A real Home Assistant for the smoke test (scripts/smoke/run.py), with Timerify
-# mounted read-only. The configuration lives in ./config, which is throwaway.
+# mounted read-only. The configuration lives in ./config, which is throwaway; only
+# configuration.yaml is kept in the repository and mounted over its copy.
 name: timerify-smoke
 
 x-image: &image ghcr.io/home-assistant/home-assistant:2026.10.4
@@ -13,6 +14,7 @@ services:
       TZ: UTC
     volumes:
       - ./config:/config
+      - ./configuration.yaml:/config/configuration.yaml:ro
       - ../../custom_components:/config/custom_components:ro
 
   # Empties ./config whatever user owns its files (Home Assistant runs as root).

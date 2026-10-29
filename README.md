@@ -152,9 +152,10 @@ The image exists for `linux/amd64` only; on Apple silicon add `--platform linux/
 ### Smoke test
 
 Needs Docker with Compose. It starts a throwaway Home Assistant 2026.10.4 with this
-checkout mounted, onboards it through its HTTP API, creates a switch, adds a timer for it,
-and checks that a 2 minute countdown turns the switch on and off, and that a 3 minute
-countdown survives a restart of the container. It takes about five minutes.
+checkout mounted, onboards it through its HTTP API, adds a timer for the switch that
+`scripts/smoke/configuration.yaml` declares, and checks that a 2 minute countdown turns
+the switch on and off, and that a 3 minute countdown survives a restart of the container.
+It takes about five minutes.
 
 ```sh
 uv run python scripts/smoke/run.py

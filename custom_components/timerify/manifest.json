@@ -2,11 +2,12 @@
   "domain": "timerify",
   "name": "Timerify",
   "codeowners": ["@klimofey"],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/klimofey/timerify",
   "integration_type": "helper",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/klimofey/timerify/issues",
   "requirements": [],
-  "version": "0.0.0"
+  "version": "0.1.0"
 }

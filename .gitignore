@@ -7,3 +7,6 @@ __pycache__/
 .coverage
 htmlcov/
 .superpowers/
+
+# Throwaway Home Assistant configuration of the smoke test
+/scripts/smoke/config/

@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a timer",
+        "description": "Pick the entity that the timer turns on and off.",
+        "data": {
+          "target": "Entity",
+          "mode": "Mode"
+        },
+        "data_description": {
+          "target": "The switch, light, fan or other entity to run on a timer.",
+          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+        }
+      },
+      "duration": {
+        "title": "Default duration",
+        "description": "How long the entity runs when it is turned on without a duration.",
+        "data": {
+          "default_duration": "Default duration"
+        }
+      }
+    },
+    "error": {
+      "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
+      "duration_not_whole": "The duration must be a whole number of minutes."
+    },
+    "abort": {
+      "already_configured": "This entity already has a timer.",
+      "already_in_progress": "A timer for this entity is already being added."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Timer settings",
+        "data": {
+          "mode": "Mode"
+        },
+        "data_description": {
+          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+        }
+      },
+      "duration": {
+        "title": "Default duration",
+        "description": "How long the entity runs when it is turned on without a duration.",
+        "data": {
+          "default_duration": "Default duration"
+        }
+      }
+    },
+    "error": {
+      "duration_not_whole": "The duration must be a whole number of minutes."
+    }
+  },
+  "selector": {
+    "mode": {
+      "options": {
+        "strict": "Strict: runs only while the timer counts down",
+        "loose": "Loose: may also run without a timer"
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "run_for": {
+        "name": "Run for"
+      }
+    },
+    "sensor": {
+      "ends_at": {
+        "name": "Ends at"
+      }
+    }
+  },
+  "services": {
+    "add_time": {
+      "name": "Add time",
+      "description": "Adds minutes to the countdown of a timer, or takes them off with a negative number. Adding to a timer that is not running starts it; taking off all the time that is left turns the entity off. A countdown never goes beyond one day.",
+      "fields": {
+        "minutes": {
+          "name": "Minutes",
+          "description": "How many minutes to move the end of the countdown by, up to a day either way."
+        }
+      }
+    },
+    "run": {
+      "name": "Run",
+      "description": "Turns the entity on without saying for how long: for the default duration in strict mode, without a countdown in loose mode."
+    }
+  },
+  "exceptions": {
+    "target_not_found": {
+      "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."
+    },
+    "not_whole_minutes": {
+      "message": "Run for takes a whole number of minutes; {minutes} is not one."
+    }
+  }
+}

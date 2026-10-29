@@ -1,0 +1,22 @@
+{
+  "entity": {
+    "number": {
+      "run_for": {
+        "default": "mdi:timer-outline"
+      }
+    },
+    "sensor": {
+      "ends_at": {
+        "default": "mdi:clock-end"
+      }
+    }
+  },
+  "services": {
+    "add_time": {
+      "service": "mdi:timer-plus-outline"
+    },
+    "run": {
+      "service": "mdi:timer-play-outline"
+    }
+  }
+}

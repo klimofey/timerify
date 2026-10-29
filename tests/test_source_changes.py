@@ -8,8 +8,8 @@ from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import CONF_TARGET
 
-from .conftest import TARGET_ID, FakeTarget, SetupTarget
-from .helpers import NUMBER, SENSOR, TURN_ON, advance, set_number, state_of
+from .conftest import FakeTarget, SetupTarget
+from .helpers import NUMBER, SENSOR, TARGET_ID, TURN_ON, advance, set_number, state_of
 
 RENAMED_ID = "switch.water_heater"
 

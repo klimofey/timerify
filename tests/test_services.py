@@ -12,8 +12,17 @@ from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import DOMAIN, MAX_MINUTES
 
-from .conftest import TARGET_ID, FakeTarget, SetupTarget
-from .helpers import NUMBER, SENSOR, TURN_OFF, TURN_ON, advance, set_number, state_of
+from .conftest import FakeTarget, SetupTarget
+from .helpers import (
+    NUMBER,
+    SENSOR,
+    TARGET_ID,
+    TURN_OFF,
+    TURN_ON,
+    advance,
+    set_number,
+    state_of,
+)
 
 
 async def call_service(

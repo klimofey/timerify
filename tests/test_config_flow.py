@@ -25,8 +25,17 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.domains import SUPPORTED_DOMAINS
 
-from .conftest import TARGET_ID, FakeTarget, SetupTarget
-from .helpers import NUMBER, TURN_OFF, TURN_ON, advance, set_number, state_of
+from .conftest import FakeTarget, SetupTarget
+from .helpers import (
+    NUMBER,
+    TARGET_ID,
+    TURN_OFF,
+    TURN_ON,
+    advance,
+    set_number,
+    state_of,
+    storage_key,
+)
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
 
@@ -481,7 +490,7 @@ async def test_removing_entry_deletes_stored_state(
     """Deleting a timer leaves no file of its state behind."""
     entry = await setup_target()
     await set_number(hass, NUMBER, 30)
-    key = f"timerify.{entry.entry_id}"
+    key = storage_key(entry)
     assert key in hass_storage
 
     await hass.config_entries.async_remove(entry.entry_id)

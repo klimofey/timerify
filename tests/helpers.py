@@ -3,11 +3,11 @@
 from datetime import timedelta
 
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-from .conftest import TARGET_ID
-
+TARGET_ID = "switch.boiler"
 NUMBER = "number.boiler_run_for"
 SENSOR = "sensor.boiler_ends_at"
 TURN_ON = ("turn_on", TARGET_ID)
@@ -38,3 +38,8 @@ def state_of(hass: HomeAssistant, entity_id: str) -> str:
     state = hass.states.get(entity_id)
     assert state is not None
     return state.state
+
+
+def storage_key(entry: ConfigEntry) -> str:
+    """The key under which the timer of `entry` is stored."""
+    return f"timerify.{entry.entry_id}"

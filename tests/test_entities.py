@@ -22,15 +22,17 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import DOMAIN
 
-from .conftest import TARGET_ID, FakeTarget, SetupTarget
+from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     NUMBER,
     SENSOR,
+    TARGET_ID,
     TURN_OFF,
     TURN_ON,
     advance,
     set_number,
     state_of,
+    storage_key,
 )
 
 
@@ -392,13 +394,14 @@ async def test_timer_across_dst_change(
 async def test_entities_attach_to_target_device(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
-    """The number lives on the target's own device; no second device appears."""
+    """Both entities live on the target's own device; no second device appears."""
     await setup_target()
 
-    entry = er.async_get(hass).async_get(NUMBER)
-
-    assert entry is not None
-    assert entry.device_id == fake_target.device_id
+    entities = er.async_get(hass)
+    for entity_id in (NUMBER, SENSOR):
+        registered = entities.async_get(entity_id)
+        assert registered is not None
+        assert registered.device_id == fake_target.device_id
     assert len(dr.async_get(hass).devices) == 1
 
 
@@ -466,7 +469,7 @@ async def test_unloaded_entry_stays_quiet_after_a_slow_call_ends(
 ) -> None:
     """Work that waited behind a slow call is dropped once the entry is unloaded."""
     entry = await setup_target()
-    key = f"timerify.{entry.entry_id}"
+    key = storage_key(entry)
     slow = fake_target.hold_next_call()
     start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(30))
     await slow.reached.wait()
@@ -551,7 +554,7 @@ async def test_toggling_the_target_without_a_timer_stores_nothing(
 ) -> None:
     """Only the timer is stored: what the target does by itself leaves no trace."""
     entry = await setup_target(mode="loose")
-    key = f"timerify.{entry.entry_id}"
+    key = storage_key(entry)
 
     await fake_target.set_state("on")
     await fake_target.set_state("off")
@@ -640,7 +643,7 @@ async def test_target_without_device_gets_own_device(
         ("switch.not_started_yet", None, "switch.not_started_yet"),
     ],
 )
-async def test_device_of_unregistered_target_is_named_after_its_state(
+async def test_unregistered_target_names_its_device_after_its_state_or_its_id(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
@@ -648,7 +651,8 @@ async def test_device_of_unregistered_target_is_named_after_its_state(
     attributes: dict[str, str] | None,
     device_name: str,
 ) -> None:
-    """A target the registry does not know is named by its state, else by its id."""
+    """A target the registry does not know names its device after its state, or after
+    its entity id when there is no state yet."""
     if attributes is not None:
         hass.states.async_set(target, "off", attributes)
 

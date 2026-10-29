@@ -13,8 +13,18 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CoreState, HomeAssistant
 
-from .conftest import START, TARGET_ID, FakeTarget, SetupTarget
-from .helpers import NUMBER, SENSOR, TURN_OFF, TURN_ON, advance, set_number, state_of
+from .conftest import START, FakeTarget, SetupTarget
+from .helpers import (
+    NUMBER,
+    SENSOR,
+    TARGET_ID,
+    TURN_OFF,
+    TURN_ON,
+    advance,
+    set_number,
+    state_of,
+    storage_key,
+)
 
 
 def at(minutes: float) -> str:
@@ -24,7 +34,7 @@ def at(minutes: float) -> str:
 
 def saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> dict[str, Any]:
     """What the storage file of `entry` holds."""
-    return hass_storage[f"timerify.{entry.entry_id}"]["data"]
+    return hass_storage[storage_key(entry)]["data"]
 
 
 async def restart(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -189,11 +199,11 @@ async def test_state_is_saved_on_every_change(
 ) -> None:
     """Setting, extending and stopping the timer each leave the new state stored."""
     entry = await setup_target()
-    assert f"timerify.{entry.entry_id}" not in hass_storage
+    assert storage_key(entry) not in hass_storage
 
     await set_number(hass, NUMBER, 45)
 
-    assert hass_storage[f"timerify.{entry.entry_id}"]["version"] == 1
+    assert hass_storage[storage_key(entry)]["version"] == 1
     assert saved(hass_storage, entry) == {"end": at(45), "pending": None}
 
     await entry.runtime_data.async_add_minutes(15)

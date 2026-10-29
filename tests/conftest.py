@@ -22,11 +22,10 @@ from custom_components.timerify.const import (
     Mode,
 )
 
+from .helpers import TARGET_ID, storage_key
+
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
-
-TARGET_ID = "switch.boiler"
-
 
 HTTP_APP_KEY_WARNING = (
     "ignore::aiohttp.web_exceptions.NotAppKeyWarning:homeassistant.components.http"
@@ -189,7 +188,7 @@ async def setup_target(
         )
         entry.add_to_hass(hass)
         if stored is not None:
-            key = f"timerify.{entry.entry_id}"
+            key = storage_key(entry)
             hass_storage[key] = {
                 "version": 1,
                 "minor_version": 1,

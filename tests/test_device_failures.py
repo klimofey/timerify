@@ -11,8 +11,17 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 
-from .conftest import TARGET_ID, FakeTarget, SetupTarget
-from .helpers import NUMBER, SENSOR, TURN_OFF, TURN_ON, advance, set_number, state_of
+from .conftest import FakeTarget, SetupTarget
+from .helpers import (
+    NUMBER,
+    SENSOR,
+    TARGET_ID,
+    TURN_OFF,
+    TURN_ON,
+    advance,
+    set_number,
+    state_of,
+)
 
 
 async def test_ignored_turn_off_at_expiry_is_sent_again_on_the_next_report(

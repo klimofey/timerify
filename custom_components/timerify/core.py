@@ -232,7 +232,11 @@ class TimerCore:
 
         Non-empty `settings` replace the ones that are owed and are sent with the
         turn-on, or on their own to a target that is on. With `apply_if_on` false they
-        are sent only with a turn-on this command causes.
+        are not sent on their own to a target that is on, or whose turn-on is in
+        flight, when the command arrives. That is all it promises for now: the choice
+        is not kept with the owed settings, so settings that are still owed because
+        the target was away or its turn-on failed go to it when it is next found
+        running, however it came to run (see `docs/followups.md`).
         """
         now = _utc(now)
         return self._run_until(now, now + duration, settings, apply_if_on=apply_if_on)
@@ -511,7 +515,8 @@ class TimerCore:
         the target is not in flight: it is sent again, or dropped if the target
         is already where the new wish wants it. Settings go with the turn-on this
         causes; a target that needs none, because it is on or its turn-on is on its
-        way, gets them alone, unless `apply_if_on` is false.
+        way, gets them alone, unless `apply_if_on` is false (which holds only as far as
+        `set_duration` says).
         """
         state = self._snapshot
         in_flight = state.pending is not None and not self._unsent

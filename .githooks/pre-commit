@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rejects staged files containing Cyrillic text: the repository is English-only.
+# Rejects staged text files containing Cyrillic: the repository is English-only.
 # The exceptions are translations of the product itself: README.ru.md, and every
 # language but English under custom_components/timerify/translations/<lang>.json
 # and custom_components/timerify/sentences/<lang>/.
@@ -19,8 +19,14 @@ cyrillic_allowed() {
   return 1
 }
 
+# Git reports a binary file as "-<tab>-<tab>path" in --numstat: images carry no text to check.
+is_binary() {
+  [[ $(git diff --cached --numstat -- "$1") == $'-\t-\t'* ]]
+}
+
 git diff --cached --name-only --diff-filter=ACMR -z | while IFS= read -r -d '' path; do
   cyrillic_allowed "$path" && continue
+  is_binary "$path" && continue
   if git show ":$path" | perl -CSD -ne 'exit 1 if /\p{Cyrillic}/'; then :; else
     echo "pre-commit: $path contains Cyrillic text; the repository is English-only." >&2
     exit 1

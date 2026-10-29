@@ -1,15 +1,104 @@
-"""Schedule intervals: how one is named for the user."""
+"""Schedule intervals: how one is named for the user, and when its windows fall.
 
-from collections.abc import Mapping
+An interval is a weekly pattern on the wall clock; a window is one occurrence of it,
+worked out in the time zone of Home Assistant, which is why a window follows the clock
+through a change to or from summer time and an interval that crosses midnight belongs
+to the day it starts on.
+"""
+
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any, Final
 
+from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import WEEKDAYS
 
-from .const import CONF_DAYS, CONF_END, CONF_START, CONF_WEEKDAYS, DaysMode
+from .const import (
+    CONF_DAYS,
+    CONF_END,
+    CONF_SETTINGS,
+    CONF_START,
+    CONF_WEEKDAYS,
+    MAX_MINUTES,
+    WINDOW_SEARCH_DAYS,
+    DaysMode,
+    Settings,
+    freeze_settings,
+)
+from .core import Window
 
 _WEEK: Final = len(WEEKDAYS)
 _MIN_RANGE: Final = 3
 """The fewest consecutive days written as a range: Mon–Wed, not Mon, Tue, Wed."""
+
+
+@dataclass(frozen=True)
+class Interval:
+    """A schedule interval as its subentry holds it: the days it runs on, when it
+    begins and ends on the wall clock, and what the target is turned on with."""
+
+    id: str
+    """The id of the subentry."""
+    days: DaysMode
+    weekdays: frozenset[str]
+    """The `homeassistant.const.WEEKDAYS` names of the days it runs on."""
+    start: time
+    end: time
+    """When it ends; not after `start` for an interval that crosses midnight."""
+    settings: Settings
+
+    @classmethod
+    def from_subentry(cls, subentry: ConfigSubentry) -> Interval:
+        """Read the interval a subentry of the interval flow holds."""
+        data = subentry.data
+        return cls(
+            id=subentry.subentry_id,
+            days=data[CONF_DAYS],
+            weekdays=frozenset(data[CONF_WEEKDAYS]),
+            start=time.fromisoformat(data[CONF_START]),
+            end=time.fromisoformat(data[CONF_END]),
+            settings=freeze_settings(data[CONF_SETTINGS]),
+        )
+
+
+def window_on(interval: Interval, day: date, zone: tzinfo) -> Window | None:
+    """The occurrence of `interval` that starts on `day` on the wall clock of `zone`;
+    None when the change of the clock swallows it.
+
+    It ends the next day when the interval ends at or before its start, and never lasts
+    longer than `MAX_MINUTES`. A wall time that does not exist on a day the clock goes
+    forward lands later by the length of the gap (02:30 becomes 03:30); one that comes
+    twice when it goes back is its first time.
+    """
+    ends_on = day + timedelta(days=1) if interval.end <= interval.start else day
+    start = datetime.combine(day, interval.start, zone).astimezone(UTC)
+    end = datetime.combine(ends_on, interval.end, zone).astimezone(UTC)
+    end = min(end, start + timedelta(minutes=MAX_MINUTES))
+    if end <= start:
+        return None
+    return Window(interval.id, start, end, interval.settings)
+
+
+def days_around(now: datetime, zone: tzinfo) -> Iterator[date]:
+    """The days on which a window that is open at `now`, or starts within
+    `WINDOW_SEARCH_DAYS`, can start: yesterday, which an interval across midnight
+    started on, today and every day ahead, in `zone`."""
+    today = now.astimezone(zone).date()
+    for ahead in range(-1, WINDOW_SEARCH_DAYS + 1):
+        yield today + timedelta(days=ahead)
+
+
+def weekday_window(interval: Interval, now: datetime, zone: tzinfo) -> Window | None:
+    """The window of `interval` that is open at `now` or comes next, on the weekdays it
+    names; None when there is none within `WINDOW_SEARCH_DAYS`."""
+    for day in days_around(now, zone):
+        if WEEKDAYS[day.weekday()] not in interval.weekdays:
+            continue
+        window = window_on(interval, day, zone)
+        if window is not None and window.end > now:
+            return window
+    return None
 
 
 def interval_title(data: Mapping[str, Any], labels: Mapping[str, str]) -> str:

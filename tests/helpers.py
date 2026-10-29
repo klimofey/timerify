@@ -2,8 +2,9 @@
 
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Final, Literal
+from zoneinfo import ZoneInfo
 
 import probatio
 import pytest
@@ -32,6 +33,13 @@ TURN_OFF = ("turn_off", TARGET_ID)
 
 WEEK: Final = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 """The names of the weekdays, in week order."""
+
+JERUSALEM: Final = "Asia/Jerusalem"
+"""The time zone the scenarios of the schedule run in: a working week from Sunday to
+Thursday, and a change of the clock on 2026-03-27 and 2026-10-25."""
+
+SUNDAY: Final = date(2026, 1, 4)
+"""The day the scenarios of the schedule start on, at six in the morning."""
 
 AC_ID = "climate.ac"
 AC_ATTRS: Final[dict[str, Any]] = {
@@ -182,6 +190,60 @@ async def advance(
     await hass.async_block_till_done()
 
 
+async def advance_to(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, moment: datetime
+) -> None:
+    """Move the clock to `moment` in one jump and run everything that fell due.
+
+    One jump is one catch-up: whatever is due by `moment` is folded at `moment`, so a
+    window's start and its end in one jump switch nothing. A scenario steps to each
+    event; one that wants the downtime of a restart uses `restart_after`.
+    """
+    freezer.move_to(moment)
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+
+def local(day: date, clock: str) -> datetime:
+    """The moment it is `clock` (`HH:MM`) on `day` on the wall clock of Jerusalem, in
+    UTC; for a time the change of the clock repeats, its first time."""
+    wall = datetime.combine(day, time.fromisoformat(clock), ZoneInfo(JERUSALEM))
+    return wall.astimezone(UTC)
+
+
+async def open_sunday(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    """Start a scenario of the schedule where they all start: `SUNDAY`, six in the
+    morning in Jerusalem."""
+    await hass.config.async_set_time_zone(JERUSALEM)
+    freezer.move_to(local(SUNDAY, "06:00"))
+
+
+def iso(day: date, clock: str) -> str:
+    """What the "Ends at" sensor shows, and the file stores, for `clock` on `day` in
+    Jerusalem: the moment in UTC."""
+    return local(day, clock).isoformat()
+
+
+async def restart(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Stop the entry and start it again, as a Home Assistant restart does."""
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+
+async def restart_after(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    entry: ConfigEntry,
+    **delta: float,
+) -> None:
+    """Stop the entry, let `delta` pass with nobody listening, and start it again: a
+    Home Assistant that was down meanwhile. Nothing fires while it is down."""
+    await hass.config_entries.async_unload(entry.entry_id)
+    freezer.tick(timedelta(**delta))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
 def at(minutes: float) -> str:
     """The stored form of the moment `minutes` after `START`: ISO-8601 in UTC."""
     return (START + timedelta(minutes=minutes)).isoformat()
@@ -204,12 +266,34 @@ def command_json(
     }
 
 
+def window_json(
+    interval_id: str,
+    start: datetime,
+    end: datetime,
+    settings: dict[str, Any] | None = None,
+    *,
+    started: bool = False,
+    suppressed: bool = False,
+) -> dict[str, Any]:
+    """The stored form of a schedule window, its times in UTC."""
+    return {
+        "interval": interval_id,
+        "start": start.astimezone(UTC).isoformat(),
+        "end": end.astimezone(UTC).isoformat(),
+        "settings": settings or {},
+        "started": started,
+        "suppressed": suppressed,
+    }
+
+
 def payload(
     end: str | None = None,
     pending: str | None = None,
     owed_settings: dict[str, Any] | None = None,
     commands: Sequence[dict[str, Any]] = (),
     owed_turn_on_only: bool = False,
+    scheduled_by: str | None = None,
+    windows: Sequence[dict[str, Any]] = (),
 ) -> dict[str, Any]:
     """What the storage file of a timer holds: the stored form of its snapshot."""
     return {
@@ -218,6 +302,8 @@ def payload(
         "owed_settings": owed_settings or {},
         "commands": list(commands),
         "owed_turn_on_only": owed_turn_on_only,
+        "scheduled_by": scheduled_by,
+        "windows": list(windows),
     }
 
 

@@ -32,6 +32,9 @@ CONF_SETTINGS: Final = "settings"
 DEFAULT_DURATION_MINUTES: Final = 30
 MAX_MINUTES: Final = 1440
 """The longest timer: one day."""
+WINDOW_SEARCH_DAYS: Final = 14
+"""How many days ahead the next occurrence of a schedule interval is looked for: an
+interval that names a weekday has one within a week, so two weeks leave a margin."""
 
 MAX_COMMANDS: Final = 20
 """How many pending commands one timer keeps."""

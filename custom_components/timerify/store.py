@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import freeze_settings
-from .core import Command, Snapshot
+from .core import Command, Snapshot, Window
 
 
 def command_to_json(command: Command) -> dict[str, Any]:
@@ -32,10 +32,57 @@ def _command_from_json(data: dict[str, Any]) -> Command:
     )
 
 
+def window_to_json(window: Window) -> dict[str, Any]:
+    """A schedule window as plain data: its times as ISO-8601 UTC, its settings as a
+    dict, and whether it has started and whether it was stopped."""
+    return {
+        "interval": window.interval_id,
+        "start": window.start.astimezone(UTC).isoformat(),
+        "end": window.end.astimezone(UTC).isoformat(),
+        "settings": dict(window.settings),
+        "started": window.started,
+        "suppressed": window.suppressed,
+    }
+
+
+def _window_from_json(data: dict[str, Any]) -> Window:
+    return Window(
+        interval_id=data["interval"],
+        start=datetime.fromisoformat(data["start"]),
+        end=datetime.fromisoformat(data["end"]),
+        settings=freeze_settings(data["settings"]),
+        started=data["started"],
+        suppressed=data["suppressed"],
+    )
+
+
+def _validated(snapshot: Snapshot) -> Snapshot:
+    """`snapshot`, if it says nothing that no timer could have written; else a
+    ValueError.
+
+    The file is read strictly, so that a defect that wrote nonsense shows when the
+    timer is set up instead of as a target switched for reasons nobody can follow.
+    """
+    seen: set[str] = set()
+    for window in snapshot.windows:
+        if window.interval_id in seen:
+            raise ValueError(f"two windows of the interval {window.interval_id}")
+        seen.add(window.interval_id)
+        if window.suppressed and not window.started:
+            raise ValueError(
+                f"the window of {window.interval_id} is suppressed but has not started"
+            )
+    if snapshot.scheduled_by is not None and snapshot.end is None:
+        raise ValueError("the timer is scheduled by an interval but has no end")
+    if snapshot.owed_turn_on_only and not snapshot.owed_settings:
+        raise ValueError("the turn-on-only marker is set without owed settings")
+    return snapshot
+
+
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
-    """What is stored of a snapshot: the countdown, the wish not yet confirmed, the
-    settings not yet confirmed with whether they may only go with a turn-on, and the
-    pending commands.
+    """What is stored of a snapshot: the countdown and the interval whose window end it
+    carries, the wish not yet confirmed, the settings not yet confirmed with whether
+    they may only go with a turn-on, the pending commands and the schedule windows.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
@@ -47,6 +94,8 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
         "owed_settings": dict(snapshot.owed_settings),
         "commands": [command_to_json(command) for command in snapshot.commands],
         "owed_turn_on_only": snapshot.owed_turn_on_only,
+        "scheduled_by": snapshot.scheduled_by,
+        "windows": [window_to_json(window) for window in snapshot.windows],
     }
 
 
@@ -63,7 +112,8 @@ class _TimerFile(Store[dict[str, Any]]):
 
         Version 1 knew no settings and no commands, so nothing was owed and nothing
         waited. Version 2 knew no schedules, so every setting that was owed came from a
-        command and may reach a running target (P1).
+        command and may reach a running target (P1), and no window existed for a timer
+        to be carried by.
         """
         if old_major_version == 1:
             return {
@@ -71,9 +121,16 @@ class _TimerFile(Store[dict[str, Any]]):
                 "owed_settings": {},
                 "commands": [],
                 "owed_turn_on_only": False,
+                "scheduled_by": None,
+                "windows": [],
             }
         if old_major_version == 2:
-            return {**old_data, "owed_turn_on_only": False}
+            return {
+                **old_data,
+                "owed_turn_on_only": False,
+                "scheduled_by": None,
+                "windows": [],
+            }
         raise NotImplementedError
 
 
@@ -89,18 +146,25 @@ class TimerStore:
 
     async def async_load(self) -> Snapshot:
         """The stored timer, migrated to the current version if need be; an idle one
-        when nothing was stored yet."""
+        when nothing was stored yet.
+
+        Raises ValueError for a file that contradicts itself (see `_validated`).
+        """
         data = await self._store.async_load()
         if data is None:
             snapshot = Snapshot()
         else:
             end = data["end"]
-            snapshot = Snapshot(
-                end=None if end is None else datetime.fromisoformat(end),
-                pending=data["pending"],
-                owed_settings=freeze_settings(data["owed_settings"]),
-                owed_turn_on_only=data["owed_turn_on_only"],
-                commands=tuple(_command_from_json(c) for c in data["commands"]),
+            snapshot = _validated(
+                Snapshot(
+                    end=None if end is None else datetime.fromisoformat(end),
+                    pending=data["pending"],
+                    owed_settings=freeze_settings(data["owed_settings"]),
+                    owed_turn_on_only=data["owed_turn_on_only"],
+                    commands=tuple(_command_from_json(c) for c in data["commands"]),
+                    scheduled_by=data["scheduled_by"],
+                    windows=tuple(_window_from_json(w) for w in data["windows"]),
+                )
             )
         self._saved = _payload(snapshot)
         return snapshot

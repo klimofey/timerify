@@ -1,8 +1,9 @@
 """Home Assistant glue around the timer core: events go in, effects are carried out.
 
 The core decides; this module owns everything that touches Home Assistant. Commands,
-target state changes and alarms all run under one lock, so the core sees them strictly
-one after another and an effect is finished before the next event is looked at.
+target state changes, alarms and the refresh of the schedule windows all run under one
+lock, so the core sees them strictly one after another and an effect is finished before
+the next event is looked at.
 """
 
 import asyncio
@@ -15,7 +16,7 @@ from typing import Any, Literal, assert_never
 from uuid import uuid4
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import (
     CALLBACK_TYPE,
     Context,
@@ -46,6 +47,7 @@ from .const import (
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
     SERVICE_CALL_TIMEOUT,
+    SUBENTRY_INTERVAL,
 )
 from .core import (
     ApplySettings,
@@ -60,10 +62,11 @@ from .core import (
     TimerCore,
     TurnOff,
     TurnOn,
-    next_wakeup,
+    Window,
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
+from .schedule import Interval, weekday_window
 from .store import TimerStore
 from .target import target_name
 
@@ -123,6 +126,12 @@ class TargetController:
             snapshot,
             automatic_resends=self._behaviour.automatic_resends,
         )
+        self._intervals = {
+            interval.id: interval
+            for interval in map(
+                Interval.from_subentry, entry.get_subentries_of_type(SUBENTRY_INTERVAL)
+            )
+        }
         self._lock = asyncio.Lock()
         self._stopped = False
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
@@ -284,33 +293,101 @@ class TargetController:
                 )
             await self._execute(command(dt_util.utcnow()))
 
+    async def _async_windows(
+        self, now: datetime
+    ) -> tuple[list[Window], frozenset[str]]:
+        """The window of each interval that is open at `now` or comes next, in the time
+        zone of Home Assistant, and the ids of the intervals whose occurrence could not
+        be worked out, whose windows are then left as they are."""
+        zone = dt_util.get_default_time_zone()
+        windows = [
+            window
+            for interval in self._intervals.values()
+            if (window := weekday_window(interval, now, zone)) is not None
+        ]
+        return windows, frozenset()
+
+    def _set_windows(
+        self, now: datetime, windows: list[Window], unknown: frozenset[str]
+    ) -> list[Effect]:
+        """Merge the freshly worked out `windows` into the timer, which holds only the
+        windows of the intervals there are."""
+        return self._core.set_windows(
+            now, windows, configured=self._intervals.keys(), keep=unknown
+        )
+
+    async def _async_refresh_windows_locked(self) -> bool:
+        """Work out the windows again and fold them into the timer: the new windows are
+        merged and followed at once, so that the timer does not rest, or is stored,
+        between an edited window and the timer that follows it (S2).
+
+        The caller holds the lock. Returns False, with the timer untouched, when the
+        timer was unloaded while the windows were worked out: its entry is being
+        replaced, and the new timer would find this one's stale save.
+        """
+        windows, unknown = await self._async_windows(dt_util.utcnow())
+        if self._stopped:
+            return False
+        now = dt_util.utcnow()
+        await self._execute(
+            self._set_windows(now, windows, unknown) + self._core.tick(now)
+        )
+        return True
+
+    async def _refresh_windows(self) -> None:
+        """Work out the windows again, for an event that does not hold the lock."""
+        async with self._lock:
+            if not self._stopped:
+                await self._async_refresh_windows_locked()
+
+    async def _handle_core_config_update(self, event: Event[Mapping[str, Any]]) -> None:
+        """A window is a moment in the time zone it was worked out in: when the zone
+        changes, the windows are worked out again."""
+        if "time_zone" in event.data:
+            await self._refresh_windows()
+
     async def _handle_started(self, _hass: HomeAssistant) -> None:
-        """Take stock of the target once, with Home Assistant fully started."""
+        """Take stock of the target once, with Home Assistant fully started.
+
+        The windows come first: the stored ones are merged with the ones worked out
+        now, so that the first observation folds both in one catch-up (§5.7).
+        """
         async with self._lock:
             if self._stopped:
                 return
-            # A timer restored unchanged gets no Arm from the core. Arming only now
-            # keeps a stored end or command that has long passed from switching a
-            # target that has not been seen yet; the first observation folds it in.
-            if (wakeup := next_wakeup(self.snapshot)) is not None:
-                self._arm(wakeup)
+            # The zone is followed from here on: a change meanwhile is not lost, and
+            # waits for the lock, so it folds windows only after the first observation.
+            self._entry.async_on_unload(
+                self._hass.bus.async_listen(
+                    EVENT_CORE_CONFIG_UPDATE, self._handle_core_config_update
+                )
+            )
+            windows, unknown = await self._async_windows(dt_util.utcnow())
+            if self._stopped:
+                return
+            now = dt_util.utcnow()
+            # Merging the windows arms the alarm for the next thing the timer waits for,
+            # which the observation does not do for a timer restored unchanged. Nothing
+            # is armed earlier: a stored end, command or window that has long passed
+            # would switch a target that has not been seen yet, and the first
+            # observation folds it in.
+            effects = self._set_windows(now, windows, unknown)
             self._schedule_refresh()
             state = self._hass.states.get(self.target_entity_id)
-            await self._execute(
-                self._core.observe(dt_util.utcnow(), actual_state(state), by_us=False)
-            )
+            effects += self._core.observe(now, actual_state(state), by_us=False)
+            await self._execute(effects)
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
         async with self._lock:
             if self._stopped:
                 return
-            await self._execute(
-                self._core.observe(
-                    dt_util.utcnow(),
-                    actual_state(event.data["new_state"]),
-                    by_us=event.context.id in self._own_contexts,
-                )
+            before = self.snapshot
+            effects = self._core.observe(
+                dt_util.utcnow(),
+                actual_state(event.data["new_state"]),
+                by_us=event.context.id in self._own_contexts,
             )
+            await self._execute_fold(before, effects)
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
@@ -320,7 +397,22 @@ class TargetController:
             before = self.snapshot
             effects = self._core.tick(now)
             self._log_due_while_unavailable(before, now, effects)
-            await self._execute(effects)
+            await self._execute_fold(before, effects)
+
+    async def _execute_fold(self, before: Snapshot, effects: list[Effect]) -> None:
+        """Carry out the effects of a fold of what fell due, which `tick` and `observe`
+        make; the snapshot before it is `before`.
+
+        A window the fold found over is replaced by the next one of its interval. That
+        goes for whichever event folds it: a report of the target may get the lock
+        before the alarm of the end does, and the alarm then finds nothing due.
+        """
+        ended = {w.interval_id for w in before.windows} - {
+            w.interval_id for w in self.snapshot.windows
+        }
+        await self._execute(effects)
+        if ended and not self._stopped:
+            await self._async_refresh_windows_locked()
 
     def _log_due_while_unavailable(
         self, before: Snapshot, now: datetime, effects: list[Effect]
@@ -330,6 +422,21 @@ class TargetController:
         after = self.snapshot
         if after.last_actual != "unavailable":
             return
+        # A window whose start set the timer wants the target on, if its window is
+        # still open when it is back; one that left the timer alone, or was over, did
+        # not.
+        if any(
+            not window.started
+            and window.start <= now
+            and after.scheduled_by == window.interval_id
+            and after.end == window.end
+            for window in before.windows
+        ):
+            _LOGGER.info(
+                "A schedule window of %s started while it is unavailable;"
+                " it is turned on when it is back, if the window is still open then",
+                self.target_entity_id,
+            )
         # A countdown that ended is one that wants the target off; a command that was
         # due with it may have moved the end or made the target wanted on instead.
         if (

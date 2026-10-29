@@ -38,6 +38,7 @@ from .const import (
     CONF_TARGET,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
+    MAX_AUTOMATIC_RESENDS,
     SERVICE_CALL_TIMEOUT,
 )
 from .core import (
@@ -45,6 +46,7 @@ from .core import (
     Changed,
     Disarm,
     Effect,
+    GaveUp,
     Snapshot,
     TimerCore,
     TurnOff,
@@ -222,6 +224,14 @@ class TargetController:
                     self._disarm()
                 case Changed():
                     pass  # Saved and shown ahead of the other effects.
+                case GaveUp(wish):
+                    _LOGGER.warning(
+                        "%s did not turn %s after %d attempts; Timerify will try"
+                        " again when it reports a change or on the next command",
+                        self.target_entity_id,
+                        wish,
+                        MAX_AUTOMATIC_RESENDS + 1,
+                    )
                 case _:
                     assert_never(effect)
 

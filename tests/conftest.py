@@ -49,6 +49,11 @@ def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Let Home Assistant load integrations from custom_components/."""
 
 
+ECHO_LIMIT = 50
+"""How often a device that echoes ignored calls does so: a loop in Timerify then ends
+the test with the wrong number of calls instead of hanging it."""
+
+
 @dataclass
 class HeldCall:
     """A service call stuck inside a slow device until it is released."""
@@ -71,6 +76,9 @@ class FakeTarget:
     """Every service call received as (service, entity_id), failed ones included."""
     _failure: Exception | None = None
     _ignore_next: bool = False
+    _ignoring: bool = False
+    _echoing: bool = False
+    _echoes: int = 0
     _held: HeldCall | None = None
 
     async def set_state(self, value: str, **attributes: str | int) -> None:
@@ -87,6 +95,19 @@ class FakeTarget:
         """Make the next service call succeed without the switch doing anything, as
         a device out of reach that the integration cannot tell about."""
         self._ignore_next = True
+
+    def ignore_calls(self, *, echo_attribute: bool = False) -> None:
+        """Make every service call succeed without the switch doing anything, until
+        `obey_calls`. With `echo_attribute` the device also answers each call with a
+        report of its unchanged state and a new attribute, as an MQTT switch that
+        publishes its full state after every command does."""
+        self._ignoring = True
+        self._echoing = echo_attribute
+
+    def obey_calls(self) -> None:
+        """End `ignore_calls`: the switch does what it is told again."""
+        self._ignoring = False
+        self._echoing = False
 
     def hold_next_call(self) -> HeldCall:
         """Make the next service call slow: it waits inside the device."""
@@ -108,8 +129,19 @@ class FakeTarget:
             if self._failure is not None:
                 failure, self._failure = self._failure, None
                 raise failure
-            if self._ignore_next:
+            if self._ignoring or self._ignore_next:
                 self._ignore_next = False
+                if self._echoing and self._echoes < ECHO_LIMIT:
+                    self._echoes += 1
+                    entity_id = call.data["entity_id"]
+                    current = self.hass.states.get(entity_id)
+                    assert current is not None
+                    self.hass.states.async_set(
+                        entity_id,
+                        current.state,
+                        {**current.attributes, "echoes": self._echoes},
+                        context=call.context,
+                    )
                 return
             self.hass.states.async_set(
                 call.data["entity_id"],

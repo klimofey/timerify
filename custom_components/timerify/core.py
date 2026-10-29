@@ -12,7 +12,7 @@ from functools import wraps
 from math import ceil
 from typing import Concatenate, Final, Literal
 
-from .const import MAX_MINUTES, Mode
+from .const import MAX_AUTOMATIC_RESENDS, MAX_MINUTES, Mode
 from .domains import Actual
 
 _MAX_DURATION: Final = timedelta(minutes=MAX_MINUTES)
@@ -58,7 +58,16 @@ class Changed:
     """The snapshot changed: persist it and refresh the entities."""
 
 
-type Effect = TurnOn | TurnOff | Arm | Disarm | Changed
+@dataclass(frozen=True)
+class GaveUp:
+    """The pending wish was sent again as often as reports alone may send it, and the
+    target still does not show it. Said once per wish; nothing is sent until the
+    target's state changes or a command wants the wish again."""
+
+    wish: Literal["on", "off"]
+
+
+type Effect = TurnOn | TurnOff | Arm | Disarm | Changed | GaveUp
 
 
 def _utc(now: datetime) -> datetime:
@@ -97,6 +106,13 @@ class TimerCore:
         """The pending wish has not reached the target (its call failed or changed
         nothing, or the target was away). Only true while a wish is pending; never
         persisted, because a restart sends every stored wish again."""
+        self._resends = 0
+        """How many times a report that merely repeated the target's state has sent
+        the pending wish again; at most `MAX_AUTOMATIC_RESENDS`. Only meaningful while
+        a wish is pending: every command that wants one starts it from zero, and so
+        does a change of the target's state. Never persisted."""
+        self._gave_up = False
+        """`GaveUp` was said for the pending wish."""
 
     @property
     def snapshot(self) -> Snapshot:
@@ -167,6 +183,9 @@ class TimerCore:
         """
         now = _utc(now)
         previous = self._snapshot.last_actual
+        repeated = actual == previous
+        if not repeated:
+            self._reset_resends()  # the target moved, so asking again is not a loop
         if previous in (None, "unavailable") and self._snapshot.pending is not None:
             self._unsent = True  # a target that is back has not received the wish
         # Record the observation first: everything below reasons about the state
@@ -182,11 +201,11 @@ class TimerCore:
             if pending == actual:
                 self._settle()
             else:
-                effects += self._send(pending)
+                effects += self._resend(pending, repeated=repeated)
         elif by_us:
             if pending == actual:
                 self._settle()
-        elif actual != previous and not expired:
+        elif not repeated and not expired:
             # Our own expiry is already switching the target off; it outranks this.
             effects += self._follow_external_change(now, actual)
         return effects
@@ -237,6 +256,7 @@ class TimerCore:
             self._settle()
             return []  # already there
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
+        self._reset_resends()  # a command always sends, whatever reports did before
         if state.last_actual == "unavailable":
             self._unsent = True
             return []  # applied when the target is back
@@ -245,6 +265,27 @@ class TimerCore:
     def _send(self, target: Literal["on", "off"]) -> list[Effect]:
         self._unsent = False
         return [TurnOn() if target == "on" else TurnOff()]
+
+    def _resend(self, wish: Literal["on", "off"], *, repeated: bool) -> list[Effect]:
+        """Send a wish again because the target reported and does not show it.
+
+        A report that moved the target's state is always answered. One that only
+        repeats it is answered `MAX_AUTOMATIC_RESENDS` times, then the core gives up
+        once and waits for a change or a command: a device that refuses the wish may
+        answer every call with such a report.
+        """
+        if repeated:
+            if self._resends >= MAX_AUTOMATIC_RESENDS:
+                if self._gave_up:
+                    return []
+                self._gave_up = True
+                return [GaveUp(wish)]
+            self._resends += 1
+        return self._send(wish)
+
+    def _reset_resends(self) -> None:
+        self._resends = 0
+        self._gave_up = False
 
     def _settle(self) -> None:
         """Drop the pending wish: it was fulfilled or no longer applies."""

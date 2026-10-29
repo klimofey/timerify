@@ -19,6 +19,12 @@ MAX_MINUTES: Final = 1440
 SERVICE_CALL_TIMEOUT: Final = timedelta(seconds=30)
 """How long a turn_on or turn_off call may take before it counts as failed."""
 
+MAX_AUTOMATIC_RESENDS: Final = 3
+"""How many times a wish that did not reach the target is sent again by reports that
+merely repeat the target's state, before the timer stops asking until the state
+changes or a command wants the wish again. Without a bound, a device that refuses a
+command and answers it with a report of its old state would be commanded for ever."""
+
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may
 also run with the timer at zero."""

@@ -7,11 +7,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from custom_components.timerify.const import MAX_MINUTES, Mode
+from custom_components.timerify.const import MAX_AUTOMATIC_RESENDS, MAX_MINUTES, Mode
 from custom_components.timerify.core import (
     Arm,
     Changed,
     Disarm,
+    Effect,
+    GaveUp,
     Snapshot,
     TimerCore,
     TurnOff,
@@ -638,6 +640,117 @@ def test_call_failed_without_a_pending_wish_changes_nothing() -> None:
     c.set_duration(NOW, minutes(10))
 
     assert c.observe(NOW + minutes(1), "off", by_us=False) == []
+
+
+def refused_turn_off() -> TimerCore:
+    """A running timer stopped, and a target that stays on although it took turn_off:
+    the call has been made and reported as not delivered."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.stop(NOW)
+    c.call_failed(NOW)
+    return c
+
+
+def repeat_reports(
+    c: TimerCore, count: int, actual: Actual = "on"
+) -> list[list[Effect]]:
+    """The effects of `count` reports in a row that repeat the target's state, from a
+    device that refuses every call: each send comes back as not delivered."""
+    results: list[list[Effect]] = []
+    for step in range(count):
+        now = NOW + minutes(1 + step)
+        effects = c.observe(now, actual, by_us=False)
+        if TurnOn() in effects or TurnOff() in effects:
+            c.call_failed(now)
+        results.append(effects)
+    return results
+
+
+def test_repeated_reports_send_a_refused_wish_a_limited_number_of_times() -> None:
+    """A target that keeps showing the old state is asked 3 times by its reports,
+    told so once, and left alone after that."""
+    c = refused_turn_off()
+
+    reports = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 3)
+
+    assert reports[:MAX_AUTOMATIC_RESENDS] == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS
+    assert reports[MAX_AUTOMATIC_RESENDS] == [GaveUp("off")]
+    assert reports[MAX_AUTOMATIC_RESENDS + 1 :] == [[], []]
+    assert c.snapshot.pending == "off"
+
+
+def test_a_change_of_the_targets_state_gives_a_full_allowance_again() -> None:
+    """A target that went away and came back is a new chance, and the answer to that
+    report does not count against the limit."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    c.observe(NOW + minutes(10), "unavailable", by_us=False)
+    back = c.observe(NOW + minutes(11), "on", by_us=False)
+
+    assert TurnOff() in back
+    c.call_failed(NOW + minutes(11))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_the_first_report_after_a_start_gives_a_full_allowance() -> None:
+    """A stored wish found unsent at start-up is sent, then limited like any other."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=None, pending="off"))
+
+    start = c.observe(NOW, "on", by_us=False)
+    c.call_failed(NOW)
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert start == [TurnOff(), Changed()]
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_a_command_wanting_the_same_wish_always_sends_and_gives_a_full_allowance() -> (
+    None
+):
+    """Stop after the core gave up sends turn_off again, and it may be repeated."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    stop = c.stop(NOW + minutes(10))
+    c.call_failed(NOW + minutes(10))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert stop == [Disarm(), TurnOff()]
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_a_wish_in_the_other_direction_replaces_the_one_given_up() -> None:
+    """After giving up on turn_off, starting the timer needs no call (the target is
+    on), and stopping it again is a new wish with its own allowance."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    start = c.set_duration(NOW + minutes(10), minutes(20))
+    stop = c.stop(NOW + minutes(11))
+    c.call_failed(NOW + minutes(11))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert TurnOn() not in start
+    assert c.snapshot.pending == "off"
+    assert stop == [Disarm(), TurnOff(), Changed()]
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_a_settled_wish_leaves_the_next_one_a_full_allowance() -> None:
+    """The target finally obeys; the next refused wish is asked 3 times again."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    c.observe(NOW + minutes(10), "off", by_us=False)
+    assert c.snapshot.pending is None
+
+    c.set_duration(NOW + minutes(11), minutes(5))
+    c.call_failed(NOW + minutes(11))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1, actual="off")
+
+    assert again == [[TurnOn()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("on")]]
 
 
 def test_startup_with_running_timer_and_target_on_rearms_nothing_else() -> None:

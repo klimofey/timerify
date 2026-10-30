@@ -52,6 +52,7 @@ from .helpers import (
     restart_after,
     state_of,
     timerify_info,
+    timerify_warnings,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -833,6 +834,74 @@ async def test_ac_back_off_is_turned_on_with_interval_settings(
 
     assert fake_climate.call_data == [SET_COOL, SET_24]
     assert state_of(hass, AC_ID) == "cool"
+
+
+async def test_setting_the_ac_no_longer_takes_is_left_out_and_said_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The interval says cooling at 24, as the AC offered cooling when it was saved. An
+    update of the AC's integration takes the mode away, and Home Assistant restarts. The
+    window turns the AC on at 24 degrees, which it can still do, instead of failing on
+    the mode every morning, and the log says once what is left out."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
+    fake_climate.write("off")
+    await restart(hass, entry)
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert fake_climate.call_data == [("turn_on", {}), SET_24]
+    assert state_of(hass, AC_ID) == "heat"
+    assert state_of(hass, AC_ENDS_AT) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(MONDAY, "06:30"))
+    assert fake_climate.call_data[-2:] == [("turn_on", {}), SET_24]
+    assert timerify_warnings(caplog) == [
+        "The schedule interval 06:30–07:15, Mon–Sun of climate.ac asks for settings"
+        " that the target cannot take now (hvac_mode); it is turned on without them"
+    ]
+
+
+async def test_setting_that_comes_back_and_goes_again_is_said_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Saying it once is for as long as the mode is missing: when the AC offers it
+    again the interval uses it, and when it is taken away a second time the log says so
+    again."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    offered = fake_climate.capability_attributes["hvac_modes"]
+    fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
+    fake_climate.write("off")
+    await restart(hass, entry)
+    assert len(timerify_warnings(caplog)) == 1
+
+    fake_climate.capability_attributes["hvac_modes"] = offered
+    fake_climate.write("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(MONDAY, "06:30"))
+
+    assert fake_climate.call_data[-2:] == [SET_COOL, SET_24]
+    assert len(timerify_warnings(caplog)) == 1
+    fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
+    fake_climate.write("off")
+    await advance_to(hass, freezer, local(MONDAY, "07:15"))
+    await advance_to(hass, freezer, local(SUNDAY + timedelta(days=2), "06:30"))
+
+    assert len(timerify_warnings(caplog)) == 2
+    assert fake_climate.call_data[-2:] == [("turn_on", {}), SET_24]
 
 
 # --- What the log says ----------------------------------------------------------------

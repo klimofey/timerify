@@ -473,6 +473,25 @@ only the final behaviour is written.
 - **The search horizon is `WINDOW_SEARCH_DAYS = 14`.** A weekday interval always matches
   within 7 days; a Workday-based one with no match is searched again when the sensor
   reports, daily. Cost if wrong: none found.
+- **A window carries only the settings of its interval that the target takes when the
+  window is worked out; the rest are left out and said once.** The form checks the
+  settings when the interval is saved, but a window is worked out from data that can be
+  months old, and what a target takes changes (an update of its integration renames a
+  mode, the device is replaced). A setting the target no longer takes fails its call, and
+  the window would turn nothing on, with a warning every morning, where a plain turn-on
+  would have worked. Each setting is judged alone, as the form offers them and as the next
+  edit keeps them (`_with_settings_the_target_takes`, through `validate_settings`), so the
+  rest of the settings are still used. The warning names the interval and the settings,
+  and is repeated only when what is left out changes, not at every refresh. Windows are
+  worked out at start-up, at every window end, when the Workday sensor reports, when the
+  zone changes and when an interval is switched, so a change of capabilities is noticed by
+  the next of those, and a window worked out before it keeps the settings it had until
+  then. A window that is kept because its occurrence could not be worked out keeps the
+  settings it was worked out with. Cost if wrong: a setting that the target takes again is
+  missing from the window that was worked out while it did not, until the next refresh.
+  Pending commands are not covered; see `docs/followups.md`. Tests:
+  `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
+  `test_setting_that_comes_back_and_goes_again_is_said_again`.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
   callbacks use `_refresh_windows`, which takes the lock; after every await the controller
   re-checks that it is still loaded and takes `now` afresh.** `asyncio.Lock` is not

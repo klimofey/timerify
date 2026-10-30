@@ -10,6 +10,7 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
@@ -52,6 +53,8 @@ from .const import (
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
+    SettingValue,
+    freeze_settings,
 )
 from .core import (
     ApplySettings,
@@ -166,6 +169,10 @@ class TargetController:
         self._workday_unanswered = False
         """Whether the last question to the Workday sensor went unanswered, so that an
         outage is logged once, not at every question."""
+        self._left_out: dict[str, frozenset[str]] = {}
+        """For each interval, the names of the settings that the target could not take
+        when its window was last worked out, so that they are said once, not at every
+        refresh."""
         self._lock = asyncio.Lock()
         self._stopped = False
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
@@ -385,9 +392,10 @@ class TargetController:
 
         windows: list[Window] = []
         unknown: set[str] = set()
-        for interval in self._intervals.values():
-            if interval.id in disabled:
+        for configured in self._intervals.values():
+            if configured.id in disabled:
                 continue
+            interval = self._with_settings_the_target_takes(configured)
             if interval.days == "weekdays":
                 window = weekday_window(interval, now, zone)
             elif unanswered:
@@ -403,6 +411,39 @@ class TargetController:
             if window is not None:
                 windows.append(window)
         return windows, frozenset(unknown)
+
+    def _with_settings_the_target_takes(self, interval: Interval) -> Interval:
+        """`interval` with only the settings the target can be turned on with now.
+
+        They were checked when the interval was saved, and what the target takes can
+        change after that: an update of its integration renames a mode, or the device
+        is replaced. A setting it no longer takes would fail its call, and the window
+        would turn nothing on. Each setting is judged alone, as the form offers them.
+        What is left out is said once, for as long as it is.
+        """
+        taken: dict[str, SettingValue] = {}
+        for name, value in interval.settings.items():
+            try:
+                validate_settings(self._hass, self.target_entity_id, {name: value})
+            except ServiceValidationError:
+                continue
+            taken[name] = value
+        left_out = frozenset(interval.settings) - frozenset(taken)
+        if left_out != self._left_out.get(interval.id, frozenset()):
+            if left_out:
+                self._left_out[interval.id] = left_out
+                _LOGGER.warning(
+                    "The schedule interval %s of %s asks for settings that the target"
+                    " cannot take now (%s); it is turned on without them",
+                    self._entry.subentries[interval.id].title,
+                    self.target_entity_id,
+                    ", ".join(sorted(left_out)),
+                )
+            else:
+                del self._left_out[interval.id]
+        return (
+            replace(interval, settings=freeze_settings(taken)) if left_out else interval
+        )
 
     async def _async_is_workday(self, day: date) -> bool:
         """Ask the Workday sensor whether `day` is a working day, as the sensor says it:

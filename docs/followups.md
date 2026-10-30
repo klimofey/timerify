@@ -98,6 +98,15 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   again, which loses its commands and the flags of its intervals. A repairs issue with a
   "reset the stored timer" fix would do. `custom_components/timerify/store.py:60-84`
   (`_validated`) and `:164-188` (`async_load`).
+- **A pending command keeps the settings it was made with.** The settings of an interval's
+  window are checked again when the window is worked out, and the ones the target no longer
+  takes are left out (`RULINGS.md`), but a command is checked only when it is made.
+  Made days ahead for an AC whose integration then renames a mode, it fails on that mode
+  when it comes due, and the log says so at every attempt. The fix is the same filter
+  where the calls are made (`_execute`), which covers the owed settings of every origin;
+  it is not a phase 3 regression, so it waits.
+  `custom_components/timerify/controller.py:259` (`async_add_command`, the check) and
+  `:724-737` (`_execute`, where the calls are made).
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.

@@ -10,3 +10,6 @@ htmlcov/
 
 # Throwaway Home Assistant configuration of the smoke test
 /scripts/smoke/config/
+
+# The dashboard card: dependencies of the TypeScript project
+card/node_modules/

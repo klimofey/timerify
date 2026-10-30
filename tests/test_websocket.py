@@ -13,6 +13,7 @@ import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import (
     MockHAClientWebSocket,
@@ -64,7 +65,14 @@ NO_OFFSET = "2026-01-05T07:00:00"
 async def client(
     hass: HomeAssistant, hass_ws_client: WebSocketGenerator
 ) -> MockHAClientWebSocket:
-    """The dashboard's connection, of an admin."""
+    """The dashboard's connection, of an admin.
+
+    Timerify is set up first. Setting it up adds the card to the web server's routes,
+    and the test server closes the routes when the first connection is made, which the
+    web server of Home Assistant does not: it takes the routes of integrations that are
+    set up after it has started.
+    """
+    await async_setup_component(hass, DOMAIN, {})
     return await hass_ws_client(hass)
 
 
@@ -76,8 +84,9 @@ async def read_only_client(
     hass_read_only_access_token: str,
 ) -> MockHAClientWebSocket:
     """The dashboard's connection, of a user who is not an admin: the read-only group,
-    which may read every entity."""
+    which may read every entity. Timerify is set up first, as for `client`."""
     assert not hass_read_only_user.is_admin
+    await async_setup_component(hass, DOMAIN, {})
     return await hass_ws_client(hass, hass_read_only_access_token)
 
 

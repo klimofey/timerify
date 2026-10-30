@@ -26,8 +26,9 @@ from homeassistant.config_entries import SOURCE_USER, ConfigEntry
 from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callback
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.helpers import intent
+from homeassistant.helpers import intent, llm
 from homeassistant.helpers.template import Template
+from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import (
     CONF_LANGUAGES,
@@ -121,9 +122,45 @@ def speech(response: intent.IntentResponse) -> str:
     return str(response.speech["plain"]["speech"])
 
 
-def expose(hass: HomeAssistant, entity_id: str, exposed: bool) -> None:
-    """Expose the entity to Assist, or stop doing it."""
-    async_expose_entity(hass, ASSISTANT, entity_id, exposed)
+def expose(
+    hass: HomeAssistant, entity_id: str, exposed: bool, assistant: str = ASSISTANT
+) -> None:
+    """Expose the entity to Assist (the assistant `assistant`), or stop doing it."""
+    async_expose_entity(hass, assistant, entity_id, exposed)
+
+
+async def assist_api(
+    hass: HomeAssistant,
+    language: str | None = "en",
+    assistant: str = ASSISTANT,
+) -> llm.APIInstance:
+    """The Assist API as an LLM agent is given it: the tools and the prompt of every
+    integration, for a request in `language` that `assistant` makes.
+
+    The LLM integration is set up first, as it is in a house that has an LLM agent.
+    """
+    assert await async_setup_component(hass, "llm", {})
+    return await llm.async_get_api(
+        hass,
+        llm.LLM_API_ASSIST,
+        llm.LLMContext(
+            platform="test",
+            context=Context(),
+            language=language,
+            assistant=assistant,
+            device_id=None,
+        ),
+    )
+
+
+async def call_tool(
+    api: llm.APIInstance, name: str, args: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Call the tool `name` as the agent does, with the arguments `args`, and return
+    what it gives back: the data of the result, which is not an error."""
+    result = await api.async_call_tool(llm.ToolInput(name, dict(args)))
+    assert not result.error
+    return dict(result.data)
 
 
 def counting(

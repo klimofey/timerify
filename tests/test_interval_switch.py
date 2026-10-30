@@ -42,6 +42,7 @@ from .helpers import (
     open_sunday,
     payload,
     record_writes,
+    reload_held_back,
     restart,
     retitle_interval,
     saved,
@@ -1117,3 +1118,62 @@ async def test_a_schedule_waiting_behind_a_slow_boiler_fails_when_the_timer_unlo
     assert raised.value.translation_domain == DOMAIN
     assert raised.value.translation_key == "timer_unloaded"
     assert hass_storage[storage_key(entry)] == stored
+
+
+async def test_a_schedule_asked_for_after_an_interval_is_deleted_is_refused_as_unknown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Deleting an interval reloads the timer, and the reload waits for its turn when
+    another is still going. The call that arrives meanwhile finds the interval gone:
+    asked for by its title it is unknown, and the answer names the one that is left."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, morning)
+
+        with pytest.raises(ServiceValidationError) as refused:
+            await entry.runtime_data.async_set_schedule_enabled(False, "Morning")
+
+    assert refused.value.translation_key == "unknown_interval"
+    assert refused.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Morning",
+        "intervals": "Evening",
+    }
+    await hass.async_block_till_done()
+    assert state_of(hass, EVENING_SWITCH) == "on"
+
+
+async def test_a_schedule_switched_as_a_whole_after_an_interval_is_deleted_has_one_left(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The whole schedule is the intervals that are still there: the evening one. It is
+    still switched off once the timer has reloaded."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, morning)
+
+        titles = await entry.runtime_data.async_set_schedule_enabled(False)
+
+    assert titles == ("Evening",)
+    await hass.async_block_till_done()
+    assert state_of(hass, EVENING_SWITCH) == "off"
+
+
+async def test_a_schedule_asked_for_after_its_only_interval_is_deleted_is_no_schedule(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, interval)
+
+        with pytest.raises(ServiceValidationError) as refused:
+            await entry.runtime_data.async_set_schedule_enabled(True)
+
+    assert refused.value.translation_key == "no_schedule"

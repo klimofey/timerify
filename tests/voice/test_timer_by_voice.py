@@ -1304,6 +1304,34 @@ async def test_llm_duration_out_of_range_is_refused(
 
 
 @pytest.mark.parametrize(
+    "args",
+    [
+        {"hours": 10**9},
+        {"minutes": 10**15},
+        {"hours": 10**30},
+        {"hours": 10**9, "minutes": 10**15},
+    ],
+    ids=["billion-hours", "quadrillion-minutes", "nonillion-hours", "both"],
+)
+async def test_llm_add_time_of_an_absurd_count_runs_a_day(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    args: dict[str, int],
+) -> None:
+    """An agent that asks for more time than there is gets what a count of 30 hours
+    gets: the timer runs for a day, and it is told so. It is no failure."""
+    api = await assist_api(hass)
+
+    added = await call_tool(api, "timerify__add_time", {"name": "Boiler", **args})
+
+    assert added["response_type"] == "action_done"
+    assert added["speech_slots"]["left_total"] == MAX_MINUTES
+    assert state_of(hass, NUMBER) == str(MAX_MINUTES)
+    assert fake_target.calls == [TURN_ON]
+
+
+@pytest.mark.parametrize(
     "args", [{}, {"minutes": 0}, {"hours": 0}], ids=["nothing", "minutes", "hours"]
 )
 @pytest.mark.parametrize("language", ["en", "ru"])

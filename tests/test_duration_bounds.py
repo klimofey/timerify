@@ -142,7 +142,7 @@ async def test_a_refused_duration_leaves_a_running_timer_alone(
     assert fake_target.calls == [TURN_ON]
 
 
-@pytest.mark.parametrize("minutes", [30, MAX_MINUTES, 100_000])
+@pytest.mark.parametrize("minutes", [30, MAX_MINUTES, 100_000, 10**9, 10**15, 10**30])
 async def test_adding_past_a_day_runs_a_day(
     hass: HomeAssistant, boiler: TargetController, minutes: int
 ) -> None:
@@ -153,3 +153,17 @@ async def test_adding_past_a_day_runs_a_day(
     await boiler.async_add_minutes(minutes)
 
     assert state_of(hass, NUMBER) == str(MAX_MINUTES)
+
+
+@pytest.mark.parametrize("minutes", [-MAX_MINUTES, -(10**9), -(10**15), -(10**30)])
+async def test_taking_off_a_day_or_more_stops_the_timer(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: TargetController, minutes: int
+) -> None:
+    """The other side of the clamp: the end is never more than a day ahead, so taking
+    off a day or more, however much, leaves nothing."""
+    await set_number(hass, NUMBER, MAX_MINUTES)
+
+    await boiler.async_add_minutes(minutes)
+
+    assert state_of(hass, NUMBER) == "0"
+    assert state_of(hass, TARGET_ID) == "off"

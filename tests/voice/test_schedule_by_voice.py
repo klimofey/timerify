@@ -34,6 +34,7 @@ from ..helpers import (
     iso,
     local,
     open_sunday,
+    reload_held_back,
     retitle_interval,
     set_switch,
     state_of,
@@ -974,6 +975,35 @@ async def test_llm_set_schedule(
     assert switches(hass) == ("on", "off")
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
     assert fake_target.calls == [TURN_ON]
+
+
+async def test_llm_asking_for_an_interval_just_deleted_is_told_which_are_left(
+    hass: HomeAssistant, scheduled: MockConfigEntry
+) -> None:
+    """The user deletes the Morning interval and an agent, which was told its title a
+    moment ago, asks for it before the timer has reloaded: it is told that the boiler
+    has no such interval and which it has, and nothing else is switched."""
+    api = await assist_api(hass)
+    (morning,) = (
+        subentry_id
+        for subentry_id, subentry in scheduled.subentries.items()
+        if subentry.title == "Morning"
+    )
+    async with reload_held_back(scheduled):
+        hass.config_entries.async_remove_subentry(scheduled, morning)
+
+        refused = await call_tool(
+            api,
+            "timerify__set_schedule",
+            {"name": "Boiler", "enabled": False, "interval": "Morning"},
+        )
+
+    assert refused["response_type"] == "error"
+    assert refused["speech"]["plain"]["speech"] == translated(
+        "en", "exceptions", "unknown_interval", "message"
+    ).format(target="Boiler", interval="Morning", intervals="Evening")
+    await hass.async_block_till_done()
+    assert state_of(hass, EVENING) == "on"
 
 
 async def test_llm_set_schedule_needs_to_be_told_on_or_off(

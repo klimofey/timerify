@@ -301,10 +301,13 @@ class TargetController:
     async def async_add_minutes(self, minutes: int) -> None:
         """Move the end of the countdown by `minutes`, which may be negative.
 
-        The end is never more than a day ahead: adding past it runs for a day, whoever
-        asks and however much.
+        The end is never more than a day ahead: adding past it runs for a day, and
+        taking off as much as a day leaves nothing, whoever asks and however much. The
+        count is bounded before it becomes a time, as a delay is (`_due`): a day either
+        way is all that can change the end, and a count of centuries is no time.
         """
-        await self._command(lambda now: self._core.add(now, timedelta(minutes=minutes)))
+        bounded = max(-MAX_MINUTES, min(minutes, MAX_MINUTES))
+        await self._command(lambda now: self._core.add(now, timedelta(minutes=bounded)))
 
     async def async_run(
         self, minutes: int | None = None, settings: Mapping[str, Any] | None = None
@@ -485,7 +488,9 @@ class TargetController:
 
         Each interval is switched as its own switch switches it
         (`async_set_interval_enabled`), one after the other under one hold of the lock,
-        so that no other command comes between them.
+        so that no other command comes between them. The intervals are those the entry
+        has: one that was deleted is no interval, even before the timer has reloaded
+        and let go of it.
 
         Raises ServiceValidationError, before anything is switched, when the timer has
         no interval (`no_schedule`) and when none has the title (`unknown_interval`,
@@ -497,8 +502,9 @@ class TargetController:
         async with self._lock:
             self._raise_if_unloaded()
             every_title = {
-                interval_id: self._entry.subentries[interval_id].title
+                interval_id: subentry.title
                 for interval_id in self._intervals
+                if (subentry := self._entry.subentries.get(interval_id)) is not None
             }
             if not every_title:
                 raise ServiceValidationError(

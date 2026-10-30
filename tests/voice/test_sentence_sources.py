@@ -14,6 +14,8 @@ from homeassistant.helpers import intent
 
 from custom_components.timerify.const import (
     LIST_TARGET,
+    MAX_DELAY_MINUTES,
+    MAX_MINUTES,
     SENTENCES_DIR,
     VOICE_LANGUAGES,
 )
@@ -92,6 +94,23 @@ def test_sources_load_with_core_and_without_names(language: str) -> None:
                 samples(language, name, names=(), numbers=ranges, takeover=takeover)
                 == []
             ), (name, takeover)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_duration_can_be_said_past_the_longest_timer(language: str) -> None:
+    """The counts of hours and of minutes reach as far as a week, the longest delay a
+    command takes, in every language: a timer never runs for more than a day, and a
+    duration beyond it must reach the handler, which clamps it when time is added and
+    refuses it when the timer is run, rather than be answered as not understood."""
+    lists = timerify_intents(language).slot_lists
+    hours, minutes = lists["timerify_hours"], lists["timerify_minutes"]
+
+    assert isinstance(hours, RangeSlotList)
+    assert isinstance(minutes, RangeSlotList)
+    assert (hours.start, hours.stop) == (1, MAX_DELAY_MINUTES // 60)
+    assert (minutes.start, minutes.stop) == (1, MAX_DELAY_MINUTES)
+    assert hours.stop * 60 > MAX_MINUTES
+    assert minutes.stop > MAX_MINUTES
 
 
 def test_every_language_has_the_same_intents_and_responses() -> None:

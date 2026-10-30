@@ -122,14 +122,17 @@ expansion_rules:
 lists:
   timerify_target:
     values: []
+  # How long can be said reaches a week, in hours and in minutes: a timer never runs for
+  # more than a day, and a duration beyond it must reach the handler, which clamps it when
+  # time is added and refuses it when the timer is run, not be answered as not understood.
   timerify_hours:
     range:
       from: 1
-      to: 24
+      to: 168
   timerify_minutes:
     range:
       from: 1
-      to: 1440
+      to: 10080
   timerify_temperature:
     range:
       from: 1

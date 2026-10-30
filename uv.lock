@@ -3150,6 +3150,7 @@ dev = [
     { name = "home-assistant-intents" },
     { name = "mypy" },
     { name = "pytest-homeassistant-custom-component" },
+    { name = "pytest-xdist" },
     { name = "ruff" },
     { name = "types-pyyaml" },
 ]
@@ -3164,6 +3165,7 @@ dev = [
     { name = "home-assistant-intents", specifier = "==2026.10.6" },
     { name = "mypy", specifier = ">=2.4.1" },
     { name = "pytest-homeassistant-custom-component", specifier = "==0.13.375" },
+    { name = "pytest-xdist", specifier = "==3.8.0" },
     { name = "ruff", specifier = ">=0.14" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]

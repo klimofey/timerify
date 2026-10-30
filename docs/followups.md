@@ -16,7 +16,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   split off; the README states the limit. Take it before the first public release, since the
   repository is built as a product. `custom_components/timerify/__init__.py:86-106`
   (`_follow_target`, the pattern), `custom_components/timerify/controller.py:236` (the
-  option) and `:811-823` (`_follow_workday_sensor`, which subscribes to the id).
+  option) and `:816-828` (`_follow_workday_sensor`, which subscribes to the id).
 
 ## Later
 
@@ -35,7 +35,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (the reset in `observe`) and `:872-885` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
-  `custom_components/timerify/controller.py:990-1009` (`_log_gave_up`) and
+  `custom_components/timerify/controller.py:995-1014` (`_log_gave_up`) and
   `custom_components/timerify/core.py:251-276` (`_Allowance`).
 - **`type Actual` has no runtime arguments.** `typing.get_args(Actual)` is `()` because the alias
   is a PEP 695 `type`; use `Actual.__value__` if the values are ever enumerated (for example
@@ -61,8 +61,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   and leaves the folding to `_handle_started`. A guard on the interval switch alone would
   be a special case, so it waits for the policy.
   `custom_components/timerify/controller.py:274-282` (`async_start`), `:452-467` and
-  `:553-570` (`async_set_interval_enabled` and the `_async_set_interval_enabled_locked` it
-  calls), `:583-592` (`_command`) and `:777-809` (`_handle_started`), and
+  `:558-575` (`async_set_interval_enabled` and the `_async_set_interval_enabled_locked` it
+  calls), `:588-597` (`_command`) and `:782-814` (`_handle_started`), and
   `custom_components/timerify/core.py:154-165` (`next_wakeup`).
 - **The R10 lines are not written by the folds of start-up and of a report of the target.**
   `_fold_due` (the alarm, the refresh of the windows and the switching off of an interval)
@@ -71,8 +71,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   through `_execute_fold` alone and say nothing, so a window or command that came due
   during downtime, found at start-up with the target unavailable, is applied when it is
   back without a line in the log. The phase-2 lines have the same gap. It changes no
-  behaviour. `custom_components/timerify/controller.py:846-854` (`_fold_due`), `:873-918`
-  (`_log_due_while_unavailable`), `:777-809` (`_handle_started`) and `:828-838`
+  behaviour. `custom_components/timerify/controller.py:851-859` (`_fold_due`), `:878-923`
+  (`_log_due_while_unavailable`), `:782-814` (`_handle_started`) and `:833-843`
   (`_handle_state_change`).
 - **A time zone changed in YAML is not noticed.** Changing the zone in the settings fires
   `EVENT_CORE_CONFIG_UPDATE`, which the controller listens to, but `configuration.yaml`
@@ -80,8 +80,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (`async_process_ha_core_config`) without that event. The windows keep the old zone until
   a window ends, the Workday sensor reports or the timer reloads. It needs a signal that
   Home Assistant does not fire for this path; look for one before working around it.
-  `custom_components/timerify/controller.py:771-775` (`_handle_core_config_update`) and
-  `:788-792` (where it is subscribed, in `_handle_started`).
+  `custom_components/timerify/controller.py:776-780` (`_handle_core_config_update`) and
+  `:794-798` (where it is subscribed, in `_handle_started`).
 - **An old generated title stays in the old language.** An edit renames an interval only if
   its title is still the one generated from its old data in the current language; after the
   house language changes the old title no longer matches and is kept as if the user had
@@ -107,14 +107,14 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   where the calls are made (`_execute`), which covers the owed settings of every origin;
   it is not a phase 3 regression, so it waits.
   `custom_components/timerify/controller.py:348` (`async_add_command`, the check) and
-  `:925-967` (`_execute`, where the calls are made).
+  `:930-972` (`_execute`, where the calls are made).
 - **The settings of an interval are checked when its window is worked out, not when the
   call is made.** A target that reports no capabilities for a moment (some cloud climates
   while they connect) gets a window built without its settings, and keeps it until the
   next refresh, which for a weekday interval is the window's end; the warning says so
   once. Checking in `_execute`, where the calls are made, would close it, and it is the
   same filter as for the pending commands above, so the two go together.
-  `custom_components/timerify/controller.py:645-676` (`_with_settings_the_target_takes`).
+  `custom_components/timerify/controller.py:650-681` (`_with_settings_the_target_takes`).
 - **The reason in the Russian `stored_timer_invalid` message is English.** `{reason}` is
   the text of the `ValueError` of the store, which is for the bug report of a defect
   (`RULINGS.md`), so it is not translated. Translating it would mean a key for each of
@@ -133,7 +133,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.
-
 - **Voice commands at a clock time.** "Turn on the boiler at 7:30" has no sentence: the
   built-in agent's sentences take a delay ("in 15 minutes") only, and the spec's example is
   a delay. An LLM can plan a command at a clock time (the tool's `at`, read by the same
@@ -167,16 +166,19 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `entity_category` at line 47).
 - **An unavailable target with no timer is answered "off".** "How long is left on the
   boiler" says "Boiler is off and has no timer" for a target that is unavailable and is not
-  wanted on, since the answer reports the timer's wish (`RULINGS.md`, "Answers state what
-  the timer wants"), and a wish is on or off. A third wording for an unavailable target
-  (and the same in Russian) would say what is known. `custom_components/timerify/voice/base.py:246-278`
-  (`timer_slots`, its state `off`) and `custom_components/timerify/sentences/en/src/timerify.yaml:184-192`
-  (the answer, and the Russian twin).
+  wanted on, since the answer reports the timer's wish (`RULINGS.md`, "An answer says what
+  the timer is set to do, not what the device shows"), and a wish is on or off. A third
+  wording for an unavailable target (and the same in Russian) would say what is known.
+  `custom_components/timerify/voice/base.py:246-278` (`timer_slots`, its state `off`) and
+  `custom_components/timerify/sentences/en/src/timerify.yaml:187-195` (the answer, and the
+  Russian twin).
 - **Wider English near-misses that name a device with a timer can reach core's turn off.**
   Timerify's sentences take the phrasings it knows, and a phrasing that it does not have,
   with "turn on" or "turn off" and the name of a timer's device, can be matched by core's
   gazetteer, which looks for any device name in the text ("turn off scheduling for the
-  boiler" turns the boiler off and says nothing of a schedule). The near-misses found in
+  boiler" turns the boiler off and says nothing of a schedule; so does "turn off the boiler
+  in 2 days", since core has no delayed shape in days and a delay of days is a natural
+  thing to say). The near-misses found in
   review ("the schedule of the boiler off", "deactivate the schedule") were added as
   sentences, but the set is open ended. Home Assistant has no hook to keep a custom
   sentence out of that fallback, so the fix is the cost of listing more phrasings, or a
@@ -212,12 +214,15 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   modes, with the set in the name's context; it multiplies the sentences and is its own
   step. `custom_components/timerify/voice/sentences.py:205-217` (`voice_setting_values`) and
   `custom_components/timerify/sentences/en/src/timerify.yaml:26-59` (the blocks of
-  `TimerifyRun`, scoped by domain, with the list of HVAC words at `:163`).
+  `TimerifyRun`, scoped by domain, with the list of HVAC words at `:166`).
 - **"For 1 hour 30" on a device that has no temperature is not understood.** A bare number
   after a duration is a temperature only for a thermostat or a water heater, since it is
-  the spec's own "cooling, 24" with no unit; said of a switch it matches nothing, and the
-  built-in agent answers that it did not understand, which is true. Reading "1 hour 30" as
-  ninety minutes for the others would be a sentence of its own in both languages.
+  the spec's own "cooling, 24" with no unit; said of a switch it matches nothing of the
+  duration, and the answer is "Sorry, I am not aware of any device called boiler": a
+  sentence of Timerify's wins the stage for unknown names, so a device that exists is
+  said to be unknown (the same wording as for a fan with no timer). Reading "1 hour 30" as
+  ninety minutes for the others would be a sentence of its own in both languages, and
+  would remove the wording with the case.
   `custom_components/timerify/sentences/en/src/timerify.yaml:26-59` (the data blocks scoped
   by domain) and `:132` (`timerify_temperature_part`).
 - **A directory at the path of the managed file stops the check of who owns it.**
@@ -234,7 +239,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   or `timerify.run` call in a task, as the newer slow-call test in `tests/test_entities.py:287` does.
   Instances: `tests/test_entities.py:250`, `:252`, `:274`, `:276`, `:459`, `:571`,
   `tests/test_restart.py:554`, `:735`, `:760` and `tests/test_settings.py:316`.
-
 - **The voice tests need Cyrillic that they may not hold.** The hook forbids Cyrillic in
   tests, so Russian sentences are proved by sampling the shipped files and the plural
   forms by their classes, which shows that every template parses, reaches its handler and
@@ -254,16 +258,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `load_yaml_dict` while the product reads them with `voice.sentences.load_sources`; both
   read the same files today, but a test that reads as the product does cannot drift from
   it. `tests/voice/test_sentence_generator.py:11` (the import) and `:77`.
-- **The suite runs serially.** The full run takes about a minute and a half, and
-  `tests/voice` alone about a minute. `pytest-xdist` 3.8.0 is already in `uv.lock`, brought
-  by `pytest-homeassistant-custom-component`, and `uv run pytest -n 6` passed all of the
-  suite three times in a row in about 22 seconds on an 18-core machine. It is not on by
-  default: it is a transitive dependency, not one of the dev group; the per-test
-  timeout and the load of a small machine have not been tried with more workers than
-  cores; and "the full local run on the final tree" stays the gate, whichever way it
-  runs. To take it, name `pytest-xdist` in the dev group, decide the worker count (a
-  fixed one, not `auto`), and say so in `CLAUDE.md` and the README. `pyproject.toml:28`
-  (`timeout`) and `pyproject.toml:10-19` (the dev group).
 
 ## Accepted
 

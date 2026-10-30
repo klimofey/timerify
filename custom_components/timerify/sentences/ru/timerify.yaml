@@ -90,11 +90,11 @@ lists:
   timerify_hours:
     range:
       from: 1
-      to: 24
+      to: 168
   timerify_minutes:
     range:
       from: 1
-      to: 1440
+      to: 10080
   timerify_temperature:
     range:
       from: 1

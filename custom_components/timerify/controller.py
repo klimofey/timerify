@@ -519,7 +519,8 @@ class TargetController:
     ) -> ServiceValidationError:
         """The refusal of a title that no interval has. It lists the titles that can be
         asked for, so that the one who asked can ask again: those that are not nothing
-        but punctuation, each once, the first `MAX_LISTED_INTERVALS` of them and the
+        but punctuation, each once (titles that `title_key` makes one are one, and the
+        first of them is written), the first `MAX_LISTED_INTERVALS` of them and the
         number of the others.
 
         The titles go into the message bare, apart by semicolons (a title may have a
@@ -527,7 +528,11 @@ class TargetController:
         for the translation of each language to choose.
         """
         target = target_name(self._hass, self.target_entity_id)
-        askable = [title for title in dict.fromkeys(titles) if title_key(title)]
+        first_of_each: dict[str, str] = {}
+        for title in titles:
+            if key := title_key(title):
+                first_of_each.setdefault(key, title)
+        askable = list(first_of_each.values())
         if not askable:
             return ServiceValidationError(
                 translation_domain=DOMAIN,

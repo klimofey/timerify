@@ -153,6 +153,54 @@ async def test_run_longer_than_a_day_is_refused(
     assert state_of(hass, NUMBER) == "0"
 
 
+async def test_run_for_thirty_hours_is_refused_with_the_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """More than a day is understood, not answered as a sentence that makes no sense:
+    the user hears what a timer takes."""
+    response = await converse(hass, "turn on the boiler for 30 hours")
+
+    assert reached(response) == RUN
+    assert refusal_of(response) == "A timer runs for 1 min to 24 h."
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "0"
+
+
+OVER_A_DAY = [
+    pytest.param({"timerify_hours": 30}, id="30-hours"),
+    pytest.param({"timerify_minutes": 1500}, id="1500-minutes"),
+    pytest.param({"timerify_hours": 168}, id="a-week-of-hours"),
+    pytest.param({"timerify_minutes": 10080}, id="a-week-of-minutes"),
+]
+"""A count that is more than a day and as much as the sentences understand."""
+
+
+@pytest.mark.parametrize("numbers", OVER_A_DAY)
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_a_run_for_more_than_a_day_is_refused_in_the_users_language(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+    numbers: dict[str, int],
+) -> None:
+    """Every way of saying it, as the shipped sentences give them, reaches the timer,
+    which refuses with its limit in the language of the request: nothing is turned
+    on."""
+    texts = samples(language, RUN, numbers=numbers, absent=SETTING_LISTS)
+    assert texts
+
+    for text in texts:
+        response = await converse(hass, text, language=language)
+
+        assert reached(response) == RUN, text
+        assert refusal_of(response) == translated(
+            language, "exceptions", "duration_out_of_range", "message"
+        ).format(max_hours="24"), text
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "0"
+
+
 async def test_a_run_replaces_the_countdown_that_was_there(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -676,6 +724,71 @@ async def test_add_time_past_a_day_runs_a_day(
 
     assert state_of(hass, NUMBER) == str(MAX_MINUTES)
     assert speech(response) == "Boiler runs for 24 hours, until 09:00 tomorrow."
+
+
+async def test_add_thirty_hours_runs_a_day(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """Asking for more than a day is not refused: a timer gets the most there is, and
+    the answer says when that ends."""
+    await set_number(hass, NUMBER, 600)
+
+    response = await converse(hass, "add 30 hours to the boiler")
+
+    assert reached(response) == ADD_TIME
+    assert state_of(hass, NUMBER) == str(MAX_MINUTES)
+    assert speech(response) == "Boiler runs for 24 hours, until 09:00 tomorrow."
+
+
+@pytest.mark.parametrize("numbers", OVER_A_DAY)
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_adding_more_than_a_day_runs_a_day_in_the_users_language(
+    hass: HomeAssistant,
+    boiler: MockConfigEntry,
+    language: str,
+    numbers: dict[str, int],
+) -> None:
+    """Every way of saying it reaches the timer and gets the answer of a run for a day
+    (the clamp of the first phase), said in the language of the request."""
+    a_day = samples(language, RUN, numbers={"timerify_hours": 24}, absent=SETTING_LISTS)
+    reference = speech(await converse(hass, a_day[0], language=language))
+    texts = samples(language, ADD_TIME, numbers=numbers, absent=SETTING_LISTS)
+    assert texts
+
+    for text in texts:
+        await set_number(hass, NUMBER, 600)
+
+        response = await converse(hass, text, language=language)
+
+        assert reached(response) == ADD_TIME, text
+        assert response.response_type is intent.IntentResponseType.ACTION_DONE, text
+        assert state_of(hass, NUMBER) == str(MAX_MINUTES), text
+        assert speech(response) == reference, text
+
+
+@pytest.mark.parametrize(
+    "numbers",
+    [{"timerify_hours": 169}, {"timerify_minutes": 10081}],
+    ids=["169-hours", "10081-minutes"],
+)
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_a_count_beyond_a_week_is_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+    numbers: dict[str, int],
+) -> None:
+    """The sentences are generous but finite: past a week they match nothing of
+    Timerify's, and nothing is switched."""
+    texts = samples(language, RUN, numbers=numbers, absent=SETTING_LISTS)
+    assert texts
+
+    for text in texts:
+        response = await converse(hass, text, language=language)
+
+        assert reached(response) not in (RUN, ADD_TIME), text
+    assert fake_target.calls == []
 
 
 # --- Stopping ----------------------------------------------------------------------

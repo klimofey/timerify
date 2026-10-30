@@ -507,15 +507,18 @@ sentences are the files under `custom_components/timerify/sentences/<language>/`
 
 The Russian column is transliterated because this README is English only; the real
 sentences are in `custom_components/timerify/sentences/ru/`. A Russian name is not
-declined, so the sentences put it after a noun ("taymera Boiler"), where the nominative
-is natural, and the answers start with the name and a colon.
+declined, so where a sentence would decline it, the sentences put it after a noun
+("taymera Boiler") and the nominative is natural; and the answers start with the name and
+a colon.
 
 What each does:
 
 - **How long is left** says the time left and when the target turns off, or that it is
   off, or on without a timer.
 - **Run for a time** is the same as setting "Run for": the countdown is that long, from
-  one minute to 24 hours, and replaces the one that runs. A thermostat, a water heater,
+  one minute to 24 hours, and replaces the one that runs. Said longer, as far as a week
+  ("for 30 hours"), the sentence is understood and refused with the limit, and nothing is
+  turned on; a count beyond a week is not understood at all. A thermostat, a water heater,
   a light, a fan or a humidifier takes its settings in the same sentence, in any order:
   the HVAC mode ("cooling", "heating", "auto", ...), a temperature ("24 degrees", "at
   22.5"), a percentage ("at 40 percent"), and a mode of the device ("eco", "high").
@@ -523,8 +526,8 @@ What each does:
   checked against the device as `timerify.run` checks it: what it cannot do is refused,
   by voice and by tool alike.
 - **Add time** extends a running countdown, or turns the target on for that long. A
-  countdown never ends more than a day ahead: adding 30 hours gives a day, and the
-  answer says when it ends.
+  countdown never ends more than a day ahead: adding 30 hours (any count up to a week)
+  gives a day, and the answer says when it ends.
 - **Stop** sets the countdown to zero and turns the target off.
 - **Turn on or off by name** is the bare "turn on the boiler" and "turn off the boiler".
   For a device that has a timer these are Timerify's commands, not Home Assistant's: on
@@ -574,8 +577,9 @@ A few things work the way Home Assistant does, not Timerify:
 - A sentence of Timerify's about a name that is not a device with a timer ("what is
   planned for the fan") is answered with Home Assistant's "not aware of any device".
 - A wording that Timerify does not have and that mentions a device with a timer, with
-  "turn on" or "turn off" in it ("turn off scheduling for the boiler"), can still be taken
-  for a plain turn off of the device by Home Assistant. Use the wordings above.
+  "turn on" or "turn off" in it ("turn off scheduling for the boiler", "turn off the boiler
+  in 2 days"), can still be taken for a plain turn off of the device by Home Assistant,
+  which turns it off at once. Use the wordings above.
 - If two entities have the same name and one of them has a timer, "turn off the boiler"
   and the other sentences above mean the one with the timer. Likewise, "turn off the
   boiler schedule" means the schedule of the timer called Boiler even when another exposed
@@ -684,7 +688,7 @@ Assist can control only what is exposed to it. Home Assistant exposes new entiti
 kinds by default (among them switches, lights, fans, climate entities, humidifiers and
 water heaters) and not those of others (an input boolean, a group). Open **Settings >
 Voice assistants > Expose** and expose the targets of your timers that are not. A device that
-is not exposed is refused as a device Assist does not know, and an LLM agent is told only
+is not exposed is refused ("Sorry, Boiler is not exposed"), and an LLM agent is told only
 about the exposed ones.
 
 Timerify's own entities, the `number`, the sensors and the interval switches, are not
@@ -806,6 +810,9 @@ uv run ruff check
 uv run ruff format --check
 uv run mypy
 ```
+
+The tests run in parallel, one worker per core (`pytest-xdist`, set in `pyproject.toml`).
+`uv run pytest -n 0` runs them in one process, which a debugger or a plain stack trace needs.
 
 ### hassfest
 

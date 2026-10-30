@@ -920,6 +920,36 @@ async def test_the_titles_a_refusal_lists_are_bare_and_each_listed_once(
     }
 
 
+async def test_titles_that_sound_the_same_take_one_place_in_a_refusal(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Titles that differ only in case or punctuation are one title to whoever asks, so
+    they are listed once, as the first of them is written, and take one of the places
+    that the list has: the cap counts what can be asked for, not what is stored."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    titles = ["Morning", "morning!", *(f"Title {number}" for number in range(1, 6))]
+    for number, title in enumerate(titles, start=1):
+        subentry_id = await add_interval(
+            hass, entry, start=f"{number:02d}:00", end=f"{number:02d}:30"
+        )
+        await retitle_interval(hass, entry, subentry_id, title)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == "unknown_interval_and_more"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "Morning; Title 1; Title 2; Title 3; Title 4",
+        "more": "1",
+    }
+
+
 @pytest.mark.parametrize(
     ("intervals", "key", "listed", "more"),
     [

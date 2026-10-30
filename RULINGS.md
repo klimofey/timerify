@@ -710,12 +710,24 @@ those of the spec.
   block's domain list contains `switch`, which is core's generic on and off in both
   languages: every target can be switched and delayed, whatever its domain. Cost if wrong:
   on a newer Home Assistant with new shapes, those reach core until a Timerify release.
-- **The takeover is proved by a structural test, and behaviour is sampled boundedly.** The
-  proof is that every core shape of every command pair is covered by the generated file; one
-  conversation per pair (optional parts skipped) shows it reaching Timerify, and a device
-  with no timer still reaches core's delayed command. Trying every spoken variant would be
-  180,544 conversations in English alone. Cost if wrong: a substitution bug that shows only
-  with optional words present is caught only by the samples of the other intents.
+- **The takeover is proved by a structural test, and behaviour is sampled boundedly, so that
+  the voice suite runs in well under a minute.** The proof is that every core shape of every
+  command pair is covered by the generated file; one conversation per pair (optional parts
+  skipped) shows it reaching Timerify, and a device with no timer still reaches core's
+  delayed command. Trying every spoken variant would be 180,544 conversations in English
+  alone. Cost if wrong: a substitution bug that shows only with optional words present is
+  caught only by the samples of the other intents.
+  The bound is held by running the suite in parallel, not by the sampling alone. Measured
+  at the end of the phase, on an 18-core machine: `tests/voice` (597 tests) takes 17 s in
+  parallel and 86 s in one process (`-n 0`), and the whole suite (1687 tests) takes 18 to
+  20 s in parallel and 112 s in one process. Each scenario is a real Home Assistant with
+  the real built-in agent, so a serial run is over the bound that the sampling alone was
+  meant to keep. `pytest-xdist` is therefore in the dev group at the locked version, and
+  `-n auto` is in the pytest options: `uv run pytest` runs in parallel, three full runs in
+  a row passed, and a run of one file stays fast (a file of 48 tests takes about 5 s
+  against 4 s in one process). The per-test timeout of 60 seconds stays. Cost if wrong: a
+  test that shares state with another fails only in parallel; none has in the runs made,
+  and `-n 0` runs the suite as before to tell.
 - **The takeover sentences name the device in a slot of their own, `timerify_target`, which
   the handlers map back to `name`.** With `name` in the sentence, the built-in agent
   prefers the custom sentence in its stage for names it does not know and then gives up the
@@ -735,14 +747,17 @@ those of the spec.
   that exists but has no timer), and no successful answer of core is hidden, which was
   checked phrasing by phrasing. Cost if wrong: a better error of core is lost.
 - **A device that is not a Timerify target but shares its name with one is not reachable
-  through Timerify's phrases.** The list of names is static and cannot tell the two apart,
-  so "turn off X" always means the target with the timer. The same holds for "turn on/off
-  the X schedule" when an exposed entity is called "X schedule": it means the schedule of
-  the timer called X (an explicit exception, decided by the owner, to §6.4's "every other
-  entity keeps core's behaviour"). That entity is reached by other phrasings and the
-  interface; the case of a timer called Boiler next to one called "Boiler schedule" is the
-  same case. Cost if wrong: a user who named an entity "<timer> schedule" must say it
-  another way.
+  through Timerify's phrases, a departure from §6.4.** §6.4 says "Sentences must never match
+  a non-Timerify entity". A sentence matches a name, though, and the list of names is
+  static and cannot tell two entities that carry it apart, so "turn off X" always means the
+  target with the timer, and core's bare and delayed on and off no longer reach the other
+  entity by that name. The same holds for "turn on/off the X schedule" when an exposed
+  entity is called "X schedule": it means the schedule of the timer called X (a second,
+  explicit exception, decided by the owner, to §6.4's "To keep every other entity on core's
+  behaviour"). That entity is reached by other phrasings and the interface; the case of a
+  timer called Boiler next to one called "Boiler schedule" is the same case. Cost if wrong:
+  a user who has an entity with a timer's name, or one called "<timer> schedule", must say
+  it another way.
 - **The English phrasings of the schedule take "of" and "for", and on or off before or
   after the noun, because a phrasing that is left out is not left alone.** The built-in
   agent takes "turn off the schedule for the boiler" for a turn off of the boiler, so the
@@ -763,7 +778,12 @@ those of the spec.
   silently caps a duration, so "for 30 hours" would run a day without a word: it is refused
   with the limit instead. Adding keeps the clamp of the first phase (the end is never more
   than a day ahead) whatever is asked, and says when the countdown really ends, so "add 30
-  hours" gives a day. Cost if wrong: none.
+  hours" gives a day. For the user to hear either, a longer duration has to reach the
+  handler, so the sentences understand hours up to 168 and minutes up to 10080, a week in
+  each, the same in both languages and equal to the longest delay a command takes; a count
+  beyond a week is not understood, and a test pins that bound too. The tools take any count
+  and the controller decides. Cost if wrong: "for 200 hours" is answered as not understood,
+  not with the limit.
 - **"Turn off X in N" decides whether the target is running under the controller's lock,
   from the desired state: a countdown above zero, else the pending wish, else the target
   being on.** A running target gets its countdown set to end then, whatever it was (shorter
@@ -794,17 +814,23 @@ those of the spec.
   turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard to
   say must be said as it is written.
 - **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
-  bare number after a duration is taken as a temperature. Cost if wrong: see the next entry.
+  bare number after a duration is taken as a temperature, and only for a target that takes
+  one (the next entry scopes it). Cost if wrong: a number that was meant as something else
+  after a duration ("for 1 hour 30") is a temperature, which a thermostat then checks and a
+  device without one does not understand.
 - **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
   on the domain of the name), in blocks of their own.** Before that, any thermostat with an
   "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which
   refused it. The managed route always writes the domain of a name; a name listed by hand
   with no domain gets the sentences that fit every device and nothing more, so the README
   shows `context: domain` on a hand-listed thermostat or water heater. Said of a device that
-  takes no temperature, "turn on the boiler for 1 hour 30" is not understood at all, which
-  is true: before the scoping it was a refusal about the setting "Temperature" that
-  misled. Cost if wrong: a user who lists a thermostat by hand without its domain gets no
-  HVAC words.
+  takes no temperature, "turn on the boiler for 1 hour 30" is not understood, and the
+  answer is the built-in agent's "not aware of any device called boiler", which says that a
+  device that exists is unknown: the mechanism of the entry above on names that are not a
+  device with a timer, where a sentence of Timerify's wins the stage for unknown names.
+  Before the scoping it was a refusal about the setting "Temperature" that also misled.
+  Cost if wrong: that wording; and a user who lists a thermostat by hand without its
+  domain gets no HVAC words.
 - **The list of HVAC words is the union of the modes of every thermostat.** Two air
   conditioners with different modes, one without "auto": a bare "auto" said of the one that
   lacks it is understood and refused truthfully, naming the modes that AC has ("fan auto"

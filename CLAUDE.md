@@ -13,7 +13,8 @@ enable `switch` per interval, windows folded into the timer; voice: Assist sente
 built-in agent in English and Russian, written by a "Voice settings" entry or copied by hand, and
 `timerify__` tools for LLM agents) are built; the later phases follow section 7 of the spec. Specs
 live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes in
-`docs/research/`, decisions made where the spec was silent in `RULINGS.md`, and open items in `docs/followups.md`.
+`docs/research/`, decisions made where the spec was silent in `RULINGS.md`, and open items in
+`docs/followups.md`.
 
 ## Repository rules (non-negotiable)
 
@@ -58,7 +59,8 @@ from the user's point of view (the scenario, not just the function).
 
 ```sh
 uv sync                     # install the dev environment (Python >= 3.14.2)
-uv run pytest               # tests
+uv run pytest               # tests, in parallel (pytest-xdist: `-n auto` is in the options)
+uv run pytest -n 0          # the same tests in one process, for a debugger or a stack trace
 uv run ruff check           # lint
 uv run ruff format --check  # formatting
 uv run mypy                 # strict type check of custom_components and scripts

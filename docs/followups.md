@@ -236,16 +236,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   refusal that names the limit. `scripts/generate_core_commands.py:107` (`_DELAY_SLOT`)
   and `:282`, which name core's lists in `sentences/<language>/core_commands.yaml:4-5`.
 
-- **The warning about settings the target cannot take reads the title of an interval that
-  may be deleted.** While the reload that follows the deletion of an interval waits for its
-  turn, the timer that is still loaded keeps the interval, and `_with_settings_the_target_takes`
-  looks its title up in the entry, which no longer has it: a `KeyError` in the working out
-  of the windows, the same class as the one the schedule commands had
-  (`async_set_schedule_enabled`, fixed). Found by reading; not reproduced, since a test
-  cannot wait for the windows of a timer whose reload it holds back. The fix is to read
-  the intervals that the entry has in the one place that works the windows out.
-  `custom_components/timerify/controller.py:688`.
-
 ## Tests
 
 - **The slow-call tests start the controller directly.** They use `asyncio.ensure_future` on
@@ -269,3 +259,10 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `add_command` (`:127-128`) and of its delay (1 to 10080, `:114-115`) are written there as well
   as in `const.MAX_MINUTES` and `const.MAX_DELAY_MINUTES`; the test
   `test_services_are_described_for_the_ui` (`tests/test_services.py:401`) fails when they drift.
+- **A deleted interval is still worked out until the timer reloads.** Deleting an interval
+  reloads the timer at once, which lets it go; only a reload that waits behind another setup
+  leaves the timer that is loaded with it, and for that time a window of it can be worked
+  out and opened. The commands that name an interval, and the warning about its settings,
+  already treat it as gone (`async_set_schedule_enabled`, `_with_settings_the_target_takes`),
+  and the reload drops its window (`TimerCore.set_windows`, `configured`). Accepted: the
+  window is short, and the fix would be a second judgement of which intervals exist.

@@ -889,8 +889,12 @@ those of the spec.
 - **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
   bare number after a duration is taken as a temperature, and only for a target that takes
   one (the next entry scopes it). Cost if wrong: a number that was meant as something else
-  after a duration ("for 1 hour 30") is a temperature, which a thermostat then checks and a
-  device without one does not understand.
+  after a duration ("for 1 hour 30", "for 2 hours 120") is a temperature, which a
+  thermostat or a water heater then checks and refuses when it is out of its range, and a
+  device without one does not understand. The temperature is understood up to 250, so
+  "turn on the AC for 2 hours 120" is answered "120 is not a valid Temperature: it must be
+  between 16 and 30." and nothing is switched, while a water heater that counts in
+  Fahrenheit takes the same 120 as its temperature (probed on both).
 - **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
   on the domain of the name), in blocks of their own.** Before that, any thermostat with an
   "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which

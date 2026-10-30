@@ -682,10 +682,13 @@ class TargetController:
         if left_out != self._left_out.get(interval.id, frozenset()):
             if left_out:
                 self._left_out[interval.id] = left_out
+                # An interval deleted since the timer was loaded is named by its id:
+                # its title went with it, and the reload that follows lets it go.
+                subentry = self._entry.subentries.get(interval.id)
                 _LOGGER.warning(
                     "The schedule interval %s of %s asks for settings that the target"
                     " cannot take now (%s); it is turned on without them",
-                    self._entry.subentries[interval.id].title,
+                    interval.id if subentry is None else subentry.title,
                     self.target_entity_id,
                     ", ".join(sorted(left_out)),
                 )

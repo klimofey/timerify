@@ -52,6 +52,7 @@ from .helpers import (
     local,
     open_sunday,
     payload,
+    reload_held_back,
     restart,
     restart_after,
     saved,
@@ -936,6 +937,39 @@ async def test_setting_the_ac_no_longer_takes_is_left_out_and_said_once(
         "The schedule interval 06:30–07:15, Mon–Sun of climate.ac asks for settings"
         " that the target cannot take now (hvac_mode); it is turned on without them"
     ]
+
+
+async def test_a_switch_flipped_before_a_deleted_interval_unloads_is_not_broken_by_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The cooling interval is deleted and the reload of the timer waits for its turn.
+    Meanwhile the AC's integration took the cooling mode away, and the evening
+    interval is switched on. The windows are worked out for the timer as it is loaded,
+    the deleted interval among them, and the warning about its setting must not fail
+    the switch for an interval that the entry no longer has."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    cooling = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    evening = await add_interval(hass, entry, start="18:00", end="19:00")
+    await entry.runtime_data.async_set_interval_enabled(evening, False)
+    fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
+    fake_climate.write("off")
+
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, cooling)
+        await entry.runtime_data.async_set_interval_enabled(evening, True)
+    await hass.async_block_till_done()
+
+    assert state_of(hass, "switch.ac_schedule_18_00_19_00_mon_sun") == "on"
+    (warning,) = timerify_warnings(caplog)
+    assert cooling in warning
+    assert "cannot take now (hvac_mode)" in warning
 
 
 async def test_setting_that_comes_back_and_goes_again_is_said_again(

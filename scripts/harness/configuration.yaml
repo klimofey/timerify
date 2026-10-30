@@ -1,5 +1,7 @@
-# The Home Assistant configuration of the smoke test (scripts/smoke/run.py).
-# compose.yaml mounts this file read-only over the throwaway ./config/configuration.yaml.
+# The Home Assistant configuration of the smoke test (scripts/smoke/run.py) and of the
+# end-to-end tests of the dashboard card (scripts/e2e/hass.py).
+# compose.yaml mounts this file read-only over the throwaway configuration.yaml of the
+# instance.
 default_config:
 
 # Home Assistant's demo integration. The smoke test uses its `switch.decorative_lights`,

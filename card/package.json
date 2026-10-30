@@ -12,7 +12,9 @@
     "build": "node build.mjs",
     "build:check": "node build.mjs --check",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "playwright test --project=e2e",
+    "screenshots": "playwright test --project=screenshots"
   },
   "dependencies": {
     "lit": "3.3.3"

@@ -847,7 +847,7 @@ The image exists for `linux/amd64` only; on Apple silicon add `--platform linux/
 
 Needs Docker with Compose. It starts a throwaway Home Assistant 2026.10.4 with this
 checkout mounted, onboards it through its HTTP API, and adds timers for the entities that
-`scripts/smoke/configuration.yaml` declares: a switch that sits on no device, the switch of
+`scripts/harness/configuration.yaml` declares: a switch that sits on no device, the switch of
 Home Assistant's demo integration (which sits on a device), and a generic thermostat. It
 checks that a 2 minute countdown turns the first switch on and off, that a schedule
 interval for today's weekday, added through the interval form to begin in a minute or two,
@@ -859,12 +859,12 @@ turns the demo switch on at its time and off a minute later, and that the thermo
 the mode and the temperature of a run. It takes about fifteen minutes.
 
 ```sh
-uv run python scripts/smoke/run.py
+uv run python -m scripts.smoke.run
 ```
 
 Add `--keep` to leave Home Assistant running afterwards, with a countdown on, at
 `http://localhost:18123`; the script prints the address of the device page and the login.
-Stop it with `docker compose --file scripts/smoke/compose.yaml down`.
+Stop it with `docker compose --project-name timerify-smoke down`.
 
 ## License
 

@@ -160,10 +160,11 @@ with settings if you like) or turn it off. A timer can hold up to 20 of them, ea
   the countdown ending, between now and then leaves the command in place. Only
   `timerify.cancel_command` removes it.
 - **"Turn on for N minutes" at its time is the same as setting "Run for" to N at that
-  time.** Without minutes, a command to turn on runs for the default duration in strict mode
-  and without a countdown in loose mode. A command to turn off turns the target off and
-  stops the countdown. A command to turn on that comes due at the very moment a countdown
-  ends keeps the target on instead of switching it off and on.
+  time.** Without minutes, a command to turn on runs a target that is off for the default
+  duration in strict mode and without a countdown in loose mode; a target that is running
+  keeps its countdown, and the command still sets its settings. A command to turn off
+  turns the target off and stops the countdown. A command to turn on that comes due at the
+  very moment a countdown ends keeps the target on instead of switching it off and on.
 
 Restarts and outages:
 
@@ -301,7 +302,10 @@ It is on to begin with.
 - Switch it off and the interval is skipped. If its window is open and the schedule is
   running the timer, the timer stops at once, or passes to another open window that wants
   the target running (rule 2 below).
-- Switch it on while the window is open and the target runs for the rest of the window.
+- Switch it on while the window is open and the target runs for the rest of the window,
+  unless the timer already ends later (rule 1 below). An interval that is on already is
+  left as it is, so a target that was turned off during its window stays off until the
+  next one (rule 4 below).
 - The state is stored with the timer and survives restarts. Flipping the switch does not
   reload the timer.
 - The name follows edits of the interval after the reload; the entity id keeps the title the
@@ -328,7 +332,9 @@ and you always win. Five rules, in plain words:
 3. **A change of yours ends that.** "Run for", `timerify.add_time`, `timerify.run`,
    stopping the timer and a pending command are yours: after one, editing an interval no
    longer touches the timer, until the next window sets it. A pending command that falls
-   due at the very moment a window opens is carried out after it and wins.
+   due at the very moment a window opens is carried out after it and wins. Turning on,
+   without a duration, a target that already runs changes nothing, so it is not a change
+   of yours.
 4. **A manual off holds until the next window.** If the target is off during a window,
    whoever turned it off (you at the wall, its own app, an automation, "Run for" 0, the end
    of a countdown you started), the window does not turn it back on; the next window does.
@@ -399,9 +405,10 @@ data:
 ```
 
 `timerify.run` turns the target on. With `minutes` (1 to 1440) the countdown is that long;
-without it the target runs for the default duration in strict mode and without a countdown
-in loose mode. Settings go along; a setting the target does not support is refused before
-anything happens.
+without it a target that is off runs for the default duration in strict mode and without a
+countdown in loose mode, and one that is running already keeps its countdown. Settings go
+along, also to a target that keeps its countdown; a setting the target does not support is
+refused before anything happens.
 
 ```yaml
 action: timerify.run
@@ -532,11 +539,13 @@ What each does:
 - **Stop** sets the countdown to zero and turns the target off.
 - **Turn on or off by name** is the bare "turn on the boiler" and "turn off the boiler".
   For a device that has a timer these are Timerify's commands, not Home Assistant's: on
-  is the turn-on of the timer's [mode](#modes) (strict mode: for the default duration;
-  loose mode: on, without a countdown), and off stops the countdown. A target that is
-  unavailable keeps the wish and is switched when it is back. Phrasings with an area, a
-  floor or a kind of device ("turn off the lights in the kitchen") stay with Home
-  Assistant, and so does every device without a timer.
+  turns a device that is off on as the timer's [mode](#modes) says (strict mode: for the
+  default duration; loose mode: on, without a countdown), and leaves a device that is
+  running as it is: its countdown keeps its end, whoever set it, and the answer says how
+  long is left. Off stops the countdown. A target that is unavailable keeps the wish and
+  is switched when it is back. Phrasings with an area, a floor or a kind of device ("turn
+  off the lights in the kitchen") stay with Home Assistant, and so does every device
+  without a timer.
 - **Turn on later** and **turn off later** are Home Assistant's own delayed commands,
   which Timerify takes over for the devices that have a timer, in every shape Home
   Assistant has for them in both languages (the delay before or after the command, in
@@ -556,13 +565,19 @@ What each does:
   takes the one after. A cancelled command never runs. An id cannot be said, so cancelling
   one particular command is for an LLM agent or the `timerify.cancel_command` service.
 - **Switch the schedule** switches every interval of the timer's schedule on or off, as
-  its [switches](#the-switch-of-an-interval) do, and has the same effects: switching off
-  while a window runs stops the timer, switching on inside a window runs the target for
-  the rest of it. To switch one interval, say its title ("the Morning schedule of the
-  boiler"): give the intervals titles of your own, because the title an interval is
-  given when it is made ("06:30-07:15, Sun-Thu") cannot be said to the built-in agent. A
-  title that two intervals share switches both. A title that another timer has and this
-  one does not is refused, and the answer names the first five titles this one has.
+  its [switches](#the-switch-of-an-interval) do, and has the same effects, on the same
+  conditions (rules 1 to 4 of [how the schedule and your own changes
+  meet](#how-the-schedule-and-your-own-changes-meet)). Switching off while a window runs
+  stops the timer only if the schedule is running it: its end came from that interval and
+  nobody has changed the timer since (otherwise it is yours and stays), or another open
+  window takes it over. Switching on inside a window runs the target for the rest of it,
+  unless the timer already ends later, and an interval that is on already is left as it
+  is, so a target that was turned off during its window stays off until the next one. To
+  switch one interval, say its title ("the Morning schedule of the boiler"): give the
+  intervals titles of your own, because the title an interval is given when it is made
+  ("06:30-07:15, Sun-Thu") cannot be said to the built-in agent. A title that two
+  intervals share switches both. A title that another timer has and this one does not is
+  refused, and the answer names the first five titles this one has.
 
 The answers are in the language of the request: a regional language such as `en-GB` uses
 the sentences of its language, and one Timerify has no texts for is answered in English.
@@ -708,7 +723,7 @@ refusal comes back as text in the language of the request.
 | Tool | What it does |
 | --- | --- |
 | `timerify__time_left` | How long is left, and when the device turns off. |
-| `timerify__run` | Turn on for `hours` and `minutes` (neither: for the usual time), with settings. |
+| `timerify__run` | Turn on for `hours` and `minutes` (neither: a device that is off runs for the usual time, and one that is running keeps its countdown), with settings. |
 | `timerify__add_time` | Add `hours` and `minutes` to the countdown. |
 | `timerify__stop` | Stop the timer and turn the device off. |
 | `timerify__delayed_command` | Plan to turn on or off (`action`) later, after `delay_hours`, `delay_minutes` and `delay_seconds` or at `at`, a date and time on the house's clock, never both. A turn-on may say how long it then runs (`hours`, `minutes`) and its settings; it may be up to a week ahead, a turn-off up to a day. |

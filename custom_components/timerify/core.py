@@ -328,16 +328,17 @@ class TimerCore:
         """The current state, safe to persist."""
         return self._snapshot
 
-    def wanted_running(self) -> bool:
-        """Whether the target is wanted running: a countdown is under way, or else the
-        wish that the target has not confirmed yet says so, or else the target was last
-        seen on.
+    def wanted_running(self, now: datetime) -> bool:
+        """Whether the target is wanted running as of `now`: a countdown is under way,
+        or else the wish that the target has not confirmed yet says so, or else the
+        target was last seen on.
 
         This is the desired state, as `_runs_as_of` judges it, not what has reached the
         target: a target that is away while its timer counts, and a turn-on that is in
-        flight, are running; a turn-off in flight is not.
+        flight, are running; a turn-off in flight is not. A countdown whose end is `now`
+        or earlier is over, whether or not its alarm was handled yet.
         """
-        return self._snapshot.end is not None or self._runs_as_of(None)
+        return self._wants_running(_utc(now), None)
 
     @_reports_change
     def set_duration(
@@ -376,10 +377,16 @@ class TimerCore:
         """Switch the target on without a duration, with `settings` as `set_duration`
         takes them.
 
-        Strict mode applies the default duration; loose mode runs with the timer
-        at zero.
+        R9 is for a target that is off: strict mode applies the default duration, and
+        loose mode runs with the timer at zero. A target that is wanted running
+        already (`wanted_running`) keeps what it has, in either mode: its countdown, or
+        its run without one, is not touched, and the timer still belongs to whoever set
+        it (S2, S3). The turn-on is asked for again if it has not reached the target,
+        and `settings` are set.
         """
         now = _utc(now)
+        if self._wants_running(now, None):
+            return self._want("on", settings)
         if self._mode == "strict":
             return self._run_until(now, now + self._default_duration, settings)
         self._set_end(None)
@@ -637,7 +644,7 @@ class TimerCore:
                 case Command():
                     commands = self._snapshot.commands[1:]
                     self._snapshot = replace(self._snapshot, commands=commands)
-                    if (command_wish := self._run_command(now, item)) is None:
+                    if (command_wish := self._run_command(now, item, wish)) is None:
                         effects.append(CommandDropped(item))
                     else:
                         wish = command_wish
@@ -736,13 +743,16 @@ class TimerCore:
         return "on" if moved else None
 
     def _run_command(
-        self, now: datetime, command: Command
+        self, now: datetime, command: Command, wish: Literal["on", "off"] | None
     ) -> Literal["on", "off"] | None:
         """Fold a command that is due into the timer and return the wish it leaves;
-        None if its run was over before it was noticed, which drops it (§5.7).
+        None if its run was over before it was noticed, which drops it (§5.7). `wish` is
+        the wish of the items folded before it.
 
         A command that turns on sets its settings even when the target is running
-        (P1), and is the same as setting the timer by hand (P3).
+        (P1), and is the same as setting the timer by hand (P3): one without minutes is
+        a bare turn-on, which leaves the countdown of a target that was wanted running
+        at its time as it is (`run_open`).
         """
         if command.action == "off":
             self._end_timer()
@@ -750,6 +760,9 @@ class TimerCore:
         end = self._command_end(command)
         if end is not None and end <= now:
             return None
+        if command.minutes is None and self._wants_running(command.at, wish):
+            self._owe(command.settings)
+            return "on"
         self._set_end(None if end is None else _capped(now, end))
         self._owe(command.settings)
         return "on"
@@ -939,6 +952,20 @@ class TimerCore:
             self._settings_allowance.reset()  # a command or a change always sends
         self._settings_unsent = False
         return [ApplySettings(state.owed_settings)]
+
+    def _wants_running(self, at: datetime, wish: Literal["on", "off"] | None) -> bool:
+        """Whether the target is wanted running at `at`, the instant an item falls due
+        or a command gets its turn: a countdown that ends after `at`, or, with none
+        under way, what `_runs_as_of` says of `wish`.
+
+        A countdown that ends at `at` or before is over, whether or not it was folded
+        yet, so a command that falls due as it ends meets a target that is about to be
+        off, and so does one that gets its turn after a slow call.
+        """
+        end = self._snapshot.end
+        if end is not None:
+            return end > at
+        return self._runs_as_of(wish)
 
     def _runs_as_of(self, wish: Literal["on", "off"] | None) -> bool:
         """Whether the target is wanted running as of a fold item: the wish so far says

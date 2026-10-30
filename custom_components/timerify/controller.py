@@ -271,6 +271,11 @@ class TargetController:
         """The timer's current state."""
         return self._core.snapshot
 
+    def wanted_running(self, now: datetime) -> bool:
+        """Whether the target is wanted running as of `now`, by the one judgement that
+        every answer and every decision shares (`TimerCore.wanted_running`)."""
+        return self._core.wanted_running(now)
+
     async def async_start(self) -> None:
         """Follow the target; once Home Assistant is running, take stock of it."""
         self._entry.async_on_unload(self._stop)
@@ -304,8 +309,12 @@ class TargetController:
     async def async_run(
         self, minutes: int | None = None, settings: Mapping[str, Any] | None = None
     ) -> None:
-        """Switch the target on for `minutes`, or without a duration (the default one
-        in strict mode), with `settings` if there are any.
+        """Switch the target on for `minutes`, or without a duration, with `settings` if
+        there are any.
+
+        Without a duration, a target that is off runs for the default one in strict
+        mode and without a countdown in loose mode (R9); one that is wanted running
+        keeps its countdown (`TimerCore.run_open`).
 
         Raises ServiceValidationError, before anything runs, for `minutes` outside 1 to
         a day (`duration_out_of_range`) and for settings that the target cannot take.
@@ -394,7 +403,7 @@ class TargetController:
         def turn_off_at(now: datetime) -> list[Effect]:
             nonlocal running
             at = _due(now, when, timedelta(minutes=MAX_MINUTES), duration_out_of_range)
-            running = self._core.wanted_running()
+            running = self._core.wanted_running(now)
             if not running:
                 return []
             return self._core.set_duration(now, at - now)

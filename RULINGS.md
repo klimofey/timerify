@@ -691,13 +691,46 @@ those of the spec.
 - **A bare "turn on X" and "turn off X" of a device that has a timer is a Timerify
   command.** The first plan left these to core and let Timerify observe the change as a
   manual one; that was reversed because §5 R9 names "voice 'turn on X' routed to Timerify".
-  On is R9 (loose mode: an open run; strict mode: the default duration) and off sets the
-  timer to zero and turns the target off, through the controller, as the services do, so an
-  unavailable target keeps its wish (R10) and the answer is Timerify's. The phrasings are
+  On is R9 for a device that is off (loose mode: an open run; strict mode: the default
+  duration; a device that already runs keeps its countdown, see the next entry)
+  and off sets the timer to zero and turns the target off, through the controller, as the
+  services do, so an unavailable target keeps its wish (R10) and the answer is Timerify's. The phrasings are
   core's own name-only ones, so a phrasing with an area, a floor or a kind of device stays
   with core, and so does every device with no timer. Cost if wrong: a phrasing that core
   adds in a newer release of its sentences reaches core until Timerify is regenerated (see
   the next entry).
+- **R9 is for a target that is off: a turn-on without a duration changes nothing about the
+  countdown of a target that is already wanted running (a clarification of R9).** R9 says
+  that a command that turns the target on without a duration runs it without a countdown
+  in loose mode and for the default duration in strict mode. It describes starting a
+  target; it says nothing about one that runs, and read literally it cut a run of two hours
+  to the default duration (strict mode) and took the auto-off away from a run of twenty
+  minutes (loose mode), or erased the end of a schedule window, only because the same
+  words were said twice. Before this phase "turn on the boiler" to a boiler that was on was
+  Home Assistant's no-op, and R4 sets the default duration only while the timer is zero, so
+  the clarification keeps what a user had before and agrees with the spec's goals (one
+  timer as the truth, and manual changes win). So a target that the timer already wants
+  running (`TimerCore.wanted_running`: a countdown that is not over, else the wish that the
+  target has not confirmed yet, else the target last seen on; a target that is away while
+  its countdown runs counts) keeps its countdown, or its run without one, in either mode.
+  R9 applies only to a target that is off, as before. The rule is in one place,
+  `TimerCore.run_open` and its twin for a pending command, and holds for every way of
+  asking without a duration: "turn on the boiler" and the name alone, the tool
+  `timerify__run` without hours and minutes, the service `timerify.run` without minutes,
+  and a command to turn on without minutes when it comes due. The answer is what any run
+  gives: how long is left and when the target turns off, or that it is on without a timer.
+  What the request carries besides a duration is still done: the settings of the tool, the
+  service or the command are set on the running target (P1, a command is a firm promise),
+  and a turn-on that has not reached the target is sent again. The timer itself is not
+  touched, so the schedule that owns a countdown still owns it (S2: editing the interval
+  realigns it) and the request is not a change of the user's (S3). A countdown that has
+  reached its end is over whether or not its alarm was handled yet, so a request that
+  meets it, or a command due in the very instant it ends, starts the run again by R9 and
+  the target is not switched off and on. A command that came due while Home Assistant was
+  down is judged as it would have been live: it finds the countdown that was under way at
+  its time and leaves it. Cost if wrong: a user who wants the default duration again says
+  "for 45 minutes", sets "Run for", or stops the timer first; a pending command without
+  minutes no longer shortens or removes the end of a run that is under way.
 - **The delayed commands of core are taken over for the devices that have a timer,
   generated from the data that Home Assistant ships.** `scripts/generate_core_commands.py`
   reads the pinned `home-assistant-intents` and writes `core_commands.yaml` for each

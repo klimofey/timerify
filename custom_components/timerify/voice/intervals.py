@@ -23,11 +23,17 @@ class SetScheduleHandler(TimerifyIntentHandler):
     description = (
         "Switches the weekly schedule of a device that has a Timerify timer on or off."
         " 'enabled' is true to let the schedule run the device at the times of its"
-        " intervals, false to skip them: switching off while an interval is running"
-        " stops the timer, and switching on during an interval's time runs the device"
-        " for the rest of it. Give 'interval', the title of an interval, to switch only"
-        " that one; without it every interval of the schedule is switched. 'name' is"
-        " the name of the device, as the prompt lists it."
+        " intervals, false to skip them. Switching off while an interval is running"
+        " stops the device only if the schedule is running its timer, that is, the"
+        " timer's end came from that interval and nobody has changed the timer since;"
+        " another open interval takes the timer over instead, and a timer that a"
+        " person started, extended or stopped keeps its own end. Switching on during"
+        " an interval's time runs the device for the rest of it, unless its timer"
+        " already ends later; an interval that is on already is left as it is, so a"
+        " run that a person ended by turning the device off is not started again."
+        " Give 'interval', the title of an interval, to switch only that one; without"
+        " it every interval of the schedule is switched. 'name' is the name of the"
+        " device, as the prompt lists it."
     )
     idempotent = True
     slot_schema: ClassVar[dict[Any, Any]] = {

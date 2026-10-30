@@ -24,7 +24,7 @@ from homeassistant.util import language as language_util
 from ..const import DOMAIN, VOICE_LANGUAGES, is_voice_options
 from ..controller import TimerifyConfigEntry
 from ..core import remaining_minutes
-from ..domains import SETTING_KINDS, actual_state, voice_settings
+from ..domains import SETTING_KINDS, voice_settings
 from ..target import target_name
 
 DEFAULT_LANGUAGE = "en"
@@ -250,7 +250,8 @@ def timer_slots(
     while the countdown runs, `open` while the target is on without one and `off`
     otherwise; the time left as `left_total` minutes, rounded up, and as
     `left_hours` and `left_minutes`; and while it counts, `ends_at` and
-    `ends_in_days` (see `clock_slots`)."""
+    `ends_in_days` (see `clock_slots`). Whether the target is on without a countdown is
+    what the controller's `wanted_running` says, as for "turn off in N"."""
     controller = entry.runtime_data
     snapshot = controller.snapshot
     left_total = remaining_minutes(snapshot, now)
@@ -269,12 +270,10 @@ def timer_slots(
             "ends_at": clock["at"],
             "ends_in_days": clock["in_days"],
         }
-    # The target is on without a timer when it is wanted on: a turn-on that the target
-    # has not shown yet counts, and a turn-off that it has not shown yet does not.
-    if snapshot.pending is not None:
-        on = snapshot.pending == "on"
-    else:
-        on = actual_state(hass.states.get(controller.target_entity_id)) == "on"
+    # The target is on without a timer when it is wanted on, as the timer judges it: a
+    # turn-on that the target has not shown yet counts, and a turn-off that it has not
+    # shown yet does not.
+    on = controller.wanted_running(now)
     return {**slots, "state": "open" if on else "off"}
 
 

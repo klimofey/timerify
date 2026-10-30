@@ -254,6 +254,60 @@ async def test_a_boiler_turned_off_by_hand_is_left_alone_by_the_schedule_asked_o
     assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
 
 
+@pytest.mark.parametrize("by", ["voice", "tool"])
+async def test_turning_off_the_schedule_leaves_a_run_the_user_extended(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+    by: str,
+) -> None:
+    """S3: the morning window runs the boiler to a quarter past seven, and at ten past
+    the user adds an hour. The schedule is not running that timer any more, so turning
+    it off, by voice or through the tool, does not stop the boiler: it runs to a
+    quarter past eight. What the tool's description promises is only this."""
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:10"))
+    await converse(hass, "add an hour to the boiler")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "08:15")
+
+    if by == "voice":
+        await converse(hass, "turn off the boiler schedule")
+    else:
+        await call_tool(
+            await assist_api(hass),
+            "timerify__set_schedule",
+            {"name": "Boiler", "enabled": False},
+        )
+
+    assert switches(hass) == ("off", "off")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "08:15")
+    assert fake_target.calls == [TURN_ON]
+    await advance_to(hass, freezer, local(SUNDAY, "08:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_turning_the_schedule_on_leaves_a_run_that_ends_later(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+) -> None:
+    """S1: with the schedule off, the user runs the boiler for two hours at twenty to
+    seven. Turning the schedule on opens the morning window, which ends sooner than the
+    run, so the run is left alone."""
+    await converse(hass, "turn off the boiler schedule")
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await converse(hass, "turn on the boiler for 2 hours")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "08:40")
+
+    await converse(hass, "turn on the boiler schedule")
+
+    assert switches(hass) == ("on", "on")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "08:40")
+    assert fake_target.calls == [TURN_ON]
+
+
 async def test_the_schedule_asked_off_twice_is_off(
     hass: HomeAssistant, scheduled: MockConfigEntry
 ) -> None:

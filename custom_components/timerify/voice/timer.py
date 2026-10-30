@@ -50,8 +50,11 @@ class TimeLeftHandler(TimerifyIntentHandler):
 
 class RunHandler(TimerifyIntentHandler):
     """Turn on the boiler for 45 minutes: turn the target on, with the settings it
-    takes, and count the time down. It replaces the countdown that was there, so it is
-    destructive. Without a duration it is the open run (R9)."""
+    takes, and count the time down. With a duration it replaces the countdown that was
+    there, so it is destructive. Without one it is the bare turn-on of R9: a target
+    that is off runs for the default duration (strict mode) or without a countdown
+    (loose mode), and one that is wanted running keeps its countdown; either way the
+    answer says how it stands."""
 
     intent_type = "TimerifyRun"
     tool_name = "timerify__run"
@@ -59,16 +62,17 @@ class RunHandler(TimerifyIntentHandler):
     description = (
         "Turns a device on and runs its Timerify timer: the device turns off by itself"
         " when the time is up. 'hours' and 'minutes' add up to how long, from 1 minute"
-        " to 24 hours; give neither to run for the device's usual time, or without a"
-        " timer. Settings are optional, and a device takes only its own: 'hvac_mode'"
-        " and 'temperature' of a thermostat, 'fan_mode' of a thermostat, 'preset_mode'"
-        " of a fan, 'operation_mode' and 'temperature' of a water heater,"
-        " 'brightness_pct' of a light, 'percentage' of a fan, 'humidity' and 'mode' of"
-        " a humidifier. 'percent' stands for the device's own percentage setting"
-        " (brightness, speed or humidity), and 'mode' for its own mode setting (the fan"
-        " mode of a thermostat, the preset of a fan, the mode of a humidifier or the"
-        " operation mode of a water heater). 'name' is the name of the device, as the"
-        " prompt lists it."
+        " to 24 hours; give neither to turn a device that is off on for its usual"
+        " time, or without a timer, while a device that is already running keeps its"
+        " timer and the result says how long is left. Settings are optional, and a"
+        " device takes only its own: 'hvac_mode' and 'temperature' of a thermostat,"
+        " 'fan_mode' of a thermostat, 'preset_mode' of a fan, 'operation_mode' and"
+        " 'temperature' of a water heater, 'brightness_pct' of a light, 'percentage'"
+        " of a fan, 'humidity' and 'mode' of a humidifier. 'percent' stands for the"
+        " device's own percentage setting (brightness, speed or humidity), and 'mode'"
+        " for its own mode setting (the fan mode of a thermostat, the preset of a fan,"
+        " the mode of a humidifier or the operation mode of a water heater). 'name' is"
+        " the name of the device, as the prompt lists it."
     )
     slot_schema: ClassVar[dict[Any, Any]] = {
         probatio.Required("name"): cv.string,

@@ -364,8 +364,9 @@ async def test_time_zone_change_moves_the_next_window(
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """Moving the house to Berlin on Sunday morning moves Monday's window with it: it
-    starts at 06:30 in Berlin, an hour after it would have in Jerusalem."""
+    """Moving the house to Berlin on Sunday morning (06:00 in Jerusalem, 05:00 in Berlin
+    when it happens) moves Monday's window with it: it starts at 06:30 in Berlin, an
+    hour after it would have in Jerusalem."""
     await open_sunday(hass, freezer)
     entry = await setup_target()
     await add_interval(hass, entry, start="06:30", end="07:15", weekdays=["mon"])

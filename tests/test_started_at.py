@@ -16,6 +16,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.translation import async_get_translations
 
 from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.core import Snapshot, TimerCore, Window
 from custom_components.timerify.store import TimerStore
 
 from .conftest import FakeTarget, SetupTarget
@@ -32,6 +33,7 @@ from .helpers import (
     advance_to,
     at,
     call_service,
+    command_json,
     edit_interval,
     iso,
     local,
@@ -435,29 +437,63 @@ async def test_beginning_survives_a_restart(
     assert began(hass) == START
 
 
+@pytest.mark.parametrize(
+    ("taken_off", "ends"),
+    [(20, 25), (50, -5)],
+    ids=["end-after-the-old-beginning", "end-before-the-old-beginning"],
+)
 async def test_clock_set_back_never_puts_the_beginning_after_the_end(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
+    taken_off: int,
+    ends: int,
 ) -> None:
-    """The clock is corrected half an hour back, and twenty minutes are then taken off
-    a countdown that began at the old time: the countdown cannot have begun in the
-    future, so it begins now, and the timer still loads after a restart."""
+    """The clock is corrected half an hour back, and minutes are then taken off a
+    countdown that began at the old time: the countdown cannot have begun in the
+    future, so it begins now, and the timer still loads after a restart. When so many
+    minutes go that the end falls before the old beginning, the old beginning would
+    make the file one that is refused."""
     entry = await setup_target()
     await set_number(hass, NUMBER, 45)
     freezer.move_to(when(-30))
 
-    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=-20)
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=-taken_off)
 
-    assert state_of(hass, SENSOR) == at(25)
+    assert state_of(hass, SENSOR) == at(ends)
     assert began(hass) == when(-30)
 
     await restart(hass, entry)
 
     assert entry.state is ConfigEntryState.LOADED
-    assert state_of(hass, SENSOR) == at(25)
+    assert state_of(hass, SENSOR) == at(ends)
     assert began(hass) == when(-30)
+
+
+def test_realignment_inside_a_catch_up_is_as_of_its_own_instant() -> None:
+    """The file of a timer carried by window b, written while the clock ran ahead,
+    says its countdown began at 06:55, after window a ended at 06:40; it is found at
+    seven, and a's end is folded first. Realigning the timer as of 06:40 keeps a
+    beginning no later than 06:40, not the 06:55 that the clock of seven would let
+    through: the timer never holds a beginning that the instant it is reasoned at had
+    not reached."""
+    carried = Snapshot(
+        end=when(30),
+        started_at=when(-5),
+        scheduled_by="b",
+        windows=(
+            Window("a", when(-60), when(-20), started=True),
+            Window("b", when(-40), when(30), started=True),
+        ),
+    )
+    core = TimerCore("strict", timedelta(minutes=45), carried)
+
+    core.tick(START)
+
+    assert [window.interval_id for window in core.snapshot.windows] == ["b"]
+    assert core.snapshot.end == when(30)
+    assert core.snapshot.started_at == when(-20)
 
 
 # --- What the file holds --------------------------------------------------------------
@@ -513,31 +549,66 @@ async def test_beginning_without_an_end_is_refused(
     assert fake_target.calls == []
 
 
+NO_OFFSET = "2026-01-05T07:00:00"
+"""A time as a file that no timer wrote might hold it: no offset to tell it by."""
+
+
 @pytest.mark.parametrize(
-    ("field", "complaint"),
+    ("stored", "complaint"),
     [
-        ("end", "the end of the countdown must be timezone-aware"),
-        ("started_at", "the beginning of the countdown must be timezone-aware"),
+        pytest.param(
+            {**payload(end=at(30), started_at=at(0)), "end": NO_OFFSET},
+            "the end of the countdown must be timezone-aware",
+            id="end",
+        ),
+        pytest.param(
+            {**payload(end=at(30), started_at=at(0)), "started_at": NO_OFFSET},
+            "the beginning of the countdown must be timezone-aware",
+            id="started_at",
+        ),
+        pytest.param(
+            payload(commands=[command_json(NO_OFFSET, minutes=30)]),
+            "the command's time must be timezone-aware",
+            id="command",
+        ),
     ],
 )
 async def test_time_without_an_offset_is_refused(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
-    field: str,
+    stored: dict[str, Any],
     complaint: str,
 ) -> None:
     """A time with no offset cannot be told from the clock's, so a file that holds one
     is refused with a reason, not read into a countdown that fails when it is
     compared."""
-    stored = {**payload(end=at(30), started_at=at(0)), field: "2026-01-05T07:00:00"}
-
     entry = await setup_target(stored=stored)
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.reason is not None
     assert complaint in entry.reason
     assert fake_target.calls == []
+
+
+async def test_stored_times_are_read_in_utc(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A file that holds its times with another offset, as a hand-edited one may, is
+    read like the windows of the same file: the same moments, in UTC, which is how the
+    sensor says them."""
+    await fake_target.set_state("on")
+
+    await setup_target(
+        stored=payload(
+            end="2026-01-05T09:30:00+02:00", started_at="2026-01-05T09:00:00+02:00"
+        )
+    )
+
+    started = began(hass)
+    assert started is not None
+    assert started.isoformat() == at(0)
+    assert state_of(hass, SENSOR) == at(30)
 
 
 # --- The name the more-info dialog shows ----------------------------------------------

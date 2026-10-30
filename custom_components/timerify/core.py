@@ -10,7 +10,7 @@ from collections.abc import Callable, Iterable
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from enum import Enum, IntEnum
+from enum import IntEnum
 from functools import wraps
 from math import ceil
 from typing import Concatenate, Final, Literal, assert_never
@@ -20,17 +20,6 @@ from .domains import Actual
 
 _MAX_DURATION: Final = timedelta(minutes=MAX_MINUTES)
 """The longest countdown from now, whichever command starts or extends it."""
-
-
-class _Keep(Enum):
-    """The type of `KEEP`."""
-
-    KEEP = "keep"
-
-
-KEEP: Final = _Keep.KEEP
-"""What a write of the end says when the countdown it writes is the one that was
-running: its beginning is kept (see `TimerCore._set_end`)."""
 
 
 @dataclass(frozen=True)
@@ -314,10 +303,6 @@ class TimerCore:
             commands=tuple(sorted(snapshot.commands, key=lambda c: c.at)),
             windows=tuple(sorted(snapshot.windows, key=lambda w: w.start)),
         )
-        self._now: datetime | None = None
-        """The instant of the step being carried out, noted where a step reaches the
-        timer (`_run_until` and `_catch_up`): the latest that a kept beginning can be
-        (see `_set_end`). Never persisted."""
         self._unsent = False
         """The pending wish has not reached the target (its call failed or changed
         nothing, or the target was away). Only true while a wish is pending; never
@@ -383,7 +368,7 @@ class TimerCore:
             if delta <= timedelta(0):
                 return []
             return self._run_until(now, now + delta, began=now)
-        return self._run_until(now, end + delta, began=KEEP)
+        return self._run_until(now, end + delta, began=self._kept_beginning(now))
 
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
@@ -648,7 +633,6 @@ class TimerCore:
         one that was over before it was noticed, a window end and a command dropped
         for coming too late leave it as it was.
         """
-        self._now = now
         effects: list[Effect] = []
         wish: Literal["on", "off"] | None = None
         due = False
@@ -761,7 +745,7 @@ class TimerCore:
             return "off"
         latest = max(open_windows, key=lambda w: (w.end, w.interval_id == interval_id))
         moved = latest.end != self._snapshot.end
-        self._set_end(latest.end, began=KEEP, by=latest.interval_id)
+        self._set_end(latest.end, began=self._kept_beginning(at), by=latest.interval_id)
         return "on" if moved else None
 
     def _run_command(
@@ -822,11 +806,10 @@ class TimerCore:
         end: datetime,
         settings: Settings = NO_SETTINGS,
         *,
-        began: datetime | _Keep,
+        began: datetime | None,
     ) -> list[Effect]:
         """Count down to `end`, at most a day from now, or stop if it is not ahead.
-        The countdown began at `began`, or when the one that was running did."""
-        self._now = now
+        The countdown began at `began`: now, or when the one that was running did."""
         if end <= now:
             return self._stop()
         self._set_end(_capped(now, end), began=began)
@@ -855,7 +838,7 @@ class TimerCore:
         self,
         end: datetime | None,
         *,
-        began: datetime | _Keep,
+        began: datetime | None,
         by: str | None = None,
     ) -> None:
         """The only writer of the end and of the beginning of the countdown it counts
@@ -863,36 +846,30 @@ class TimerCore:
         write, whoever made it, leaves the timer to nobody's schedule (S3), and a timer
         with no end is nobody's.
 
-        `began` is when the countdown began, or `KEEP` for the countdown that was
-        running: an end that only moves keeps its beginning, but never later than the
-        step being carried out, so that a clock that stepped back cannot leave the
-        beginning at or after an end that is ahead. A timer with no end has no
-        beginning, whatever `began` says.
+        `began` is when the countdown began: the caller works it out, a countdown that
+        goes on with a new end through `_kept_beginning`. None where there is none to
+        say, and always None for a timer with no end.
         """
-        if end is None:
-            started_at = None
-        elif isinstance(began, _Keep):
-            started_at = self._kept_beginning()
-        else:
-            started_at = _utc(began, "the beginning")
         self._snapshot = replace(
             self._snapshot,
             end=end,
-            started_at=started_at,
+            started_at=None
+            if end is None or began is None
+            else _utc(began, "the beginning"),
             scheduled_by=None if end is None else by,
         )
 
-    def _kept_beginning(self) -> datetime | None:
-        """The beginning of the running countdown, held back to the step's instant;
-        None where it has none (it never had one, or nothing runs)."""
-        if (kept := self._snapshot.started_at) is None:
-            return None
-        assert self._now is not None  # Only a step writes an end: see `_now`.
-        return min(kept, self._now)
+    def _kept_beginning(self, at: datetime) -> datetime | None:
+        """The beginning of the running countdown for a write of its end as of `at`:
+        no later than `at`, so that a clock that stepped back cannot leave it at or
+        after an end that is ahead. None where it has none (it never had one, or
+        nothing runs)."""
+        kept = self._snapshot.started_at
+        return None if kept is None else min(kept, at)
 
     def _clear_end(self) -> None:
         """There is no countdown: no end, no beginning, nobody's schedule."""
-        self._set_end(None, began=KEEP)
+        self._set_end(None, began=None)
 
     def _want(
         self,

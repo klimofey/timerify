@@ -12,6 +12,26 @@ from .const import DOMAIN, freeze_settings
 from .core import Command, Snapshot, Window, checked_window
 
 
+def _time_to_json(moment: datetime | None) -> str | None:
+    """A time as ISO-8601 UTC, or None for none."""
+    return None if moment is None else moment.astimezone(UTC).isoformat()
+
+
+def _time_from_json(text: str, what: str) -> datetime:
+    """A stored time, in UTC whatever offset the file gives it, as the core holds every
+    time; a ValueError naming `what` for a time with no offset, which no timer wrote
+    and which cannot be compared with the clock."""
+    moment = datetime.fromisoformat(text)
+    if moment.utcoffset() is None:
+        raise ValueError(f"{what} must be timezone-aware")
+    return moment.astimezone(UTC)
+
+
+def _optional_time_from_json(text: str | None, what: str) -> datetime | None:
+    """`_time_from_json`, or None for a time that is not there."""
+    return None if text is None else _time_from_json(text, what)
+
+
 def command_to_json(command: Command) -> dict[str, Any]:
     """A pending command as plain data: its time as ISO-8601 UTC, its settings as a
     dict. The file of the timer and the "Next command" sensor show it alike."""
@@ -27,7 +47,7 @@ def command_to_json(command: Command) -> dict[str, Any]:
 def _command_from_json(data: dict[str, Any]) -> Command:
     return Command(
         id=data["id"],
-        at=datetime.fromisoformat(data["at"]),
+        at=_time_from_json(data["at"], "the command's time"),
         action=data["action"],
         minutes=data["minutes"],
         settings=freeze_settings(data["settings"]),
@@ -100,22 +120,6 @@ def _disabled_from_json(interval_ids: list[str]) -> frozenset[str]:
         if times > 1:
             raise ValueError(f"the interval {interval_id} is switched off twice")
     return frozenset(interval_ids)
-
-
-def _time_to_json(moment: datetime | None) -> str | None:
-    """A time as ISO-8601 UTC, or None for none."""
-    return None if moment is None else moment.astimezone(UTC).isoformat()
-
-
-def _time_from_json(text: str | None, what: str) -> datetime | None:
-    """A stored time, or None for none; a ValueError naming `what` for a time with no
-    offset, which no timer wrote and which cannot be compared with the clock."""
-    if text is None:
-        return None
-    moment = datetime.fromisoformat(text)
-    if moment.utcoffset() is None:
-        raise ValueError(f"{what} must be timezone-aware")
-    return moment
 
 
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
@@ -220,8 +224,8 @@ class TimerStore:
         """The timer a file of the current version holds."""
         return _validated(
             Snapshot(
-                end=_time_from_json(data["end"], "the end of the countdown"),
-                started_at=_time_from_json(
+                end=_optional_time_from_json(data["end"], "the end of the countdown"),
+                started_at=_optional_time_from_json(
                     data["started_at"], "the beginning of the countdown"
                 ),
                 pending=data["pending"],

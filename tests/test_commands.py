@@ -748,6 +748,40 @@ def test_a_command_is_due_after_a_delay_or_at_a_time() -> None:
         assert raised.value.translation_key == "delay_or_at"
 
 
+@pytest.mark.parametrize(
+    "delay",
+    [
+        timedelta(days=7, seconds=1),
+        timedelta(days=4 * 10**6),
+        timedelta.max,
+    ],
+    ids=["a_second_over_the_week", "centuries", "the_longest_delay_there_is"],
+)
+@pytest.mark.parametrize("action", ["on", "off"])
+async def test_a_delay_too_long_to_be_a_date_is_refused_not_added_to_now(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    action: str,
+    delay: timedelta,
+) -> None:
+    """The controller is the one path that every caller, a service, a voice command or
+    a tool, takes, so a delay they cannot all bound is refused here with a reason,
+    before it is added to the time now: it would not be a date."""
+    entry = await setup_target()
+    controller = entry.runtime_data
+
+    with pytest.raises(ServiceValidationError) as raised_command:
+        await controller.async_add_command(action, delay, None, None)
+    with pytest.raises(ServiceValidationError) as raised_turn_off:
+        await controller.async_turn_off_in(delay)
+
+    assert raised_command.value.translation_key == "command_too_far"
+    assert raised_turn_off.value.translation_key == "duration_out_of_range"
+    assert state_of(hass, NEXT) == "unknown"
+    assert fake_target.calls == []
+
+
 async def test_command_the_week_ahead_is_accepted(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:

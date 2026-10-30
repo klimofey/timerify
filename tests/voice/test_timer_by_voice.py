@@ -62,6 +62,7 @@ from .helpers import (
     expose,
     listed,
     reached,
+    refusal_of,
     samples,
     speech,
     spoken_values,
@@ -82,13 +83,6 @@ COOL = ("set_hvac_mode", {"hvac_mode": "cool"})
 TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]
 """The calls that turn the air conditioner on cooling, at 24 degrees."""
-
-
-def refusal_of(response: intent.IntentResponse) -> str:
-    """What the answer says when the timer refused: asserts that it did."""
-    assert response.response_type is intent.IntentResponseType.ERROR
-    assert response.error_code is intent.IntentResponseErrorCode.FAILED_TO_HANDLE
-    return speech(response)
 
 
 # --- Running a timer ---------------------------------------------------------------

@@ -255,6 +255,13 @@ def reached(response: intent.IntentResponse) -> str | None:
     return None if response.intent is None else response.intent.intent_type
 
 
+def refusal_of(response: intent.IntentResponse) -> str:
+    """What the answer says when the timer refused: asserts that it did."""
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert response.error_code is intent.IntentResponseErrorCode.FAILED_TO_HANDLE
+    return speech(response)
+
+
 async def assert_one_form_per_class(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,

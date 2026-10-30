@@ -7,8 +7,7 @@ intents:
     - sentences:
       - how (much time|long) is left (on|for) [<the>] {timerify_target:name}
       - how long will [<the>] {timerify_target:name} (run|stay on|be on|keep running)
-      - (when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut)
-        off
+      - (when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut) off
   TimerifyRun:
     data:
     - sentences:
@@ -22,8 +21,7 @@ intents:
         - climate
         - water_heater
       expansion_rules:
-        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part>
-          [<timerify_percent_part>])
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part> [<timerify_percent_part>])
     - sentences:
       - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
       - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
@@ -31,11 +29,7 @@ intents:
       requires_context:
         domain: climate
       expansion_rules:
-        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>];
-          [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>];
-          [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part>
-          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part>
-          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
+        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
     - sentences:
       - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
       - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
@@ -43,10 +37,7 @@ intents:
       requires_context:
         domain: water_heater
       expansion_rules:
-        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>];
-          [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>];
-          [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>];
-          [<timerify_percent_part>]))
+        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
   TimerifyAddTime:
     data:
     - sentences:
@@ -60,8 +51,7 @@ intents:
       - (stop|cancel) the timer (on|of) [<the>] {timerify_target:name}
 expansion_rules:
   timerify_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
-  timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes}
-    more minute[s])
+  timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes} more minute[s])
   timerify_hours_part: '{timerify_hours:hours} hour[s]'
   timerify_minutes_part: '{timerify_minutes:minutes} minute[s]'
   timerify_for_part: for <timerify_duration>

@@ -266,13 +266,16 @@ def validate(language: str, built: Mapping[str, Any]) -> None:
 
 
 def dump_sentences(data: Mapping[str, Any]) -> str:
-    """`data` as the text of a sentence file."""
+    """`data` as the text of a sentence file. A sentence or a rule is one line, however
+    long: folded, it would break in the middle of an expression, where a reader cannot
+    tell the fold from the text."""
     text: str = yaml.dump(
         dict(data),
         Dumper=_SentenceDumper,
         default_flow_style=False,
         allow_unicode=True,
         sort_keys=False,
+        width=float("inf"),
     )
     return text
 

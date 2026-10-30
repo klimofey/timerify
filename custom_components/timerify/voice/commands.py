@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Final
 
 import probatio
 from homeassistant.exceptions import ServiceValidationError
@@ -109,16 +109,26 @@ class DelayedCommandHandler(TimerifyIntentHandler):
             )
 
 
+_UNIT_SECONDS: Final = {"hours": 3600, "minutes": 60, "seconds": 1}
+_LONGEST_DELAY_SECONDS: Final = timedelta.max // timedelta(seconds=1)
+
+
 def _delay_of(slots: Mapping[str, Any]) -> timedelta | None:
     """How long from now the slots `delay_hours`, `delay_minutes` and `delay_seconds`
     say together; None when none of them is given. A delay of nothing is a delay: the
-    controller refuses it as a time that is not ahead."""
-    delays = {
-        unit: slots[f"delay_{unit}"]["value"]
-        for unit in ("hours", "minutes", "seconds")
+    controller refuses it as a time that is not ahead.
+
+    A count that no `timedelta` can hold is the longest one that can be: longer than
+    any the controller takes, which refuses it as too far.
+    """
+    seconds = [
+        slots[f"delay_{unit}"]["value"] * factor
+        for unit, factor in _UNIT_SECONDS.items()
         if f"delay_{unit}" in slots
-    }
-    return timedelta(**delays) if delays else None
+    ]
+    if not seconds:
+        return None
+    return timedelta(seconds=min(sum(seconds), _LONGEST_DELAY_SECONDS))
 
 
 def _clock_time_of(slots: Mapping[str, Any]) -> datetime | None:

@@ -28,8 +28,10 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
+from custom_components.timerify.domains import SUPPORTED_DOMAINS
 from custom_components.timerify.voice.sentences import read_back
 from scripts.generate_core_commands import (
+    COMMAND,
     COMMAND_RULE,
     COMMAND_RULE_NAME,
     COMMAND_SLOT,
@@ -69,6 +71,7 @@ from .helpers import (
     converse,
     copy_sentences,
     reached,
+    refusal_of,
     speech,
     talk,
     translated,
@@ -82,6 +85,7 @@ COOL = ("set_hvac_mode", {"hvac_mode": "cool"})
 TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]
 """The calls that turn the air conditioner on cooling, at 24 degrees."""
+TANK_NUMBER = "number.tank_run_for"
 DELAY_VALUES = {"hours": 2, "minutes": 15, "seconds": 30}
 """What the samples say for each unit of a delay."""
 
@@ -100,13 +104,6 @@ async def cancel_pending(hass: HomeAssistant, number: str, sensor: str) -> None:
         await call_service(
             hass, "cancel_command", {"entity_id": number}, command_id=command["id"]
         )
-
-
-def refusal_of(response: intent.IntentResponse) -> str:
-    """What the answer says when the timer refused: asserts that it did."""
-    assert response.response_type is intent.IntentResponseType.ERROR
-    assert response.error_code is intent.IntentResponseErrorCode.FAILED_TO_HANDLE
-    return speech(response)
 
 
 @pytest.fixture
@@ -233,6 +230,50 @@ async def test_turn_off_with_an_area_stays_with_home_assistant(
     assert reached(response) == "HassTurnOff"
     assert fake_lamp.calls == [("turn_off", fake_lamp.entity_id)]
     assert fake_target.calls == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_kind_of_device_home_assistant_does_not_name_is_taken_over(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_humidifier: FakeTarget,
+    fake_tank: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Home Assistant's own sentences to turn a device on or off name lights, switches,
+    fans, media players, input booleans and thermostats; a water heater and a
+    humidifier that have a timer are turned on and off with the same words, alone and
+    for later, and with the settings they have."""
+    await with_voice_settings(hass, setup_target, fake_humidifier, fake_tank)
+
+    on = await converse(hass, "turn on the tank")
+    stopped_soon = await converse(hass, "turn off the tank in 5 minutes")
+    planned = await converse(hass, "turn on the humidifier in 10 minutes at 40 percent")
+
+    assert [reached(response) for response in (on, stopped_soon, planned)] == [
+        RUN,
+        DELAYED_COMMAND,
+        DELAYED_COMMAND,
+    ]
+    assert speech(on) == "Tank runs for 45 minutes, until 09:45."
+    assert speech(stopped_soon) == "Tank turns off at 09:05."
+    assert speech(planned) == "Humidifier turns on at 09:10."
+    assert state_of(hass, TANK_NUMBER) == "5"
+    assert fake_humidifier.call_data == []
+
+    await advance(hass, freezer, minutes=5)
+
+    assert fake_tank.call_data == [("turn_on", {}), ("turn_off", {})]
+
+    await advance(hass, freezer, minutes=5)
+    off = await converse(hass, "turn off the humidifier")
+
+    assert reached(off) == STOP
+    assert fake_humidifier.call_data == [
+        ("turn_on", {}),
+        ("set_humidity", {"humidity": 40.0}),
+        ("turn_off", {}),
+    ]
 
 
 # --- Turning on later --------------------------------------------------------------
@@ -641,6 +682,51 @@ async def test_the_same_words_about_a_device_without_a_timer_stay_with_home_assi
     assert fake_target.calls == []
 
 
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_home_assistant_still_runs_its_delayed_command_for_a_device_with_no_timer(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_vent: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+) -> None:
+    """Said about the vent, which has no timer, three delayed commands wait in Home
+    Assistant and, when their time comes, it switches the vent as it always did; the
+    boiler, which has a timer, is not touched and Timerify keeps no command."""
+    delayed = [phrasing for phrasing in core_phrasings(language, "Vent") if phrasing[2]]
+    chosen = [
+        next(phrasing for phrasing in delayed if phrasing[1] == "on"),
+        next(phrasing for phrasing in delayed if phrasing[1] == "off"),
+        delayed[-1],
+    ]
+    switched: list[tuple[str, str]] = []
+
+    for text, action, shape in chosen:
+        assert shape is not None
+        response = await converse(hass, text, language)
+        assert reached(response) == "HassStartTimer", text
+        assert fake_vent.calls == switched, text
+        # Home Assistant waits for the time in a background task of its own: let it
+        # begin to wait before the clock moves.
+        await hass.async_block_till_done()
+
+        delay = {
+            key.removeprefix("delay_"): value
+            for key, value in delay_slots(shape).items()
+        }
+        await advance(hass, freezer, **delay)
+        # When the time is over that task starts a second one, which says the command
+        # to the agent again. No other timer waits, so the background tasks left are
+        # that one.
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+        switched.append((f"turn_{action}", fake_vent.entity_id))
+        assert fake_vent.calls == switched, text
+    assert fake_target.calls == []
+    assert pending(hass, NEXT) == []
+
+
 # --- The generator -----------------------------------------------------------------
 
 
@@ -657,8 +743,10 @@ def admits(block: Mapping[str, Any], domain: str) -> bool:
 
 
 def admitted(block: CommandBlock, domain: str) -> bool:
-    """Whether a block of Home Assistant is for the devices of `domain`."""
-    return not block.domains or domain in block.domains
+    """Whether a block of Home Assistant is for the devices of `domain`. The generic
+    block is for every device that has a timer, whatever its domain: it is Timerify that
+    decides that a device is turned on and off the way the generic block says."""
+    return block.generic or domain in block.domains
 
 
 def alternatives(group: str) -> list[str]:
@@ -716,22 +804,24 @@ def wanted_later(block: CommandBlock, shapes: Sequence[str]) -> set[str]:
 
 
 def probes(blocks: Sequence[CommandBlock]) -> list[str]:
-    """The domains to ask about: each one the blocks of Home Assistant name, and some
-    they do not."""
-    return sorted({d for block in blocks for d in block.domains} | {"vacuum", "fan"})
+    """The domains to ask about: every kind of device that can have a timer, each one
+    the blocks of Home Assistant name, and one that nothing names."""
+    named = {d for block in blocks for d in block.domains}
+    return sorted({*SUPPORTED_DOMAINS, *named, "kettle"})
 
 
 def gaps(data: Mapping[str, Any], generated: Mapping[str, Any]) -> list[str]:
     """Where the generated file `generated` does not say what Home Assistant says in
     `data`, for any kind of device, or says more.
 
-    For each kind of device (each domain the blocks of Home Assistant name, and some
-    they do not) and each of turning on and off: every sentence of Home Assistant that
-    acts on the device by its name, said alone and in every shape of a delayed command,
-    must be a sentence of a generated block that is for that kind of device; and a
-    generated block for it may say nothing else but the sentences for every device
-    (those of the generic block of Home Assistant), since every device that has a timer
-    is turned on and off with them.
+    For each kind of device (each that Timerify supports, each domain the blocks of Home
+    Assistant name, and one that nothing names) and each of turning on and off: every
+    sentence of Home Assistant that acts on the device by its name, said alone and in
+    every shape of a delayed command, must be a sentence of a generated block that is
+    for that kind of device, and nothing else may be. The sentences for every device
+    (those of the generic block of Home Assistant) are the ones of every kind: a water
+    heater or a humidifier is turned on and off with them though the block does not name
+    it.
     """
     blocks = command_blocks(data)
     shapes = delayed_shapes(data)
@@ -739,15 +829,6 @@ def gaps(data: Mapping[str, Any], generated: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
     for action in ("on", "off"):
         own = [block for block in blocks if block.action == action]
-        everywhere = {
-            s.replace("{name}", "{timerify_target}")
-            for block in own
-            if block.generic
-            for s in block.sentences
-        }
-        everywhere_later = {
-            s for block in own if block.generic for s in wanted_later(block, shapes)
-        }
         bare = generated["intents"][TIMERIFY_COMMANDS[action]]["data"]
         later = [
             block
@@ -769,8 +850,7 @@ def gaps(data: Mapping[str, Any], generated: Mapping[str, Any]) -> list[str]:
                 for s in alone - said_alone
             ]
             problems += [
-                f"{action} {domain}: {s!r} is said alone"
-                for s in said_alone - alone - everywhere
+                f"{action} {domain}: {s!r} is said alone" for s in said_alone - alone
             ]
             wanted = {s for block in for_domain for s in wanted_later(block, shapes)}
             said = {
@@ -784,8 +864,7 @@ def gaps(data: Mapping[str, Any], generated: Mapping[str, Any]) -> list[str]:
                 f"{action} {domain}: {s!r} is not said later" for s in wanted - said
             ]
             problems += [
-                f"{action} {domain}: {s!r} is said later"
-                for s in said - wanted - everywhere_later
+                f"{action} {domain}: {s!r} is said later" for s in said - wanted
             ]
     return problems
 
@@ -804,39 +883,99 @@ def test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_devic
     assert gaps(data, shipped(language)) == []
 
 
-def test_a_file_that_leaves_something_out_or_adds_something_is_caught() -> None:
+def without_the_first_sentence(generated: dict[str, Any]) -> None:
+    block = generated["intents"][DELAYED_COMMAND]["data"][0]
+    block["sentences"] = block["sentences"][1:]
+
+
+def without_a_way_to_say_the_delay(generated: dict[str, Any]) -> None:
+    rules = generated["expansion_rules"]
+    rules[DELAY_BEFORE_RULE_NAME] = (
+        "(" + "|".join(alternatives(rules[DELAY_BEFORE_RULE_NAME])[1:]) + ")"
+    )
+
+
+def without_the_last_stop(generated: dict[str, Any]) -> None:
+    del generated["intents"][STOP]["data"][-1]
+
+
+def with_the_last_stop_for_every_device(generated: dict[str, Any]) -> None:
+    generated["intents"][STOP]["data"][-1].pop("requires_context")
+
+
+def without_water_heaters_turned_on_later(generated: dict[str, Any]) -> None:
+    blocks = generated["intents"][DELAYED_COMMAND]["data"]
+    blocks[:] = [
+        block
+        for block in blocks
+        if "water_heater" not in block.get("requires_context", {}).get("domain", [])
+    ]
+
+
+def with_more_kinds_left_out_of_turning_on_later(generated: dict[str, Any]) -> None:
+    for block in generated["intents"][DELAYED_COMMAND]["data"]:
+        if "excludes_context" in block:
+            block["excludes_context"]["domain"] += [
+                "humidifier",
+                "siren",
+                "group",
+                "remote",
+            ]
+
+
+def with_turning_on_for_the_kinds_of_home_assistant_only(
+    generated: dict[str, Any],
+) -> None:
+    generated["intents"][RUN]["data"][0]["requires_context"] = {
+        "domain": ["light", "switch", "fan", "media_player", "input_boolean", "climate"]
+    }
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        without_the_first_sentence,
+        without_a_way_to_say_the_delay,
+        without_the_last_stop,
+        with_the_last_stop_for_every_device,
+        without_water_heaters_turned_on_later,
+        with_more_kinds_left_out_of_turning_on_later,
+        with_turning_on_for_the_kinds_of_home_assistant_only,
+    ],
+    ids=lambda mutate: mutate.__name__,
+)
+def test_a_file_that_leaves_something_out_or_adds_something_is_caught(
+    language: str, mutate: Callable[[dict[str, Any]], None]
+) -> None:
     """The proof above sees the surprises it is there for: a sentence of a delayed
     command or a way to say the delay that is missing, a command for a kind of device
-    that is not, and a sentence for every device that was written for one kind only."""
-    data = get_intents("en")
+    that is not, a sentence for every device that was written for one kind only, and,
+    for a kind of device that Home Assistant's sentences do not name (a water heater, a
+    humidifier), the sentences for every device that do not reach it."""
+    data = get_intents(language)
     assert data is not None
-    generated = shipped("en")
-
-    without_a_sentence = copy.deepcopy(generated)
-    block = without_a_sentence["intents"][DELAYED_COMMAND]["data"][0]
-    block["sentences"] = block["sentences"][1:]
-    without_a_delay = copy.deepcopy(generated)
-    rule = without_a_delay["expansion_rules"][DELAY_BEFORE_RULE_NAME]
-    without_a_delay["expansion_rules"][DELAY_BEFORE_RULE_NAME] = (
-        "(" + rule.split("|", 1)[1]
-    )
-    without_a_block = copy.deepcopy(generated)
-    del without_a_block["intents"][STOP]["data"][-1]
-    with_a_widened_block = copy.deepcopy(generated)
-    with_a_widened_block["intents"][STOP]["data"][-1].pop("requires_context")
-
+    generated = shipped(language)
     assert gaps(data, generated) == []
-    assert gaps(data, without_a_sentence)
-    assert gaps(data, without_a_delay)
-    assert gaps(data, without_a_block)
-    assert gaps(data, with_a_widened_block)
+
+    mutate(generated)
+
+    assert gaps(data, generated)
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 def test_the_committed_file_is_what_the_generator_writes(language: str) -> None:
+    """The file is written from two sources: the sentences of the pinned
+    home-assistant-intents, which a new release changes, and the rules for the settings
+    in `sentences/<language>/src/timerify.yaml`, which an edit there changes."""
     text = (SENTENCES_DIR / language / FILE_NAME).read_text("utf-8")
 
-    assert text == render(language)
+    assert text == render(language), (
+        f"sentences/{language}/{FILE_NAME} is not what the generator writes: either"
+        " home-assistant-intents was updated, or the settings in"
+        f" sentences/{language}/src/timerify.yaml were edited. Run `{COMMAND}` and"
+        " commit the result"
+    )
 
 
 @pytest.mark.parametrize(
@@ -1008,6 +1147,18 @@ async def test_llm_plans_a_command_at_a_clock_time(
             {"at": "09:00"},
         ),
         ({"action": "on", "delay_hours": 200}, "command_too_far", {"days": "7"}),
+        ({"action": "on", "delay_hours": 10**8}, "command_too_far", {"days": "7"}),
+        ({"action": "on", "delay_hours": 10**15}, "command_too_far", {"days": "7"}),
+        (
+            {"action": "off", "delay_hours": 10**8},
+            "duration_out_of_range",
+            {"max_hours": "24"},
+        ),
+        (
+            {"action": "off", "delay_seconds": 10**18},
+            "duration_out_of_range",
+            {"max_hours": "24"},
+        ),
         (
             {"action": "off", "delay_minutes": 10, "minutes": 5},
             "off_takes_no_duration_or_settings",

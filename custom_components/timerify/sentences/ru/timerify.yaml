@@ -20,32 +20,23 @@ intents:
         - climate
         - water_heater
       expansion_rules:
-        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part>
-          [<timerify_percent_part>])
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part> [<timerify_percent_part>])
     - sentences:
       - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
       requires_context:
         domain: climate
       expansion_rules:
-        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>];
-          [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>];
-          [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part>
-          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part>
-          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
+        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
     - sentences:
       - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
       requires_context:
         domain: water_heater
       expansion_rules:
-        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>];
-          [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>];
-          [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>];
-          [<timerify_percent_part>]))
+        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
   TimerifyAddTime:
     data:
     - sentences:
-      - (добавь|прибавь|накинь) [ещё|еще] <timerify_duration> (к таймеру|таймеру|к|для)
-        {timerify_target:name}
+      - (добавь|прибавь|накинь) [ещё|еще] <timerify_duration> (к таймеру|таймеру|к|для) {timerify_target:name}
       - (ещё|еще) <timerify_duration> (к таймеру|таймеру|для) {timerify_target:name}
       - продли [таймер] {timerify_target:name} на <timerify_duration>
   TimerifyStop:

@@ -107,6 +107,15 @@ def duration_out_of_range() -> ServiceValidationError:
     )
 
 
+def command_too_far() -> ServiceValidationError:
+    """The refusal of a command set more than `MAX_COMMAND_AHEAD` ahead."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="command_too_far",
+        translation_placeholders={"days": str(MAX_COMMAND_AHEAD.days)},
+    )
+
+
 def command_when(delay: timedelta | None, at: datetime | None) -> datetime | timedelta:
     """When a command is due, as exactly one of a delay from now and a moment is given.
 
@@ -133,12 +142,21 @@ def _refuse_a_run_of_off(
         )
 
 
-def _due(now: datetime, when: datetime | timedelta) -> datetime:
+def _due(
+    now: datetime,
+    when: datetime | timedelta,
+    ahead: timedelta,
+    too_far: Callable[[], ServiceValidationError],
+) -> datetime:
     """The moment a command that gets its turn at `now` is due: `when`, or `when` from
     now.
 
-    Raises ServiceValidationError (`command_in_past`) for a moment that is not ahead.
+    Raises ServiceValidationError (`command_in_past`) for a moment that is not ahead,
+    and the error `too_far` makes for one more than `ahead` ahead. A delay is compared
+    with `ahead` before it is added to `now`: one of centuries is no date at all.
     """
+    if isinstance(when, timedelta) and when > ahead:
+        raise too_far()
     at = now + when if isinstance(when, timedelta) else when
     if at <= now:
         raise ServiceValidationError(
@@ -146,6 +164,8 @@ def _due(now: datetime, when: datetime | timedelta) -> datetime:
             translation_key="command_in_past",
             translation_placeholders={"at": _local_time(at)},
         )
+    if at > now + ahead:
+        raise too_far()
     return at
 
 
@@ -316,7 +336,8 @@ class TargetController:
         Raises ServiceValidationError, before anything is kept, for an "off" with
         either, for `minutes` outside 1 to a day (`duration_out_of_range`), for settings
         that the target cannot take, for a time that is not ahead or is more than
-        `MAX_COMMAND_AHEAD` ahead, and when the timer already keeps `MAX_COMMANDS`.
+        `MAX_COMMAND_AHEAD` ahead (`command_too_far`, whatever the delay is), and when
+        the timer already keeps `MAX_COMMANDS`.
         """
         if action == "off":
             _refuse_a_run_of_off(minutes, settings)
@@ -326,13 +347,7 @@ class TargetController:
         command_id = uuid4().hex
 
         def add(now: datetime) -> list[Effect]:
-            at = _due(now, when)
-            if at > now + MAX_COMMAND_AHEAD:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="command_too_far",
-                    translation_placeholders={"days": str(MAX_COMMAND_AHEAD.days)},
-                )
+            at = _due(now, when, MAX_COMMAND_AHEAD, command_too_far)
             if len(self.snapshot.commands) >= MAX_COMMANDS:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
@@ -368,17 +383,15 @@ class TargetController:
         Raises ServiceValidationError, before anything runs, for `minutes` or `settings`
         (an "off" has neither: `off_takes_no_duration_or_settings`), and when the call
         gets its turn, for a moment that is not ahead (`command_in_past`, which a zero
-        delay is) or is more than a day ahead (`duration_out_of_range`), whether or
-        not the target is running.
+        delay is) or is more than a day ahead (`duration_out_of_range`, whatever the
+        delay is), whether or not the target is running.
         """
         _refuse_a_run_of_off(minutes, settings)
         running = False
 
         def turn_off_at(now: datetime) -> list[Effect]:
             nonlocal running
-            at = _due(now, when)
-            if at > now + timedelta(minutes=MAX_MINUTES):
-                raise duration_out_of_range()
+            at = _due(now, when, timedelta(minutes=MAX_MINUTES), duration_out_of_range)
             running = self._core.wanted_running()
             if not running:
                 return []

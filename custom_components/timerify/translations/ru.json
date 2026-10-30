@@ -263,7 +263,12 @@
     },
     "sensor": {
       "ends_at": {
-        "name": "Выключится в"
+        "name": "Выключится в",
+        "state_attributes": {
+          "started_at": {
+            "name": "Запущен в"
+          }
+        }
       },
       "next_command": {
         "name": "Следующая команда",

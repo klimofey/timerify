@@ -488,7 +488,9 @@ def test_manual_on_in_strict_starts_default_duration() -> None:
     fx = c.observe(NOW, "on", by_us=False)
 
     assert fx == [Arm(NOW + minutes(45)), Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(45), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(45), started_at=NOW, last_actual="on"
+    )
 
 
 def test_manual_on_in_loose_leaves_timer_idle() -> None:
@@ -509,7 +511,9 @@ def test_own_turn_on_clears_pending() -> None:
     fx = c.observe(NOW, "on", by_us=True)
 
     assert fx == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(10), started_at=NOW, last_actual="on"
+    )
 
 
 def test_own_turn_off_clears_pending() -> None:
@@ -625,7 +629,9 @@ def test_set_while_unavailable_turns_on_when_back() -> None:
 
     assert back == [TurnOn(), Changed()]
     assert confirmed == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(10), started_at=NOW, last_actual="on"
+    )
 
 
 def test_set_while_unavailable_needs_no_turn_on_when_back_on() -> None:
@@ -636,7 +642,9 @@ def test_set_while_unavailable_needs_no_turn_on_when_back_on() -> None:
     fx = c.observe(NOW + minutes(1), "on", by_us=False)
 
     assert fx == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(10), started_at=NOW, last_actual="on"
+    )
 
 
 def test_wifi_drop_does_not_clear_timer() -> None:
@@ -649,7 +657,9 @@ def test_wifi_drop_does_not_clear_timer() -> None:
 
     assert gone == [Changed()]
     assert back == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(10), started_at=NOW, last_actual="on"
+    )
 
 
 def test_expiry_noticed_with_a_manual_on_does_not_start_a_new_timer() -> None:
@@ -764,7 +774,9 @@ def test_target_found_on_after_a_failed_turn_on_settles_it() -> None:
     fx = c.observe(NOW + minutes(1), "on", by_us=False)
 
     assert fx == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(10), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(10), started_at=NOW, last_actual="on"
+    )
 
 
 def test_call_failed_without_a_pending_wish_changes_nothing() -> None:
@@ -3753,7 +3765,9 @@ def test_run_for_zero_then_run_for_thirty_before_the_device_reports_turns_it_on(
     assert c.snapshot.pending == "on"
     assert c.snapshot.end == NOW + minutes(30)
     assert c.observe(NOW + minutes(2), "on", by_us=True) == [Changed()]
-    assert c.snapshot == Snapshot(end=NOW + minutes(30), last_actual="on")
+    assert c.snapshot == Snapshot(
+        end=NOW + minutes(30), started_at=NOW, last_actual="on"
+    )
 
 
 def test_start_then_stop_before_the_device_reports_turns_it_off_in_strict_mode() -> (

@@ -252,6 +252,7 @@ class TargetController:
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
+        self._notified_started_at = self.snapshot.started_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         self._wakeup_alarm: CALLBACK_TYPE | None = None
@@ -991,11 +992,12 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown, the pending commands and which
-        # intervals are switched off; the rest of the snapshot is bookkeeping that
-        # needs no state write.
+        # The entities show the end of the countdown and when it began, the pending
+        # commands and which intervals are switched off; the rest of the snapshot is
+        # bookkeeping that needs no state write.
         if (
             self.snapshot.end != self._notified_end
+            or self.snapshot.started_at != self._notified_started_at
             or self.snapshot.commands != self._notified_commands
             or self.snapshot.disabled_intervals != self._notified_disabled
         ):
@@ -1184,6 +1186,7 @@ class TargetController:
 
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
+        self._notified_started_at = self.snapshot.started_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         for listener in list(self._listeners):

@@ -263,7 +263,12 @@
     },
     "sensor": {
       "ends_at": {
-        "name": "Ends at"
+        "name": "Ends at",
+        "state_attributes": {
+          "started_at": {
+            "name": "Started at"
+          }
+        }
       },
       "next_command": {
         "name": "Next command",

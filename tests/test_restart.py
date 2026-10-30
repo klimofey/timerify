@@ -207,11 +207,11 @@ async def test_state_is_saved_on_every_change(
     await set_number(hass, NUMBER, 45)
 
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
-    assert saved(hass_storage, entry) == payload(end=at(45))
+    assert saved(hass_storage, entry) == payload(end=at(45), started_at=at(0))
 
     await entry.runtime_data.async_add_minutes(15)
 
-    assert saved(hass_storage, entry) == payload(end=at(60))
+    assert saved(hass_storage, entry) == payload(end=at(60), started_at=at(0))
 
     await set_number(hass, NUMBER, 0)
 
@@ -239,7 +239,7 @@ async def test_version_1_store_is_migrated(
     await set_number(hass, NUMBER, 45)
 
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
-    assert saved(hass_storage, entry) == payload(end=at(45))
+    assert saved(hass_storage, entry) == payload(end=at(45), started_at=at(0))
 
 
 async def test_version_2_store_is_migrated(
@@ -265,7 +265,7 @@ async def test_version_2_store_is_migrated(
 
     assert fake_climate.call_data == [("set_hvac_mode", {"hvac_mode": "cool"})]
     assert state_of(hass, AC_ID) == "cool"
-    assert hass_storage[storage_key(entry)]["version"] == 3
+    assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
     assert saved(hass_storage, entry)["scheduled_by"] is None
     assert saved(hass_storage, entry)["windows"] == []
@@ -292,6 +292,7 @@ async def test_schedule_state_is_stored(
 
     assert saved(hass_storage, entry) == payload(
         end=iso(SUNDAY, "07:15"),
+        started_at=iso(SUNDAY, "06:30"),
         scheduled_by=interval,
         windows=[
             window_json(
@@ -558,6 +559,7 @@ async def test_owed_settings_are_stored_until_the_ac_confirms_them(
 
     assert saved(hass_storage, entry) == payload(
         end=at(60),
+        started_at=at(0),
         pending="on",
         owed_settings={"hvac_mode": "cool", "temperature": 24.0},
     )
@@ -566,7 +568,7 @@ async def test_owed_settings_are_stored_until_the_ac_confirms_them(
     await start
     await hass.async_block_till_done()
 
-    assert saved(hass_storage, entry) == payload(end=at(60))
+    assert saved(hass_storage, entry) == payload(end=at(60), started_at=at(0))
 
 
 async def test_turn_on_only_settings_survive_a_restart_and_skip_a_running_ac(
@@ -735,13 +737,15 @@ async def test_timer_is_saved_before_a_slow_service_call_ends(
     start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(45))
     await slow.reached.wait()
 
-    assert saved(hass_storage, entry) == payload(end=at(45), pending="on")
+    assert saved(hass_storage, entry) == payload(
+        end=at(45), started_at=at(0), pending="on"
+    )
 
     slow.release.set()
     await start
     await hass.async_block_till_done()
 
-    assert saved(hass_storage, entry) == payload(end=at(45))
+    assert saved(hass_storage, entry) == payload(end=at(45), started_at=at(0))
 
 
 async def test_timer_set_during_a_slow_call_survives_a_restart(

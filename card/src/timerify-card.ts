@@ -119,7 +119,11 @@ export class TimerifyCard extends LitElement {
     return GRID_OPTIONS[this._config?.layout ?? "pill"];
   }
 
-  /** Also waits for the questions to Timerify and for the strings that are on their way. */
+  /**
+   * Also waits for the questions to Timerify and for the strings that are on their way.
+   * Only tests await this: no frontend code awaits a card's updateComplete, and none may,
+   * since a question that never comes back would hold it.
+   */
   protected override async getUpdateComplete(): Promise<boolean> {
     let updated = await super.getUpdateComplete();
     while (this.#pending.size > 0) {

@@ -14,9 +14,8 @@ from typing import Final
 
 from homeassistant.components.frontend import add_extra_js_url
 
-# The import Home Assistant documents. The package does not list the name as exported,
-# which mypy's strict mode asks for; the module that defines it does.
-from homeassistant.components.http import StaticPathConfig  # type: ignore[attr-defined]
+# The module that defines it: the package only re-exports the name.
+from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 CARD_URL: Final = "/timerify_frontend/timerify-card.js"

@@ -13,6 +13,7 @@ import re
 import probatio
 import pytest
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent, llm
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -22,7 +23,7 @@ from custom_components.timerify.voice import HANDLER_TYPES
 from custom_components.timerify.voice.base import TimerifyIntentHandler
 from custom_components.timerify.voice.timer import TimeLeftHandler
 
-from ..conftest import FakeTarget, SetupTarget
+from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import NUMBER, TARGET_ID, set_number
 from .helpers import assist_api, call_tool, expose
 
@@ -33,25 +34,28 @@ PROMPT = (
     " commands, or switch its schedule on or off, use the timerify__ tools, naming the"
     " device as listed here."
 )
-"""What an agent is told about Timerify's tools, with the names of the devices where
-`{names}` is."""
+"""What an agent is told about Timerify's tools, with the names of the devices, as a
+JSON list, where `{names}` is."""
 READ_ONLY = llm.ToolAnnotations(read_only=True, open_world=False)
-CHANGES = llm.ToolAnnotations(destructive=False, open_world=False)
-REPEATS = llm.ToolAnnotations(idempotent=True, open_world=False)
+ADDS = llm.ToolAnnotations(destructive=False, open_world=False)
+CONTROL = llm.ToolAnnotations(idempotent=True, open_world=False)
+REPEATS = llm.ToolAnnotations(open_world=False)
 ANNOTATIONS = {
     "timerify__time_left": READ_ONLY,
-    "timerify__run": CHANGES,
-    "timerify__add_time": CHANGES,
-    "timerify__stop": REPEATS,
-    "timerify__delayed_command": CHANGES,
+    "timerify__run": REPEATS,
+    "timerify__add_time": ADDS,
+    "timerify__stop": CONTROL,
+    "timerify__delayed_command": REPEATS,
     "timerify__list_commands": READ_ONLY,
-    "timerify__cancel_commands": REPEATS,
-    "timerify__set_schedule": REPEATS,
+    "timerify__cancel_commands": CONTROL,
+    "timerify__set_schedule": CONTROL,
 }
-"""How each tool behaves, as the core tools of the same kind are annotated: a query
-reads only; starting and extending a timer or a command adds and takes nothing away;
-stopping, cancelling and switching a schedule give the same result when repeated. None
-reaches outside Home Assistant."""
+"""How each tool behaves, annotated as core annotates the intent tools of its kind
+(`homeassistant/components/intent/llm.py`). A query only reads. Adding time only adds.
+Stopping a timer, cancelling commands and switching a schedule give the same result when
+repeated. Running a timer and planning a command replace the countdown and apply
+settings, as turning a device on and starting a timer do in core, so they are
+destructive and act again when repeated. None reaches outside Home Assistant."""
 EVERY_HANDLER = pytest.mark.parametrize(
     "handler", HANDLER_TYPES, ids=lambda handler: handler.tool_name
 )
@@ -78,13 +82,15 @@ def tool_of(api: llm.APIInstance, handler: type[TimerifyIntentHandler]) -> llm.T
     return timerify_tools(api)[handler.tool_name]
 
 
-def context(language: str | None = "en") -> llm.LLMContext:
+def context(
+    language: str | None = "en", assistant: str = "conversation"
+) -> llm.LLMContext:
     """The context of a request, for the platform to be asked directly."""
     return llm.LLMContext(
         platform="test",
         context=Context(),
         language=language,
-        assistant="conversation",
+        assistant=assistant,
         device_id=None,
     )
 
@@ -252,6 +258,18 @@ async def test_no_tools_for_another_llm_api(
     assert async_get_tools(hass, context(), "other") is None
 
 
+async def test_no_tools_for_a_request_without_an_assistant(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """An empty name is no assistant. Asked about it, Home Assistant would write a
+    decision for it into the registry entry of every target."""
+    assert async_get_tools(hass, context(assistant=""), llm.LLM_API_ASSIST) is None
+
+    registered = er.async_get(hass).async_get(TARGET_ID)
+    assert registered is not None
+    assert "" not in registered.options
+
+
 # --- What the agent is told --------------------------------------------------------
 
 
@@ -270,14 +288,36 @@ async def test_prompt_names_the_exposed_targets_only(
 
     api = await assist_api(hass)
 
-    assert PROMPT.format(names="Boiler") in api.api_prompt
+    assert PROMPT.format(names='["Boiler"]') in api.api_prompt
     assert "Fan" not in api.api_prompt
 
     expose(hass, fake_fan.entity_id, True)
 
     api = await assist_api(hass)
 
-    assert PROMPT.format(names="Boiler, Fan") in api.api_prompt
+    assert PROMPT.format(names='["Boiler", "Fan"]') in api.api_prompt
+
+
+async def test_prompt_lists_the_names_so_that_each_is_one(
+    hass: HomeAssistant,
+    provide_target: ProvideTarget,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> None:
+    """A device is called what its owner called it, a comma, a quote and a line break
+    included: the prompt lists the names as a JSON list, in which each stays one name
+    and the agent can pass it back as it reads it."""
+    name = 'Café, "main"\nlamp'
+    odd = provide_target("switch.odd", SWITCH_SERVICES, name=name)
+    await setup_target()
+    await setup_target(target=odd.entity_id)
+
+    api = await assist_api(hass)
+
+    assert PROMPT.format(names=r'["Boiler", "Café, \"main\"\nlamp"]') in api.api_prompt
+    data = await call_tool(api, "timerify__time_left", {"name": name})
+    assert data["speech_slots"]["target"] == name
 
 
 # --- Calling a tool ----------------------------------------------------------------

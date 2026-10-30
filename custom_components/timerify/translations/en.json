@@ -23,7 +23,7 @@
       },
       "voice_settings": {
         "title": "Voice settings",
-        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the custom_sentences folder of each language you pick (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
+        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the folder of each language you pick under custom_sentences (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
         "data": {
           "write_sentence_files": "Add voice sentences for the built-in agent",
           "languages": "Languages"
@@ -72,7 +72,7 @@
       },
       "voice_settings": {
         "title": "Voice settings",
-        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the custom_sentences folder of each language you pick (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
+        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the folder of each language you pick under custom_sentences (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
         "data": {
           "write_sentence_files": "Add voice sentences for the built-in agent",
           "languages": "Languages"

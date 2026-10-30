@@ -6,6 +6,8 @@ that uses the Assist API starts a request. They are the handlers of the built-in
 the same path to the same controller.
 """
 
+import json
+
 from homeassistant.components.homeassistant.exposed_entities import (
     async_should_expose,
 )
@@ -29,8 +31,8 @@ TOOLS_PROMPT = (
     " commands, or switch its schedule on or off, use the timerify__ tools, naming the"
     " device as listed here."
 )
-"""What an agent is told about the tools, with the names of the devices where `{names}`
-is."""
+"""What an agent is told about the tools, with the names of the devices, as a JSON
+list, where `{names}` is."""
 
 
 def handler_tool(handler_type: type[TimerifyIntentHandler]) -> IntentTool:
@@ -62,9 +64,14 @@ def async_get_tools(
 
     Home Assistant does not filter a tool by what is exposed to the assistant, so this
     does: the tools are offered while there is a device they can act on, and the prompt
-    names those devices only. Exposure is asked again when a tool is called.
+    names those devices only, as a JSON list, in which a name with a comma, a quote or a
+    line break is still one name. Exposure is asked again when a tool is called.
     """
     if api_id != LLM_API_ASSIST:
+        return None
+    if not llm_context.assistant:
+        # An empty name is no assistant: asking Home Assistant about its exposure
+        # would write a decision for it into the registry entry of every target.
         return None
     targets = (entry.runtime_data.target_entity_id for entry in loaded_timers(hass))
     names = [
@@ -76,5 +83,5 @@ def async_get_tools(
         return None
     return LLMTools(
         tools=[handler_tool(handler_type) for handler_type in HANDLER_TYPES],
-        prompt=TOOLS_PROMPT.format(names=", ".join(names)),
+        prompt=TOOLS_PROMPT.format(names=json.dumps(names, ensure_ascii=False)),
     )

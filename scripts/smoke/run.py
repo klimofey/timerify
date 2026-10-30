@@ -13,7 +13,10 @@ user would see:
    turns the switch off one minute later.
 3. "Run for" 1 minute with a mode and a temperature on a generic thermostat: it is set
    to heat and 23 degrees, and turned off when the countdown ends.
-4. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
+4. A schedule interval for today's weekday, added to the first timer through the
+   interval flow to begin in a minute or two and run for two minutes: its switch is on,
+   and the first switch turns on at the start and off at the end.
+5. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
    carries on and the switch turns off at the end it had before the restart.
 
 Everything is observed over the WebSocket API by subscribing to state changes.
@@ -27,12 +30,13 @@ import argparse
 import asyncio
 import contextlib
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -58,6 +62,10 @@ CALL_TIMEOUT = 30.0
 TURN_ON_TIMEOUT = 15.0
 COMMAND_DELAY = timedelta(minutes=1)
 """How far ahead the pending command of the demo switch is set."""
+WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+"""The names the interval form gives the days of the week, Monday first."""
+INTERVAL_LENGTH = timedelta(minutes=2)
+"""How long the schedule interval runs the first switch."""
 START_SLACK = timedelta(seconds=5)
 """How far the end of a countdown may be from `minutes` after the switch turned on."""
 EXPIRY_SLACK = timedelta(seconds=5)
@@ -66,6 +74,7 @@ CLOCK_TOLERANCE = timedelta(seconds=1)
 
 type State = dict[str, Any]
 type Matcher = Callable[[State | None], bool]
+type EntityMatcher = Callable[[str, State], bool]
 
 
 class SmokeFailure(Exception):
@@ -281,24 +290,61 @@ class Socket:
     ) -> State:
         """Wait until the entity's state matches; `expected` says what it should be."""
 
+        def found() -> State | None:
+            state = self._states.get(entity_id)
+            return state if matches(state) else None
+
+        def current() -> str:
+            state = self._states.get(entity_id)
+            return state["state"] if state else "missing"
+
+        return await self._wait_for(found, entity_id, expected, seconds, current)
+
+    async def wait_for_entity(
+        self, matches: EntityMatcher, expected: str, seconds: float
+    ) -> State:
+        """Wait until the state of some entity matches, for an entity whose id is not
+        known yet; returns that state, which names the entity."""
+
+        def found() -> State | None:
+            return next(
+                (
+                    state
+                    for entity_id, state in self._states.items()
+                    if matches(entity_id, state)
+                ),
+                None,
+            )
+
+        return await self._wait_for(found, "the entities", expected, seconds)
+
+    async def _wait_for(
+        self,
+        found: Callable[[], State | None],
+        what: str,
+        expected: str,
+        seconds: float,
+        current: Callable[[], str] | None = None,
+    ) -> State:
+        """Wait until `found` gives a state; `what` names the thing waited for."""
+
         async def satisfied() -> State:
             async with self._changed:
                 await self._changed.wait_for(
-                    lambda: self._closed or matches(self._states.get(entity_id))
+                    lambda: self._closed or found() is not None
                 )
-            if not matches(self._states.get(entity_id)):
+            if (state := found()) is None:
                 raise SmokeFailure(
-                    f"{entity_id}: the WebSocket closed while waiting for {expected}"
+                    f"{what}: the WebSocket closed while waiting for {expected}"
                 )
-            return self._states[entity_id]
+            return state
 
         try:
             return await asyncio.wait_for(satisfied(), seconds)
         except TimeoutError:
-            current = self._states.get(entity_id)
+            found_now = f", it is {current()}" if current else ""
             raise SmokeFailure(
-                f"{entity_id}: expected {expected} within {seconds:.0f}s, "
-                f"it is {current['state'] if current else 'missing'}"
+                f"{what}: expected {expected} within {seconds:.0f}s{found_now}"
             ) from None
 
     async def _read(self) -> None:
@@ -389,6 +435,11 @@ async def add_timer(
             f"{flow_path}/{flow['flow_id']}",
             access_token,
             json=user_input,
+        )
+    if flow["type"] == "form" and flow["step_id"] == "workday":
+        # Asked only in a house that has a Workday sensor, and optional.
+        flow = await request_json(
+            session, "POST", f"{flow_path}/{flow['flow_id']}", access_token, json={}
         )
     if flow["type"] != "create_entry":
         raise SmokeFailure(f"The flow should create the timer, but gave {flow}")
@@ -614,6 +665,125 @@ async def scenario_settings(session: aiohttp.ClientSession, refresh_token: str) 
         await expect_off_at(socket, timer, end)
 
 
+def the_only[Row](found: Iterable[Row], what: str) -> Row:
+    """The one row of `found`; none or several is a failure that says what was found."""
+    rows = list(found)
+    if len(rows) != 1:
+        raise SmokeFailure(f"Expected one {what}, found {len(rows)}: {rows}")
+    return rows[0]
+
+
+def is_schedule_switch_of(title: str) -> EntityMatcher:
+    """Match the state `on` of the switch of the interval that is called `title`."""
+    return lambda entity_id, state: (
+        entity_id.startswith("switch.")
+        and state["state"] == "on"
+        and state["attributes"].get("friendly_name", "").endswith(f"Schedule {title}")
+    )
+
+
+async def add_interval(
+    session: aiohttp.ClientSession,
+    access_token: str,
+    timer: Timer,
+    *,
+    weekday: str,
+    start: datetime,
+    end: datetime,
+) -> str:
+    """Add an interval of `weekday` from `start` to `end` to the timer the way its page
+    does, through the interval flow; returns the title Timerify gave it.
+
+    The times are the wall clock of Home Assistant, which the form takes as `HH:MM:SS`.
+    """
+    flow_path = "/api/config/config_entries/subentries/flow"
+    flow = await request_json(
+        session,
+        "POST",
+        flow_path,
+        access_token,
+        json={"handler": [timer.entry_id, "interval"]},
+    )
+    if flow["type"] != "form" or flow["step_id"] != "user":
+        raise SmokeFailure(f"The flow should ask for the interval, but gave {flow}")
+    flow = await request_json(
+        session,
+        "POST",
+        f"{flow_path}/{flow['flow_id']}",
+        access_token,
+        json={
+            "days": "weekdays",
+            "weekdays": [weekday],
+            "start": f"{start:%H:%M}:00",
+            "end": f"{end:%H:%M}:00",
+        },
+    )
+    if flow["type"] != "create_entry":
+        raise SmokeFailure(f"The flow should create the interval, but gave {flow}")
+    return str(flow["title"])
+
+
+async def scenario_schedule(
+    session: aiohttp.ClientSession, refresh_token: str, timer: Timer
+) -> None:
+    say(f"Add an interval for {timer.target}: today, two minutes long, in a minute")
+    async with open_socket(session, refresh_token) as socket:
+        zone = ZoneInfo((await socket.call("get_config"))["time_zone"])
+        # The next whole minute, plus one: the form and the reload that follows it take
+        # a few seconds, and the interval must not have begun when they are done.
+        start = datetime.now(zone).replace(second=0, microsecond=0) + timedelta(
+            minutes=2
+        )
+        end = start + INTERVAL_LENGTH
+        title = await add_interval(
+            session,
+            await new_access_token(session, refresh_token),
+            timer,
+            weekday=WEEKDAYS[start.weekday()],
+            start=start,
+            end=end,
+        )
+        say(f"  interval {title}, in the time zone {zone.key}")
+
+        await socket.wait_for_entity(
+            is_schedule_switch_of(title), "the switch of the interval, on", CALL_TIMEOUT
+        )
+        subentries = await socket.call(
+            "config_entries/subentries/list", entry_id=timer.entry_id
+        )
+        subentry = the_only(
+            (row for row in subentries if row["title"] == title),
+            f"subentry titled {title!r}",
+        )
+        registry = await socket.call("config/entity_registry/list")
+        unique_id = f"{timer.entry_id}_interval_{subentry['subentry_id']}"
+        row = the_only(
+            (row for row in registry if row["unique_id"] == unique_id),
+            f"entity with the unique id {unique_id}",
+        )
+        if row["device_id"] != timer.device_id:
+            raise SmokeFailure(
+                f"The switch of the interval sits on device {row['device_id']}, "
+                f"not on that of the timer, {timer.device_id}"
+            )
+        say(f"  {row['entity_id']} on, on the device of the timer")
+
+        wait = (start - datetime.now(UTC)).total_seconds() + TURN_ON_TIMEOUT
+        on, ends_at = await expect_started(
+            socket, timer, int(INTERVAL_LENGTH.total_seconds() // 60), wait=wait
+        )
+        started = timestamp(on["last_changed"])
+        if not start - CLOCK_TOLERANCE <= started <= start + START_SLACK:
+            raise SmokeFailure(f"{timer.target} turned on at {started}, not at {start}")
+        if abs(ends_at - end) > CLOCK_TOLERANCE:
+            raise SmokeFailure(f"The interval ends at {end}, the timer at {ends_at}")
+        await expect_off_at(socket, timer, end)
+        await socket.wait_for_state(
+            row["entity_id"], has_state("on"), "on, the interval is still enabled", 1
+        )
+        say(f"  {row['entity_id']} still on: the interval waits for next week")
+
+
 async def scenario_restart(
     session: aiohttp.ClientSession, refresh_token: str, timer: Timer
 ) -> None:
@@ -661,6 +831,7 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
     await scenario_expiry(session, refresh_token, timer)
     await scenario_command(session, refresh_token)
     await scenario_settings(session, refresh_token)
+    await scenario_schedule(session, refresh_token, timer)
     await scenario_restart(session, refresh_token, timer)
     if keep:
         await leave_running(session, refresh_token, timer)

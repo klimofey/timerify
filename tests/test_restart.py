@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CoreState, HomeAssistant
 
 from custom_components.timerify.const import freeze_settings
@@ -24,24 +24,28 @@ from .helpers import (
     AC_NUMBER,
     NUMBER,
     SENSOR,
+    SUNDAY,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_interval,
     advance,
+    advance_to,
     at,
     command_json,
+    iso,
+    local,
+    open_sunday,
     payload,
+    restart,
     saved,
     set_number,
     state_of,
     storage_key,
+    window_json,
 )
 
-
-async def restart(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Stop the entry and start it again, as a Home Assistant restart does."""
-    await hass.config_entries.async_reload(entry.entry_id)
-    await hass.async_block_till_done()
+MONDAY = SUNDAY + timedelta(days=1)
 
 
 async def test_running_timer_survives_reload(
@@ -231,14 +235,266 @@ async def test_version_1_store_is_migrated(
     assert state_of(hass, NUMBER) == "30"
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
-    assert saved(hass_storage, entry)["commands"] == []
 
     await set_number(hass, NUMBER, 45)
 
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
-    assert saved(hass_storage, entry) == payload(
-        end=at(45), owed_settings={}, commands=[]
+    assert saved(hass_storage, entry) == payload(end=at(45))
+
+
+async def test_version_2_store_is_migrated(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A timer stored before schedules existed owes settings that a command asked for,
+    so they still reach an AC that is running; the file is written in the current form
+    and no longer says anything else of them."""
+    await fake_climate.set_state("heat")
+    entry = await setup_target(
+        target=AC_ID,
+        stored={
+            "end": at(30),
+            "pending": None,
+            "owed_settings": {"hvac_mode": "cool"},
+            "commands": [],
+        },
+        stored_version=2,
     )
+
+    assert fake_climate.call_data == [("set_hvac_mode", {"hvac_mode": "cool"})]
+    assert state_of(hass, AC_ID) == "cool"
+    assert hass_storage[storage_key(entry)]["version"] == 3
+    assert saved(hass_storage, entry) == payload(end=at(30))
+    assert saved(hass_storage, entry)["scheduled_by"] is None
+    assert saved(hass_storage, entry)["windows"] == []
+
+
+async def test_schedule_state_is_stored(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The file holds the window that is waiting, then the window that runs with the
+    timer that carries its end, then the window of the next day."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+
+    assert saved(hass_storage, entry) == payload(
+        windows=[window_json(interval, local(SUNDAY, "06:30"), local(SUNDAY, "07:15"))]
+    )
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "07:15"),
+        scheduled_by=interval,
+        windows=[
+            window_json(
+                interval,
+                local(SUNDAY, "06:30"),
+                local(SUNDAY, "07:15"),
+                started=True,
+            )
+        ],
+    )
+
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+
+    monday = SUNDAY + timedelta(days=1)
+    assert saved(hass_storage, entry) == payload(
+        windows=[window_json(interval, local(monday, "06:30"), local(monday, "07:15"))]
+    )
+
+
+async def test_interval_settings_are_stored_with_their_window(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The window keeps what its interval turns the AC on with, so a restart before the
+    window starts still turns the AC on that way."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    settings = {"hvac_mode": "cool", "temperature": 24.0}
+    interval = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=settings
+    )
+
+    assert saved(hass_storage, entry) == payload(
+        windows=[
+            window_json(
+                interval, local(SUNDAY, "06:30"), local(SUNDAY, "07:15"), settings
+            )
+        ]
+    )
+
+    await restart(hass, entry)
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "cool"}),
+        ("set_temperature", {"temperature": 24.0}),
+    ]
+
+
+async def test_window_stopped_by_hand_is_stored_as_suppressed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Switching the target off during its window is on file with the window, which is
+    what keeps a restart from turning the target on again (S4)."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    await fake_target.set_state("off")
+
+    assert saved(hass_storage, entry) == payload(
+        windows=[
+            window_json(
+                interval,
+                local(SUNDAY, "06:30"),
+                local(SUNDAY, "07:15"),
+                started=True,
+                suppressed=True,
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "complaint"),
+    [
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")),
+                    window_json("a", local(SUNDAY, "08:30"), local(SUNDAY, "09:15")),
+                ]
+            ),
+            "two windows of the interval a",
+            id="two-windows-of-one-interval",
+        ),
+        pytest.param(
+            payload(scheduled_by="a"),
+            "scheduled by an interval but has no end",
+            id="schedule-without-an-end",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json(
+                        "a",
+                        local(SUNDAY, "06:30"),
+                        local(SUNDAY, "07:15"),
+                        suppressed=True,
+                    )
+                ]
+            ),
+            "window of a is suppressed but has not started",
+            id="suppressed-before-it-started",
+        ),
+        pytest.param(
+            payload(end=at(30), owed_turn_on_only=True),
+            "turn-on-only marker is set without owed settings",
+            id="marker-without-settings",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15"))
+                ],
+                disabled_intervals=["a"],
+            ),
+            "the interval a is switched off but has a window",
+            id="window-of-a-switched-off-interval",
+        ),
+        pytest.param(
+            {**payload(), "disabled_intervals": ["a", "a"]},
+            "the interval a is switched off twice",
+            id="interval-switched-off-twice",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    {
+                        **window_json(
+                            "a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")
+                        ),
+                        "start": "2026-01-04T04:30:00",
+                    }
+                ]
+            ),
+            "the window's start must be timezone-aware",
+            id="window-start-without-an-offset",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    {
+                        **window_json(
+                            "a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")
+                        ),
+                        "end": "2026-01-04T05:15:00",
+                    }
+                ]
+            ),
+            "the window's end must be timezone-aware",
+            id="window-end-without-an-offset",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "07:15"), local(SUNDAY, "06:30"))
+                ]
+            ),
+            "the window of a must start before it ends and last at most a day",
+            id="window-that-ends-before-it-starts",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "06:30"), local(MONDAY, "06:31"))
+                ]
+            ),
+            "the window of a must start before it ends and last at most a day",
+            id="window-longer-than-a-day",
+        ),
+    ],
+)
+async def test_file_that_contradicts_itself_is_refused(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+    stored: dict[str, Any],
+    complaint: str,
+) -> None:
+    """The file is read strictly: one that no timer could have written fails the
+    set-up with a reason in words, saying what is wrong, instead of running on a state
+    nothing makes sense of; the log has the reason, not a bare ValueError."""
+    entry = await setup_target(stored=stored)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_domain == "timerify"
+    assert entry.error_reason_translation_key == "stored_timer_invalid"
+    assert entry.reason is not None
+    assert "Remove this timer and add it again" in entry.reason
+    assert complaint in entry.reason
+    assert complaint in caplog.text
+    assert "ValueError" not in caplog.text
+    assert fake_target.calls == []
 
 
 def test_command_is_stored_as_plain_data_in_utc() -> None:
@@ -311,6 +567,117 @@ async def test_owed_settings_are_stored_until_the_ac_confirms_them(
     await hass.async_block_till_done()
 
     assert saved(hass_storage, entry) == payload(end=at(60))
+
+
+async def test_turn_on_only_settings_survive_a_restart_and_skip_a_running_ac(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """§5.4: a schedule window owed its settings to a turn-on that had not happened when
+    Home Assistant stopped; the AC is found running, so nobody pushes them onto it."""
+    await fake_climate.set_state("heat")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == []
+    assert state_of(hass, AC_ID) == "heat"
+    assert state_of(hass, AC_NUMBER) == "30"
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_turn_on_only_settings_survive_a_restart_and_turn_an_off_ac_on(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The same file with the AC off: the turn-on that was owed goes out with them."""
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == [("set_hvac_mode", {"hvac_mode": "cool"})]
+    assert state_of(hass, AC_ID) == "cool"
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_partly_applied_window_settings_are_retried_on_the_ac_it_turned_on(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The window's turn-on switches the AC to heat, and setting the temperature fails:
+    the AC runs because of that turn-on, so the temperature is tried again instead of
+    being dropped as settings pushed onto a running AC."""
+    fake_climate.fail_next_call(service="set_temperature")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "heat", "temperature": 22.0},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "heat"}),
+        ("set_temperature", {"temperature": 22.0}),
+        ("set_hvac_mode", {"hvac_mode": "heat"}),
+        ("set_temperature", {"temperature": 22.0}),
+    ]
+    assert fake_climate.state_attributes["temperature"] == 22.0
+    assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_turn_on_only_settings_are_stored_while_the_ac_is_away(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The file keeps the marker with the settings across changes of the timer, so the
+    AC that comes back running is still not given them."""
+    await fake_climate.set_state("unavailable")
+    entry = await setup_target(
+        target=AC_ID,
+        stored=payload(
+            end=at(30),
+            pending="on",
+            owed_settings={"hvac_mode": "cool"},
+            owed_turn_on_only=True,
+        ),
+    )
+
+    await entry.runtime_data.async_add_minutes(15)
+
+    assert saved(hass_storage, entry) == payload(
+        end=at(45),
+        pending="on",
+        owed_settings={"hvac_mode": "cool"},
+        owed_turn_on_only=True,
+    )
+
+    await fake_climate.set_state("heat")
+
+    assert fake_climate.call_data == []
+    assert saved(hass_storage, entry) == payload(end=at(45))
 
 
 async def test_expiry_is_saved(

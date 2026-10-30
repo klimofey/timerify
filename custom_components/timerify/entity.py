@@ -1,12 +1,34 @@
 """Base class of the entities Timerify adds to a target's device."""
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device import async_entity_id_to_device
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN
 from .controller import TimerifyConfigEntry
+
+
+def timer_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> dr.AnyDeviceEntry:
+    """The device the entities of a timer are on: the target's own or, for a target that
+    is on none, one Timerify makes for the timer, named after the target.
+
+    An entity is put on it by `Entity.device_entry`, never by a `DeviceInfo`: with a
+    `DeviceInfo` the platform registers the device under the subentry the entity is
+    added to, so the switch of an interval would move the timer's device into the
+    interval's subentry, the other entities would leave the registry with it, and
+    deleting the interval would delete the device. The device made for the timer
+    belongs to the entry alone.
+    """
+    controller = entry.runtime_data
+    device = async_entity_id_to_device(hass, controller.target_entity_id)
+    if device is not None:
+        return device
+    return dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=controller.device_name,
+    )
 
 
 class TimerifyEntity(Entity):
@@ -19,16 +41,22 @@ class TimerifyEntity(Entity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: TimerifyConfigEntry,
+        *,
+        unique_id: str | None = None,
+    ) -> None:
+        """`unique_id` is the entity's own; without one it is the timer's id and the
+        key of the entity's description, for an entity that a timer has one of."""
         self._controller = entry.runtime_data
-        self._attr_unique_id = f"{entry.entry_id}_{self.entity_description.key}"
-        target = self._controller.target_entity_id
-        self.device_entry = async_entity_id_to_device(hass, target)
-        if self.device_entry is None:
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, entry.entry_id)},
-                name=self._controller.device_name,
-            )
+        self._attr_unique_id = (
+            f"{entry.entry_id}_{self.entity_description.key}"
+            if unique_id is None
+            else unique_id
+        )
+        self.device_entry = timer_device(hass, entry)
 
     async def async_added_to_hass(self) -> None:
         """Follow the controller."""

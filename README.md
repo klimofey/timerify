@@ -9,16 +9,17 @@ off when the countdown ends.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
 
-> **Status:** version 0.2.0, the second phase. The core timer, settings for turning on
-> ("cooling, 24 degrees") and pending commands ("turn on in 15 minutes") work and are
-> described below. Schedules and voice control are not built yet; see
-> [What is not here yet](#what-is-not-here-yet).
+> **Status:** version 0.3.0, the third phase. The core timer, settings for turning on
+> ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes") and weekly schedules
+> ("working days 06:30 to 07:15") work and are described below. The dashboard card and
+> voice control are not built yet; see [What is not here yet](#what-is-not-here-yet).
 
 ## What it does
 
 Each timer belongs to one entity, its target. Starting, changing and stopping the countdown
 is the only way Timerify switches the target, so the rules never contradict each other (a
-pending command is a change of the countdown that happens later):
+pending command is a change of the countdown that happens later, and so is the start of a
+schedule interval's window):
 
 - Set "Run for" to a number of minutes: the target turns on and turns off when the time is up.
   Set it to a new number while it runs: the countdown restarts from that number.
@@ -40,6 +41,8 @@ pending command is a change of the countdown that happens later):
   start-up the end time is checked against the clock. A countdown that ended while Home
   Assistant was down turns the target off.
 - A countdown is whole minutes, up to one day.
+- A weekly schedule starts the countdown on its own at set times of the day; see
+  [Schedules](#schedules).
 
 ### Targets
 
@@ -71,7 +74,7 @@ those other entities, and groups, on and off through `homeassistant.turn_on` and
 
 ### Entities
 
-All three sit on the target's device. A target that is on no device gets a device named
+All of them sit on the target's device. A target that is on no device gets a device named
 after it.
 
 | Entity | What it shows |
@@ -79,6 +82,7 @@ after it.
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
 | `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
+| `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 
 ## Settings
 
@@ -99,6 +103,9 @@ Settings are applied in these cases:
   kind, whatever causes it: setting "Run for", `timerify.add_time` on a timer that is not
   running, a command that gives no settings of its own. If the target is found running
   instead, even when you turned it on by hand, they are set then.
+- The settings of a schedule interval go out only with the turn-on that its window makes,
+  and are never pushed onto a target that is already running; see
+  [Settings of an interval](#settings-of-an-interval).
 
 When no settings wait, a manual turn-on, setting "Run for" and `timerify.add_time` turn the
 target on plainly.
@@ -191,6 +198,185 @@ commands:
 `id` is what `timerify.cancel_command` takes, `at` is in UTC, `minutes` is null when the
 command gives none, and `settings` is empty when it carries none. The list is not kept in
 the history database.
+
+## Schedules
+
+A schedule interval says "the target should run from this time to that time on these days".
+A timer can have any number of them, each with its own days, times and settings: a boiler
+that heats on working-day mornings and a little later on days off is two intervals. When an
+interval's window opens, Timerify sets the timer to the window's end, so the target turns on
+and turns itself off at the end like any other countdown, and everything above applies:
+"Run for", `timerify.add_time` and the other services work on a countdown a window started.
+
+### Adding, editing and deleting intervals
+
+Intervals belong to the timer's entry, one at a time. Open **Settings > Devices & services**
+and the timer's entry under Timerify, and choose **Add schedule interval**. Each interval
+is listed there with a menu to **Edit** or **Delete** it. The form asks for:
+
+- **Days**: the weekdays you pick, the working days, or the non-working days; see
+  [Days](#days).
+- **Weekdays**: the days the interval starts on, all seven to begin with. It matters only
+  when the days are the weekdays.
+- **Start time** and **End time**, in whole minutes; the two must differ. An end earlier
+  than the start carries the interval past midnight into the next day: 22:00 to 06:00 runs
+  the night, and belongs to the day it starts on.
+- **Settings**, for a target that has some: see [Settings of an interval](#settings-of-an-interval).
+  The section is folded away for a new interval and open when you edit one that has settings.
+
+An interval is named by its times and days, in your language: *06:30–07:15, Sun–Thu*. A
+name you gave it yourself is kept when you edit the interval; one that Timerify made follows
+the edit.
+
+Adding, editing or deleting an interval reloads the timer for a moment so that it reads its
+intervals again. The countdown and the pending commands are stored and carry on. Deleting
+an interval removes its switch.
+
+### Days
+
+- **Weekdays**: any set of days of the week.
+- **Working days** and **Non-working days**: follow a **Workday sensor**, a binary sensor of
+  Home Assistant's [Workday integration](https://www.home-assistant.io/integrations/workday/),
+  which knows your country's public holidays and the working week you set in it. Its
+  default week is Monday to Friday in every country, so set the week in the sensor's own
+  options, both fields: **Days to include** and **Days to exclude** — a day in both lists
+  is excluded. In Israel: include Sunday to Thursday, exclude Friday, Saturday and holidays.
+  Timerify follows the sensor. A boiler that runs "on working days at 06:30" skips a
+  holiday on its own.
+
+The Workday sensor belongs to the timer. If your house has one, the last step of adding a
+timer asks for it, and the first interval you add then offers working days from the start.
+To set it, change it or take it away later, open the timer's entry and choose **Configure**;
+the sensor is the last step. It is optional, and a timer without one has weekday intervals
+only.
+
+- **Use a sensor with a days offset of 0**, the default of the Workday integration. Timerify
+  asks the sensor about the day an interval starts on and takes its answer as it is: a
+  sensor with an offset of 1 answers for the day after, and the schedule would run shifted
+  by a day.
+- **An interval of working days or non-working days needs the timer's Workday sensor.** The
+  interval form refuses these days on a timer without one, and **Configure** refuses to
+  remove the sensor while an interval uses it: change or delete those intervals first. (A
+  timer whose stored intervals need a sensor it does not have, which only a hand-edited
+  file can produce, does not load and says why; reload it after fixing the file.)
+- **An unavailable sensor stops new windows, not running ones.** When the sensor is
+  unavailable, the Workday integration is not loaded, or its answer fails, Timerify cannot
+  tell whether a day is a working one. The windows it has already worked out stay: one that
+  is open runs to its end and one that has not begun still begins. No new window of a
+  working-day or non-working-day interval is worked out until the sensor answers, so the
+  morning after the sensor went away nothing starts. The log carries one warning per outage
+  that says which sensor and why. Timerify tries again whenever the sensor changes or
+  reports, which the Workday integration does at every midnight; when it answers, a window
+  that is open is run for its remainder. Intervals of weekdays do not depend on the sensor.
+- **A renamed Workday sensor is not followed.** Timerify keeps the sensor by its entity id,
+  and unlike the target it does not follow a rename. After renaming the sensor the working-day
+  intervals wait and the log says the sensor could not be asked; open **Configure** on the
+  timer and pick the sensor again.
+
+### Windows
+
+Each day an interval applies, it opens a window from its start to its end. Windows follow the
+clock on the wall, in Home Assistant's time zone:
+
+- A window across midnight lasts what the clock says. For working days, the day that counts
+  is the day it starts on.
+- On the days the clock changes, a window starts and ends at its wall times. In Israel in
+  2026, from 23:00 to 07:00 lasts 7 hours on the night the clock goes forward and 9 hours
+  on the night it goes back. A time that does not exist (02:30 on the night the clock jumps
+  from 02:00 to 03:00) happens an hour later, at 03:30, so 02:10 to 02:50 runs from 03:10 to
+  03:50 that day. When that puts the start at or after the end (02:30 to 03:15, or 02:50 to
+  03:10), the interval does not run that day. A time that happens twice (01:30 when the
+  clock goes back) is its first.
+- A window is never longer than a day, the length of the longest countdown.
+- Changing Home Assistant's time zone moves the windows. (A zone changed in
+  `configuration.yaml` and applied with "Reload core configuration" is not noticed until a
+  window ends, the Workday sensor reports or the timer is reloaded.)
+
+### The switch of an interval
+
+Every interval has a `switch` on the timer's device, named *Schedule 06:30–07:15, Sun–Thu*.
+It is on to begin with.
+
+- Switch it off and the interval is skipped. If its window is open and the schedule is
+  running the timer, the timer stops at once, or passes to another open window that wants
+  the target running (rule 2 below).
+- Switch it on while the window is open and the target runs for the rest of the window.
+- The state is stored with the timer and survives restarts. Flipping the switch does not
+  reload the timer.
+- The name follows edits of the interval after the reload; the entity id keeps the title the
+  interval had when it was added.
+
+### How the schedule and your own changes meet
+
+Schedules are declarative: an interval means "the target should run during this window",
+and you always win. Five rules, in plain words:
+
+1. **A window extends a manual run, never shortens it.** When a window opens, the timer is
+   set to the window's end, unless the timer already ends later, in which case it is left
+   alone. If you started a countdown at 06:20 that ends at 06:40, the 06:30 to 07:15 window
+   makes it end at 07:15; if you added time so that it ends at 08:00, it stays. In loose
+   mode a run without a countdown that is going when a window opens is cut at the window's
+   end.
+2. **Edits follow the schedule.** While the timer's end was set by a schedule interval and
+   you have not changed the timer since, editing, deleting or switching off that interval
+   moves or stops the timer at once: edit the interval at 07:00 from 06:00 to 08:00 into 06:00
+   to 07:30, and the timer ends at 07:30. Moving an interval ahead stops the target and
+   starts it at the new start, which is a new window. With overlapping intervals the timer
+   ends at the latest end of the open windows, so deleting one of two overlapping intervals
+   does not stop a target that the other still wants.
+3. **A change of yours ends that.** "Run for", `timerify.add_time`, `timerify.run`,
+   stopping the timer and a pending command are yours: after one, editing an interval no
+   longer touches the timer, until the next window sets it. A pending command that falls
+   due at the very moment a window opens is carried out after it and wins.
+4. **A manual off holds until the next window.** If the target is off during a window,
+   whoever turned it off (you at the wall, its own app, an automation, "Run for" 0, the end
+   of a countdown you started), the window does not turn it back on; the next window does.
+   This is stored, so a restart does not bring the window back either. Two things start the
+   target again, because they are your acts too: editing the interval so that its window
+   moves out of the present moment (the edit makes a new window, which begins at its own
+   start), and switching the interval off and on.
+5. **Turning the target on by hand once a window has opened is an ordinary manual start.**
+   In strict mode it runs for the default duration, in loose mode without a countdown; the
+   window does not stretch it to its own end.
+
+### Settings of an interval
+
+An interval can turn the target on the way you want, with the same settings as a pending
+command: cooling at 24 degrees on the air conditioner, a brightness for a light. The form
+offers only what the target says it can do.
+
+- The settings go out when the window opens and **Timerify turns the target on for it**: the
+  target is off, or a turn-off is on its way and the target has not yet answered. An air
+  conditioner gets its mode, then its temperature, then its fan mode.
+- **A target that is already running when a window opens gets no settings**, only the
+  extended countdown: someone chose the current ones. That includes a run started by another
+  interval, and a target that is not on yet but whose turn-on is still wanted (it is on its
+  way, it waits for an unavailable target, or the call failed). The same goes for a target
+  that was unavailable when the window opened and is already on when it comes back.
+- A target that is unavailable at the start keeps the countdown, and is turned on with the
+  settings when it is back, if it is off then and the window is still open.
+- A window never replaces the settings of a command that is waiting for the target: the
+  command's turn-on is still wanted, and its settings stay.
+- If the turn-on goes through and a settings call fails, the settings are sent again, with
+  the same limits as for a refused turn-on, provided the target reports that it is on in
+  response to Timerify's own call. A device that only reports later, when it is polled, has
+  the rest of the settings dropped: Timerify does not push settings onto a target that
+  someone else may have set.
+- Editing an interval while its window is open does not push the new settings onto the
+  running target; they are used from the next window.
+
+### Restarts
+
+- Windows are stored with the timer, with whether each has started and whether you stopped
+  it.
+- A window that is open when Home Assistant starts and had already started leaves the
+  countdown as it was: it still ends where the window ends.
+- A window that began while Home Assistant was down, and was not applied yet, is applied at
+  start-up for the rest of its window: the boiler turns on when it is back.
+- A countdown that ended while Home Assistant was down turns the target off, as above. When
+  one window ended and the next began during a long outage, the target is not switched off and
+  on for it.
+- An interval you switched off stays off.
 
 ## Services
 
@@ -304,32 +490,36 @@ Add one timer per entity:
    "Timerify (Helper)".)
 2. Pick the entity, and the mode.
 3. In strict mode, set the default duration.
+4. If your house has a Workday sensor, pick the one this timer follows, or leave it empty;
+   see [Days](#days).
 
-The timer appears on the entity's device page. To change the mode or the default duration
-later, open the timer on the Timerify integration page and choose **Configure**. The
-entity itself cannot be changed: add a timer for the other entity instead.
+The timer appears on the entity's device page. To change the mode, the default duration or
+the Workday sensor later, open the timer on the Timerify integration page and choose
+**Configure**. The entity itself cannot be changed: add a timer for the other entity
+instead. Schedule intervals are added on the same page; see [Schedules](#schedules).
 
 Renaming the target, or moving it to another device, is followed: the timer keeps running.
 
 ## What is not here yet
 
-Planned for later versions, none of it available in 0.2.0: a weekly schedule, a dashboard
-card, and Assist voice control ("turn on the boiler for 10 minutes", "how long is left on
-the boiler?").
+Planned for later versions, none of it available in 0.3.0: a dashboard card, and Assist
+voice control ("turn on the boiler for 10 minutes", "how long is left on the boiler?").
 
 ## Verification
 
-What 0.2.0 was checked with before release:
+What 0.3.0 was checked with before release:
 
 - The test suite (`uv run pytest`): every rule above is a scenario, with time moved
-  explicitly.
+  explicitly, among them the days the clock changes, Home Assistant down overnight, a
+  Workday sensor that is away, and the real Workday integration for the Israeli week.
 - `hassfest`, Home Assistant's own validation of an integration, reports no problems.
 - A smoke test in a real Home Assistant 2026.10.4 container (see below): the timer is
   added through the config flow, "Run for" 2 minutes turns the target on and off on time,
   and a 3 minute countdown survives a restart of the container and still ends on time. A
   pending command turns a switch that sits on a device on at its time and off a minute
-  later, and a thermostat run for a minute with a mode and a temperature is set to both and
-  switched off at the end.
+  later, a thermostat run for a minute with a mode and a temperature is set to both and
+  switched off at the end, and a schedule interval added through the interval form turns
+  a switch on at its start and off at its end, with the interval's own switch on.
 
 ## Development
 
@@ -358,10 +548,12 @@ Needs Docker with Compose. It starts a throwaway Home Assistant 2026.10.4 with t
 checkout mounted, onboards it through its HTTP API, and adds timers for the entities that
 `scripts/smoke/configuration.yaml` declares: a switch that sits on no device, the switch of
 Home Assistant's demo integration (which sits on a device), and a generic thermostat. It
-checks that a 2 minute countdown turns the first switch on and off, that a 3 minute
-countdown survives a restart of the container, that a pending command turns the demo switch
-on at its time and off a minute later, and that the thermostat takes the mode and the
-temperature of a run. It takes about ten minutes.
+checks that a 2 minute countdown turns the first switch on and off, that a schedule
+interval for today's weekday, added through the interval form to begin in a minute or two,
+turns the first switch on at its start and off two minutes later (its switch is on, on the
+timer's device), that a 3 minute countdown survives a restart of the container, that a
+pending command turns the demo switch on at its time and off a minute later, and that the
+thermostat takes the mode and the temperature of a run. It takes about fifteen minutes.
 
 ```sh
 uv run python scripts/smoke/run.py

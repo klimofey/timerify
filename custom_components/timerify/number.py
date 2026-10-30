@@ -9,7 +9,7 @@ from homeassistant.components.number import (
     NumberMode,
 )
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant, ServiceResponse
+from homeassistant.core import HomeAssistant, ServiceResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -45,10 +45,27 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         mode=NumberMode.SLIDER,
     )
 
+    _shown: float | None = None
+    """The minutes the state was last written with."""
+
     @property
     def native_value(self) -> float:
         """The remaining minutes."""
         return remaining_minutes(self._controller.snapshot, dt_util.utcnow())
+
+    async def async_added_to_hass(self) -> None:
+        """Show the minutes as they are now, then follow them."""
+        self._shown = self.native_value
+        await super().async_added_to_hass()
+
+    @callback
+    def _handle_controller_update(self) -> None:
+        """Write the state when the minutes changed; a change of the timer that leaves
+        them as they were, such as an interval switched before its window, writes
+        nothing."""
+        if (minutes := self.native_value) != self._shown:
+            self._shown = minutes
+            self.async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
         """Count down `value` minutes from now; a part of a minute is refused, not

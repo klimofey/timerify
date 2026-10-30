@@ -1,27 +1,30 @@
 """Home Assistant glue around the timer core: events go in, effects are carried out.
 
 The core decides; this module owns everything that touches Home Assistant. Commands,
-target state changes and alarms all run under one lock, so the core sees them strictly
-one after another and an effect is finished before the next event is looked at.
+target state changes, alarms and the refresh of the schedule windows all run under one
+lock, so the core sees them strictly one after another and an effect is finished before
+the next event is looked at.
 """
 
 import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
 from uuid import uuid4
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import ATTR_ENTITY_ID, EVENT_CORE_CONFIG_UPDATE
 from homeassistant.core import (
     CALLBACK_TYPE,
     Context,
     Event,
     EventStateChangedData,
     HomeAssistant,
+    ServiceResponse,
     callback,
 )
 from homeassistant.exceptions import (
@@ -33,6 +36,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_point_in_utc_time,
     async_track_state_change_event,
+    async_track_state_report_event,
 )
 from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
@@ -41,11 +45,16 @@ from .const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
     SERVICE_CALL_TIMEOUT,
+    SUBENTRY_INTERVAL,
+    WORKDAY_DOMAIN,
+    SettingValue,
+    freeze_settings,
 )
 from .core import (
     ApplySettings,
@@ -60,10 +69,11 @@ from .core import (
     TimerCore,
     TurnOff,
     TurnOn,
-    next_wakeup,
+    Window,
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
+from .schedule import Interval, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
 
@@ -87,12 +97,32 @@ def _local_time(moment: datetime) -> str:
     return dt_util.as_local(moment).isoformat(sep=" ", timespec="seconds")
 
 
+def _unloaded_error() -> HomeAssistantError:
+    return HomeAssistantError(
+        translation_domain=DOMAIN, translation_key="timer_unloaded"
+    )
+
+
+class _WorkdayUnknown(Exception):
+    """The Workday sensor could not say whether a day is a working day; the reason is
+    logged where it is found."""
+
+
+def _workday_answer(response: ServiceResponse, sensor: str) -> bool | None:
+    """Whether `workday.check_date` called the day a working day, in its answer about
+    `sensor`; None when the answer says nothing of the kind."""
+    about_sensor = (response or {}).get(sensor)
+    answer = about_sensor.get("workday") if isinstance(about_sensor, dict) else None
+    return answer if isinstance(answer, bool) else None
+
+
 class TargetController:
     """Runs the timer of one target entity.
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
-    `async_add_command`, `async_cancel_command`) waits for its turn and raises
-    HomeAssistantError (`timer_unloaded`) if the timer was unloaded meanwhile.
+    `async_add_command`, `async_cancel_command`, `async_set_interval_enabled`) waits
+    for its turn and raises HomeAssistantError (`timer_unloaded`) if the timer was
+    unloaded meanwhile.
     """
 
     def __init__(
@@ -123,12 +153,33 @@ class TargetController:
             snapshot,
             automatic_resends=self._behaviour.automatic_resends,
         )
+        self._intervals = {
+            interval.id: interval
+            for interval in map(
+                Interval.from_subentry, entry.get_subentries_of_type(SUBENTRY_INTERVAL)
+            )
+        }
+        self._workday_sensor: str | None = options.get(CONF_WORKDAY_SENSOR)
+        if self._workday_sensor is None and any(
+            interval.days != "weekdays" for interval in self._intervals.values()
+        ):
+            raise ConfigEntryError(
+                translation_domain=DOMAIN, translation_key="workday_sensor_missing"
+            )
+        self._workday_unanswered = False
+        """Whether the last question to the Workday sensor went unanswered, so that an
+        outage is logged once, not at every question."""
+        self._left_out: dict[str, frozenset[str]] = {}
+        """For each interval, the names of the settings that the target could not take
+        when its window was last worked out, so that they are said once, not at every
+        refresh."""
         self._lock = asyncio.Lock()
         self._stopped = False
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
         self._notified_commands = self.snapshot.commands
+        self._notified_disabled = self.snapshot.disabled_intervals
         self._wakeup_alarm: CALLBACK_TYPE | None = None
         self._refresh_alarm: CALLBACK_TYPE | None = None
         self._raised_for: tuple[Label, object] | None = None
@@ -259,6 +310,35 @@ class TargetController:
 
         await self._command(cancel)
 
+    async def async_set_interval_enabled(self, interval_id: str, enabled: bool) -> None:
+        """Switch a schedule interval on or off.
+
+        Switching off is an edit of the schedule (S2): the window goes and the timer,
+        if the schedule's, follows at once. Switching on works the interval's window
+        out and, if it is open, the target runs for the rest of it. The flag is kept in
+        the timer's file; nothing is reloaded.
+
+        Switching on is one change: the flag is recorded and shown with the window, once
+        the window is known, which may mean waiting for the Workday sensor. A timer that
+        is unloaded meanwhile changes nothing and says so. An interval that is on
+        already is left as it is: nothing is worked out and nobody is asked.
+        """
+        async with self._lock:
+            self._raise_if_unloaded()
+            now = dt_util.utcnow()
+            if enabled:
+                if interval_id not in self.snapshot.disabled_intervals:
+                    return
+                effects = self._core.set_interval_enabled(now, interval_id, True)
+                if not await self._async_refresh_windows_locked(effects):
+                    raise _unloaded_error()
+            else:
+                effects = self._core.set_interval_enabled(now, interval_id, False)
+                # The tick folds what fell due while this call waited for its turn. A
+                # window that it finds over is replaced like any other (the interval
+                # that was switched off is not: its window left with the flag).
+                await self._fold_due(now, effects)
+
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
         """Call `listener` whenever what the entities show may have changed."""
@@ -278,49 +358,287 @@ class TargetController:
         change had been made would be a lie.
         """
         async with self._lock:
-            if self._stopped:
-                raise HomeAssistantError(
-                    translation_domain=DOMAIN, translation_key="timer_unloaded"
-                )
+            self._raise_if_unloaded()
             await self._execute(command(dt_util.utcnow()))
 
+    def _raise_if_unloaded(self) -> None:
+        """Raise HomeAssistantError (`timer_unloaded`) if the timer was unloaded: a call
+        that reached it and waited for its turn would otherwise be reported as done."""
+        if self._stopped:
+            raise _unloaded_error()
+
+    async def _async_windows(
+        self, now: datetime
+    ) -> tuple[list[Window], frozenset[str]]:
+        """The window of each interval that is switched on and open at `now` or comes
+        next, in the time zone of Home Assistant, and the ids of the intervals whose
+        occurrence could not be worked out, whose windows are then left as they are.
+
+        An interval that is switched off has no window, and nothing is asked to work one
+        out. An interval of working days or days off asks the Workday sensor about the
+        days it looks at, each day once however many intervals look at it. The first
+        question that gets no answer ends the questions: every such interval of this
+        round is unknown, since what is wrong with the sensor is wrong for them all.
+        """
+        zone = dt_util.get_default_time_zone()
+        disabled = self.snapshot.disabled_intervals
+        answers: dict[date, bool] = {}
+        unanswered = False
+
+        async def is_workday(day: date) -> bool:
+            if day not in answers:
+                answers[day] = await self._async_is_workday(day)
+            return answers[day]
+
+        windows: list[Window] = []
+        unknown: set[str] = set()
+        for configured in self._intervals.values():
+            if configured.id in disabled:
+                continue
+            interval = self._with_settings_the_target_takes(configured)
+            if interval.days == "weekdays":
+                window = weekday_window(interval, now, zone)
+            elif unanswered:
+                unknown.add(interval.id)
+                continue
+            else:
+                try:
+                    window = await workday_window(interval, now, zone, is_workday)
+                except _WorkdayUnknown:
+                    unanswered = True
+                    unknown.add(interval.id)
+                    continue
+            if window is not None:
+                windows.append(window)
+        return windows, frozenset(unknown)
+
+    def _with_settings_the_target_takes(self, interval: Interval) -> Interval:
+        """`interval` with only the settings the target can be turned on with now.
+
+        They were checked when the interval was saved, and what the target takes can
+        change after that: an update of its integration renames a mode, or the device
+        is replaced. A setting it no longer takes would fail its call, and the window
+        would turn nothing on. Each setting is judged alone, as the form offers them.
+        What is left out is said once, for as long as it is.
+        """
+        taken: dict[str, SettingValue] = {}
+        for name, value in interval.settings.items():
+            try:
+                validate_settings(self._hass, self.target_entity_id, {name: value})
+            except ServiceValidationError:
+                continue
+            taken[name] = value
+        left_out = frozenset(interval.settings) - frozenset(taken)
+        if left_out != self._left_out.get(interval.id, frozenset()):
+            if left_out:
+                self._left_out[interval.id] = left_out
+                _LOGGER.warning(
+                    "The schedule interval %s of %s asks for settings that the target"
+                    " cannot take now (%s); it is turned on without them",
+                    self._entry.subentries[interval.id].title,
+                    self.target_entity_id,
+                    ", ".join(sorted(left_out)),
+                )
+            else:
+                del self._left_out[interval.id]
+        return (
+            replace(interval, settings=freeze_settings(taken)) if left_out else interval
+        )
+
+    async def _async_is_workday(self, day: date) -> bool:
+        """Ask the Workday sensor whether `day` is a working day, as the sensor says it:
+        its day offset, if it has one, is included.
+
+        Raises _WorkdayUnknown, having logged why (once per outage), when the sensor
+        cannot say: the call fails, which it does for a sensor that is unavailable or
+        gone, or takes longer than a service call may, or the answer is not one. A call
+        that raises something else, a bug in the integration or a change to its service,
+        is a call that fails too: it must not stop the timer.
+        """
+        sensor = self._workday_sensor
+        assert sensor is not None  # An interval that asks has a sensor: see __init__.
+        reason: object
+        unexpected: Exception | None = None
+        try:
+            async with asyncio.timeout(SERVICE_CALL_TIMEOUT.total_seconds()):
+                response = await self._hass.services.async_call(
+                    WORKDAY_DOMAIN,
+                    "check_date",
+                    {ATTR_ENTITY_ID: sensor, "check_date": day},
+                    blocking=True,
+                    return_response=True,
+                )
+        except HomeAssistantError as err:
+            reason = err
+        except TimeoutError:
+            reason = f"no answer within {SERVICE_CALL_TIMEOUT.total_seconds():g} s"
+        except Exception as err:
+            reason = f"{type(err).__name__}: {err}"
+            unexpected = err
+        else:
+            if (answer := _workday_answer(response, sensor)) is not None:
+                self._workday_unanswered = False
+                return answer
+            reason = f"it answered {response!r}"
+        self._log_workday_unknown(day, reason, unexpected)
+        raise _WorkdayUnknown
+
+    def _log_workday_unknown(
+        self, day: date, reason: object, unexpected: Exception | None
+    ) -> None:
+        """Say that the Workday sensor could not be asked about `day`, once for as long
+        as it cannot be: the next answer ends the outage, and a later one is logged
+        again. An error nobody expected is logged with its traceback."""
+        if not self._workday_unanswered:
+            self._workday_unanswered = True
+            _LOGGER.warning(
+                "Could not ask %s whether %s is a working day (%s);"
+                " the schedule of %s waits until it reports",
+                self._workday_sensor,
+                day,
+                reason,
+                self.target_entity_id,
+                exc_info=unexpected,
+            )
+
+    def _set_windows(
+        self, now: datetime, windows: list[Window], unknown: frozenset[str]
+    ) -> list[Effect]:
+        """Merge the freshly worked out `windows` into the timer, which holds only the
+        windows of the intervals there are."""
+        return self._core.set_windows(
+            now, windows, configured=self._intervals.keys(), keep=unknown
+        )
+
+    async def _async_refresh_windows_locked(
+        self, effects: Sequence[Effect] = ()
+    ) -> bool:
+        """Work out the windows again and fold them into the timer: the new windows are
+        merged and followed at once, so that the timer does not rest, or is stored,
+        between an edited window and the timer that follows it (S2). `effects` are those
+        of a change that is made with them, and are carried out with them.
+
+        The caller holds the lock. Returns False, with the timer untouched but for
+        what `effects` are of, when the timer was unloaded while the windows were worked
+        out: its entry is being replaced, and the new timer would find this one's stale
+        save. A window that is over by the time they are worked out, which asking the
+        Workday sensor may take that long, is replaced like any other that a fold finds
+        over.
+        """
+        windows, unknown = await self._async_windows(dt_util.utcnow())
+        if self._stopped:
+            return False
+        now = dt_util.utcnow()
+        await self._fold_due(now, [*effects, *self._set_windows(now, windows, unknown)])
+        return True
+
+    async def _refresh_windows(self) -> None:
+        """Work out the windows again, for an event that does not hold the lock."""
+        async with self._lock:
+            if not self._stopped:
+                await self._async_refresh_windows_locked()
+
+    async def _handle_core_config_update(self, event: Event[Mapping[str, Any]]) -> None:
+        """A window is a moment in the time zone it was worked out in: when the zone
+        changes, the windows are worked out again."""
+        if "time_zone" in event.data:
+            await self._refresh_windows()
+
     async def _handle_started(self, _hass: HomeAssistant) -> None:
-        """Take stock of the target once, with Home Assistant fully started."""
+        """Take stock of the target once, with Home Assistant fully started.
+
+        The windows come first: the stored ones are merged with the ones worked out
+        now, so that the first observation folds both in one catch-up (§5.7).
+        """
         async with self._lock:
             if self._stopped:
                 return
-            # A timer restored unchanged gets no Arm from the core. Arming only now
-            # keeps a stored end or command that has long passed from switching a
-            # target that has not been seen yet; the first observation folds it in.
-            if (wakeup := next_wakeup(self.snapshot)) is not None:
-                self._arm(wakeup)
-            self._schedule_refresh()
-            state = self._hass.states.get(self.target_entity_id)
-            await self._execute(
-                self._core.observe(dt_util.utcnow(), actual_state(state), by_us=False)
+            # The zone and the Workday sensor are followed from here on: a change
+            # meanwhile is not lost, and waits for the lock, so it folds windows only
+            # after the first observation.
+            self._entry.async_on_unload(
+                self._hass.bus.async_listen(
+                    EVENT_CORE_CONFIG_UPDATE, self._handle_core_config_update
+                )
             )
+            self._follow_workday_sensor()
+            windows, unknown = await self._async_windows(dt_util.utcnow())
+            if self._stopped:
+                return
+            now = dt_util.utcnow()
+            # Merging the windows arms the alarm for the next thing the timer waits for,
+            # which the observation does not do for a timer restored unchanged. Nothing
+            # is armed earlier: a stored end, command or window that has long passed
+            # would switch a target that has not been seen yet, and the first
+            # observation folds it in.
+            effects = self._set_windows(now, windows, unknown)
+            self._schedule_refresh()
+            before = self.snapshot
+            state = self._hass.states.get(self.target_entity_id)
+            effects += self._core.observe(now, actual_state(state), by_us=False)
+            await self._execute_fold(before, effects)
+
+    def _follow_workday_sensor(self) -> None:
+        """Work the windows out again whenever the Workday sensor changes or reports.
+
+        A report that repeats its state counts too: Workday writes its state at every
+        midnight of the house, which is how a question that failed while the sensor
+        stayed as it was is asked again within a day.
+        """
+        if (sensor := self._workday_sensor) is None:
+            return
+        for track in (async_track_state_change_event, async_track_state_report_event):
+            self._entry.async_on_unload(
+                track(self._hass, sensor, self._handle_workday_report)
+            )
+
+    async def _handle_workday_report(self, _event: Event[Any]) -> None:
+        await self._refresh_windows()
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
         async with self._lock:
             if self._stopped:
                 return
-            await self._execute(
-                self._core.observe(
-                    dt_util.utcnow(),
-                    actual_state(event.data["new_state"]),
-                    by_us=event.context.id in self._own_contexts,
-                )
+            before = self.snapshot
+            effects = self._core.observe(
+                dt_util.utcnow(),
+                actual_state(event.data["new_state"]),
+                by_us=event.context.id in self._own_contexts,
             )
+            await self._execute_fold(before, effects)
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
             if self._stopped:
                 return
-            now = dt_util.utcnow()
-            before = self.snapshot
-            effects = self._core.tick(now)
-            self._log_due_while_unavailable(before, now, effects)
-            await self._execute(effects)
+            await self._fold_due(dt_util.utcnow(), [])
+
+    async def _fold_due(self, now: datetime, effects: list[Effect]) -> None:
+        """Carry out `effects`, which the caller has just made the core produce, and
+        whatever falls due at `now` on top of them, and say what came due while the
+        target is unavailable. Every event that folds what is due goes through here:
+        the alarm, the refresh of the windows and the switching off of an interval."""
+        before = self.snapshot
+        effects = effects + self._core.tick(now)
+        self._log_due_while_unavailable(before, now, effects)
+        await self._execute_fold(before, effects)
+
+    async def _execute_fold(self, before: Snapshot, effects: list[Effect]) -> None:
+        """Carry out the effects of a fold of what fell due, which `tick` and `observe`
+        make; the snapshot before it is `before`.
+
+        A window the fold found over is replaced by the next one of its interval. That
+        goes for whichever event folds it: a report of the target may get the lock
+        before the alarm of the end does, and the alarm then finds nothing due. It goes
+        for the fold of a refresh too, since asking the Workday sensor may take until a
+        window that was just worked out is over.
+        """
+        ended = {w.interval_id for w in before.windows} - {
+            w.interval_id for w in self.snapshot.windows
+        }
+        await self._execute(effects)
+        if ended and not self._stopped:
+            await self._async_refresh_windows_locked()
 
     def _log_due_while_unavailable(
         self, before: Snapshot, now: datetime, effects: list[Effect]
@@ -330,6 +648,21 @@ class TargetController:
         after = self.snapshot
         if after.last_actual != "unavailable":
             return
+        # A window whose start set the timer wants the target on, if its window is
+        # still open when it is back; one that left the timer alone, or was over, did
+        # not.
+        if any(
+            not window.started
+            and window.start <= now
+            and after.scheduled_by == window.interval_id
+            and after.end == window.end
+            for window in before.windows
+        ):
+            _LOGGER.info(
+                "A schedule window of %s started while it is unavailable;"
+                " it is turned on when it is back, if the window is still open then",
+                self.target_entity_id,
+            )
         # A countdown that ended is one that wants the target off; a command that was
         # due with it may have moved the end or made the target wanted on instead.
         if (
@@ -405,11 +738,13 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown and the pending commands; the
-        # rest of the snapshot is bookkeeping that needs no state write.
+        # The entities show the end of the countdown, the pending commands and which
+        # intervals are switched off; the rest of the snapshot is bookkeeping that
+        # needs no state write.
         if (
             self.snapshot.end != self._notified_end
             or self.snapshot.commands != self._notified_commands
+            or self.snapshot.disabled_intervals != self._notified_disabled
         ):
             self._notify()
 
@@ -597,5 +932,6 @@ class TargetController:
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
         self._notified_commands = self.snapshot.commands
+        self._notified_disabled = self.snapshot.disabled_intervals
         for listener in list(self._listeners):
             listener()

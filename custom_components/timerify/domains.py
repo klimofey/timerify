@@ -91,6 +91,17 @@ class _Capabilities:
         return get_capability(self._hass, self._entity_id, name)
 
 
+@dataclass(frozen=True)
+class SettingChoice:
+    """A setting an entity can be turned on with and what it accepts: the values it
+    lists in `options`, or the numbers from `low` to `high`."""
+
+    name: str
+    options: tuple[str, ...] = ()
+    low: float | None = None
+    high: float | None = None
+
+
 def _text(value: Any) -> str:
     """A value as the user reads it: 16 for 16.0."""
     if isinstance(value, float) and value.is_integer():
@@ -117,6 +128,14 @@ class _Between:
         """Whether the entity says where its range begins and ends."""
         return all(
             _bound(capabilities, bound) is not None for bound in (self.low, self.high)
+        )
+
+    def choice(self, capabilities: _Capabilities, setting: str) -> SettingChoice:
+        """The range the entity accepts."""
+        return SettingChoice(
+            setting,
+            low=float(_bound(capabilities, self.low)),
+            high=float(_bound(capabilities, self.high)),
         )
 
     def check(self, capabilities: _Capabilities, setting: str, value: Any) -> None:
@@ -157,6 +176,10 @@ class _OneOf:
         """Whether the entity lists an option a turn-on may use: one that lists only
         `off` offers no setting."""
         return bool(self._options(capabilities))
+
+    def choice(self, capabilities: _Capabilities, setting: str) -> SettingChoice:
+        """The values the entity accepts."""
+        return SettingChoice(setting, options=tuple(self._options(capabilities)))
 
     def check(self, capabilities: _Capabilities, setting: str, value: Any) -> None:
         options = self._options(capabilities)
@@ -212,6 +235,10 @@ class _Setting:
         """Whether the entity can take the setting: it has what the setting needs and
         says which values it accepts."""
         return self.requires(capabilities) and self.rule.known(capabilities)
+
+    def choice(self, capabilities: _Capabilities) -> SettingChoice:
+        """The values the entity accepts for the setting; only for a supported one."""
+        return self.rule.choice(capabilities, self.name)
 
 
 @dataclass(frozen=True)
@@ -464,6 +491,15 @@ def actual_state(state: State | None) -> Actual:
     return "on" if behaviour_for(state.entity_id).is_on(state) else "off"
 
 
+def _capabilities_of(hass: HomeAssistant, entity_id: str) -> _Capabilities | None:
+    """What the entity can do, from its state or its registry entry; None for an
+    entity that is in neither, which says nothing about what it can do."""
+    try:
+        return _Capabilities(hass, entity_id)
+    except HomeAssistantError:
+        return None
+
+
 def switchable_by_features(hass: HomeAssistant, entity_id: str) -> bool:
     """Whether the entity advertises every feature its domain's on and off services
     need, from its state or, without one, from the entity registry.
@@ -474,10 +510,27 @@ def switchable_by_features(hass: HomeAssistant, entity_id: str) -> bool:
     required = behaviour_for(entity_id).required_features
     if not required:
         return True
-    try:
-        return _Capabilities(hass, entity_id).supports(*required)
-    except HomeAssistantError:  # Neither a state nor a registry entry: unknown.
-        return False
+    capabilities = _capabilities_of(hass, entity_id)
+    return capabilities is not None and capabilities.supports(*required)
+
+
+def supported_settings(
+    hass: HomeAssistant, entity_id: str
+) -> tuple[SettingChoice, ...]:
+    """The settings the entity can be turned on with now, each with the values it
+    accepts, in the order the row of its domain lists them.
+
+    The same judgement as `validate_settings`: from the entity's state or, without
+    one, its registry entry. An entity that is in neither supports none.
+    """
+    capabilities = _capabilities_of(hass, entity_id)
+    if capabilities is None:
+        return ()
+    return tuple(
+        setting.choice(capabilities)
+        for setting in behaviour_for(entity_id).settings
+        if setting.supported(capabilities)
+    )
 
 
 def validate_settings(
@@ -497,10 +550,7 @@ def validate_settings(
     if not values:
         return NO_SETTINGS
     specs = {spec.name: spec for spec in behaviour_for(entity_id).settings}
-    try:
-        capabilities = _Capabilities(hass, entity_id)
-    except HomeAssistantError:  # Neither a state nor a registry entry: unknown.
-        capabilities = None
+    capabilities = _capabilities_of(hass, entity_id)
     for name, value in values.items():
         spec = specs.get(name)
         if spec is None or capabilities is None or not spec.supported(capabilities):

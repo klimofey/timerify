@@ -1,24 +1,45 @@
 """Shared fixtures for Timerify tests."""
 
 import asyncio
+import copy
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any, Final
 
+import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import Context, HomeAssistant, ServiceCall, split_entity_id
+from homeassistant.const import (
+    STATE_OFF,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    WEEKDAYS,
+)
+from homeassistant.core import (
+    Context,
+    HomeAssistant,
+    Service,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    split_entity_id,
+)
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
     DOMAIN,
     Mode,
 )
@@ -135,7 +156,17 @@ class FakeTarget:
     _ignoring: bool = False
     _echoing: bool = False
     _echoes: int = 0
+    _reporting_late: bool = False
+    _late: list[tuple[Obey, ServiceCall]] = field(default_factory=list)
+    _reverting: int = 0
+    _last_context: Context | None = None
     _held: HeldCall | None = None
+
+    def _is_timerify_entity(self, entity_id: str) -> bool:
+        """Whether `entity_id` is an entity of Timerify's own, not of the target's
+        integration: the target may have been renamed, so its id is not a test."""
+        registered = er.async_get(self.hass).async_get(entity_id)
+        return registered is not None and registered.platform == DOMAIN
 
     @property
     def state(self) -> str:
@@ -194,56 +225,265 @@ class FakeTarget:
         self._ignoring = False
         self._echoing = False
 
+    def report_next_call_late(self) -> None:
+        """Make the next service call succeed with the entity changing only when
+        `report_late` is called, as a cloud integration does that confirms a command
+        after the call returned. The change then carries the context of the call."""
+        self._reporting_late = True
+
+    def revert_next_calls(self, count: int) -> None:
+        """Make the device undo each of the next `count` service calls by itself, as a
+        relay with an auto-off time of a few seconds or a plug that trips on overload
+        does: it obeys, and at once shows the state it was in. Both changes carry the
+        context of the call, because Home Assistant credits the writes of an entity to
+        the last call it took for five seconds."""
+        self._reverting = count
+
+    async def set_state_credited_to_last_call(self, value: str) -> None:
+        """Change the state from outside within the five seconds in which Home
+        Assistant credits the writes of the entity to the last call it took, as a
+        switch pressed on the wall just after a command is: the change carries the
+        context of that call."""
+        assert self._last_context is not None, "the entity has taken no call yet"
+        self.write(value, context=self._last_context)
+        await self.hass.async_block_till_done()
+
+    async def report_late(self) -> None:
+        """The device reports what the calls it took did, in the order it took them,
+        and everything that follows settles."""
+        late, self._late = self._late, []
+        for obey, call in late:
+            obey(self, call)
+        await self.hass.async_block_till_done()
+
     def hold_next_call(self) -> HeldCall:
         """Make the next service call slow: it waits inside the device."""
         self._held = HeldCall()
         return self._held
 
     def provide_services(self, services: Mapping[str, Obey]) -> None:
-        """Provide the services of the entity's domain."""
+        """Provide the services of the entity's domain.
+
+        A domain has one set of services for all its entities, so a call for an entity
+        of Timerify's own (the switch of an interval) goes on to the service that was
+        there before, which is the domain's own.
+        """
         domain, _ = split_entity_id(self.entity_id)
         for service, obey in services.items():
+            elsewhere = self.hass.services.async_services_for_domain(domain).get(
+                service
+            )
             self.hass.services.async_register(
-                domain, service, self._handler(service, obey)
+                domain, service, self._handler(service, obey, elsewhere)
             )
 
+    async def _take(
+        self,
+        service: str,
+        obey: Obey,
+        call: ServiceCall,
+        entity_id: str,
+        data: dict[str, Any],
+    ) -> None:
+        """The device receives `call` for its `entity_id` and does what it is set to do:
+        hold it, fail it, report late, ignore it or obey."""
+        self.calls.append((service, entity_id))
+        self.call_data.append((service, data))
+        self._last_context = call.context
+        if self._held is not None:
+            held, self._held = self._held, None
+            held.reached.set()
+            await held.release.wait()
+        if self._failure is not None and self._failure[0] in (None, service):
+            _, failure = self._failure
+            self._failure = None
+            raise failure
+        if self._reporting_late:
+            self._reporting_late = False
+            self._late.append((obey, call))
+            return
+        if self._ignoring or self._ignore_next:
+            self._ignore_next = False
+            if self._echoing and self._echoes < ECHO_LIMIT:
+                self._echoes += 1
+                self.write(self.state, context=call.context, echoes=self._echoes)
+            return
+        if self._reverting:
+            self._reverting -= 1
+            before = self.state
+            obey(self, call)
+            self.write(before, context=call.context)
+            return
+        obey(self, call)
+
     def _handler(
-        self, service: str, obey: Obey
+        self, service: str, obey: Obey, elsewhere: Service | None
     ) -> Callable[[ServiceCall], Awaitable[None]]:
         async def handle(call: ServiceCall) -> None:
             data = dict(call.data)
-            entity_id = data.pop("entity_id")
-            self.calls.append((service, entity_id))
-            self.call_data.append((service, data))
-            if self._held is not None:
-                held, self._held = self._held, None
-                held.reached.set()
-                await held.release.wait()
-            if self._failure is not None and self._failure[0] in (None, service):
-                _, failure = self._failure
-                self._failure = None
-                raise failure
-            if self._ignoring or self._ignore_next:
-                self._ignore_next = False
-                if self._echoing and self._echoes < ECHO_LIMIT:
-                    self._echoes += 1
-                    self.write(self.state, context=call.context, echoes=self._echoes)
-                return
-            obey(self, call)
+            entity_ids: list[str] = cv.ensure_list(data.pop("entity_id"))
+            ours = (
+                []
+                if elsewhere is None
+                else [e for e in entity_ids if self._is_timerify_entity(e)]
+            )
+            if elsewhere is not None and ours:
+                forwarded = ServiceCall(
+                    self.hass,
+                    call.domain,
+                    call.service,
+                    {**data, "entity_id": ours},
+                    call.context,
+                )
+                if (
+                    running := self.hass.async_run_hass_job(elsewhere.job, forwarded)
+                ) is not None:
+                    await running
+            for entity_id in entity_ids:
+                if entity_id not in ours:
+                    await self._take(service, obey, call, entity_id, data)
 
         return handle
+
+
+NO_ENTITY_MATCHED: Final = (
+    "Service call requested response data but did not match any entities"
+)
+"""What Home Assistant raises when an entity service is asked for a response and no
+entity answers it, as for a sensor that is unavailable. A test against the real Workday
+integration pins that this is what it raises."""
+
+
+@dataclass
+class FakeWorkday:
+    """The Workday integration as the other integrations see it: a binary sensor of
+    platform `workday` that says whether today is a working day, and the
+    `workday.check_date` service that says it of any day.
+
+    The service answers as the real one does: `{entity_id: {"workday": ...}}`, and
+    while the sensor is unavailable it raises the error that a call for an entity that
+    is not there gets, since Home Assistant cannot tell the two apart.
+    """
+
+    hass: HomeAssistant
+    entity_id: str = "binary_sensor.workday_sensor"
+    workdays: set[str] = field(
+        default_factory=lambda: {"sun", "mon", "tue", "wed", "thu"}
+    )
+    """The weekdays that are working days: Israel's week."""
+    holidays: set[date] = field(default_factory=set)
+    """The days that are not working days though their weekday is."""
+    asked: list[date] = field(default_factory=list)
+    """The day of every `check_date` call received, failed ones included."""
+    _available: bool = True
+    _state: str = STATE_ON
+    _failure: Exception | None = None
+    _held: HeldCall | None = None
+
+    def is_workday(self, day: date) -> bool:
+        """Whether `day` is a working day by the week and the holidays."""
+        return WEEKDAYS[day.weekday()] in self.workdays and day not in self.holidays
+
+    def write(self, available: bool | None = None) -> None:
+        """Write the state of the sensor, which is that of today when it comes back
+        and unchanged otherwise: with `available` left out it is a report of what it
+        already says, which Workday makes at every local midnight."""
+        if available is not None:
+            self._available = available
+            if available:
+                today = dt_util.now().date()
+                self._state = STATE_ON if self.is_workday(today) else STATE_OFF
+        self.hass.states.async_set(
+            self.entity_id, self._state if self._available else STATE_UNAVAILABLE
+        )
+
+    async def set_available(self, on: bool) -> None:
+        """Make the sensor unavailable, as a reloading Workday is, or bring it back,
+        and let everything that follows settle."""
+        self.write(on)
+        await self.hass.async_block_till_done()
+
+    async def report(self) -> None:
+        """Rewrite the state of the sensor as it is, and let everything that follows
+        settle."""
+        self.write()
+        await self.hass.async_block_till_done()
+
+    def fail_next_call(self, error: Exception | None = None) -> None:
+        """Make the next `check_date` fail, with `error` (a bug of the integration may
+        raise anything) or as a sensor that could not answer."""
+        self._failure = error or HomeAssistantError("The sensor could not answer")
+
+    def hold_next_call(self) -> HeldCall:
+        """Make the next `check_date` slow: it has its answer, or its error, and waits
+        before it gives it."""
+        self._held = HeldCall()
+        return self._held
+
+    async def check_date(self, call: ServiceCall) -> ServiceResponse:
+        """The service `workday.check_date`."""
+        day: date = call.data["check_date"]
+        self.asked.append(day)
+        failure, self._failure = self._failure, None
+        if failure is None and (
+            call.data["entity_id"] != self.entity_id or not self._available
+        ):
+            failure = HomeAssistantError(NO_ENTITY_MATCHED)
+        if self._held is not None:
+            held, self._held = self._held, None
+            held.reached.set()
+            await held.release.wait()
+        if failure is not None:
+            raise failure
+        return {self.entity_id: {"workday": self.is_workday(day)}}
+
+
+@pytest.fixture
+def fake_workday(hass: HomeAssistant) -> FakeWorkday:
+    """A Workday sensor, `binary_sensor.workday_sensor`, for a working week from
+    Sunday to Thursday and no holidays: registered under the platform `workday` with
+    its `check_date` service."""
+    provider = MockConfigEntry(domain="workday")
+    provider.add_to_hass(hass)
+    workday = FakeWorkday(hass)
+    object_id = split_entity_id(workday.entity_id)[1]
+    er.async_get(hass).async_get_or_create(
+        "binary_sensor",
+        provider.domain,
+        object_id,
+        config_entry=provider,
+        original_name="Workday Sensor",
+        suggested_object_id=object_id,
+    )
+    workday.write(True)
+    hass.services.async_register(
+        provider.domain,
+        "check_date",
+        workday.check_date,
+        schema=probatio.Schema(
+            {
+                probatio.Required("entity_id"): cv.entity_id,
+                probatio.Required("check_date"): cv.date,
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    return workday
 
 
 type ProvideTarget = Callable[..., FakeTarget]
 
 
 @pytest.fixture
-def provide_target(
+async def provide_target(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> ProvideTarget:
     """Make an entity the way another integration provides it, switched off, at
     `START`: `provide(entity_id, services, device_name=..., ...)`."""
     freezer.move_to(START)
+    # Timerify adds switches, so the switch component runs whenever it does. It sets its
+    # services up with itself, and would replace those of a fake that came before it.
+    assert await async_setup_component(hass, "switch", {})
 
     def provide(
         entity_id: str,
@@ -281,7 +521,7 @@ def provide_target(
             hass,
             device_id,
             entity_id,
-            capability_attributes=capability_attributes or {},
+            capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
             state_attributes=state_attributes or {},
         )
         target.write("off")
@@ -345,9 +585,9 @@ async def setup_target(
     """Set up a Timerify entry for `switch.boiler`; it returns the loaded entry.
 
     `stored` is what an earlier run left in the entry's storage file, in the form
-    of `stored_version`; the entry then starts the way it does after a restart. A
-    test that sets up a target provides it first, through one of the `fake_*`
-    fixtures.
+    of `stored_version`; the entry then starts the way it does after a restart.
+    `workday_sensor` is the Workday sensor the timer asks about the days. A test that
+    sets up a target provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -356,16 +596,17 @@ async def setup_target(
         target: str = TARGET_ID,
         stored: dict[str, Any] | None = None,
         stored_version: int = TimerStore.STORAGE_VERSION,
+        workday_sensor: str | None = None,
     ) -> MockConfigEntry:
+        options: dict[str, Any] = {
+            CONF_TARGET: target,
+            CONF_MODE: mode,
+            CONF_DEFAULT_DURATION: default_duration,
+        }
+        if workday_sensor is not None:
+            options[CONF_WORKDAY_SENSOR] = workday_sensor
         entry = MockConfigEntry(
-            domain=DOMAIN,
-            version=1,
-            title="Boiler",
-            options={
-                CONF_TARGET: target,
-                CONF_MODE: mode,
-                CONF_DEFAULT_DURATION: default_duration,
-            },
+            domain=DOMAIN, version=1, title="Boiler", options=options
         )
         entry.add_to_hass(hass)
         if stored is not None:

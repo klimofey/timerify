@@ -784,6 +784,22 @@ those of the spec.
   beyond a week is not understood, and a test pins that bound too. The tools take any count
   and the controller decides. Cost if wrong: "for 200 hours" is answered as not understood,
   not with the limit.
+  The shape of the minutes is a matter of cost. A range that allows number words makes
+  hassil build, on the first request in a language, a table of the words of every number in
+  it, and that table grows with the range: measured on hassil 3.12 in a fresh process, hours
+  1..168 cost 0.02 s in Russian and nothing measurable in English; minutes 1..1440 cost
+  0.36 s and 16 MB in Russian and 0.02 s in English; minutes 1..10080 cost 4.7 s and 123 MB
+  in Russian and 0.19 s and 22 MB in English, which made the first Russian request take
+  over 4 s of CPU (4.34 s measured through Assist, against 0.45 s now). So the
+  minutes up to a day (1..1440, as many as a timer can run) and the hours (1..168) are
+  ranges that may be said as words, and the minutes from a day and a minute to a week
+  (1441..10080) are a list of their own, `timerify_long_minutes`, with `words: false`:
+  digits only, no table. It fills the same slot, `minutes`, through the expansion rule
+  `timerify_minutes_count`, so the handler cannot tell the two apart, and both languages
+  have the same shape. A test pins the shape, and another that no range list of Timerify
+  that allows words is larger than a day of minutes (the structure, not the time, which
+  varies by machine). Cost if wrong: "for two thousand minutes" said in words is not
+  understood, while "for 2000 minutes" is, and answered with the limit.
 - **"Turn off X in N" decides whether the target is running under the controller's lock,
   from the desired state: a countdown above zero, else the pending wish, else the target
   being on.** A running target gets its countdown set to end then, whatever it was (shorter

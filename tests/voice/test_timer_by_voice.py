@@ -168,11 +168,12 @@ async def test_run_for_thirty_hours_is_refused_with_the_limit(
 
 OVER_A_DAY = [
     pytest.param({"timerify_hours": 30}, id="30-hours"),
-    pytest.param({"timerify_minutes": 1500}, id="1500-minutes"),
+    pytest.param({"timerify_long_minutes": 1500}, id="1500-minutes"),
     pytest.param({"timerify_hours": 168}, id="a-week-of-hours"),
-    pytest.param({"timerify_minutes": 10080}, id="a-week-of-minutes"),
+    pytest.param({"timerify_long_minutes": 10080}, id="a-week-of-minutes"),
 ]
-"""A count that is more than a day and as much as the sentences understand."""
+"""A count that is more than a day and as much as the sentences understand. Minutes
+beyond a day are the list of digits that fills the slot of the minutes."""
 
 
 @pytest.mark.parametrize("numbers", OVER_A_DAY)
@@ -768,7 +769,7 @@ async def test_adding_more_than_a_day_runs_a_day_in_the_users_language(
 
 @pytest.mark.parametrize(
     "numbers",
-    [{"timerify_hours": 169}, {"timerify_minutes": 10081}],
+    [{"timerify_hours": 169}, {"timerify_long_minutes": 10081}],
     ids=["169-hours", "10081-minutes"],
 )
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)

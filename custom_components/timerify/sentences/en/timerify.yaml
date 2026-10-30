@@ -92,9 +92,10 @@ intents:
         enabled: false
 expansion_rules:
   timerify_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
-  timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes} more minute[s])
+  timerify_more_duration: ({timerify_hours:hours} more hour[s]|<timerify_minutes_count> more minute[s])
   timerify_hours_part: '{timerify_hours:hours} hour[s]'
-  timerify_minutes_part: '{timerify_minutes:minutes} minute[s]'
+  timerify_minutes_part: <timerify_minutes_count> minute[s]
+  timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: for <timerify_duration>
   timerify_hvac_part: '{timerify_hvac_mode:hvac_mode} [mode]'
   timerify_temperature_part: '[at] {timerify_temperature:temperature} [degree[s]]'
@@ -110,7 +111,12 @@ lists:
   timerify_minutes:
     range:
       from: 1
+      to: 1440
+  timerify_long_minutes:
+    range:
+      from: 1441
       to: 10080
+      words: false
   timerify_temperature:
     range:
       from: 1

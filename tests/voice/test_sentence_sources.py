@@ -101,16 +101,50 @@ def test_a_duration_can_be_said_past_the_longest_timer(language: str) -> None:
     """The counts of hours and of minutes reach as far as a week, the longest delay a
     command takes, in every language: a timer never runs for more than a day, and a
     duration beyond it must reach the handler, which clamps it when time is added and
-    refuses it when the timer is run, rather than be answered as not understood."""
+    refuses it when the timer is run, rather than be answered as not understood.
+
+    Minutes up to a day can be said as words as well as in digits; the minutes beyond
+    a day only in digits, a list of their own that fills the same slot, so that no
+    language has to build its table of number words for a week of minutes."""
     lists = timerify_intents(language).slot_lists
-    hours, minutes = lists["timerify_hours"], lists["timerify_minutes"]
+    hours = lists["timerify_hours"]
+    minutes = lists["timerify_minutes"]
+    long_minutes = lists["timerify_long_minutes"]
 
     assert isinstance(hours, RangeSlotList)
     assert isinstance(minutes, RangeSlotList)
+    assert isinstance(long_minutes, RangeSlotList)
     assert (hours.start, hours.stop) == (1, MAX_DELAY_MINUTES // 60)
-    assert (minutes.start, minutes.stop) == (1, MAX_DELAY_MINUTES)
     assert hours.stop * 60 > MAX_MINUTES
-    assert minutes.stop > MAX_MINUTES
+    assert (minutes.start, minutes.stop) == (1, MAX_MINUTES)
+    assert (long_minutes.start, long_minutes.stop) == (
+        MAX_MINUTES + 1,
+        MAX_DELAY_MINUTES,
+    )
+    assert minutes.words
+    assert not long_minutes.words
+    assert long_minutes.digits
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_numbers_said_as_words_stay_within_a_day(language: str) -> None:
+    """The first request in a language builds a table of the number words of every
+    range that may be said as words, and what it costs grows with the size of the
+    ranges: about 0.3 s for a day of minutes in Russian, and 4.5 s and 120 MB for a
+    week. So the range lists of Timerify that allow words never hold more than a day
+    of minutes, whatever they count; a longer one has to be said in digits only."""
+    spoken = {
+        name: slot_list
+        for name, slot_list in timerify_intents(language).slot_lists.items()
+        if name.startswith(PREFIX)
+        and isinstance(slot_list, RangeSlotList)
+        and slot_list.words
+    }
+
+    assert {"timerify_hours", "timerify_minutes"} <= set(spoken)
+    for name, slot_list in spoken.items():
+        assert isinstance(slot_list, RangeSlotList)
+        assert slot_list.stop - slot_list.start + 1 <= MAX_MINUTES, name
 
 
 def test_every_language_has_the_same_intents_and_responses() -> None:
@@ -190,7 +224,11 @@ async def test_handlers_are_registered_once_per_intent(
     assert "is being overwritten" not in caplog.text
 
 
-ADD_TIME_NUMBERS = {"timerify_hours": 1, "timerify_minutes": 1}
+ADD_TIME_NUMBERS = {
+    "timerify_hours": 1,
+    "timerify_minutes": 1,
+    "timerify_long_minutes": MAX_MINUTES + 1,
+}
 """The numbers with which the sentences that add time can be said."""
 
 
@@ -231,6 +269,7 @@ def test_every_text_does_not_leave_out_what_it_cannot_say() -> None:
             numbers={
                 "timerify_hours": 1,
                 "timerify_minutes": 1,
+                "timerify_long_minutes": MAX_MINUTES + 1,
                 "timerify_percent": 1,
                 "timerify_temperature": 1,
             },

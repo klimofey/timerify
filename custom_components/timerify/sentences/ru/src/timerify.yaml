@@ -108,7 +108,8 @@ expansion_rules:
   timerify_turn_on: "(включи|запусти)[ть]"
   timerify_duration: "(<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
   timerify_hours_part: "{timerify_hours:hours} час[а|ов]"
-  timerify_minutes_part: "{timerify_minutes:minutes} минут[у|ы]"
+  timerify_minutes_part: "<timerify_minutes_count> минут[у|ы]"
+  timerify_minutes_count: "({timerify_minutes:minutes}|{timerify_long_minutes:minutes})"
 # How long a command that turns a device on runs for, said before or after the delay of
 # core_commands.yaml.
   timerify_for_part: "на <timerify_duration>"
@@ -125,6 +126,10 @@ lists:
   # How long can be said reaches a week, in hours and in minutes: a timer never runs for
   # more than a day, and a duration beyond it must reach the handler, which clamps it when
   # time is added and refuses it when the timer is run, not be answered as not understood.
+  # Minutes can be said as words up to a day; the minutes beyond it are a list of digits
+  # only that fills the same slot, because the first request in a language builds a table
+  # of the number words of every range that allows words, and for a week of minutes that
+  # table takes seconds and over 100 MB (RULINGS.md, the duration entry).
   timerify_hours:
     range:
       from: 1
@@ -132,7 +137,12 @@ lists:
   timerify_minutes:
     range:
       from: 1
+      to: 1440
+  timerify_long_minutes:
+    range:
+      from: 1441
       to: 10080
+      words: false
   timerify_temperature:
     range:
       from: 1

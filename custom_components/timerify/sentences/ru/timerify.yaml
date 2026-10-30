@@ -78,7 +78,8 @@ expansion_rules:
   timerify_turn_on: (включи|запусти)[ть]
   timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
   timerify_hours_part: '{timerify_hours:hours} час[а|ов]'
-  timerify_minutes_part: '{timerify_minutes:minutes} минут[у|ы]'
+  timerify_minutes_part: <timerify_minutes_count> минут[у|ы]
+  timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: на <timerify_duration>
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
@@ -94,7 +95,12 @@ lists:
   timerify_minutes:
     range:
       from: 1
+      to: 1440
+  timerify_long_minutes:
+    range:
+      from: 1441
       to: 10080
+      words: false
   timerify_temperature:
     range:
       from: 1

@@ -517,8 +517,9 @@ What each does:
   off, or on without a timer.
 - **Run for a time** is the same as setting "Run for": the countdown is that long, from
   one minute to 24 hours, and replaces the one that runs. Said longer, as far as a week
-  ("for 30 hours"), the sentence is understood and refused with the limit, and nothing is
-  turned on; a count beyond a week is not understood at all. A thermostat, a water heater,
+  ("for 30 hours"; minutes beyond a day in digits, "for 2000 minutes"), the sentence is
+  understood and refused with the limit, and nothing is turned on; a count beyond a week
+  is not understood at all. A thermostat, a water heater,
   a light, a fan or a humidifier takes its settings in the same sentence, in any order:
   the HVAC mode ("cooling", "heating", "auto", ...), a temperature ("24 degrees", "at
   22.5"), a percentage ("at 40 percent"), and a mode of the device ("eco", "high").

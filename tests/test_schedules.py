@@ -261,6 +261,14 @@ async def test_restart_after_midnight_keeps_the_window_that_began_yesterday(
             datetime(2026, 10, 25, 5, 0, tzinfo=UTC),
             id="night-the-clock-goes-back-nine-hours",
         ),
+        pytest.param(
+            date(2026, 10, 24),
+            "06:30",
+            "07:15",
+            datetime(2026, 10, 25, 4, 30, tzinfo=UTC),
+            datetime(2026, 10, 25, 5, 15, tzinfo=UTC),
+            id="morning-after-the-clock-goes-back",
+        ),
     ],
 )
 async def test_window_follows_the_clock_on_dst_days(
@@ -274,11 +282,11 @@ async def test_window_follows_the_clock_on_dst_days(
     starts_at: datetime,
     ends_at: datetime,
 ) -> None:
-    """In Jerusalem the clock goes from 02:00 to 03:00 on 2026-03-27 and from 03:00 to
-    02:00 on 2026-10-25. A window starts and ends at the wall time it was given on both
-    sides of the change: at 06:30 the morning after the first, an hour earlier by UTC
-    than the day before; from 23:00 to 07:00 across either it lasts what the clock
-    says, seven hours or nine."""
+    """In Jerusalem the clock goes from 02:00 to 03:00 on 2026-03-27 and from 02:00
+    back to 01:00 on 2026-10-25. A window starts and ends at the wall time it was given
+    on both sides of the change: at 06:30 the morning after the first, an hour earlier
+    by UTC than the day before, and the morning after the second, an hour later; from
+    23:00 to 07:00 across either it lasts what the clock says, seven hours or nine."""
     await hass.config.async_set_time_zone(JERUSALEM)
     freezer.move_to(local(day_before, "12:00"))
     entry = await setup_target()

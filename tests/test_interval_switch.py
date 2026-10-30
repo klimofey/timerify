@@ -392,6 +392,63 @@ async def test_flipping_the_interval_off_and_on_behind_a_late_boiler_leaves_it_o
     assert state_of(hass, TARGET_ID) == "off"
 
 
+async def test_enabling_during_a_window_the_user_stopped_starts_the_target_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """S4 keeps the window off after the boiler was switched off by hand at 06:40, and
+    editing the running interval does not bring it back (RULINGS). Switching the
+    interval off and on again is another act of the user, newer than the stop: at 06:50
+    the boiler runs for the rest of the window, once."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == "unknown"
+
+    await set_switch(hass, SWITCH, False)
+    await set_switch(hass, SWITCH, True)
+
+    assert fake_target.calls == [TURN_ON, TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_ON, TURN_OFF]
+
+
+async def test_one_call_for_an_interval_switch_and_the_boiler_reaches_both(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A dashboard button that turns off several switches at once names the interval's
+    switch and the boiler in one call: the interval is switched off, the boiler gets its
+    turn-off, and the window that would have run does not."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+
+    await hass.services.async_call(
+        "switch",
+        "turn_off",
+        {"entity_id": [SWITCH, TARGET_ID]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert state_of(hass, SWITCH) == "off"
+    assert fake_target.calls == [TURN_OFF]
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_OFF]
+
+
 async def test_enabling_before_the_window_waits_for_it(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -557,3 +614,22 @@ async def test_switch_is_written_only_when_toggled(
     await set_switch(hass, SWITCH, True)
 
     assert writes == ["off", "on"]
+
+
+async def test_flipping_an_interval_outside_its_window_does_not_write_the_number(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The number shows the minutes left, and a flip before the window leaves them at
+    zero: the history gets no report of a value that did not change."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    writes = record_writes(hass, NUMBER)
+
+    await set_switch(hass, SWITCH, False)
+    await set_switch(hass, SWITCH, True)
+
+    assert writes == []

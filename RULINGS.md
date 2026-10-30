@@ -441,8 +441,10 @@ only the final behaviour is written.
   manual off, as an edit is. An in-place edit of an open, started window keeps its
   suppression (`_inheriting`) and a toggle does not, because a disabled interval has no
   window to remember it in: the invariant "no window for a disabled interval" has one
-  owner. Cost if wrong: a surprise turn-on when enabling mid-window, also after the user
-  stopped the boiler.
+  owner. Pinned by `test_enabling_during_a_window_the_user_stopped_starts_the_target_again`
+  for the toggle and `test_target_off_during_a_window_stays_off_until_the_next_window`
+  for the edit. Cost if wrong: a surprise turn-on when enabling mid-window, also after
+  the user stopped the boiler.
 - **Deleting an interval is disabling it for S2.** Its window leaves the snapshot and the
   realignment follows, so the timer stops, or passes to another open window, at once. Cost
   if wrong: none.

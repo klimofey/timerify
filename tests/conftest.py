@@ -258,39 +258,64 @@ class FakeTarget:
                 domain, service, self._handler(service, obey, elsewhere)
             )
 
+    async def _take(
+        self,
+        service: str,
+        obey: Obey,
+        call: ServiceCall,
+        entity_id: str,
+        data: dict[str, Any],
+    ) -> None:
+        """The device receives `call` for its `entity_id` and does what it is set to do:
+        hold it, fail it, report late, ignore it or obey."""
+        self.calls.append((service, entity_id))
+        self.call_data.append((service, data))
+        if self._held is not None:
+            held, self._held = self._held, None
+            held.reached.set()
+            await held.release.wait()
+        if self._failure is not None and self._failure[0] in (None, service):
+            _, failure = self._failure
+            self._failure = None
+            raise failure
+        if self._reporting_late:
+            self._reporting_late = False
+            self._late.append((obey, call))
+            return
+        if self._ignoring or self._ignore_next:
+            self._ignore_next = False
+            if self._echoing and self._echoes < ECHO_LIMIT:
+                self._echoes += 1
+                self.write(self.state, context=call.context, echoes=self._echoes)
+            return
+        obey(self, call)
+
     def _handler(
         self, service: str, obey: Obey, elsewhere: Service | None
     ) -> Callable[[ServiceCall], Awaitable[None]]:
         async def handle(call: ServiceCall) -> None:
             data = dict(call.data)
-            entity_id = data.pop("entity_id")
-            if elsewhere is not None and self._is_timerify_entity(entity_id):
+            entity_ids: list[str] = cv.ensure_list(data.pop("entity_id"))
+            ours = (
+                []
+                if elsewhere is None
+                else [e for e in entity_ids if self._is_timerify_entity(e)]
+            )
+            if elsewhere is not None and ours:
+                forwarded = ServiceCall(
+                    self.hass,
+                    call.domain,
+                    call.service,
+                    {**data, "entity_id": ours},
+                    call.context,
+                )
                 if (
-                    running := self.hass.async_run_hass_job(elsewhere.job, call)
+                    running := self.hass.async_run_hass_job(elsewhere.job, forwarded)
                 ) is not None:
                     await running
-                return
-            self.calls.append((service, entity_id))
-            self.call_data.append((service, data))
-            if self._held is not None:
-                held, self._held = self._held, None
-                held.reached.set()
-                await held.release.wait()
-            if self._failure is not None and self._failure[0] in (None, service):
-                _, failure = self._failure
-                self._failure = None
-                raise failure
-            if self._reporting_late:
-                self._reporting_late = False
-                self._late.append((obey, call))
-                return
-            if self._ignoring or self._ignore_next:
-                self._ignore_next = False
-                if self._echoing and self._echoes < ECHO_LIMIT:
-                    self._echoes += 1
-                    self.write(self.state, context=call.context, echoes=self._echoes)
-                return
-            obey(self, call)
+            for entity_id in entity_ids:
+                if entity_id not in ours:
+                    await self._take(service, obey, call, entity_id, data)
 
         return handle
 

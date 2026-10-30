@@ -532,12 +532,12 @@ async def test_fallback_target_runs_through_homeassistant_services(
     await set_number(hass, "number.tea_run_for", 10)
 
     assert kettle.state == "on"
-    assert kettle.calls == [("turn_on", ["kettle.tea"])]
+    assert kettle.calls == [("turn_on", "kettle.tea")]
 
     await kettle.set_state("off")
 
     assert state_of(hass, "number.tea_run_for") == "0"
-    assert kettle.calls == [("turn_on", ["kettle.tea"])]
+    assert kettle.calls == [("turn_on", "kettle.tea")]
 
 
 async def test_picker_offers_only_entities_that_can_be_switched(

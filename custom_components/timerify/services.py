@@ -6,7 +6,7 @@ here on each, so the service reaches the controller of every timer picked.
 """
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Final
 
 import probatio
 from homeassistant.components.number import DOMAIN as NUMBER_DOMAIN
@@ -108,6 +108,11 @@ def _unquoted_yaml_action(value: Any) -> Any:
     return value
 
 
+command_time: Final = probatio.All(cv.datetime, dt_util.as_utc)
+"""The time a command is due at, as a service takes it and a voice agent's tool does.
+A time without a zone, as the UI's date and time picker gives it, is the time on the
+wall of the house: Home Assistant's own time zone. The result is in UTC."""
+
 ADD_COMMAND_SCHEMA: VolDictType = {
     probatio.Required(ATTR_ACTION): probatio.All(
         _unquoted_yaml_action, probatio.In(["on", "off"])
@@ -115,9 +120,7 @@ ADD_COMMAND_SCHEMA: VolDictType = {
     probatio.Optional(ATTR_DELAY): probatio.All(
         whole_minutes, probatio.Range(min=1, max=MAX_DELAY_MINUTES)
     ),
-    # A time without a zone, as the UI's date and time picker gives it, is the time
-    # on the wall of the house: Home Assistant's own time zone.
-    probatio.Optional(ATTR_AT): probatio.All(cv.datetime, dt_util.as_utc),
+    probatio.Optional(ATTR_AT): command_time,
     probatio.Optional(ATTR_MINUTES): probatio.All(
         whole_minutes, probatio.Range(min=1, max=MAX_MINUTES)
     ),

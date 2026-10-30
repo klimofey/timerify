@@ -20,21 +20,27 @@ intents:
         - climate
         - water_heater
       expansion_rules:
-        timerify_settings: ([<timerify_percent_part>]; [<timerify_mode_part>])
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part>
+          [<timerify_percent_part>])
     - sentences:
       - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
       requires_context:
         domain: climate
       expansion_rules:
-        timerify_settings: ([<timerify_hvac_part>]; [<timerify_temperature_part>];
-          [<timerify_percent_part>]; [<timerify_mode_part>])
+        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>];
+          [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>];
+          [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part>
+          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part>
+          ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
     - sentences:
       - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
       requires_context:
         domain: water_heater
       expansion_rules:
-        timerify_settings: ([<timerify_temperature_part>]; [<timerify_percent_part>];
-          [<timerify_mode_part>])
+        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>];
+          [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>];
+          [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>];
+          [<timerify_percent_part>]))
   TimerifyAddTime:
     data:
     - sentences:
@@ -51,6 +57,7 @@ expansion_rules:
   timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
   timerify_hours_part: '{timerify_hours:hours} час[а|ов]'
   timerify_minutes_part: '{timerify_minutes:minutes} минут[у|ы]'
+  timerify_for_part: на <timerify_duration>
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
   timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
@@ -261,3 +268,33 @@ responses:
           {%- endif -%}
         {%- endmacro -%}
         {{ timer_now(slots) }}
+    TimerifyDelayedCommand:
+      delayed: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro timer_later(slots) -%}
+          {%- if slots.outcome == "command_added" -%}
+            {{ slots.target }}: включится {{ day(slots.in_days) }}в {{ slots.at }}.
+          {%- elif slots.outcome == "timer_set" -%}
+            {{ slots.target }}: выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+          {%- else -%}
+            {{ slots.target }}: уже выключено, ничего не изменилось.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_later(slots) }}

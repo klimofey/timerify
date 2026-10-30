@@ -15,6 +15,7 @@ from custom_components.timerify.voice.base import (
     async_error_text,
     clock_slots,
     duration_of,
+    named,
     voice_language,
     whole_slot,
 )
@@ -54,6 +55,15 @@ def test_the_duration_of_slots_can_be_asked_by_prefix() -> None:
 
     assert duration_of(slots, "delay_") == 15
     assert duration_of(slots) == 60
+
+
+def test_the_device_of_a_takeover_sentence_is_its_name() -> None:
+    """The sentences that take over Home Assistant's say the device in a slot of their
+    own; to a handler it is the `name`, like the device of any other sentence."""
+    slots = {"timerify_target": {"value": "Boiler"}, "action": {"value": "on"}}
+
+    assert named(slots) == {"name": {"value": "Boiler"}, "action": {"value": "on"}}
+    assert named({"name": {"value": "Boiler"}}) == {"name": {"value": "Boiler"}}
 
 
 @pytest.mark.parametrize("value", [0, 1, 15, 15.0, 1440, 1440.0])

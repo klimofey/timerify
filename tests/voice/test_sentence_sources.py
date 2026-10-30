@@ -86,7 +86,11 @@ def test_sources_load_with_core_and_without_names(language: str) -> None:
     for name, parsed in timerify.items():
         for data in parsed.data:
             assert data.sentences, name
-        assert samples(language, name, names=(), numbers=ranges) == [], name
+        for takeover in (False, True):
+            assert (
+                samples(language, name, names=(), numbers=ranges, takeover=takeover)
+                == []
+            ), (name, takeover)
 
 
 def test_every_language_has_the_same_intents_and_responses() -> None:

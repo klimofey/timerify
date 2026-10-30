@@ -7,7 +7,8 @@ words for a day. The shipped file `sentences/<language>/<name>.yaml` is the same
 with, in front of each answer, the definition of every macro the answer calls and of
 the macros those call, since the built-in agent renders an answer on its own and cannot
 import a macro. The managed files and the manual installation use the shipped files. A
-shipped file that has no source any more is removed.
+shipped file that has no source any more is removed, but for the one that
+`scripts/generate_core_commands.py` writes.
 
     uv run python -m scripts.generate_sentences
 """
@@ -19,6 +20,7 @@ from typing import Any, Final
 
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
 from custom_components.timerify.voice.sentences import dump_sentences, read_back
+from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 
 COMMAND: Final = "uv run python -m scripts.generate_sentences"
 """How the shipped files are written again."""
@@ -84,8 +86,10 @@ def render(language: str, root: Path = SENTENCES_DIR) -> dict[str, str]:
 
 
 def stale(language: str, root: Path = SENTENCES_DIR) -> list[Path]:
-    """The shipped files of `language` under `root` that no source writes any more."""
-    written = render(language, root)
+    """The shipped files of `language` under `root` that nothing writes any more: no
+    source of this script, and not the file of the commands of Home Assistant that
+    `scripts/generate_core_commands.py` writes."""
+    written = {*render(language, root), CORE_COMMANDS}
     return [
         path
         for path in sorted((root / language).glob("*.yaml"))

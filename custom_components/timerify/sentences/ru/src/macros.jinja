@@ -53,3 +53,16 @@
     {{ slots.target }}: выключено.
   {%- endif -%}
 {%- endmacro -%}
+
+{#- What a command for later did, from the slots a handler gives: a command to turn on
+    was kept, the countdown was set to turn off, or there was nothing to turn off. The
+    name goes first, since it cannot be declined. -#}
+{%- macro timer_later(slots) -%}
+  {%- if slots.outcome == "command_added" -%}
+    {{ slots.target }}: включится {{ day(slots.in_days) }}в {{ slots.at }}.
+  {%- elif slots.outcome == "timer_set" -%}
+    {{ slots.target }}: выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+  {%- else -%}
+    {{ slots.target }}: уже выключено, ничего не изменилось.
+  {%- endif -%}
+{%- endmacro -%}

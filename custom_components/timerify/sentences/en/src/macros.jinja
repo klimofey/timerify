@@ -48,3 +48,15 @@
     {{ slots.target }} is off.
   {%- endif -%}
 {%- endmacro -%}
+
+{#- What a command for later did, from the slots a handler gives: a command to turn on
+    was kept, the countdown was set to turn off, or there was nothing to turn off. -#}
+{%- macro timer_later(slots) -%}
+  {%- if slots.outcome == "command_added" -%}
+    {{ slots.target }} turns on at {{ slots.at }}{{ day(slots.in_days) }}.
+  {%- elif slots.outcome == "timer_set" -%}
+    {{ slots.target }} turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+  {%- else -%}
+    {{ slots.target }} is already off; nothing changed.
+  {%- endif -%}
+{%- endmacro -%}

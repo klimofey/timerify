@@ -47,6 +47,10 @@ RULE_PREFIX: Final = "timerify_"
 
 _TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
 
+_LOADER: Final = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+"""The loader of the sentence files: the one built on libyaml where there is libyaml, as
+Home Assistant's own is, since the files run to tens of kilobytes."""
+
 
 class _SentenceDumper(yaml.SafeDumper):
     """The safe YAML dumper, but a text of several lines is written as a block, as the
@@ -275,7 +279,7 @@ def dump_sentences(data: Mapping[str, Any]) -> str:
 
 def read_back(text: str) -> dict[str, Any]:
     """The sentences of the text of a file, as the built-in agent reads the file."""
-    sentences: dict[str, Any] = yaml.safe_load(text)
+    sentences: dict[str, Any] = yaml.load(text, Loader=_LOADER)
     return sentences
 
 

@@ -447,6 +447,9 @@
     "delay_or_at": {
       "message": "Укажите для команды либо задержку, либо время: одно из двух."
     },
+    "invalid_command_time": {
+      "message": "Timerify не может понять это время."
+    },
     "off_takes_no_duration_or_settings": {
       "message": "У команды выключения не бывает ни минут, ни настроек."
     },

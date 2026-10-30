@@ -17,6 +17,7 @@ from typing import Any, Final
 
 import yaml
 from freezegun.api import FrozenDateTimeFactory
+from hassil.expression import Sentence
 from hassil.intents import Intents, RangeSlotList, SlotList, TextSlotList
 from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
@@ -42,14 +43,19 @@ from custom_components.timerify.const import (
     SENTENCES_DIR,
     VOICE_LANGUAGES,
 )
-from custom_components.timerify.voice.sentences import load_sources
+from custom_components.timerify.voice.sentences import read_back
+from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 
+from ..conftest import FakeTarget, SetupTarget
 from ..helpers import advance_to, local
 
 ASSISTANT: Final = "conversation"
 """The assistant the built-in agent asks Home Assistant about exposure as."""
 NAMES_FILE: Final = "timerify_names.yaml"
 """The file of the manual installation that lists the targets' names."""
+OWN_SENTENCES: Final = "timerify.yaml"
+"""The shipped file of the sentences that Timerify's own intents are said with, besides
+`CORE_COMMANDS`, the file of those that take over Home Assistant's."""
 TRANSLATIONS: Final = (
     Path(__file__).parents[2] / "custom_components" / DOMAIN / "translations"
 )
@@ -210,11 +216,26 @@ TIMER_CASES: Final[Sequence[Mapping[str, Any]]] = (
 every counting form of the language's plural rules, a day, and the states without a
 countdown."""
 
+LATER_CASES: Final[Sequence[Mapping[str, Any]]] = (
+    {"outcome": "command_added", "target": "Boiler", "at": "10:15", "in_days": 0},
+    {"outcome": "command_added", "target": "Boiler", "at": "10:15", "in_days": 1},
+    {"outcome": "command_added", "target": "Boiler", "at": "10:15", "in_days": 2},
+    {"outcome": "command_added", "target": "Boiler", "at": "10:15", "in_days": 21},
+    {"outcome": "timer_set", "target": "Boiler", "ends_at": "10:15", "ends_in_days": 0},
+    {"outcome": "timer_set", "target": "Boiler", "ends_at": "10:15", "ends_in_days": 1},
+    {"outcome": "timer_set", "target": "Boiler", "ends_at": "10:15", "ends_in_days": 5},
+    {"outcome": "not_running", "target": "Boiler"},
+)
+"""The slots a handler gives to the answer about a command for later, in the cases it
+tells apart: a command to turn on that was kept, the countdown that was set to turn
+off (each today and on another date), and a turn off of a target that is not running."""
+
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyTimeLeft", "default"): TIMER_CASES,
     ("TimerifyRun", "default"): TIMER_CASES,
     ("TimerifyAddTime", "default"): TIMER_CASES,
     ("TimerifyStop", "default"): TIMER_CASES,
+    ("TimerifyDelayedCommand", "delayed"): LATER_CASES,
 }
 """For each answer of the sentence files, by intent and response key, the slots a
 handler gives it in the cases it tells apart. A task that adds an answer adds its slots
@@ -308,6 +329,16 @@ async def add_voice_entry(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     return result["result"]
+
+
+async def with_voice_settings(
+    hass: HomeAssistant, setup_target: SetupTarget, *targets: FakeTarget
+) -> None:
+    """Timers on `targets`, which Assist knows by the Voice settings entry: their
+    names, and the words for the modes and the presets that they have."""
+    for target in targets:
+        await setup_target(target=target.entity_id)
+    await add_voice_entry(hass)
 
 
 def managed_file(hass: HomeAssistant, language: str) -> Path:
@@ -412,12 +443,23 @@ async def copy_sentences(
 
 
 @cache
-def _intents_of(language: str) -> Intents:
-    """The core sentences of `language` with the Timerify sources on top and no
-    target listed."""
+def _intents_of(language: str, takeover: bool = False) -> Intents:
+    """The core sentences of `language` with the shipped sentences of Timerify on top
+    and no target listed: those of `OWN_SENTENCES`, or, for `takeover`, the intents of
+    `CORE_COMMANDS` in their place, which are said with the lists and rules of the
+    first and those of their own file."""
     merged = get_intents(language)
     assert merged is not None, f"home-assistant-intents has no {language}"
-    merge_dict(merged, load_sources(language))
+    shipped = SENTENCES_DIR / language
+    own = read_back((shipped / OWN_SENTENCES).read_text("utf-8"))
+    if takeover:
+        taken = read_back((shipped / CORE_COMMANDS).read_text("utf-8"))
+        own["intents"] = taken["intents"]
+        own["expansion_rules"] = {
+            **own.get("expansion_rules", {}),
+            **taken.get("expansion_rules", {}),
+        }
+    merge_dict(merged, own)
     return Intents.from_dict(merged)
 
 
@@ -463,16 +505,24 @@ def samples(
     numbers: Mapping[str, int],
     texts: Mapping[str, str] | None = None,
     absent: Collection[str] = (),
+    takeover: bool = False,
+    optionals: bool = True,
 ) -> list[str]:
-    """Sentences of the intent as a user would say them, a bounded number.
+    """Sentences of the intent as a user would say them, a bounded number: those of
+    `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`.
 
     Every list is cut down to one value (see `_one_value`) and every sentence
     template is sampled twice: once as its first expansion with the optional parts
-    said and the first order of a permutation, once with the optional parts left out.
-    The same text is returned once. Sampling all expansions of the core's number
-    lists runs to hundreds of thousands of sentences.
+    said and the first order of a permutation, once with the optional parts left out;
+    a sentence that cannot be said even with them left out is skipped, and with
+    `optionals` false only that second sampling is done, which a sentence with many
+    optional parts needs: they expand to thousands of texts. The same text is returned
+    once. Sampling all expansions of the core's number lists runs to hundreds of
+    thousands of sentences.
     """
-    intents = _intents_of(language)
+    intents = _intents_of(language, takeover)
+    if intent_type not in intents.intents:
+        return []
     found: list[str] = []
     for data in intents.intents[intent_type].data:
         slot_lists = _one_value(
@@ -484,22 +534,42 @@ def samples(
         )
         rules = {**intents.expansion_rules, **data.expansion_rules}
         for sentence in data.sentences:
-            for skip_optionals in (False, True):
-                first = next(
-                    iter(
-                        sample_sentence(
-                            sentence,
-                            slot_lists,
-                            rules,
-                            language=language,
-                            skip_optionals=skip_optionals,
-                        )
-                    ),
-                    None,
-                )
-                if first is not None and (text := first.strip()) not in found:
+            if (
+                minimal := _first_sample(sentence, slot_lists, rules, language, True)
+            ) is None:
+                continue
+            said = (
+                _first_sample(sentence, slot_lists, rules, language, False)
+                if optionals
+                else None
+            )
+            for text in (said, minimal):
+                if text is not None and text not in found:
                     found.append(text)
     return found
+
+
+def _first_sample(
+    sentence: Sentence,
+    slot_lists: Mapping[str, SlotList],
+    rules: Mapping[str, Sentence],
+    language: str,
+    skip_optionals: bool,
+) -> str | None:
+    """The first text the sentence expands to, if it can be said."""
+    first = next(
+        iter(
+            sample_sentence(
+                sentence,
+                dict(slot_lists),
+                dict(rules),
+                language=language,
+                skip_optionals=skip_optionals,
+            )
+        ),
+        None,
+    )
+    return None if first is None else first.strip()
 
 
 def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:

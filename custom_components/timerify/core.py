@@ -328,6 +328,17 @@ class TimerCore:
         """The current state, safe to persist."""
         return self._snapshot
 
+    def wanted_running(self) -> bool:
+        """Whether the target is wanted running: a countdown is under way, or else the
+        wish that the target has not confirmed yet says so, or else the target was last
+        seen on.
+
+        This is the desired state, as `_runs_as_of` judges it, not what has reached the
+        target: a target that is away while its timer counts, and a turn-on that is in
+        flight, are running; a turn-off in flight is not.
+        """
+        return self._snapshot.end is not None or self._runs_as_of(None)
+
     @_reports_change
     def set_duration(
         self,

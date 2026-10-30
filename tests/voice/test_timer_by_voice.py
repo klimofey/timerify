@@ -54,7 +54,6 @@ from .helpers import (
     HOUR_CLASSES,
     MINUTE_CLASSES,
     PluralClasses,
-    add_voice_entry,
     assert_one_form_per_class,
     assist_api,
     call_tool,
@@ -68,6 +67,7 @@ from .helpers import (
     spoken_values,
     talk,
     translated,
+    with_voice_settings,
 )
 
 RUN = "TimerifyRun"
@@ -82,16 +82,6 @@ COOL = ("set_hvac_mode", {"hvac_mode": "cool"})
 TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]
 """The calls that turn the air conditioner on cooling, at 24 degrees."""
-
-
-async def with_voice_settings(
-    hass: HomeAssistant, setup_target: SetupTarget, *targets: FakeTarget
-) -> None:
-    """Timers on `targets`, which Assist knows by the Voice settings entry: their
-    names, and the words for the modes and the presets that they have."""
-    for target in targets:
-        await setup_target(target=target.entity_id)
-    await add_voice_entry(hass)
 
 
 def refusal_of(response: intent.IntentResponse) -> str:

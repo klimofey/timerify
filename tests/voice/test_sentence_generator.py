@@ -12,6 +12,7 @@ from homeassistant.util.yaml import load_yaml_dict
 
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
 from custom_components.timerify.voice.sentences import load_sources
+from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 from scripts.generate_sentences import (
     COMMAND,
     SOURCES,
@@ -58,10 +59,11 @@ def test_shipped_sentence_files_are_current(language: str) -> None:
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 def test_there_are_no_other_shipped_sentence_files(language: str) -> None:
     """A file whose source was removed or renamed would still ship, and the managed
-    files and the manual installation would still be made from it."""
+    files and the manual installation would still be made from it. The sentences that
+    take over the commands of Home Assistant are the one file with another generator."""
     shipped = {path.name for path in (SENTENCES_DIR / language).glob("*.yaml")}
 
-    assert shipped == set(render(language)), (
+    assert shipped == {*render(language), CORE_COMMANDS}, (
         f"sentences/{language} has files the generator does not write from its"
         f" sources: run `{COMMAND}`, which removes them, and commit the result"
     )
@@ -136,6 +138,24 @@ def test_a_macros_file_that_holds_anything_but_macros_is_refused() -> None:
     """Whatever is not in a macro would be left out of every answer without a word."""
     with pytest.raises(ValueError, match="more than macros and comments"):
         macros_of(MACROS + "{% set stray = 1 %}")
+
+
+def test_writing_leaves_the_file_of_the_other_generator_alone(tmp_path: Path) -> None:
+    """The commands of Home Assistant have no source in `src`; they are written from
+    the intents by `scripts/generate_core_commands.py`, and this script must neither
+    remove them as stale nor write over them."""
+    sources = tmp_path / "en" / SOURCES
+    sources.mkdir(parents=True)
+    (sources / "macros.jinja").write_text(MACROS, "utf-8")
+    (sources / "words.yaml").write_text("language: en\n", "utf-8")
+    (tmp_path / "en" / CORE_COMMANDS).write_text("language: en\n# theirs\n", "utf-8")
+
+    assert stale("en", tmp_path) == []
+    write("en", tmp_path)
+
+    assert (tmp_path / "en" / CORE_COMMANDS).read_text("utf-8") == (
+        "language: en\n# theirs\n"
+    )
 
 
 def test_writing_replaces_the_shipped_files_and_removes_those_without_a_source(

@@ -18,6 +18,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import CONF_TARGET, DOMAIN, MAX_COMMANDS
+from custom_components.timerify.controller import command_when
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -27,6 +28,7 @@ from .helpers import (
     AC_NUMBER,
     NEXT,
     NUMBER,
+    START,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
@@ -729,6 +731,21 @@ async def test_invalid_commands_are_rejected(
     assert storage_key(entry) not in hass_storage
     await advance(hass, freezer, hours=1)
     assert fake_target.calls == []
+
+
+def test_a_command_is_due_after_a_delay_or_at_a_time() -> None:
+    """Exactly one of the two says when; a delay of nothing is still a delay, and the
+    controller refuses it as a time that is not ahead."""
+    delay = timedelta(minutes=5)
+    moment = START + delay
+
+    assert command_when(delay, None) == delay
+    assert command_when(timedelta(0), None) == timedelta(0)
+    assert command_when(None, moment) == moment
+    for both_or_neither in ((delay, moment), (None, None), (timedelta(0), moment)):
+        with pytest.raises(ServiceValidationError) as raised:
+            command_when(*both_or_neither)
+        assert raised.value.translation_key == "delay_or_at"
 
 
 async def test_command_the_week_ahead_is_accepted(

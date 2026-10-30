@@ -107,6 +107,48 @@ def duration_out_of_range() -> ServiceValidationError:
     )
 
 
+def command_when(delay: timedelta | None, at: datetime | None) -> datetime | timedelta:
+    """When a command is due, as exactly one of a delay from now and a moment is given.
+
+    Raises ServiceValidationError (`delay_or_at`) for both and for neither.
+    """
+    if delay is not None and at is None:
+        return delay
+    if at is not None and delay is None:
+        return at
+    raise ServiceValidationError(
+        translation_domain=DOMAIN, translation_key="delay_or_at"
+    )
+
+
+def _refuse_a_run_of_off(
+    minutes: int | None, settings: Mapping[str, Any] | None
+) -> None:
+    """Raise ServiceValidationError (`off_takes_no_duration_or_settings`) for a command
+    to turn off that is given minutes to run or settings to run with."""
+    if minutes is not None or settings:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="off_takes_no_duration_or_settings",
+        )
+
+
+def _due(now: datetime, when: datetime | timedelta) -> datetime:
+    """The moment a command that gets its turn at `now` is due: `when`, or `when` from
+    now.
+
+    Raises ServiceValidationError (`command_in_past`) for a moment that is not ahead.
+    """
+    at = now + when if isinstance(when, timedelta) else when
+    if at <= now:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="command_in_past",
+            translation_placeholders={"at": _local_time(at)},
+        )
+    return at
+
+
 def _unloaded_error() -> HomeAssistantError:
     return HomeAssistantError(
         translation_domain=DOMAIN, translation_key="timer_unloaded"
@@ -130,9 +172,9 @@ class TargetController:
     """Runs the timer of one target entity.
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
-    `async_add_command`, `async_cancel_command`, `async_set_interval_enabled`) waits
-    for its turn and raises HomeAssistantError (`timer_unloaded`) if the timer was
-    unloaded meanwhile.
+    `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
+    `async_set_interval_enabled`) waits for its turn and raises HomeAssistantError
+    (`timer_unloaded`) if the timer was unloaded meanwhile.
     """
 
     def __init__(
@@ -276,24 +318,15 @@ class TargetController:
         that the target cannot take, for a time that is not ahead or is more than
         `MAX_COMMAND_AHEAD` ahead, and when the timer already keeps `MAX_COMMANDS`.
         """
-        if action == "off" and (minutes is not None or settings):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="off_takes_no_duration_or_settings",
-            )
+        if action == "off":
+            _refuse_a_run_of_off(minutes, settings)
         if minutes is not None and not 1 <= minutes <= MAX_MINUTES:
             raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         command_id = uuid4().hex
 
         def add(now: datetime) -> list[Effect]:
-            at = now + when if isinstance(when, timedelta) else when
-            if at <= now:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="command_in_past",
-                    translation_placeholders={"at": _local_time(at)},
-                )
+            at = _due(now, when)
             if at > now + MAX_COMMAND_AHEAD:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
@@ -315,6 +348,44 @@ class TargetController:
 
         await self._command(add)
         return command_id
+
+    async def async_turn_off_in(
+        self,
+        when: datetime | timedelta,
+        minutes: int | None = None,
+        settings: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Have the target turned off at `when`, a moment or how long from now, and say
+        whether it was: set the countdown to end then if the target is wanted running,
+        change nothing if it is not.
+
+        Whether it is wanted running is judged when the call gets its turn, from the
+        desired state (see `TimerCore.wanted_running`), so a turn-on or a turn-off that
+        the target has not confirmed yet counts, and a target that is away while its
+        timer counts is running (R10). The countdown is set as by hand: whatever time
+        was left is replaced, shorter or longer.
+
+        Raises ServiceValidationError, before anything runs, for `minutes` or `settings`
+        (an "off" has neither: `off_takes_no_duration_or_settings`), and when the call
+        gets its turn, for a moment that is not ahead (`command_in_past`, which a zero
+        delay is) or is more than a day ahead (`duration_out_of_range`), whether or
+        not the target is running.
+        """
+        _refuse_a_run_of_off(minutes, settings)
+        running = False
+
+        def turn_off_at(now: datetime) -> list[Effect]:
+            nonlocal running
+            at = _due(now, when)
+            if at > now + timedelta(minutes=MAX_MINUTES):
+                raise duration_out_of_range()
+            running = self._core.wanted_running()
+            if not running:
+                return []
+            return self._core.set_duration(now, at - now)
+
+        await self._command(turn_off_at)
+        return running
 
     async def async_cancel_command(self, command_id: str) -> None:
         """Forget the pending command with that id.

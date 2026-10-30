@@ -447,6 +447,9 @@
     "delay_or_at": {
       "message": "Give the command either a delay or a time, not both and not neither."
     },
+    "invalid_command_time": {
+      "message": "That is not a time Timerify can understand."
+    },
     "off_takes_no_duration_or_settings": {
       "message": "A command to turn off takes no minutes and no settings."
     },

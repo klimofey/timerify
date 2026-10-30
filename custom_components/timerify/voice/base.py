@@ -29,6 +29,24 @@ from ..target import target_name
 
 DEFAULT_LANGUAGE = "en"
 """The language a refusal is spoken in when the request is in none Timerify has."""
+SPOKEN_TARGET_SLOT: Final = "timerify_target"
+"""The slot in which the sentences that take over Home Assistant's commands to turn a
+device on or off (`core_commands.yaml`) say the device. A handler reads it as `name`,
+where every other way of saying it puts it.
+
+It is not called `name` because of how the built-in agent treats a sentence that names
+no device it knows, such as "turn it off". Among the sentences that came closest it
+prefers one that has a `name`, and it gives up on a custom sentence, where it would work
+out what "it" means. With a `name`, a sentence of ours would win against the sentence of
+Home Assistant for the same words, and every follow-up would fail with an error."""
+
+
+def named(slots: Mapping[str, Any]) -> dict[str, Any]:
+    """`slots` with the device said in `SPOKEN_TARGET_SLOT` in the place of `name`."""
+    return {
+        "name" if key == SPOKEN_TARGET_SLOT else key: value
+        for key, value in slots.items()
+    }
 
 
 def whole_slot(value: float) -> int:
@@ -300,7 +318,7 @@ class TimerifyIntentHandler(intent.IntentHandler):
         """
         hass = intent_obj.hass
         response = intent_obj.create_response()
-        slots = self.async_validate_slots(intent_obj.slots)
+        slots = self.async_validate_slots(named(intent_obj.slots))
         entry = await async_match_timer(hass, intent_obj, slots["name"]["value"])
         try:
             await self.async_handle_timer(intent_obj, entry, slots, response)

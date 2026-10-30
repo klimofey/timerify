@@ -15,7 +15,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, MAX_MINUTES
-from .controller import TimerifyConfigEntry
+from .controller import TimerifyConfigEntry, command_when
 from .core import remaining_minutes
 from .entity import TimerifyEntity
 
@@ -101,14 +101,7 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         An "on" runs for `minutes` and with the `settings` given. Exactly one of
         `delay` and `at` is wanted.
         """
-        if at is not None and delay is None:
-            when: datetime | timedelta = at
-        elif delay is not None and at is None:
-            when = timedelta(minutes=delay)
-        else:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="delay_or_at"
-            )
+        when = command_when(None if delay is None else timedelta(minutes=delay), at)
         command_id = await self._controller.async_add_command(
             action, when, minutes, settings
         )

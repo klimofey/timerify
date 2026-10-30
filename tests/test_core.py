@@ -3819,3 +3819,37 @@ def test_a_report_of_a_call_the_core_never_made_asks_for_nothing() -> None:
 
     assert c.observe(NOW, "off", by_us=True) == [Changed()]
     assert c.snapshot == Snapshot(end=NOW + minutes(20), last_actual="off")
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "wanted"),
+    [
+        (Snapshot(last_actual="off"), False),
+        (Snapshot(), False),
+        (Snapshot(end=NOW + minutes(10), last_actual="on"), True),
+        (Snapshot(end=NOW + minutes(10), last_actual="unavailable"), True),
+        (Snapshot(last_actual="on"), True),
+        (Snapshot(pending="on", last_actual="off"), True),
+        (Snapshot(pending="on", last_actual="unavailable"), True),
+        (Snapshot(pending="off", last_actual="on"), False),
+        (Snapshot(last_actual="unavailable"), False),
+    ],
+    ids=[
+        "idle",
+        "never_seen",
+        "counting",
+        "counting_while_unavailable",
+        "on_without_a_timer",
+        "turn_on_in_flight",
+        "turn_on_waiting_for_the_target",
+        "turn_off_in_flight",
+        "unavailable_without_a_wish",
+    ],
+)
+def test_the_target_is_wanted_running_by_the_desired_state(
+    snapshot: Snapshot, wanted: bool
+) -> None:
+    """A countdown means running, also while the target is away (R10). Without one the
+    wish the target has not confirmed yet decides, and only then what it was last seen
+    doing: a turn-on in flight is a run, a turn-off in flight is not."""
+    assert TimerCore("strict", minutes(45), snapshot).wanted_running() is wanted

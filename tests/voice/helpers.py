@@ -39,6 +39,7 @@ from custom_components.timerify.const import (
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
     DOMAIN,
+    LIST_INTERVAL,
     LIST_TARGET,
     MANUAL_SENTENCES_DIR,
     SENTENCES_DIR,
@@ -301,6 +302,32 @@ CANCEL_CASES: Final[Sequence[Mapping[str, Any]]] = (
 tells apart: none, the next one (each of the ways a command is said), every one, with
 the counts of each plural form, and one by its id."""
 
+
+def scheduling(
+    enabled: bool, interval: str | None = None, count: int = 2
+) -> dict[str, Any]:
+    """The slots a handler gives to the answer about switching a schedule: the
+    schedule of the target, or the one `interval` of it, `enabled` or not, with the
+    `count` of intervals switched."""
+    return {
+        "target": "Boiler",
+        "enabled": enabled,
+        "interval": interval,
+        "count": count,
+    }
+
+
+SCHEDULE_CASES: Final[Sequence[Mapping[str, Any]]] = (
+    scheduling(True),
+    scheduling(False),
+    scheduling(True, count=1),
+    scheduling(True, "Morning", count=1),
+    scheduling(False, "Morning", count=1),
+    scheduling(False, "Morning", count=3),
+)
+"""The slots a handler gives to the answer about switching a schedule, in the cases it
+tells apart: the whole schedule, or an interval by its title, on and off."""
+
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyTimeLeft", "default"): TIMER_CASES,
     ("TimerifyRun", "default"): TIMER_CASES,
@@ -309,6 +336,7 @@ RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyDelayedCommand", "delayed"): LATER_CASES,
     ("TimerifyListCommands", "default"): LIST_CASES,
     ("TimerifyCancelCommands", "default"): CANCEL_CASES,
+    ("TimerifySetSchedule", "default"): SCHEDULE_CASES,
 }
 """For each answer of the sentence files, by intent and response key, the slots a
 handler gives it in the cases it tells apart. A task that adds an answer adds its slots
@@ -478,11 +506,13 @@ async def copy_sentences(
     hass: HomeAssistant,
     names: Sequence[str],
     domains: Mapping[str, str] | None = None,
+    intervals: Sequence[str] = (),
 ) -> None:
     """Install the sentences the manual way: every source file of each language into
     `custom_sentences/<lang>/timerify_manual/`, with a file listing the targets'
     `names` as they are said and shown, and for each name in `domains` the domain of
-    its target, which the words for an HVAC mode and a temperature need.
+    its target, which the words for an HVAC mode and a temperature need, and the
+    `intervals` titles of the schedules.
 
     Before the built-in agent's first request in a language, which reads the files
     once.
@@ -512,7 +542,10 @@ async def copy_sentences(
                             }
                             for name in names
                         ]
-                    }
+                    },
+                    LIST_INTERVAL: {
+                        "values": [{"in": title, "out": title} for title in intervals]
+                    },
                 },
             }
             (directory / NAMES_FILE).write_text(
@@ -656,6 +689,7 @@ def every_text(
     intent_type: str,
     *,
     name: str = "Boiler",
+    interval: str = "Morning",
     numbers: Mapping[str, int] | None = None,
 ) -> list[tuple[str, Mapping[str, Any]]]:
     """Every text the shipped sentences of the intent can be said as, each with the
@@ -663,12 +697,12 @@ def every_text(
 
     Every alternative of every sentence is taken in turn, optional parts said and left
     out, and every value of every list of words: the sentences of the intent are
-    expanded in full. The target is the one `name`, and a list of numbers has the one
-    number `numbers` gives it by the name of the list. Nothing is left out quietly: a
-    list that a sentence says a value of and that has none (a list of numbers that
-    `numbers` does not name, a list of words with no values) is an error, and so is an
-    intent that expands to more than `EVERY_TEXT_LIMIT` texts, for which `samples` is
-    the bounded sampler.
+    expanded in full. The target is the one `name`, the title of a schedule interval
+    the one `interval`, and a list of numbers has the one number `numbers` gives it by
+    the name of the list. Nothing is left out quietly: a list that a sentence says a
+    value of and that has none (a list of numbers that `numbers` does not name, a list
+    of words with no values) is an error, and so is an intent that expands to more than
+    `EVERY_TEXT_LIMIT` texts, for which `samples` is the bounded sampler.
     """
     intents = _intents_of(language)
     found: list[tuple[str, Mapping[str, Any]]] = []
@@ -682,9 +716,9 @@ def every_text(
         }
         for list_name in sorted(said):
             slot_list = slot_lists[list_name]
-            if list_name == LIST_TARGET:
+            if list_name in (LIST_TARGET, LIST_INTERVAL):
                 slot_lists[list_name] = TextSlotList.from_strings(
-                    [name], name=list_name
+                    [name if list_name == LIST_TARGET else interval], name=list_name
                 )
             elif isinstance(slot_list, RangeSlotList):
                 given = (numbers or {}).get(list_name)

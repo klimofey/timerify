@@ -15,6 +15,7 @@ from .commands import (
     DelayedCommandHandler,
     ListCommandsHandler,
 )
+from .intervals import SetScheduleHandler
 from .timer import AddTimeHandler, RunHandler, StopHandler, TimeLeftHandler
 
 HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (
@@ -25,6 +26,7 @@ HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (
     DelayedCommandHandler,
     ListCommandsHandler,
     CancelCommandsHandler,
+    SetScheduleHandler,
 )
 """Every handler Timerify registers, one per intent type."""
 

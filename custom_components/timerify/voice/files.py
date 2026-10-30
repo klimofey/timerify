@@ -2,9 +2,10 @@
 them in step with the timers, and takes them away again.
 
 The file of a language is `custom_sentences/<language>/timerify.yaml`. It is the shipped
-sentences with the names of the timers' targets in them, and it is rewritten whenever
-those names may have changed. Writing a file and removing one are followed by a reload
-of the built-in agent's sentences, so that the change is heard at once.
+sentences with the names of the timers' targets in them and the titles of their schedule
+intervals, and it is rewritten whenever those may have changed. Writing a file and
+removing one are followed by a reload of the built-in agent's sentences, so that the
+change is heard at once.
 
 The path is the user's directory, and a file at it is Timerify's only if its first line
 is `MANAGED_HEADER`: Timerify writes where there is no file or its own, removes only its
@@ -45,6 +46,7 @@ from .sentences import (
     VoiceName,
     VoiceSettingValues,
     build,
+    interval_names,
     load_sources,
     read_back,
     render,
@@ -109,6 +111,7 @@ def _write_if_changed(
     language: str,
     names: Sequence[VoiceName],
     settings: VoiceSettingValues,
+    intervals: Sequence[VoiceName],
 ) -> WriteResult:
     """Build the sentences of `language`, check that the built-in agent can read the
     text that would be written, and write it to `path` unless it is what is there
@@ -120,7 +123,7 @@ def _write_if_changed(
     first_line = _first_line(path)
     if first_line is not None and first_line != MANAGED_HEADER:
         return WriteResult.FOREIGN
-    text = render(build(load_sources(language), names, settings))
+    text = render(build(load_sources(language), names, settings, intervals))
     validate(language, read_back(text))
     if first_line is not None and path.read_text("utf-8", errors="replace") == text:
         return WriteResult.UNCHANGED
@@ -173,9 +176,10 @@ class SentenceFiles:
 
     The first writing happens before the entry is set up when Home Assistant is running,
     and once it has started otherwise, when every timer is there to be listed. Only
-    after it do changes cause writing: a timer set up or unloaded, and a rename of a
-    target, of its device or of an alias of it. A burst of changes is one writing,
-    `VOICE_SYNC_COOLDOWN` after the last.
+    after it do changes cause writing: a timer set up or unloaded, which an edit of the
+    title of an interval of its schedule is, and a rename of a target, of its device or
+    of an alias of it. A burst of changes is one writing, `VOICE_SYNC_COOLDOWN` after
+    the last.
     """
 
     def __init__(self, hass: HomeAssistant, entry: VoiceConfigEntry) -> None:
@@ -247,6 +251,7 @@ class SentenceFiles:
         ]
         names = voice_names(hass)
         settings = voice_setting_values(hass)
+        intervals = interval_names(hass)
         await self._async_warn_about_manual_installs(chosen)
         changed = False
         try:
@@ -257,7 +262,7 @@ class SentenceFiles:
                     continue
                 try:
                     result = await hass.async_add_executor_job(
-                        _write_if_changed, path, language, names, settings
+                        _write_if_changed, path, language, names, settings, intervals
                     )
                 except InvalidSentences as err:
                     _LOGGER.error(

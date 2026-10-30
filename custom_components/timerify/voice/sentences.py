@@ -2,12 +2,14 @@
 the proof that the built-in agent can read them.
 
 The shipped sentences (`sentences/<language>/*.yaml`) are complete but for the names of
-the devices; the names are what this module adds. A file that Home Assistant cannot load
-makes the built-in agent fail for the whole language, whatever the request, so a file is
-built here, parsed the way the agent parses it, and written only when it passes
-(`validate`).
+the devices, the titles of the schedule intervals and the modes the devices take; those
+are what this module adds. A file that Home Assistant cannot load makes the built-in
+agent fail for the whole language, whatever the request, so a file is built here, parsed
+the way the agent parses it, and written only when it passes (`validate`).
 
-Everything here is blocking, except `voice_names`, and runs in the executor.
+Everything here is blocking, and runs in the executor, except the functions that read
+what Home Assistant knows (`voice_names`, `interval_names`, `voice_setting_values`),
+which run in the event loop.
 """
 
 import copy
@@ -34,10 +36,12 @@ from homeassistant.helpers import intent
 
 from ..const import (
     LIST_HVAC_MODE,
+    LIST_INTERVAL,
     LIST_MODE,
     LIST_TARGET,
     MANAGED_HEADER,
     SENTENCES_DIR,
+    SUBENTRY_INTERVAL,
 )
 from ..domains import supported_settings
 from .base import loaded_timers
@@ -75,15 +79,17 @@ class InvalidSentences(ValueError):
 
 @dataclass(frozen=True)
 class VoiceName:
-    """One way a target is called: what is said, and what is meant by it."""
+    """One way a target, or a schedule interval of its timer, is called: what is said,
+    and what is meant by it."""
 
     spoken: str
     """The name as the built-in agent compares it with what it hears: punctuation
     removed."""
     name: str
-    """The name as Home Assistant shows it, which the intent receives."""
+    """The name as Home Assistant shows it, which the intent receives: the title of an
+    interval."""
     domain: str
-    """The domain of the target."""
+    """The domain of the target, which an interval is the schedule of as well."""
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,7 @@ def spoken_mode(mode: str) -> str:
 
 NAME_LISTS: Final[Mapping[str, Callable[[str], str]]] = {
     LIST_TARGET: spoken_form,
+    LIST_INTERVAL: spoken_form,
     LIST_MODE: spoken_mode,
 }
 """The lists of the sentences that hold names as people say them, each with how a value
@@ -165,6 +172,27 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
 
 
 @callback
+def interval_names(hass: HomeAssistant) -> list[VoiceName]:
+    """Every title the built-in agent would know the schedule intervals of the timers
+    by, each once however many timers have an interval of that title.
+
+    A title is cleaned as a name is: what is said is the title without punctuation, and
+    what is meant is the title as it is, which names the interval to the timer. A title
+    that is nothing but punctuation is left out: it would match anywhere.
+    """
+    names: dict[tuple[str, str], VoiceName] = {}
+    for entry in loaded_timers(hass):
+        domain = split_entity_id(entry.runtime_data.target_entity_id)[0]
+        for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
+            spoken = spoken_form(subentry.title)
+            if spoken:
+                names.setdefault(
+                    (spoken, subentry.title), VoiceName(spoken, subentry.title, domain)
+                )
+    return list(names.values())
+
+
+@callback
 def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
     """The values of the settings that the targets of the timers support now, from their
     states or, without one, their registry entries: the same judgement a command is
@@ -193,14 +221,16 @@ def build(
     sources: Mapping[str, Any],
     names: Sequence[VoiceName],
     settings: VoiceSettingValues = NO_SETTING_VALUES,
+    intervals: Sequence[VoiceName] = (),
 ) -> dict[str, Any]:
-    """The sentences of `sources` with the lists of what the targets are called and
-    can be turned on in filled in.
+    """The sentences of `sources` with the lists of what the targets are called, what
+    the schedule intervals are called and what can be turned on in filled in.
 
     A name is listed under what is said (`in`, escaped so that it is read as text) and
-    what it means (`out`), with the domain of its target as context. The words for an
-    HVAC mode are those of the sources that mean a mode some target supports; the modes
-    are listed as the devices name them, said with spaces for underscores.
+    what it means (`out`), with the domain of its target as context; an interval, which
+    is told apart by its title alone, without a context. The words for an HVAC mode are
+    those of the sources that mean a mode some target supports; the modes are listed as
+    the devices name them, said with spaces for underscores.
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
@@ -212,6 +242,12 @@ def build(
                 "context": {"domain": name.domain},
             }
             for name in names
+        ]
+    }
+    lists[LIST_INTERVAL] = {
+        "values": [
+            {"in": escape_template(interval.spoken), "out": interval.name}
+            for interval in intervals
         ]
     }
     lists[LIST_HVAC_MODE] = {

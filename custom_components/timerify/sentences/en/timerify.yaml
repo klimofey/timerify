@@ -64,6 +64,28 @@ intents:
       - cancel the next (planned|pending) command (for|of) [<the>] {timerify_target:name}
       slots:
         which: next
+  TimerifySetSchedule:
+    data:
+    - sentences:
+      - <turn> on [<the>] {timerify_target:name} schedule
+      - <turn> [<the>] {timerify_target:name} schedule on
+      - <turn> on the schedule of [<the>] {timerify_target:name}
+      - (enable|resume) [<the>] {timerify_target:name} schedule
+      - (enable|resume) the schedule of [<the>] {timerify_target:name}
+      - <turn> on [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      - (enable|resume) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      slots:
+        enabled: true
+    - sentences:
+      - <turn> off [<the>] {timerify_target:name} schedule
+      - <turn> [<the>] {timerify_target:name} schedule off
+      - <turn> off the schedule of [<the>] {timerify_target:name}
+      - (disable|pause) [<the>] {timerify_target:name} schedule
+      - (disable|pause) the schedule of [<the>] {timerify_target:name}
+      - <turn> off [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      - (disable|pause) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      slots:
+        enabled: false
 expansion_rules:
   timerify_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
   timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes} more minute[s])
@@ -117,6 +139,8 @@ lists:
     - in: heat and cool
       out: heat_cool
   timerify_mode:
+    values: []
+  timerify_interval:
     values: []
 responses:
   intents:
@@ -374,4 +398,11 @@ responses:
           Cancelled the next planned command for {{ slots.target }}: {{ planned_command(slots.commands[0]) }}.
         {%- else -%}
           Cancelled {{ slots.cancelled }} planned {{ plural(slots.cancelled, "command", "commands") }} for {{ slots.target }}.
+        {%- endif -%}
+    TimerifySetSchedule:
+      default: |-
+        {%- if slots.interval -%}
+          The {{ slots.interval }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- else -%}
+          The schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
         {%- endif -%}

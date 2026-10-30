@@ -74,6 +74,10 @@ LIST_MODE: Final = "timerify_mode"
 """The list that holds the modes of the targets as their devices name them, which the
 sentences use as the slot `mode`. Empty in the sources: only the files Timerify writes
 know the devices."""
+LIST_INTERVAL: Final = "timerify_interval"
+"""The list that holds the titles of the schedule intervals of the timers, which the
+sentences use as the slot `interval`. Empty in the sources: only the files Timerify
+writes know the intervals."""
 MANUAL_SENTENCES_DIR: Final = "timerify_manual"
 """The directory of `custom_sentences/<language>/` that the sentence files are copied
 into by hand. The managed file has a name of its own beside it, and the two are never

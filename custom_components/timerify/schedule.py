@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from typing import Any, Final
 
+from hassil.util import remove_punctuation
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import WEEKDAYS
 
@@ -138,6 +139,14 @@ def interval_title(data: Mapping[str, Any], labels: Mapping[str, str]) -> str:
         else labels[days]
     )
     return f"{data[CONF_START]}–{data[CONF_END]}, {label}"
+
+
+def title_key(title: str) -> str:
+    """What the titles of intervals are compared by when one is meant by what was said
+    or typed: the title as the built-in agent hears it, without punctuation, case and
+    the space around it. So `Morning!` is meant by "morning", and two intervals that
+    carry the same title are meant together."""
+    return remove_punctuation(title).strip().casefold()
 
 
 def _weekdays_label(weekdays: list[str], labels: Mapping[str, str]) -> str:

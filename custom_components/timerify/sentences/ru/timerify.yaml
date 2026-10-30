@@ -58,6 +58,22 @@ intents:
       - (отмени|удали|сбрось) (следующую|ближайшую) (запланированную|назначенную|отложенную) команду (у таймера|на таймере|для таймера) {timerify_target:name}
       slots:
         which: next
+  TimerifySetSchedule:
+    data:
+    - sentences:
+      - <timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      - <timerify_schedule_verb> расписание {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      slots:
+        enabled: true
+      expansion_rules:
+        timerify_schedule_verb: (включи|включить|активируй|возобнови|возобновить)
+    - sentences:
+      - <timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      - <timerify_schedule_verb> расписание {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      slots:
+        enabled: false
+      expansion_rules:
+        timerify_schedule_verb: (выключи|выключить|отключи|отключить|останови|остановить|приостанови|приостановить)
 expansion_rules:
   timerify_turn_on: (включи|запусти)[ть]
   timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
@@ -111,6 +127,8 @@ lists:
     - in: (тепло и холод|обогрев и охлаждение|нагрев и охлаждение)
       out: heat_cool
   timerify_mode:
+    values: []
+  timerify_interval:
     values: []
 responses:
   intents:
@@ -392,4 +410,11 @@ responses:
           {{ slots.target }}: отменена ближайшая запланированная команда: {{ planned_command(slots.commands[0]) }}.
         {%- else -%}
           {{ slots.target }}: {{ plural(slots.cancelled, "отменена", "отменено", "отменено") }} {{ slots.cancelled }} {{ plural(slots.cancelled, "запланированная команда", "запланированные команды", "запланированных команд") }}.
+        {%- endif -%}
+    TimerifySetSchedule:
+      default: |-
+        {%- if slots.interval -%}
+          {{ slots.target }}: расписание «{{ slots.interval }}» {{ "включено" if slots.enabled else "выключено" }}.
+        {%- else -%}
+          {{ slots.target }}: расписание {{ "включено" if slots.enabled else "выключено" }}.
         {%- endif -%}

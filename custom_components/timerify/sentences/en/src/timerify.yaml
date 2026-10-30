@@ -6,9 +6,9 @@
 # put into it, either by the Voice settings entry of Timerify, which writes this file
 # and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
-# mode of a thermostat, the preset of a fan, the mode of a humidifier), and
-# timerify_hvac_mode, which the Voice settings entry cuts down to the HVAC modes that
-# the devices have.
+# mode of a thermostat, the preset of a fan, the mode of a humidifier),
+# timerify_interval, the titles of the schedule intervals, and timerify_hvac_mode, which
+# the Voice settings entry cuts down to the HVAC modes that the devices have.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains
@@ -83,6 +83,31 @@ intents:
           - "cancel the next (planned|pending) command (for|of) [<the>] {timerify_target:name}"
         slots:
           which: "next"
+  TimerifySetSchedule:
+    data:
+      # The whole schedule of a device, or the interval of a title: on and off are
+      # separate blocks, each fixing what it means. An interval is said by its title,
+      # which timerify_interval holds.
+      - sentences:
+          - "<turn> on [<the>] {timerify_target:name} schedule"
+          - "<turn> [<the>] {timerify_target:name} schedule on"
+          - "<turn> on the schedule of [<the>] {timerify_target:name}"
+          - "(enable|resume) [<the>] {timerify_target:name} schedule"
+          - "(enable|resume) the schedule of [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+          - "(enable|resume) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+        slots:
+          enabled: true
+      - sentences:
+          - "<turn> off [<the>] {timerify_target:name} schedule"
+          - "<turn> [<the>] {timerify_target:name} schedule off"
+          - "<turn> off the schedule of [<the>] {timerify_target:name}"
+          - "(disable|pause) [<the>] {timerify_target:name} schedule"
+          - "(disable|pause) the schedule of [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+          - "(disable|pause) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+        slots:
+          enabled: false
 # How long: hours and minutes, each alone or both, or a phrase such as "half an hour";
 # and how much more: "30 more minutes".
 expansion_rules:
@@ -144,6 +169,8 @@ lists:
         out: heat_cool
   timerify_mode:
     values: []
+  timerify_interval:
+    values: []
 # An answer calls the macros of macros.jinja by name.
 responses:
   intents:
@@ -179,4 +206,11 @@ responses:
           Cancelled the next planned command for {{ slots.target }}: {{ planned_command(slots.commands[0]) }}.
         {%- else -%}
           Cancelled {{ slots.cancelled }} planned {{ plural(slots.cancelled, "command", "commands") }} for {{ slots.target }}.
+        {%- endif -%}
+    TimerifySetSchedule:
+      default: |-
+        {%- if slots.interval -%}
+          The {{ slots.interval }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- else -%}
+          The schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
         {%- endif -%}

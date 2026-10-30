@@ -74,7 +74,7 @@ from .core import (
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
-from .schedule import Interval, weekday_window, workday_window
+from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
 
@@ -193,8 +193,9 @@ class TargetController:
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
     `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
-    `async_cancel_commands`, `async_set_interval_enabled`) waits for its turn and raises
-    HomeAssistantError (`timer_unloaded`) if the timer was unloaded meanwhile.
+    `async_cancel_commands`, `async_set_interval_enabled`,
+    `async_set_schedule_enabled`) waits for its turn and raises HomeAssistantError
+    (`timer_unloaded`) if the timer was unloaded meanwhile.
     """
 
     def __init__(
@@ -462,19 +463,78 @@ class TargetController:
         """
         async with self._lock:
             self._raise_if_unloaded()
-            now = dt_util.utcnow()
-            if enabled:
-                if interval_id not in self.snapshot.disabled_intervals:
-                    return
-                effects = self._core.set_interval_enabled(now, interval_id, True)
-                if not await self._async_refresh_windows_locked(effects):
-                    raise _unloaded_error()
-            else:
-                effects = self._core.set_interval_enabled(now, interval_id, False)
-                # The tick folds what fell due while this call waited for its turn. A
-                # window that it finds over is replaced like any other (the interval
-                # that was switched off is not: its window left with the flag).
-                await self._fold_due(now, effects)
+            await self._async_set_interval_enabled_locked(interval_id, enabled)
+
+    async def async_set_schedule_enabled(
+        self, enabled: bool, interval: str | None = None
+    ) -> tuple[str, ...]:
+        """Switch the whole schedule on or off, or the intervals that carry the title
+        `interval` (compared as `title_key` compares), and return the titles of the
+        intervals that are now as asked, in the order of the schedule, whether or not
+        they were already.
+
+        Each interval is switched as its own switch switches it
+        (`async_set_interval_enabled`), one after the other under one hold of the lock,
+        so that no other command comes between them.
+
+        Raises ServiceValidationError, before anything is switched, when the timer has
+        no interval (`no_schedule`) and when none has the title (`unknown_interval`). A
+        timer that is unloaded part-way says so (`timer_unloaded`); the intervals
+        switched until then stay switched.
+        """
+        async with self._lock:
+            self._raise_if_unloaded()
+            titles = {
+                interval_id: self._entry.subentries[interval_id].title
+                for interval_id in self._intervals
+            }
+            if not titles:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="no_schedule",
+                    translation_placeholders={
+                        "target": target_name(self._hass, self.target_entity_id)
+                    },
+                )
+            if interval is not None:
+                wanted = title_key(interval)
+                titles = {
+                    interval_id: title
+                    for interval_id, title in titles.items()
+                    if title_key(title) == wanted
+                }
+                if not titles:
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="unknown_interval",
+                        translation_placeholders={
+                            "target": target_name(self._hass, self.target_entity_id),
+                            "interval": interval,
+                        },
+                    )
+            for interval_id in titles:
+                self._raise_if_unloaded()
+                await self._async_set_interval_enabled_locked(interval_id, enabled)
+            return tuple(titles.values())
+
+    async def _async_set_interval_enabled_locked(
+        self, interval_id: str, enabled: bool
+    ) -> None:
+        """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
+        the caller holds the lock and has seen that the timer is not unloaded."""
+        now = dt_util.utcnow()
+        if enabled:
+            if interval_id not in self.snapshot.disabled_intervals:
+                return
+            effects = self._core.set_interval_enabled(now, interval_id, True)
+            if not await self._async_refresh_windows_locked(effects):
+                raise _unloaded_error()
+        else:
+            effects = self._core.set_interval_enabled(now, interval_id, False)
+            # The tick folds what fell due while this call waited for its turn. A
+            # window that it finds over is replaced like any other (the interval that
+            # was switched off is not: its window left with the flag).
+            await self._fold_due(now, effects)
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:

@@ -35,6 +35,7 @@ from custom_components.timerify.const import (
     DOMAIN,
     KIND_VOICE_SETTINGS,
     LIST_HVAC_MODE,
+    LIST_INTERVAL,
     LIST_MODE,
     MANAGED_HEADER,
     SUBENTRY_INTERVAL,
@@ -50,7 +51,14 @@ from custom_components.timerify.voice.sentences import (
 )
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
-from ..helpers import AC_ID, TARGET_ID, advance, restart
+from ..helpers import (
+    AC_ID,
+    TARGET_ID,
+    add_interval,
+    advance,
+    restart,
+    retitle_interval,
+)
 from .helpers import (
     add_voice_entry,
     conversation_reloads,
@@ -704,6 +712,229 @@ async def test_every_language_gets_the_same_modes(
     }
     assert hvac["en"] == hvac["ru"] == {"cool", "heat", "fan_only"}
     assert modes["en"] == modes["ru"] != []
+
+
+# Schedule interval titles
+
+
+async def add_titled_interval(
+    hass: HomeAssistant, entry: ConfigEntry, title: str, start: str = "06:30"
+) -> str:
+    """Add an interval to the timer of `entry` and give it a title, as its owner does;
+    return its id."""
+    interval = await add_interval(hass, entry, start=start, end="23:00")
+    await retitle_interval(hass, entry, interval, title)
+    return interval
+
+
+def interval_values(title: str) -> dict[str, str]:
+    """What the managed file lists for an interval titled `title` that needs no
+    escaping."""
+    return {"in": title, "out": title}
+
+
+@pytest.mark.usefixtures("assist")
+async def test_interval_titles_are_listed_once_for_every_language(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler has Morning and Evening, the fan Morning and Night: the house has the
+    three titles, Morning once, in the order the timers and their intervals come, and
+    every language has them."""
+    boiler = await setup_target()
+    fan = await setup_target(target=fake_fan.entity_id)
+    await add_titled_interval(hass, boiler, "Morning")
+    await add_titled_interval(hass, boiler, "Evening", "18:00")
+    await add_titled_interval(hass, fan, "Morning")
+    await add_titled_interval(hass, fan, "Night", "22:00")
+
+    await add_voice_entry(hass)
+
+    for language in VOICE_LANGUAGES:
+        assert listed(hass, language, LIST_INTERVAL) == [
+            interval_values("Morning"),
+            interval_values("Evening"),
+            interval_values("Night"),
+        ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_house_without_intervals_lists_none(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    await setup_target()
+
+    await add_voice_entry(hass, languages=("en",))
+
+    assert listed(hass, "en", LIST_INTERVAL) == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_new_interval_is_listed_and_a_deleted_one_leaves(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    boiler = await setup_target()
+    await add_voice_entry(hass, languages=("en",))
+    reloads = conversation_reloads(hass)
+
+    morning = await add_titled_interval(hass, boiler, "Morning")
+    assert listed(hass, "en", LIST_INTERVAL) == []
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert listed(hass, "en", LIST_INTERVAL) == [interval_values("Morning")]
+    assert len(reloads) == 1
+
+    hass.config_entries.async_remove_subentry(boiler, morning)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert listed(hass, "en", LIST_INTERVAL) == []
+    assert len(reloads) == 2
+
+
+@pytest.mark.usefixtures("assist")
+async def test_the_intervals_of_a_removed_timer_leave_with_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    boiler = await setup_target()
+    fan = await setup_target(target=fake_fan.entity_id)
+    await add_titled_interval(hass, boiler, "Morning")
+    await add_titled_interval(hass, fan, "Night", "22:00")
+    await add_voice_entry(hass, languages=("en",))
+    assert listed(hass, "en", LIST_INTERVAL) == [
+        interval_values("Morning"),
+        interval_values("Night"),
+    ]
+
+    await hass.config_entries.async_remove(fan.entry_id)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert listed(hass, "en", LIST_INTERVAL) == [interval_values("Morning")]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_title_left_empty_by_punctuation_is_skipped(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A title that is nothing but punctuation would match anywhere; it is left out,
+    the other titles stay."""
+    boiler = await setup_target()
+    await add_titled_interval(hass, boiler, "?!")
+    await add_titled_interval(hass, boiler, "Evening", "18:00")
+
+    await add_voice_entry(hass, languages=("en",))
+
+    assert listed(hass, "en", LIST_INTERVAL) == [interval_values("Evening")]
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Morning (weekdays)",
+        "Lamp [2]",
+        "A|B lamp",
+        "<Hall>",
+        "Tea {pot}",
+        "me@home",
+        "Back\\slash",
+        "A\\(b",
+        "Morning!",
+        "06:30–07:15, Mon–Sun",
+    ],
+)
+@pytest.mark.usefixtures("assist")
+async def test_titles_are_listed_so_that_they_match_as_said(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    title: str,
+) -> None:
+    """A title with a character that Home Assistant reads as part of a sentence
+    template is written so that it is read as the title; the file loads and the title,
+    said as it is, reaches the timer and switches its interval."""
+    boiler = await setup_target()
+    await add_titled_interval(hass, boiler, title)
+
+    await add_voice_entry(hass, languages=("en",))
+
+    assert [value["out"] for value in listed(hass, "en", LIST_INTERVAL)] == [title]
+    response = await converse(hass, f"turn off the {title} schedule of the boiler")
+    assert response.intent is not None
+    assert response.intent.intent_type == "TimerifySetSchedule"
+    assert boiler.runtime_data.snapshot.disabled_intervals == frozenset(
+        boiler.subentries
+    )
+
+
+@pytest.mark.usefixtures("assist")
+async def test_unescaped_title_is_refused_before_writing(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A title that the built-in agent could not parse leaves the file as it was, and
+    the log says which language it is about."""
+    boiler = await setup_target()
+    interval = await add_titled_interval(hass, boiler, "Morning")
+    await add_voice_entry(hass, languages=("en",))
+    before = managed_file(hass, "en").read_text("utf-8")
+    reloads = conversation_reloads(hass)
+
+    with patch(
+        "custom_components.timerify.voice.sentences.escape_template",
+        side_effect=lambda text: text,
+    ):
+        await retitle_interval(hass, boiler, interval, "Morning (early")
+        await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert managed_file(hass, "en").read_text("utf-8") == before
+    assert "sentences for en" in only_error(caplog)
+    assert reloads == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_title_that_would_not_match_as_said_is_refused(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A title that parses, but as something other than the text it stands for (here,
+    `<Hall>` as a reference to an expansion rule), would never be matched as said: it
+    is refused as well."""
+
+    def forgetting_the_angle_brackets(text: str) -> str:
+        return escape_template(text).replace("\\<", "<").replace("\\>", ">")
+
+    boiler = await setup_target()
+    interval = await add_titled_interval(hass, boiler, "Morning")
+    await add_voice_entry(hass, languages=("en",))
+    before = managed_file(hass, "en").read_text("utf-8")
+
+    with patch(
+        "custom_components.timerify.voice.sentences.escape_template",
+        side_effect=forgetting_the_angle_brackets,
+    ):
+        await retitle_interval(hass, boiler, interval, "<Hall>")
+        await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert managed_file(hass, "en").read_text("utf-8") == before
+    message = only_error(caplog)
+    assert "sentences for en" in message
+    assert "matched as said" in message
 
 
 # Names that are not plain words

@@ -465,6 +465,12 @@
     "unknown_command": {
       "message": "This timer has no pending command with the id {command_id}. Cancel a command through the timer that holds it."
     },
+    "no_schedule": {
+      "message": "{target} has no schedule. Add an interval to its timer first."
+    },
+    "unknown_interval": {
+      "message": "{target} has no schedule interval called {interval}."
+    },
     "timer_unloaded": {
       "message": "This timer was unloaded while the call waited, so nothing was changed. Try again once the timer is loaded."
     },

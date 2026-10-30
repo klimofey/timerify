@@ -168,6 +168,17 @@ async def add_interval(
     return subentry_id
 
 
+async def retitle_interval(
+    hass: HomeAssistant, entry: ConfigEntry, subentry_id: str, title: str
+) -> None:
+    """Give an interval another title, as the rename on the entry's page does. The
+    timer reloads, as it does for any edit of its entry."""
+    hass.config_entries.async_update_subentry(
+        entry, entry.subentries[subentry_id], title=title
+    )
+    await hass.async_block_till_done()
+
+
 async def edit_interval(
     hass: HomeAssistant, entry: ConfigEntry, subentry_id: str, **fields: Any
 ) -> SubentryFlowResult:

@@ -15,17 +15,34 @@ lists:
 responses:
   intents:
     TimerifyTimeLeft:
-      default: "{%- macro plural(n, one, other) -%}\n  {%- if n == 1 -%}\n    {{ one
-        }}\n  {%- else -%}\n    {{ other }}\n  {%- endif -%}\n{%- endmacro -%}\n{%-
-        macro day(n) -%}\n  {%- if n == 1 -%}\n    {{ \" tomorrow\" }}\n  {%- elif
-        n == 2 -%}\n    {{ \" the day after tomorrow\" }}\n  {%- elif n > 2 -%}\n
-        \   {{ \" in \" ~ n ~ \" days\" }}\n  {%- endif -%}\n{%- endmacro -%}\n{%-
-        if slots.state == \"counting\" -%}\n  {%- set parts = [] -%}\n  {%- if slots.left_hours
-        > 0 -%}\n    {%- set parts = parts + [slots.left_hours ~ \" \" ~ plural(slots.left_hours,
-        \"hour\", \"hours\")] -%}\n  {%- endif -%}\n  {%- if slots.left_minutes >
-        0 -%}\n    {%- set parts = parts + [slots.left_minutes ~ \" \" ~ plural(slots.left_minutes,
-        \"minute\", \"minutes\")] -%}\n  {%- endif -%}\n  {{ parts | join(\" and \")
-        }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days)
-        }}.\n{%- elif slots.state == \"open\" -%}\n  {{ slots.target }} is on without
-        a timer.\n{%- else -%}\n  {{ slots.target }} is off and has no timer.\n{%-
-        endif -%}"
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- if slots.state == "counting" -%}
+          {%- set parts = [] -%}
+          {%- if slots.left_hours > 0 -%}
+            {%- set parts = parts + [slots.left_hours ~ " " ~ plural(slots.left_hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if slots.left_minutes > 0 -%}
+            {%- set parts = parts + [slots.left_minutes ~ " " ~ plural(slots.left_minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+        {%- elif slots.state == "open" -%}
+          {{ slots.target }} is on without a timer.
+        {%- else -%}
+          {{ slots.target }} is off and has no timer.
+        {%- endif -%}

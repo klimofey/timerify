@@ -20,7 +20,9 @@ from custom_components.timerify.voice.sentences import (
     InvalidSentences,
     VoiceName,
     build,
+    dump_sentences,
     load_sources,
+    read_back,
     render,
     spoken_form,
     validate,
@@ -46,7 +48,8 @@ def timerify_sentences(built: dict[str, Any]) -> list[str]:
 
 
 def first_name(built: dict[str, Any]) -> dict[str, Any]:
-    return built["lists"][LIST_TARGET]["values"][0]  # type: ignore[no-any-return]
+    name: dict[str, Any] = built["lists"][LIST_TARGET]["values"][0]
+    return name
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
@@ -162,3 +165,35 @@ def test_a_file_says_that_it_is_managed_and_holds_the_sentences() -> None:
 
     assert text.startswith(f"{MANAGED_HEADER}\n")
     assert yaml.safe_load(text) == built
+
+
+def test_a_text_of_several_lines_is_written_as_a_block() -> None:
+    """The file is one that people open: an answer is as readable in it as it was
+    written, not a line of escapes."""
+    text = dump_sentences({"answer": "{% if a %}\n  yes\n{% endif %}", "short": "one"})
+
+    assert text == "answer: |-\n  {% if a %}\n    yes\n  {% endif %}\nshort: one\n"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "one\ntwo",
+        "one\ntwo\n",
+        "one\n\n\ntwo\n\n",
+        "  leading\nspace",
+        "trailing space \nin the middle",
+        "tab\tinside\nand more",
+        "\nstarts on a new line",
+        "Unicode caf\u00e9\nand more",
+    ],
+)
+def test_a_text_written_as_a_block_is_read_back_as_it_was(text: str) -> None:
+    assert read_back(dump_sentences({"answer": text, "after": 1})) == {
+        "answer": text,
+        "after": 1,
+    }
+
+
+def test_the_text_of_a_file_is_read_as_the_built_in_agent_reads_it() -> None:
+    assert read_back("name: yes\nother: 'yes'\n") == {"name": True, "other": "yes"}

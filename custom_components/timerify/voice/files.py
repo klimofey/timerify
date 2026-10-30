@@ -5,11 +5,16 @@ The file of a language is `custom_sentences/<language>/timerify.yaml`. It is the
 sentences with the names of the timers' targets in them, and it is rewritten whenever
 those names may have changed. Writing a file and removing one are followed by a reload
 of the built-in agent's sentences, so that the change is heard at once.
+
+The path is the user's directory, and a file at it is Timerify's only if its first line
+is `MANAGED_HEADER`: Timerify writes where there is no file or its own, removes only its
+own, and leaves any other alone.
 """
 
 import logging
 from collections.abc import Iterable, Sequence
 from contextlib import suppress
+from enum import Enum, auto
 from pathlib import Path
 from typing import TypeIs
 
@@ -26,6 +31,7 @@ from homeassistant.util.file import write_utf8_file_atomic
 from ..const import (
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
+    MANAGED_HEADER,
     MANUAL_SENTENCES_DIR,
     SIGNAL_TIMERS_CHANGED,
     VOICE_LANGUAGES,
@@ -39,6 +45,7 @@ from .sentences import (
     VoiceName,
     build,
     load_sources,
+    read_back,
     render,
     validate,
     voice_names,
@@ -73,32 +80,58 @@ def _managed_path(hass: HomeAssistant, language: str) -> Path:
     return Path(hass.config.path("custom_sentences", language, "timerify.yaml"))
 
 
-def _write_if_changed(path: Path, language: str, names: Sequence[VoiceName]) -> bool:
-    """Build the sentences of `language`, check that the built-in agent can read them,
-    and write them to `path` unless they are what is there already. Whether the file
-    changed.
+class WriteResult(Enum):
+    """What came of writing the sentences of a language."""
+
+    UNCHANGED = auto()
+    """The file says what it should."""
+    WRITTEN = auto()
+    """The file was made or changed."""
+    FOREIGN = auto()
+    """A file that Timerify did not write is in the way, and was left as it is."""
+
+
+def _first_line(path: Path) -> str | None:
+    """The first line of the file at `path`, without its line break; None if there is no
+    such file. What is not text is read as the replacement character, which no header
+    has."""
+    try:
+        with path.open(encoding="utf-8", errors="replace") as file:
+            return file.readline().removesuffix("\n")
+    except FileNotFoundError:
+        return None
+
+
+def _write_if_changed(
+    path: Path, language: str, names: Sequence[VoiceName]
+) -> WriteResult:
+    """Build the sentences of `language`, check that the built-in agent can read the
+    text that would be written, and write it to `path` unless it is what is there
+    already, or the file there is not Timerify's.
 
     Raises `InvalidSentences`, with the file untouched, when the sentences are not fit
     to be read.
     """
-    built = build(load_sources(language), names)
-    validate(language, built)
-    text = render(built)
-    with suppress(FileNotFoundError):
-        if path.read_text("utf-8") == text:
-            return False
+    first_line = _first_line(path)
+    if first_line is not None and first_line != MANAGED_HEADER:
+        return WriteResult.FOREIGN
+    text = render(build(load_sources(language), names))
+    validate(language, read_back(text))
+    if first_line is not None and path.read_text("utf-8", errors="replace") == text:
+        return WriteResult.UNCHANGED
     path.parent.mkdir(parents=True, exist_ok=True)
     write_utf8_file_atomic(str(path), text)
-    return True
+    return WriteResult.WRITTEN
 
 
 def _remove(paths: Iterable[Path]) -> bool:
-    """Remove the files that exist among `paths`. Whether there were any."""
+    """Remove the files among `paths` that Timerify wrote. Whether there were any."""
     removed = False
     for path in paths:
-        with suppress(FileNotFoundError):
-            path.unlink()
-            removed = True
+        if _first_line(path) == MANAGED_HEADER:
+            with suppress(FileNotFoundError):
+                path.unlink()
+                removed = True
     return removed
 
 
@@ -120,7 +153,7 @@ async def async_remove_sentence_files(
     hass: HomeAssistant, languages: Iterable[str] = VOICE_LANGUAGES
 ) -> None:
     """Remove the files Timerify wrote, for `languages`, and tell the built-in agent if
-    there were any.
+    there were any. A file at the path that Timerify did not write stays.
 
     A function of its own, since the entry that wrote the files has no runtime data
     left by the time it is removed.
@@ -151,11 +184,11 @@ class SentenceFiles:
             function=self.async_sync,
         )
         self._warned_about_manual = False
+        self._warned_about_foreign: set[Path] = set()
 
     async def async_start(self) -> None:
         """Write the files, and then follow the timers; at the start of Home Assistant
         if it is starting."""
-        self._entry.async_on_unload(self._debouncer.async_shutdown)
         if self._hass.state is CoreState.running:
             await self._async_first_sync()
         else:
@@ -168,7 +201,8 @@ class SentenceFiles:
 
     async def _async_first_sync(self) -> None:
         """Write the files, then follow what their names depend on."""
-        await self.async_sync()
+        async with self._debouncer.async_lock():
+            await self.async_sync()
         hass = self._hass
         self._entry.async_on_unload(
             async_dispatcher_connect(hass, SIGNAL_TIMERS_CHANGED, self._changed)
@@ -183,6 +217,14 @@ class SentenceFiles:
                 dr.EVENT_DEVICE_REGISTRY_UPDATED, self._device_updated
             )
         )
+
+    async def async_stop(self) -> None:
+        """Stop writing: nothing waiting for the cooldown is written, and a writing
+        under way is waited for, so that when this returns the files are the caller's
+        to remove."""
+        self._debouncer.async_shutdown()
+        async with self._debouncer.async_lock():
+            pass
 
     async def async_sync(self) -> None:
         """Make the files what they should be now: one for each language chosen, listing
@@ -208,7 +250,7 @@ class SentenceFiles:
                     changed |= await hass.async_add_executor_job(_remove, [path])
                     continue
                 try:
-                    changed |= await hass.async_add_executor_job(
+                    result = await hass.async_add_executor_job(
                         _write_if_changed, path, language, names
                     )
                 except InvalidSentences as err:
@@ -218,9 +260,26 @@ class SentenceFiles:
                         language,
                         err,
                     )
+                    continue
+                changed |= result is WriteResult.WRITTEN
+                self._note_foreign(language, path, result is WriteResult.FOREIGN)
         finally:
             if changed:
                 await _async_reload_sentences(hass)
+
+    def _note_foreign(self, language: str, path: Path, foreign: bool) -> None:
+        """Say, once, that a file Timerify did not write is where its file for
+        `language` belongs, and so the language is not written."""
+        if not foreign:
+            self._warned_about_foreign.discard(path)
+        elif path not in self._warned_about_foreign:
+            self._warned_about_foreign.add(path)
+            _LOGGER.warning(
+                "Not writing the sentences for %s: %s was not written by Timerify, and"
+                " is left as it is. Move or delete it to have them written",
+                language,
+                path,
+            )
 
     async def _async_warn_about_manual_installs(self, languages: list[str]) -> None:
         """Say, once, that the sentences are also installed by hand: both would be read
@@ -304,8 +363,10 @@ async def _async_entry_updated(hass: HomeAssistant, entry: VoiceConfigEntry) -> 
 async def async_unload_voice_entry(
     hass: HomeAssistant, entry: VoiceConfigEntry
 ) -> bool:
-    """Let the entry go. The files stay, as they do while Home Assistant stops or the
-    entry reloads, unless the entry is disabled: then they go."""
+    """Let the entry go. The files stay, as they do while the entry reloads, unless the
+    entry is disabled: then they go, once nothing is left that could write them
+    again."""
+    await entry.runtime_data.async_stop()
     if entry.disabled_by is not None:
         await async_remove_sentence_files(hass)
     return True

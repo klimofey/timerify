@@ -9,6 +9,7 @@ then answers. Files are written to the configuration directory of the test.
 import json
 import logging
 import os
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -17,6 +18,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import (
     SOURCE_USER,
+    ConfigEntry,
     ConfigEntryDisabler,
     ConfigEntryState,
 )
@@ -25,6 +27,7 @@ from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import (
     CONF_KIND,
@@ -38,7 +41,11 @@ from custom_components.timerify.const import (
     VOICE_UNIQUE_ID,
 )
 from custom_components.timerify.voice.files import SentenceFiles
-from custom_components.timerify.voice.sentences import InvalidSentences, escape_template
+from custom_components.timerify.voice.sentences import (
+    InvalidSentences,
+    escape_template,
+    render,
+)
 
 from ..conftest import FakeTarget, SetupTarget
 from ..helpers import TARGET_ID, advance, restart
@@ -49,6 +56,7 @@ from .helpers import (
     copy_sentences,
     listed,
     managed_file,
+    put_file,
     samples,
     speech,
 )
@@ -101,6 +109,16 @@ def only_error(caplog: pytest.LogCaptureFixture) -> str:
     ]
     assert len(errors) == 1, errors
     return errors[0]
+
+
+def timerify_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """What Timerify warned about."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name.startswith("custom_components.timerify")
+    ]
 
 
 def stamp(hass: HomeAssistant, language: str) -> None:
@@ -269,7 +287,7 @@ async def test_voice_entry_writes_a_file_per_chosen_language(
     (russian_text, *_) = samples("ru", TIME_LEFT, numbers={})
     russian = await converse(hass, russian_text, "ru")
     assert reached_time_left(russian)
-    assert len(reloads) == 1
+    assert [call.data for call in reloads] == [{}]
 
 
 @pytest.mark.usefixtures("assist")
@@ -366,7 +384,7 @@ async def test_removing_the_entry_removes_the_files(
 
     assert not managed_file(hass, "en").exists()
     assert not managed_file(hass, "ru").exists()
-    assert len(reloads) == 1
+    assert [call.data for call in reloads] == [{}]
     assert not reached_time_left(await converse(hass, "how long is left on the boiler"))
 
 
@@ -758,6 +776,318 @@ async def test_a_language_that_fails_does_not_stop_the_other(
     assert "sentences for ru" in only_error(caplog)
 
 
+# Files that are not Timerify's
+
+FOREIGN = "# My own sentences, in my own file\nlanguage: en\nintents: {}\n"
+"""A file of the user's at the path of the managed file."""
+FOREIGN_FIRST_LINES = [
+    pytest.param(b"", id="an empty file"),
+    pytest.param(b"language: en\nintents: {}\n", id="no comment"),
+    pytest.param(b"# Managed by somebody else.\nlanguage: en\n", id="another comment"),
+    pytest.param(
+        MANAGED_HEADER.encode() + b" \nlanguage: en\n", id="a header and more"
+    ),
+    pytest.param(
+        b"#" + MANAGED_HEADER.encode() + b"\nlanguage: en\n",
+        id="the header commented out",
+    ),
+    pytest.param(b"\n" + MANAGED_HEADER.encode() + b"\n", id="the header second"),
+    pytest.param(b"\xff\xfe\x00 not text at all", id="not text"),
+]
+"""First lines that are not the managed header, which is the only way a file is known
+to be Timerify's."""
+
+
+@pytest.mark.parametrize("content", FOREIGN_FIRST_LINES)
+@pytest.mark.usefixtures("assist")
+async def test_a_file_that_does_not_start_with_the_managed_header_is_not_timerifys(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    content: bytes,
+) -> None:
+    """The file is left as it is, the language is not written, and the log says whose
+    file is in the way."""
+    await setup_target()
+    path = await put_file(hass, "en", content)
+    reloads = conversation_reloads(hass)
+
+    await add_voice_entry(hass, languages=("en",))
+
+    assert path.read_bytes() == content
+    assert reloads == []
+    warnings = timerify_warnings(caplog)
+    assert len(warnings) == 1
+    assert str(path) in warnings[0]
+    assert "not written by Timerify" in warnings[0]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_foreign_file_costs_only_its_own_language(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The other language is written and follows the timers, and the warning is said
+    once for the entry that was loaded, not at every writing."""
+    await setup_target()
+    path = await put_file(hass, "en", FOREIGN)
+    reloads = conversation_reloads(hass)
+
+    await add_voice_entry(hass, languages=("en", "ru"))
+    await setup_target(target="switch.fan")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert path.read_text("utf-8") == FOREIGN
+    assert listed(hass, "ru") == [BOILER, FAN]
+    assert len(reloads) == 2
+    warnings = timerify_warnings(caplog)
+    assert len(warnings) == 1
+    assert str(path) in warnings[0]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_the_language_is_written_once_the_foreign_file_is_moved_away(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    await setup_target()
+    path = await put_file(hass, "en", FOREIGN)
+    await add_voice_entry(hass, languages=("en",))
+    assert path.read_text("utf-8") == FOREIGN
+
+    await hass.async_add_executor_job(path.unlink)
+    await setup_target(target="switch.fan")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert listed(hass, "en") == [BOILER, FAN]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_foreign_file_in_a_language_that_is_not_chosen_survives(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Nothing is written for the language, so there is nothing to say about the
+    file either."""
+    await setup_target()
+    path = await put_file(hass, "ru", FOREIGN)
+    reloads = conversation_reloads(hass)
+
+    await add_voice_entry(hass, languages=("en",))
+    await setup_target(target="switch.fan")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert path.read_text("utf-8") == FOREIGN
+    assert len(reloads) == 2
+    assert timerify_warnings(caplog) == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_foreign_files_survive_while_the_option_is_off_and_across_a_restart(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """With nothing to write, Timerify removes what it wrote, which is not these."""
+    await setup_target()
+    paths = [await put_file(hass, language, FOREIGN) for language in ("en", "ru")]
+    reloads = conversation_reloads(hass)
+
+    entry = await add_voice_entry(hass, write=False)
+    await restart(hass, entry)
+
+    assert [path.read_text("utf-8") for path in paths] == [FOREIGN, FOREIGN]
+    assert reloads == []
+    assert timerify_warnings(caplog) == []
+
+
+@pytest.mark.parametrize("action", ["remove", "disable"])
+@pytest.mark.usefixtures("assist")
+async def test_leaving_takes_what_timerify_wrote_and_not_what_it_did_not(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    action: str,
+) -> None:
+    await setup_target()
+    foreign = await put_file(hass, "ru", FOREIGN)
+    entry = await add_voice_entry(hass, languages=("en",))
+    assert managed_file(hass, "en").exists()
+
+    await leave(hass, entry, action)
+
+    assert not managed_file(hass, "en").exists()
+    assert foreign.read_text("utf-8") == FOREIGN
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_managed_file_that_was_edited_is_written_again(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The header says not to edit it; as long as the header stays, the file is
+    Timerify's and what is written over is the user's edit."""
+    await setup_target()
+    entry = await add_voice_entry(hass, languages=("en",))
+    path = managed_file(hass, "en")
+    await hass.async_add_executor_job(
+        path.write_text, f"{MANAGED_HEADER}\n# and my own line\nlanguage: en\n", "utf-8"
+    )
+    reloads = conversation_reloads(hass)
+
+    await restart(hass, entry)
+
+    assert path.read_text("utf-8").splitlines()[0] == MANAGED_HEADER
+    assert listed(hass, "en") == [BOILER]
+    assert len(reloads) == 1
+
+
+@pytest.mark.usefixtures("assist")
+async def test_what_is_written_is_what_is_checked(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The built-in agent reads the text of the file, not the data it was made from:
+    text that reads differently from the data is refused like any other."""
+    await setup_target()
+    reloads = conversation_reloads(hass)
+
+    def read_as_two_names(built: dict[str, Any]) -> str:
+        return render(built).replace("in: Boiler\n", "in: Boiler|Heater\n")
+
+    with patch(
+        "custom_components.timerify.voice.files.render", side_effect=read_as_two_names
+    ):
+        await add_voice_entry(hass, languages=("en",))
+
+    assert not managed_file(hass, "en").exists()
+    assert reloads == []
+    assert "matched as said" in only_error(caplog)
+
+
+# Changes that wait for the cooldown
+
+
+async def leave(hass: HomeAssistant, entry: ConfigEntry, how: str) -> None:
+    """Remove the entry, or disable it, and let everything that follows run."""
+    if how == "remove":
+        await hass.config_entries.async_remove(entry.entry_id)
+    else:
+        await hass.config_entries.async_set_disabled_by(
+            entry.entry_id, ConfigEntryDisabler.USER
+        )
+    await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize("how", ["remove", "disable"])
+@pytest.mark.usefixtures("assist")
+async def test_a_change_waiting_for_the_cooldown_is_dropped_with_the_entry(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+    how: str,
+) -> None:
+    await setup_target()
+    entry = await add_voice_entry(hass, languages=("en",))
+    await setup_target(target="switch.fan")
+    reloads = conversation_reloads(hass)
+
+    await leave(hass, entry, how)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert not managed_file(hass, "en").exists()
+    assert len(reloads) == 1
+
+
+@pytest.mark.parametrize("how", ["remove", "disable"])
+@pytest.mark.parametrize("first", ["the writing", "the leaving"])
+@pytest.mark.usefixtures("assist")
+async def test_a_writing_that_falls_due_as_the_entry_goes_does_not_bring_the_files_back(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+    how: str,
+    first: str,
+) -> None:
+    """The cooldown ends while the entry is being taken away: the files must be gone
+    when everything has run, whichever of the two started first."""
+    await setup_target()
+    entry = await add_voice_entry(hass, languages=("en",))
+    await setup_target(target="switch.fan")
+    freezer.tick(timedelta(seconds=VOICE_SYNC_COOLDOWN))
+
+    if first == "the writing":
+        async_fire_time_changed(hass)
+    leaving = hass.async_create_task(leave(hass, entry, how))
+    if first == "the leaving":
+        async_fire_time_changed(hass)
+    await leaving
+    await hass.async_block_till_done()
+
+    assert not managed_file(hass, "en").exists()
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_burst_of_changes_is_written_once_after_the_cooldown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    await setup_target()
+    await add_voice_entry(hass, languages=("en",))
+    reloads = conversation_reloads(hass)
+
+    await setup_target(target="switch.fan")
+    er.async_get(hass).async_update_entity(TARGET_ID, name="Water heater")
+    await hass.async_block_till_done()
+    assert listed(hass, "en") == [BOILER]
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert [value["in"] for value in listed(hass, "en")] == ["Water heater", "Fan"]
+    assert len(reloads) == 1
+
+
+@pytest.mark.usefixtures("assist")
+async def test_changes_while_home_assistant_stops_are_not_written(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    await setup_target()
+    await add_voice_entry(hass, languages=("en",))
+    stamp(hass, "en")
+    reloads = conversation_reloads(hass)
+
+    hass.set_state(CoreState.stopping)
+    er.async_get(hass).async_update_entity(TARGET_ID, name="Water heater")
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert is_stamped(hass, "en")
+    assert reloads == []
+
+
 # Files by hand, and no conversation
 
 
@@ -779,12 +1109,7 @@ async def test_manual_copy_beside_the_managed_file_is_warned_about(
     await setup_target(target="switch.fan")
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
-    warnings = [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name.startswith("custom_components.timerify")
-    ]
+    warnings = timerify_warnings(caplog)
     assert len(warnings) == 1
     assert "manual and managed sentences are both installed" in warnings[0]
     assert listed(hass, "en") == [BOILER, FAN]

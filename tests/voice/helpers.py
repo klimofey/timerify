@@ -220,6 +220,20 @@ def managed_file(hass: HomeAssistant, language: str) -> Path:
     return Path(hass.config.path("custom_sentences", language, "timerify.yaml"))
 
 
+async def put_file(hass: HomeAssistant, language: str, content: str | bytes) -> Path:
+    """Put a file at the path where the Voice settings entry writes the sentences of
+    `language`, as a user does who got there first. Returns its path."""
+    path = managed_file(hass, language)
+    data = content.encode("utf-8") if isinstance(content, str) else content
+
+    def put() -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    await hass.async_add_executor_job(put)
+    return path
+
+
 def listed(
     hass: HomeAssistant, language: str, list_name: str = LIST_TARGET
 ) -> list[dict[str, Any]]:

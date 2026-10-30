@@ -6,7 +6,8 @@ language, in `sentences/<language>/src/macros.jinja`: the plural forms of a coun
 words for a day. The shipped file `sentences/<language>/<name>.yaml` is the same data
 with, in front of each answer, the definition of every macro the answer calls and of
 the macros those call, since the built-in agent renders an answer on its own and cannot
-import a macro. The managed files and the manual installation use the shipped files.
+import a macro. The managed files and the manual installation use the shipped files. A
+shipped file that has no source any more is removed.
 
     uv run python -m scripts.generate_sentences
 """
@@ -16,9 +17,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
-from homeassistant.util.yaml import dump, load_yaml_dict
-
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
+from custom_components.timerify.voice.sentences import dump_sentences, read_back
 
 COMMAND: Final = "uv run python -m scripts.generate_sentences"
 """How the shipped files are written again."""
@@ -69,25 +69,42 @@ def _expand_answers(answers: Any, macros: Mapping[str, str]) -> Any:
     return {key: _expand_answers(value, macros) for key, value in answers.items()}
 
 
-def render(language: str) -> dict[str, str]:
-    """The text of each shipped file of `language`, by file name."""
-    sources = SENTENCES_DIR / language / SOURCES
+def render(language: str, root: Path = SENTENCES_DIR) -> dict[str, str]:
+    """The text of each shipped file of `language` under `root`, by file name."""
+    sources = root / language / SOURCES
     macros = macros_of((sources / MACROS).read_text("utf-8"))
     files: dict[str, str] = {}
     for path in sorted(sources.glob("*.yaml")):
-        data = load_yaml_dict(path)
+        data = read_back(path.read_text("utf-8"))
         if "responses" in data:
             data["responses"] = _expand_answers(data["responses"], macros)
         header = HEADER.format(name=path.name, macros=MACROS, command=COMMAND)
-        files[path.name] = header + dump(data)
+        files[path.name] = header + dump_sentences(data)
     return files
+
+
+def stale(language: str, root: Path = SENTENCES_DIR) -> list[Path]:
+    """The shipped files of `language` under `root` that no source writes any more."""
+    written = render(language, root)
+    return [
+        path
+        for path in sorted((root / language).glob("*.yaml"))
+        if path.name not in written
+    ]
+
+
+def write(language: str, root: Path = SENTENCES_DIR) -> None:
+    """Write the shipped files of `language` under `root`, and remove the stale ones."""
+    for path in stale(language, root):
+        path.unlink()
+    for name, text in render(language, root).items():
+        (root / language / name).write_text(text, "utf-8")
 
 
 def main() -> None:
     """Write the shipped files of every language."""
     for language in VOICE_LANGUAGES:
-        for name, text in render(language).items():
-            Path(SENTENCES_DIR / language / name).write_text(text, "utf-8")
+        write(language)
 
 
 if __name__ == "__main__":

@@ -3,12 +3,24 @@ macros of each language written once, and the generator that puts them together;
 every answer the files hold, said by the built-in agent's own template engine.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.util.yaml import load_yaml_dict
 
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
 from custom_components.timerify.voice.sentences import load_sources
-from scripts.generate_sentences import COMMAND, expand, macros_of, render
+from scripts.generate_sentences import (
+    COMMAND,
+    SOURCES,
+    expand,
+    macros_of,
+    render,
+    stale,
+    write,
+)
 
 from .helpers import RESPONSE_SLOTS, render_response
 
@@ -41,6 +53,29 @@ def test_shipped_sentence_files_are_current(language: str) -> None:
             f"sentences/{language}/{name} is not what the generator writes from"
             f" sentences/{language}/src: run `{COMMAND}` and commit the result"
         )
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_there_are_no_other_shipped_sentence_files(language: str) -> None:
+    """A file whose source was removed or renamed would still ship, and the managed
+    files and the manual installation would still be made from it."""
+    shipped = {path.name for path in (SENTENCES_DIR / language).glob("*.yaml")}
+
+    assert shipped == set(render(language)), (
+        f"sentences/{language} has files the generator does not write from its"
+        f" sources: run `{COMMAND}`, which removes them, and commit the result"
+    )
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_shipped_answers_are_blocks_not_lines_of_escapes(language: str) -> None:
+    """The shipped files are the ones people read to copy a sentence or to see how an
+    answer is said."""
+    for name, text in render(language).items():
+        answers = load_yaml_dict(SENTENCES_DIR / language / SOURCES / name)
+        for keys in answers.get("responses", {}).get("intents", {}).values():
+            for key in keys:
+                assert re.search(rf"^\s+{key}: \|-?$", text, re.MULTILINE), (name, key)
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
@@ -101,3 +136,34 @@ def test_a_macros_file_that_holds_anything_but_macros_is_refused() -> None:
     """Whatever is not in a macro would be left out of every answer without a word."""
     with pytest.raises(ValueError, match="more than macros and comments"):
         macros_of(MACROS + "{% set stray = 1 %}")
+
+
+def test_writing_replaces_the_shipped_files_and_removes_those_without_a_source(
+    tmp_path: Path,
+) -> None:
+    """Run by a developer after a source was renamed: the file of the old name goes,
+    the file of the new one is written, and the sources are left as they are."""
+    sources = tmp_path / "en" / SOURCES
+    sources.mkdir(parents=True)
+    (sources / "macros.jinja").write_text(MACROS, "utf-8")
+    (sources / "new_name.yaml").write_text(
+        "responses:\n  intents:\n    Ask:\n      default: '{{ twice(slots.n) }}'\n",
+        "utf-8",
+    )
+    (tmp_path / "en" / "old_name.yaml").write_text("language: en\n", "utf-8")
+    (tmp_path / "en" / "notes.txt").write_text("not a sentence file\n", "utf-8")
+
+    assert [path.name for path in stale("en", tmp_path)] == ["old_name.yaml"]
+    write("en", tmp_path)
+
+    assert sorted(path.name for path in (tmp_path / "en").iterdir()) == [
+        "new_name.yaml",
+        "notes.txt",
+        SOURCES,
+    ]
+    assert stale("en", tmp_path) == []
+    assert "macro twice" in (tmp_path / "en" / "new_name.yaml").read_text("utf-8")
+    assert sorted(path.name for path in sources.iterdir()) == [
+        "macros.jinja",
+        "new_name.yaml",
+    ]

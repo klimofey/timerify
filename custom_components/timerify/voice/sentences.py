@@ -16,6 +16,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
+import yaml
 from hassil.expression import (
     Expression,
     ListReference,
@@ -30,7 +31,6 @@ from home_assistant_intents import get_intents
 from homeassistant.core import HomeAssistant, callback, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
-from homeassistant.util.yaml import dump, load_yaml_dict
 
 from ..const import LIST_TARGET, MANAGED_HEADER, SENTENCES_DIR
 from .base import loaded_timers
@@ -42,6 +42,19 @@ RULE_PREFIX: Final = "timerify_"
 """What the names of the lists and expansion rules the sentences define start with."""
 
 _TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
+
+
+class _SentenceDumper(yaml.SafeDumper):
+    """The safe YAML dumper, but a text of several lines is written as a block, as the
+    text is, not as a line of escapes."""
+
+
+def _represent_text(dumper: _SentenceDumper, text: str) -> yaml.ScalarNode:
+    style = "|" if "\n" in text else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", text, style=style)
+
+
+_SentenceDumper.add_representer(str, _represent_text)
 
 
 class InvalidSentences(ValueError):
@@ -114,7 +127,7 @@ def load_sources(language: str) -> dict[str, Any]:
     of the language's directory, merged, in the order of their names."""
     sources: dict[str, Any] = {}
     for path in sorted((SENTENCES_DIR / language).glob("*.yaml")):
-        merge_dict(sources, load_yaml_dict(path))
+        merge_dict(sources, read_back(path.read_text("utf-8")))
     return sources
 
 
@@ -167,9 +180,27 @@ def validate(language: str, built: Mapping[str, Any]) -> None:
         raise InvalidSentences(f"{type(err).__name__}: {err}") from err
 
 
+def dump_sentences(data: Mapping[str, Any]) -> str:
+    """`data` as the text of a sentence file."""
+    text: str = yaml.dump(
+        dict(data),
+        Dumper=_SentenceDumper,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    )
+    return text
+
+
+def read_back(text: str) -> dict[str, Any]:
+    """The sentences of the text of a file, as the built-in agent reads the file."""
+    sentences: dict[str, Any] = yaml.safe_load(text)
+    return sentences
+
+
 def render(built: Mapping[str, Any]) -> str:
     """The text of the file for `built`."""
-    return f"{MANAGED_HEADER}\n{dump(dict(built))}"
+    return f"{MANAGED_HEADER}\n{dump_sentences(built)}"
 
 
 def _references(expression: Expression) -> Iterator[ListReference | RuleReference]:

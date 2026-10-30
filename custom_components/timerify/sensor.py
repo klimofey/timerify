@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
+from .const import KEY_ENDS_AT, KEY_NEXT_COMMAND
 from .controller import TimerifyConfigEntry
 from .core import Command, Snapshot
 from .entity import TimerifyEntity
@@ -40,7 +41,7 @@ class EndsAtSensor(TimerifyEntity, SensorEntity):
     """
 
     entity_description = SensorEntityDescription(
-        key="ends_at",
+        key=KEY_ENDS_AT,
         translation_key="ends_at",
         device_class=SensorDeviceClass.TIMESTAMP,
     )
@@ -76,7 +77,7 @@ class NextCommandSensor(TimerifyEntity, SensorEntity):
     """
 
     entity_description = SensorEntityDescription(
-        key="next_command",
+        key=KEY_NEXT_COMMAND,
         translation_key="next_command",
         device_class=SensorDeviceClass.TIMESTAMP,
     )

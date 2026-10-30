@@ -14,7 +14,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, MAX_MINUTES
+from .const import DOMAIN, KEY_RUN_FOR, MAX_MINUTES
 from .controller import TimerifyConfigEntry, command_when
 from .core import remaining_minutes
 from .entity import TimerifyEntity
@@ -36,7 +36,7 @@ class RunForNumber(TimerifyEntity, NumberEntity):
     """Minutes left, rounded up; setting it starts, changes or stops the timer."""
 
     entity_description = NumberEntityDescription(
-        key="run_for",
+        key=KEY_RUN_FOR,
         translation_key="run_for",
         native_min_value=0,
         native_max_value=MAX_MINUTES,

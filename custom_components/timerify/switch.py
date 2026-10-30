@@ -8,7 +8,7 @@ from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import SUBENTRY_INTERVAL
+from .const import SUBENTRY_INTERVAL, interval_unique_id
 from .controller import TimerifyConfigEntry
 from .entity import TimerifyEntity
 
@@ -51,7 +51,9 @@ class IntervalSwitch(TimerifyEntity, SwitchEntity):
         self, hass: HomeAssistant, entry: TimerifyConfigEntry, subentry: ConfigSubentry
     ) -> None:
         super().__init__(
-            hass, entry, unique_id=f"{entry.entry_id}_interval_{subentry.subentry_id}"
+            hass,
+            entry,
+            unique_id=interval_unique_id(entry.entry_id, subentry.subentry_id),
         )
         self._interval_id = subentry.subentry_id
         self._attr_translation_placeholders = {"interval": subentry.title}

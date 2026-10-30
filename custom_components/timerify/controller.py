@@ -42,11 +42,9 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
-    DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
@@ -56,6 +54,7 @@ from .const import (
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
     SettingValue,
+    default_duration_minutes,
     freeze_settings,
 )
 from .core import (
@@ -221,9 +220,7 @@ class TargetController:
         # a restart, so its first report counts as the target coming back.
         self._core = TimerCore(
             options[CONF_MODE],
-            timedelta(
-                minutes=options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
-            ),
+            timedelta(minutes=default_duration_minutes(options)),
             snapshot,
             automatic_resends=self._behaviour.automatic_resends,
         )

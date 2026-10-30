@@ -29,24 +29,22 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
-    CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
-    DEFAULT_DURATION_MINUTES,
     DOMAIN,
+    KEY_ENDS_AT,
+    KEY_NEXT_COMMAND,
+    KEY_RUN_FOR,
     SUBENTRY_INTERVAL,
     Mode,
+    default_duration_minutes,
+    interval_unique_id,
     is_voice_options,
+    timer_unique_id,
 )
 from .domains import behaviour_for
 
 COMMAND: Final = "timerify/timer"
-
-# The keys of the entity descriptions of a timer, which its unique ids are made of: the
-# entry's id and the key, `<entry id>_<key>` (see `TimerifyEntity`).
-_RUN_FOR: Final = "run_for"
-_ENDS_AT: Final = "ends_at"
-_NEXT_COMMAND: Final = "next_command"
 
 
 class IntervalInfo(TypedDict):
@@ -128,10 +126,10 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo | None:
         return None
     target = er.async_resolve_entity_id(registry, entry.options[CONF_TARGET])
     ends_at = registry.async_get_entity_id(
-        Platform.SENSOR, DOMAIN, _unique_id(entry, _ENDS_AT)
+        Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, KEY_ENDS_AT)
     )
     next_command = registry.async_get_entity_id(
-        Platform.SENSOR, DOMAIN, _unique_id(entry, _NEXT_COMMAND)
+        Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, KEY_NEXT_COMMAND)
     )
     if target is None or ends_at is None or next_command is None:
         return None
@@ -142,9 +140,7 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo | None:
         target=target,
         mode=mode,
         default_duration=(
-            entry.options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
-            if mode == "strict"
-            else None
+            default_duration_minutes(entry.options) if mode == "strict" else None
         ),
         ends_at=ends_at,
         next_command=next_command,
@@ -163,7 +159,7 @@ def _entry_of_number(
     entry = hass.config_entries.async_get_entry(number.config_entry_id)
     if entry is None or entry.domain != DOMAIN or is_voice_options(entry.options):
         return None
-    if number.unique_id != _unique_id(entry, _RUN_FOR):
+    if number.unique_id != timer_unique_id(entry.entry_id, KEY_RUN_FOR):
         return None
     return entry
 
@@ -172,17 +168,11 @@ def _intervals(registry: er.EntityRegistry, entry: ConfigEntry) -> list[Interval
     """The intervals of the timer that have a switch, with their titles."""
     intervals: list[IntervalInfo] = []
     for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
-        # The unique id of an `IntervalSwitch`.
         switch = registry.async_get_entity_id(
             Platform.SWITCH,
             DOMAIN,
-            f"{entry.entry_id}_interval_{subentry.subentry_id}",
+            interval_unique_id(entry.entry_id, subentry.subentry_id),
         )
         if switch is not None:
             intervals.append(IntervalInfo(entity_id=switch, title=subentry.title))
     return intervals
-
-
-def _unique_id(entry: ConfigEntry, key: str) -> str:
-    """The unique id of the entity of the timer that has the description key `key`."""
-    return f"{entry.entry_id}_{key}"

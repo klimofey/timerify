@@ -285,3 +285,13 @@ def test_building_with_settings_leaves_the_sources_as_they_were() -> None:
     build(sources, NAMES, SETTINGS)
 
     assert sources == before
+
+
+def test_a_list_that_two_blocks_share_is_written_out_in_both() -> None:
+    """The sources share the sentences of a kind of target between blocks with a YAML
+    anchor; the files are read by people and copied by hand, and have no alias."""
+    shared = ["one", "two"]
+
+    text = dump_sentences({"first": shared, "second": shared})
+
+    assert text == "first:\n- one\n- two\nsecond:\n- one\n- two\n"

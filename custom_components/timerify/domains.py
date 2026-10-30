@@ -55,6 +55,10 @@ from .target import target_name
 type Actual = Literal["on", "off", "unavailable"]
 """What an entity is doing; "unavailable" covers missing, unavailable and unknown."""
 
+type SettingKind = Literal["number", "text"]
+"""What a setting is made of: a number between bounds, or one of the strings that the
+entity lists."""
+
 type VoiceMeaning = Literal["percent", "mode"]
 """What a person means by a setting without naming it: "at 40 percent" is the brightness
 of a light, the speed of a fan or the humidity of a humidifier, and "in eco mode" is the
@@ -111,7 +115,10 @@ class SettingChoice:
 
 
 def _text(value: Any) -> str:
-    """A value as the user reads it: 16 for 16.0."""
+    """A value as the user reads it: 16 for 16.0, and `true` and `false` as the words
+    they are, not as Python spells them."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
@@ -498,6 +505,26 @@ _BEHAVIOURS: Final[Mapping[str, DomainBehaviour]] = {
 }
 
 SUPPORTED_DOMAINS: Final[tuple[str, ...]] = tuple(_BEHAVIOURS)
+
+
+def _setting_kinds() -> Mapping[str, SettingKind]:
+    """What each setting of the table is made of. A setting is the same kind in every
+    row that has it: a service field has one type."""
+    kinds: dict[str, SettingKind] = {}
+    for row in _BEHAVIOURS.values():
+        for setting in row.settings:
+            kind: SettingKind = (
+                "number" if isinstance(setting.rule, _Between) else "text"
+            )
+            if kinds.setdefault(setting.name, kind) != kind:
+                raise ValueError(f"The setting {setting.name} is a number and a text")
+    return kinds
+
+
+SETTING_KINDS: Final = _setting_kinds()
+"""Every setting an entity can be turned on with, by name: a number between bounds, or
+one of the strings the entity lists. What the slots of a sentence and of a tool are
+typed by."""
 
 
 def behaviour_for_domain(domain: str) -> DomainBehaviour:

@@ -10,6 +10,12 @@
 # timerify_hvac_mode, which the Voice settings entry cuts down to the HVAC modes that
 # the devices have.
 #
+# A setting is said only of a device that has it: the names in timerify_target carry the
+# domain of their device, and a block of TimerifyRun below takes the names of the domains
+# whose settings it lists. So "auto" is the mode of a humidifier and a fan, and the HVAC
+# mode only of a thermostat, and a temperature is said only of a thermostat or a water
+# heater. A name listed by hand has to carry its domain for the same reason.
+#
 # A name cannot be declined, so the sentences put it where the nominative is natural,
 # and an answer starts with it, followed by a colon.
 language: ru
@@ -24,8 +30,25 @@ intents:
   TimerifyRun:
     data:
       - sentences:
-          - "<timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]"
           - "(поставь|установи|заведи) таймер {timerify_target:name} на <timerify_duration>"
+      # The same sentence for every kind of device, each with the settings of its own:
+      # the other devices, thermostats and water heaters.
+      - sentences: &timerify_run_with_settings
+          - "<timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]"
+        excludes_context:
+          domain: [climate, water_heater]
+        expansion_rules:
+          timerify_settings: "([<timerify_percent_part>]; [<timerify_mode_part>])"
+      - sentences: *timerify_run_with_settings
+        requires_context:
+          domain: climate
+        expansion_rules:
+          timerify_settings: "([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])"
+      - sentences: *timerify_run_with_settings
+        requires_context:
+          domain: water_heater
+        expansion_rules:
+          timerify_settings: "([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])"
   TimerifyAddTime:
     data:
       - sentences:
@@ -43,8 +66,8 @@ expansion_rules:
   timerify_hours_part: "{timerify_hours:hours} час[а|ов]"
   timerify_minutes_part: "{timerify_minutes:minutes} минут[у|ы]"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
-# an HVAC mode, a temperature, a percentage, and a mode of the device.
-  timerify_settings: "([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])"
+# an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
+# device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
   timerify_hvac_part: "[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}"
   timerify_temperature_part: "[на] {timerify_temperature:temperature} [градус[а|ов]]"
   timerify_percent_part: "[на] {timerify_percent:percent} процент[а|ов]"

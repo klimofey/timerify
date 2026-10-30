@@ -363,10 +363,15 @@ def conversation_reloads(hass: HomeAssistant) -> list[ServiceCall]:
     return calls
 
 
-async def copy_sentences(hass: HomeAssistant, names: Sequence[str]) -> None:
+async def copy_sentences(
+    hass: HomeAssistant,
+    names: Sequence[str],
+    domains: Mapping[str, str] | None = None,
+) -> None:
     """Install the sentences the manual way: every source file of each language into
     `custom_sentences/<lang>/timerify_manual/`, with a file listing the targets'
-    `names` as they are said and shown.
+    `names` as they are said and shown, and for each name in `domains` the domain of
+    its target, which the words for an HVAC mode and a temperature need.
 
     Before the built-in agent's first request in a language, which reads the files
     once.
@@ -384,7 +389,18 @@ async def copy_sentences(hass: HomeAssistant, names: Sequence[str]) -> None:
                 "language": language,
                 "lists": {
                     LIST_TARGET: {
-                        "values": [{"in": name, "out": name} for name in names]
+                        "values": [
+                            {
+                                "in": name,
+                                "out": name,
+                                **(
+                                    {"context": {"domain": domains[name]}}
+                                    if name in (domains or {})
+                                    else {}
+                                ),
+                            }
+                            for name in names
+                        ]
                     }
                 },
             }

@@ -24,8 +24,7 @@ from homeassistant.util import language as language_util
 from ..const import DOMAIN, VOICE_LANGUAGES, is_voice_options
 from ..controller import TimerifyConfigEntry
 from ..core import remaining_minutes
-from ..domains import actual_state, voice_settings
-from ..services import SETTINGS_SCHEMA
+from ..domains import SETTING_KINDS, actual_state, voice_settings
 from ..target import target_name
 
 DEFAULT_LANGUAGE = "en"
@@ -65,14 +64,13 @@ def number_slot(value: float) -> float:
 
 
 SETTING_SLOTS: Final[dict[Any, Any]] = {
-    probatio.Optional(str(marker)): (
-        cv.string if validator is cv.string else number_slot
-    )
-    for marker, validator in SETTINGS_SCHEMA.items()
+    probatio.Optional(name): number_slot if kind == "number" else cv.string
+    for name, kind in SETTING_KINDS.items()
 }
 """The settings a target can be turned on with, as the slots of a sentence or of a tool,
-under the names the services give them. The services decide which settings there are;
-the slots only give the values their types, and `validate_settings` judges them."""
+under the names the services give them. The domain table decides which settings there
+are and whether each is a number or a text; the slots only give the values their types,
+and `validate_settings` judges them."""
 
 PERCENT_SLOT: Final[dict[Any, Any]] = {probatio.Optional("percent"): number_slot}
 """The slot that only sentences have besides the settings: "at 40 percent", which means
@@ -269,8 +267,8 @@ class TimerifyIntentHandler(intent.IntentHandler):
     the target and has no default for any slot, since an LLM is told none; what an LLM
     is told about the tool the handler makes (`tool_name`, `title`, `description` and,
     where they differ from the defaults, `read_only`, `destructive` and `idempotent`);
-    and does its work in `async_handle_timer`. A handler validates the slots it uses
-    with `async_validate_slots`, as Home Assistant's own do.
+    and does its work in `async_handle_timer`, which is handed the slots validated by
+    `slot_schema`.
     """
 
     tool_name: ClassVar[str]
@@ -305,7 +303,7 @@ class TimerifyIntentHandler(intent.IntentHandler):
         slots = self.async_validate_slots(intent_obj.slots)
         entry = await async_match_timer(hass, intent_obj, slots["name"]["value"])
         try:
-            await self.async_handle_timer(intent_obj, entry, response)
+            await self.async_handle_timer(intent_obj, entry, slots, response)
         except HomeAssistantError as err:
             if err.translation_domain != DOMAIN:
                 raise
@@ -337,9 +335,10 @@ class TimerifyIntentHandler(intent.IntentHandler):
         self,
         intent_obj: intent.Intent,
         entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
-        """Do the work for the timer of `entry`, and set the speech slots of
-        `response`. Success never sets speech: the built-in agent renders it from the
-        response templates of the sentences."""
+        """Do the work for the timer of `entry`, as the validated `slots` ask, and set
+        the speech slots of `response`. Success never sets speech: the built-in agent
+        renders it from the response templates of the sentences."""
         raise NotImplementedError

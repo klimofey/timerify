@@ -1,13 +1,16 @@
 """The handlers that ask about a timer, run it, extend it and stop it."""
 
+from collections.abc import Mapping
 from typing import Any, ClassVar
 
 import probatio
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import intent
 from homeassistant.util import dt as dt_util
 
-from ..controller import TimerifyConfigEntry, duration_out_of_range
+from ..const import DOMAIN
+from ..controller import TimerifyConfigEntry
 from .base import (
     PERCENT_SLOT,
     SETTING_SLOTS,
@@ -37,6 +40,7 @@ class TimeLeftHandler(TimerifyIntentHandler):
         self,
         intent_obj: intent.Intent,
         entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
         response.async_set_speech_slots(
@@ -78,10 +82,10 @@ class RunHandler(TimerifyIntentHandler):
         self,
         intent_obj: intent.Intent,
         entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
         hass = intent_obj.hass
-        slots = self.async_validate_slots(intent_obj.slots)
         await entry.runtime_data.async_run(
             duration_of(slots), settings_of(hass, entry, slots)
         )
@@ -113,12 +117,14 @@ class AddTimeHandler(TimerifyIntentHandler):
         self,
         intent_obj: intent.Intent,
         entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
-        slots = self.async_validate_slots(intent_obj.slots)
         # Time to add is asked for in the slots; without any there is nothing to add.
         if not (minutes := duration_of(slots)):
-            raise duration_out_of_range()
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="no_time_to_add"
+            )
         await entry.runtime_data.async_add_minutes(minutes)
         response.async_set_speech_slots(
             timer_slots(intent_obj.hass, entry, dt_util.utcnow())
@@ -143,6 +149,7 @@ class StopHandler(TimerifyIntentHandler):
         self,
         intent_obj: intent.Intent,
         entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
         await entry.runtime_data.async_set_minutes(0)

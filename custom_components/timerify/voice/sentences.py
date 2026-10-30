@@ -50,7 +50,11 @@ _TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
 
 class _SentenceDumper(yaml.SafeDumper):
     """The safe YAML dumper, but a text of several lines is written as a block, as the
-    text is, not as a line of escapes."""
+    text is, not as a line of escapes, and a list that two places share is written out
+    in both: the files are read by people and by tools that take no anchors on faith."""
+
+    def ignore_aliases(self, data: Any) -> bool:
+        return True
 
 
 def _represent_text(dumper: _SentenceDumper, text: str) -> yaml.ScalarNode:

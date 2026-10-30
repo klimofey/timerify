@@ -438,6 +438,9 @@
     "duration_out_of_range": {
       "message": "A timer runs for 1 min to {max_hours} h."
     },
+    "no_time_to_add": {
+      "message": "Say how much time to add."
+    },
     "voice_setting_not_supported": {
       "message": "{target} cannot be turned on with that setting."
     },

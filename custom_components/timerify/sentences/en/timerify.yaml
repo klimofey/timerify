@@ -12,10 +12,35 @@ intents:
   TimerifyRun:
     data:
     - sentences:
+      - set [<the>] {timerify_target:name} timer to <timerify_duration>
+    - sentences:
       - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
       - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
       - run [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
-      - set [<the>] {timerify_target:name} timer to <timerify_duration>
+      excludes_context:
+        domain:
+        - climate
+        - water_heater
+      expansion_rules:
+        timerify_settings: ([<timerify_percent_part>]; [<timerify_mode_part>])
+    - sentences:
+      - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
+      - run [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      requires_context:
+        domain: climate
+      expansion_rules:
+        timerify_settings: ([<timerify_hvac_part>]; [<timerify_temperature_part>];
+          [<timerify_percent_part>]; [<timerify_mode_part>])
+    - sentences:
+      - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
+      - run [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      requires_context:
+        domain: water_heater
+      expansion_rules:
+        timerify_settings: ([<timerify_temperature_part>]; [<timerify_percent_part>];
+          [<timerify_mode_part>])
   TimerifyAddTime:
     data:
     - sentences:
@@ -33,8 +58,6 @@ expansion_rules:
     more minute[s])
   timerify_hours_part: '{timerify_hours:hours} hour[s]'
   timerify_minutes_part: '{timerify_minutes:minutes} minute[s]'
-  timerify_settings: ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>];
-    [<timerify_mode_part>])
   timerify_hvac_part: '{timerify_hvac_mode:hvac_mode} [mode]'
   timerify_temperature_part: '[at] {timerify_temperature:temperature} [degree[s]]'
   timerify_percent_part: '[at] {timerify_percent:percent} percent'

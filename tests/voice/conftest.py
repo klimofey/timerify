@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 from homeassistant.components.fan.const import FanEntityFeature
+from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.components.light.const import ColorMode
+from homeassistant.components.water_heater.const import WaterHeaterEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -13,8 +15,11 @@ from ..conftest import (
     CLIMATE_SERVICES,
     SWITCH_SERVICES,
     FakeTarget,
+    Obey,
     ProvideTarget,
     SetupTarget,
+    sets_attribute,
+    switches_to,
 )
 from ..helpers import AC_ATTRS, AC_ID, JERUSALEM
 from .helpers import copy_sentences
@@ -76,14 +81,14 @@ def fake_lamp(provide_target: ProvideTarget) -> FakeTarget:
 
 @pytest.fixture
 def fake_vent(provide_target: ProvideTarget) -> FakeTarget:
-    """`fan.vent` on a device called Vent, switched off: a fan with a speed and two
-    presets."""
+    """`fan.vent` on a device called Vent, switched off: a fan with a speed and three
+    presets, one of them `auto`."""
     return provide_target(
         "fan.vent",
         SWITCH_SERVICES,
         name="Vent",
         capability_attributes={
-            "preset_modes": ["eco", "sleep"],
+            "preset_modes": ["auto", "eco", "sleep"],
             "supported_features": int(
                 FanEntityFeature.TURN_ON
                 | FanEntityFeature.TURN_OFF
@@ -108,4 +113,62 @@ def fake_full_ac(provide_target: ProvideTarget) -> FakeTarget:
         name="AC",
         capability_attributes={**AC_ATTRS, "hvac_modes": HVAC_MODES},
         state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+
+
+HUMIDIFIER_SERVICES: dict[str, Obey] = {
+    "turn_on": switches_to("on"),
+    "turn_off": switches_to("off"),
+    "set_mode": sets_attribute("mode"),
+    "set_humidity": sets_attribute("humidity"),
+}
+"""The services of a humidifier."""
+
+
+@pytest.fixture
+def fake_humidifier(provide_target: ProvideTarget) -> FakeTarget:
+    """`humidifier.humidifier` on a device called Humidifier, switched off: a
+    humidifier with a humidity of 30 to 80 percent and the modes `auto` and `eco`."""
+    return provide_target(
+        "humidifier.humidifier",
+        HUMIDIFIER_SERVICES,
+        name="Humidifier",
+        capability_attributes={
+            "min_humidity": 30,
+            "max_humidity": 80,
+            "available_modes": ["auto", "eco"],
+            "supported_features": int(HumidifierEntityFeature.MODES),
+        },
+        state_attributes={"humidity": 50, "mode": "eco"},
+    )
+
+
+WATER_HEATER_SERVICES: dict[str, Obey] = {
+    "turn_on": switches_to("on"),
+    "turn_off": switches_to("off"),
+    "set_temperature": sets_attribute("temperature"),
+    "set_operation_mode": sets_attribute("operation_mode"),
+}
+"""The services of a water heater."""
+
+
+@pytest.fixture
+def fake_tank(provide_target: ProvideTarget) -> FakeTarget:
+    """`water_heater.tank` on a device called Tank, switched off: a water heater with
+    a temperature of 30 to 70 degrees and the operation modes `eco` and `electric`."""
+    return provide_target(
+        "water_heater.tank",
+        WATER_HEATER_SERVICES,
+        name="Tank",
+        capability_attributes={
+            "min_temp": 30,
+            "max_temp": 70,
+            "operation_list": ["off", "eco", "electric"],
+            "supported_features": int(
+                WaterHeaterEntityFeature.TARGET_TEMPERATURE
+                | WaterHeaterEntityFeature.OPERATION_MODE
+                | WaterHeaterEntityFeature.ON_OFF
+            ),
+        },
+        state_attributes={"temperature": 50, "operation_mode": "eco"},
     )

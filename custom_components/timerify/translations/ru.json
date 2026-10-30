@@ -438,6 +438,9 @@
     "duration_out_of_range": {
       "message": "Таймер работает от 1 мин до {max_hours} ч."
     },
+    "no_time_to_add": {
+      "message": "Скажите, сколько времени добавить."
+    },
     "voice_setting_not_supported": {
       "message": "{target}: включить с такой настройкой нельзя."
     },

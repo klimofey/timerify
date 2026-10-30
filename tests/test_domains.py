@@ -727,6 +727,9 @@ async def test_number_settings_refuse_booleans(
         validate_settings(hass, entity_id, {setting: flag})
 
     assert err.value.translation_key == "setting_out_of_range"
+    # Shown to the person as the word that was said, not as Python spells it.
+    assert err.value.translation_placeholders is not None
+    assert err.value.translation_placeholders["value"] == str(flag).lower()
 
 
 @pytest.mark.parametrize(

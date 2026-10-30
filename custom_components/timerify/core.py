@@ -178,10 +178,11 @@ def _capped(now: datetime, end: datetime) -> datetime:
     return min(end, now + _MAX_DURATION)
 
 
-def _checked(window: Window) -> Window:
+def checked_window(window: Window) -> Window:
     """`window` in UTC, so every start and end is UTC whatever zone the caller works
     in. A naive time, or a window that does not start before it ends or lasts longer
-    than a day, is refused."""
+    than a day, is refused with a ValueError, whoever made it: the caller of
+    `set_windows`, or the file that a timer is read from."""
     start = _utc(window.start, "the window's start")
     end = _utc(window.end, "the window's end")
     if not start < end <= start + _MAX_DURATION:
@@ -413,7 +414,7 @@ class TimerCore:
         """
         now = _utc(now)
         fresh: dict[str, Window] = {}
-        for window in map(_checked, windows):
+        for window in map(checked_window, windows):
             if window.interval_id in fresh:
                 raise ValueError(f"two windows of the interval {window.interval_id}")
             fresh[window.interval_id] = window

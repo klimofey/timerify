@@ -94,9 +94,9 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
 - **A store file that contradicts itself fails the timer, and the interface cannot repair
   it.** `_validated` refuses a file that no timer could have written (two windows of one
   interval, a window that is suppressed but has not started, and so on), which means a
-  defect, and the entry stays failed. The only way out is to delete the timer and add it
-  again, which loses its commands and the flags of its intervals. A repairs issue with a
-  "reset the stored timer" fix would do. `custom_components/timerify/store.py:60-84`
+  defect, and the entry stays failed with a reason in words (`stored_timer_invalid`). The
+  only way out is to delete the timer and add it again, which loses its commands and the
+  flags of its intervals. A repairs issue with a "reset the stored timer" fix would do. `custom_components/timerify/store.py:60-84`
   (`_validated`) and `:164-188` (`async_load`).
 - **A pending command keeps the settings it was made with.** The settings of an interval's
   window are checked again when the window is worked out, and the ones the target no longer

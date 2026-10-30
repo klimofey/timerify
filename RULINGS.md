@@ -141,9 +141,13 @@ not repeated beside its successor.
   contradicts itself is refused when the timer is set up, not repaired: two windows of one
   interval, a window that is suppressed but has not started, a window of a switched-off
   interval, an interval switched off twice, `scheduled_by` without an end, the marker
-  without owed settings. Only the timer's own code writes the file, so such a file means a
-  defect, and it should show when the timer loads, not as a target switched for reasons
-  nobody can follow. Versions 2 and 3 were never released before their keys were
+  without owed settings, a window with a time that has no offset or that does not start
+  before it ends or lasts more than a day (the rule of `checked_window`, the one the core
+  applies to every window it is given). The set-up fails with a `ConfigEntryError`
+  (`stored_timer_invalid`), whose translated reason says what is wrong and tells the
+  user to remove the timer and add it again, not with a bare `ValueError`. Only the
+  timer's own code writes the file, so such a file means a defect, and it should show when
+  the timer loads, not as a target switched for reasons nobody can follow. Versions 2 and 3 were never released before their keys were
   complete, so they need no further steps. Cost if wrong: a version 2 or 3 file written by
   a development build from between the changes lacks a key and fails to load; that exists
   on developer machines only.

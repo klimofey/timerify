@@ -387,6 +387,9 @@
     "target_not_found": {
       "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."
     },
+    "stored_timer_invalid": {
+      "message": "The stored timer of this entry cannot be used: {reason}. Remove this timer and add it again."
+    },
     "not_whole_minutes": {
       "message": "Run for takes a whole number of minutes; {minutes} is not one."
     },

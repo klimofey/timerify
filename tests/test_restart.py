@@ -45,6 +45,8 @@ from .helpers import (
     window_json,
 )
 
+MONDAY = SUNDAY + timedelta(days=1)
+
 
 async def test_running_timer_survives_reload(
     hass: HomeAssistant,
@@ -423,6 +425,52 @@ async def test_window_stopped_by_hand_is_stored_as_suppressed(
             "the interval a is switched off twice",
             id="interval-switched-off-twice",
         ),
+        pytest.param(
+            payload(
+                windows=[
+                    {
+                        **window_json(
+                            "a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")
+                        ),
+                        "start": "2026-01-04T04:30:00",
+                    }
+                ]
+            ),
+            "the window's start must be timezone-aware",
+            id="window-start-without-an-offset",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    {
+                        **window_json(
+                            "a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")
+                        ),
+                        "end": "2026-01-04T05:15:00",
+                    }
+                ]
+            ),
+            "the window's end must be timezone-aware",
+            id="window-end-without-an-offset",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "07:15"), local(SUNDAY, "06:30"))
+                ]
+            ),
+            "the window of a must start before it ends and last at most a day",
+            id="window-that-ends-before-it-starts",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    window_json("a", local(SUNDAY, "06:30"), local(MONDAY, "06:31"))
+                ]
+            ),
+            "the window of a must start before it ends and last at most a day",
+            id="window-longer-than-a-day",
+        ),
     ],
 )
 async def test_file_that_contradicts_itself_is_refused(
@@ -434,11 +482,18 @@ async def test_file_that_contradicts_itself_is_refused(
     complaint: str,
 ) -> None:
     """The file is read strictly: one that no timer could have written fails the
-    set-up, saying why, instead of running on a state nothing makes sense of."""
+    set-up with a reason in words, saying what is wrong, instead of running on a state
+    nothing makes sense of; the log has the reason, not a bare ValueError."""
     entry = await setup_target(stored=stored)
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_domain == "timerify"
+    assert entry.error_reason_translation_key == "stored_timer_invalid"
+    assert entry.reason is not None
+    assert "Remove this timer and add it again" in entry.reason
+    assert complaint in entry.reason
     assert complaint in caplog.text
+    assert "ValueError" not in caplog.text
     assert fake_target.calls == []
 
 

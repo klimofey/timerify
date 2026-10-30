@@ -5,10 +5,11 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers.storage import Store
 
-from .const import freeze_settings
-from .core import Command, Snapshot, Window
+from .const import DOMAIN, freeze_settings
+from .core import Command, Snapshot, Window, checked_window
 
 
 def command_to_json(command: Command) -> dict[str, Any]:
@@ -47,13 +48,17 @@ def window_to_json(window: Window) -> dict[str, Any]:
 
 
 def _window_from_json(data: dict[str, Any]) -> Window:
-    return Window(
-        interval_id=data["interval"],
-        start=datetime.fromisoformat(data["start"]),
-        end=datetime.fromisoformat(data["end"]),
-        settings=freeze_settings(data["settings"]),
-        started=data["started"],
-        suppressed=data["suppressed"],
+    """A stored window, in UTC; a ValueError for one that no schedule could have made,
+    by the rule that holds for every window the core is given."""
+    return checked_window(
+        Window(
+            interval_id=data["interval"],
+            start=datetime.fromisoformat(data["start"]),
+            end=datetime.fromisoformat(data["end"]),
+            settings=freeze_settings(data["settings"]),
+            started=data["started"],
+            suppressed=data["suppressed"],
+        )
     )
 
 
@@ -165,27 +170,40 @@ class TimerStore:
         """The stored timer, migrated to the current version if need be; an idle one
         when nothing was stored yet.
 
-        Raises ValueError for a file that contradicts itself (see `_validated`).
+        Raises ConfigEntryError (`stored_timer_invalid`), saying what is wrong, for a
+        file that contradicts itself (see `_validated`) or holds a time that is not one.
         """
         data = await self._store.async_load()
         if data is None:
             snapshot = Snapshot()
         else:
-            end = data["end"]
-            snapshot = _validated(
-                Snapshot(
-                    end=None if end is None else datetime.fromisoformat(end),
-                    pending=data["pending"],
-                    owed_settings=freeze_settings(data["owed_settings"]),
-                    owed_turn_on_only=data["owed_turn_on_only"],
-                    commands=tuple(_command_from_json(c) for c in data["commands"]),
-                    scheduled_by=data["scheduled_by"],
-                    windows=tuple(_window_from_json(w) for w in data["windows"]),
-                    disabled_intervals=_disabled_from_json(data["disabled_intervals"]),
-                )
-            )
+            try:
+                snapshot = self._read(data)
+            except ValueError as err:
+                raise ConfigEntryError(
+                    translation_domain=DOMAIN,
+                    translation_key="stored_timer_invalid",
+                    translation_placeholders={"reason": str(err)},
+                ) from None  # The reason says all there is to say of it.
         self._saved = _payload(snapshot)
         return snapshot
+
+    @staticmethod
+    def _read(data: dict[str, Any]) -> Snapshot:
+        """The timer a file of the current version holds."""
+        end = data["end"]
+        return _validated(
+            Snapshot(
+                end=None if end is None else datetime.fromisoformat(end),
+                pending=data["pending"],
+                owed_settings=freeze_settings(data["owed_settings"]),
+                owed_turn_on_only=data["owed_turn_on_only"],
+                commands=tuple(_command_from_json(c) for c in data["commands"]),
+                scheduled_by=data["scheduled_by"],
+                windows=tuple(_window_from_json(w) for w in data["windows"]),
+                disabled_intervals=_disabled_from_json(data["disabled_intervals"]),
+            )
+        )
 
     async def async_save(self, snapshot: Snapshot) -> None:
         """Write the timer out at once, unless the file already holds it.

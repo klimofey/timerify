@@ -28,8 +28,11 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
 - **A device that answers each refused call with `unknown` and then its old state is re-sent
   without end.** Each cycle is a real state change, which resets the allowance of automatic
   re-sends by design. Not a regression (phase 1 before the cap behaved the same). A per-wish
-  total limit would close it. `custom_components/timerify/core.py:514-517` (the reset in
-  `observe`) and `:814-827` (`_resend`).
+  total limit would close it. The same holds for a device that answers each correction of
+  a contradicting report of its own call (the entry "A report of our own call that
+  contradicts the timer" in `RULINGS.md`) with the opposite state, each time as an answer
+  to our call: every change is answered once. `custom_components/timerify/core.py:514-517`
+  (the reset in `observe`) and `:814-827` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
   `custom_components/timerify/controller.py:719-738` (`_log_gave_up`) and

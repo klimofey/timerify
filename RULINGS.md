@@ -68,6 +68,36 @@ not repeated beside its successor.
   player that is still booting reports a state that is not on; they are sent the command
   again on a state change or a command. Cost if wrong: an ignoring media player is retried
   only then.
+- **A report of our own call that contradicts the timer, with no wish pending, is a wish
+  that has not landed, and the core asks for the state it wished again.** A call that
+  the device accepted but does not show yet counts as not delivered (above), so a newer
+  wish for the state the target still shows is settled with nothing sent. The older call
+  then lands, and its report, which carries our context, leaves the target the opposite
+  of the timer: an interval switched off and on again within the report lag of a cloud
+  device, "Run for 0" and at once "Run for 30", a start and at once a stop. R6 says our
+  own report is not "someone else"; without this rule it was also not "us", and nothing
+  corrected the target until some other change came. The core now keeps in memory what it
+  last asked of the target (`_wished`, set by every wish, whether or not anything had to
+  be sent; never stored, since only the core that made a call can be answered by it).
+  A report by one of our calls that shows the other state, while no wish is pending, makes
+  that state the pending wish again and sends it. The report is a change of the target's
+  state, so it is always answered; if the new call does not land either, the wish is an
+  ordinary unsent one, and the reports that follow are answered within the limit of
+  `automatic_resends`, so a device that refuses cannot loop. The memory covers a loose
+  timer at zero too: the user's last word (run without a countdown, stop) is what is
+  wished, since a loose target may run with the timer at zero but not against the last
+  thing the user asked. Someone else's change ends the memory (manual wins, R8): a late
+  report after it asks for nothing. Why: §5.1, one timer as the single source of truth.
+  Cost if wrong: a device that changes by itself and has the change attributed to our
+  context within its report window (Home Assistant attributes it for five seconds after
+  a call) is commanded once per change, and a cycle of such changes is not bounded by the
+  limit, as the entry in `docs/followups.md` about a device that answers a refused call
+  with `unknown` says; the settings that a window owes only with a turn-on were dropped
+  when the window started again on a target that still read on, so the correcting
+  turn-on is plain, and a device that remembers its last mode runs in it. Tests:
+  `test_run_for_zero_and_at_once_run_for_thirty_leaves_the_boiler_running`,
+  `test_start_and_at_once_stop_leave_a_strict_boiler_off`,
+  `test_flipping_the_interval_off_and_on_behind_a_late_boiler_leaves_it_on`.
 - **A service call that takes longer than 30 seconds counts as failed**
   (`SERVICE_CALL_TIMEOUT`), each call of a list on its own. Home Assistant service calls
   have no timeout of their own, and a hung device would otherwise freeze its timer. Cost if

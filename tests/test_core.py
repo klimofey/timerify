@@ -714,14 +714,15 @@ def refused_turn_off() -> TimerCore:
 
 
 def repeat_reports(
-    c: TimerCore, count: int, actual: Actual = "on"
+    c: TimerCore, count: int, actual: Actual = "on", *, by_us: bool = False
 ) -> list[list[Effect]]:
     """The effects of `count` reports in a row that repeat the target's state, from a
-    device that refuses every call: each send comes back as not delivered."""
+    device that refuses every call: each send comes back as not delivered. They are
+    answers to our own calls if `by_us`."""
     results: list[list[Effect]] = []
     for step in range(count):
         now = NOW + minutes(1 + step)
-        effects = c.observe(now, actual, by_us=False)
+        effects = c.observe(now, actual, by_us=by_us)
         if any(isinstance(e, TurnOn | TurnOff | ApplySettings) for e in effects):
             c.call_failed(now)
         results.append(effects)
@@ -3471,3 +3472,179 @@ def test_windows_of_disabled_intervals_are_not_kept() -> None:
     assert fx == [Arm(NOW + minutes(30)), Changed()]
     assert c.snapshot.windows == (window("y", 30, 75),)
     assert c.snapshot.disabled_intervals == frozenset({"x", "old"})
+
+
+# --- A report of our own call that contradicts the timer ---------------------------
+#
+# A device that confirms after the call returned makes the call count as not delivered
+# while it is still on its way. A newer wish that asks for the state the target shows
+# is then settled with nothing sent, and the answer to the older call, which comes
+# later, leaves the target the opposite of the timer: the core asks again.
+
+
+def stopped_behind_a_slow_device(mode: Mode) -> TimerCore:
+    """A timer that ran a target that is on and was stopped. The device took turn_off
+    but has not reported it, so the call counts as not delivered while the target
+    reads on."""
+    c = core(mode, "on")
+    c.set_duration(NOW, minutes(30))
+    assert c.stop(NOW) == [Disarm(), TurnOff(), Changed()]
+    c.call_failed(NOW)
+    return c
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_run_for_zero_then_run_for_thirty_before_the_device_reports_turns_it_on(
+    mode: Mode,
+) -> None:
+    """ "Run for 0" and at once "Run for 30": the second asks for nothing, as the target
+    still reads on. When the report of the first arrives, the target is off while the
+    timer runs, and the core turns it on."""
+    c = stopped_behind_a_slow_device(mode)
+
+    again = c.set_duration(NOW, minutes(30))
+    late = c.observe(NOW + minutes(1), "off", by_us=True)
+
+    assert again == [Arm(NOW + minutes(30)), Changed()]
+    assert late == [TurnOn(), Changed()]
+    assert c.snapshot.pending == "on"
+    assert c.snapshot.end == NOW + minutes(30)
+    assert c.observe(NOW + minutes(2), "on", by_us=True) == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(30), last_actual="on")
+
+
+def test_start_then_stop_before_the_device_reports_turns_it_off_in_strict_mode() -> (
+    None
+):
+    """A start and at once a stop: the stop asks for nothing, as the target still reads
+    off. When the report of the start arrives, the target runs with the timer at zero,
+    which strict mode does not allow, and the core turns it off."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(30))
+    c.call_failed(NOW)
+
+    stopped = c.stop(NOW)
+    late = c.observe(NOW + minutes(1), "on", by_us=True)
+
+    assert stopped == [Disarm(), Changed()]
+    assert late == [TurnOff(), Changed()]
+    assert c.snapshot.pending == "off"
+    assert c.observe(NOW + minutes(2), "off", by_us=True) == [Changed()]
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_open_run_then_stop_before_the_device_reports_turns_it_off_in_loose_mode() -> (
+    None
+):
+    """Loose mode allows a target that runs with the timer at zero, but not one that
+    the last thing the user did was to stop."""
+    c = core("loose", "off")
+    c.run_open(NOW)
+    c.call_failed(NOW)
+    c.stop(NOW)
+
+    late = c.observe(NOW + minutes(1), "on", by_us=True)
+
+    assert late == [TurnOff(), Changed()]
+
+
+def test_stop_then_open_run_before_the_device_reports_turns_it_on_in_loose_mode() -> (
+    None
+):
+    """The user's last word was to run the target, with no countdown: the timer is at
+    zero either way, and the target is to run."""
+    c = core("loose", "on")
+    c.stop(NOW)
+    c.call_failed(NOW)
+    assert c.run_open(NOW) == [Disarm(), Changed()]
+
+    late = c.observe(NOW + minutes(1), "off", by_us=True)
+
+    assert late == [TurnOn(), Changed()]
+
+
+def flipped_off_and_on_behind_a_slow_device(
+    settings: Settings = NO_SETTINGS,
+) -> TimerCore:
+    """The target is on in the window of interval a, which carries the timer. The
+    interval is switched off, and on again before the device that took turn_off reports
+    it: the window starts again and asks for nothing, as the target reads on."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("a", -15, 45, settings)], configured={"a"})
+    c.tick(NOW)
+    assert c.snapshot.scheduled_by == "a"
+    c.set_interval_enabled(NOW, "a", False)
+    assert c.tick(NOW) == [Disarm(), TurnOff(), Changed()]
+    c.call_failed(NOW)
+    c.set_interval_enabled(NOW, "a", True)
+    c.set_windows(NOW, [window("a", -15, 45, settings)], configured={"a"})
+    assert c.tick(NOW) == [Arm(NOW + minutes(45)), Changed()]
+    return c
+
+
+def test_interval_switched_off_and_on_before_the_device_reports_turns_it_on() -> None:
+    """The report of the turn-off arrives after the window runs again: the core turns
+    the target on, and the window still carries the timer."""
+    c = flipped_off_and_on_behind_a_slow_device()
+
+    late = c.observe(NOW + minutes(1), "off", by_us=True)
+
+    assert late == [TurnOn(), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(45), "a")
+    assert c.observe(NOW + minutes(2), "on", by_us=True) == [Changed()]
+    assert c.snapshot.pending is None
+
+
+def test_the_turn_on_after_a_late_report_does_not_carry_the_window_settings() -> None:
+    """The window's settings were dropped when it started again on a target that read
+    on, as they may only go with a turn-on (§5.4); the turn-on that follows the late
+    report is plain. A device that remembers its last mode runs in it."""
+    c = flipped_off_and_on_behind_a_slow_device(HEAT22)
+
+    late = c.observe(NOW + minutes(1), "off", by_us=True)
+
+    assert late == [TurnOn(), Changed()]
+    assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_a_contradicting_report_is_answered_a_limited_number_of_times() -> None:
+    """A device that keeps answering the turn-on with an off, each time as an answer
+    to our own call, is asked again like any that refuses: 3 more times, told so once,
+    then left alone."""
+    c = stopped_behind_a_slow_device("strict")
+    c.set_duration(NOW, minutes(30))
+    assert c.observe(NOW + minutes(1), "off", by_us=True) == [TurnOn(), Changed()]
+    c.call_failed(NOW + minutes(1))
+
+    reports = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 2, actual="off", by_us=True)
+
+    assert reports[:MAX_AUTOMATIC_RESENDS] == [[TurnOn()]] * MAX_AUTOMATIC_RESENDS
+    assert reports[MAX_AUTOMATIC_RESENDS:] == [[GaveUp("on")], []]
+    assert c.snapshot.pending == "on"
+
+
+def test_a_late_report_after_someone_else_switched_the_target_asks_for_nothing() -> (
+    None
+):
+    """Manual wins (R8): the user switched the target off by hand while the report of
+    our own turn-off was on its way, and the timer follows the user. The report that
+    arrives next is not a reason to turn the target on."""
+    c = stopped_behind_a_slow_device("strict")
+    c.set_duration(NOW, minutes(30))
+    assert c.observe(NOW + minutes(1), "off", by_us=False) == [Disarm(), Changed()]
+
+    late = c.observe(NOW + minutes(2), "off", by_us=True)
+
+    assert late == []
+    assert c.snapshot == Snapshot(last_actual="off")
+
+
+def test_a_report_of_a_call_the_core_never_made_asks_for_nothing() -> None:
+    """A timer restored from the store has asked for nothing yet, so there is no
+    answer to it that could contradict anything."""
+    c = TimerCore(
+        "strict", minutes(45), Snapshot(end=NOW + minutes(20), last_actual="on")
+    )
+
+    assert c.observe(NOW, "off", by_us=True) == [Changed()]
+    assert c.snapshot == Snapshot(end=NOW + minutes(20), last_actual="off")

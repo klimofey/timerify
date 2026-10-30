@@ -305,6 +305,11 @@ class TimerCore:
         self._settings_unsent = False
         """The owed settings have not reached the target, as `_unsent` says of the
         wish. Only true while settings are owed; never persisted either."""
+        self._wished: Literal["on", "off"] | None = None
+        """What the timer last asked of the target, whether or not anything had to be
+        sent: the state its own calls are to leave the target in. None until the core
+        asks, and again once someone else changes the target. Never persisted, because
+        only the core that made a call can be answered by it."""
         self._wish_allowance = _Allowance(automatic_resends)
         """Re-sends of the pending wish by reports. Only meaningful while a wish is
         pending: every command that wants one starts it from zero, and so does a
@@ -506,7 +511,11 @@ class TimerCore:
     def observe(self, now: datetime, actual: Actual, *, by_us: bool) -> list[Effect]:
         """React to the target's state: on every change and once at startup.
 
-        `by_us` says the change came from a service call the core asked for.
+        `by_us` says the change came from a service call the core asked for. Such an
+        answer may be late: a newer wish can have been settled by the state the target
+        showed before the call landed, and the answer then leaves the target the
+        opposite of what the timer wants. With no wish pending, the core asks for the
+        state it wished again.
         """
         now = _utc(now)
         previous = self._snapshot.last_actual
@@ -542,6 +551,12 @@ class TimerCore:
         elif by_us:
             if pending == actual:
                 self._settle()
+            elif (
+                pending is None
+                and (wished := self._wished) is not None
+                and wished != actual
+            ):
+                effects += self._ask_again(wished)
         elif not repeated and not caught_up:
             # What was due has just decided what the target is to do; it outranks
             # what someone else did to the target.
@@ -717,6 +732,7 @@ class TimerCore:
     ) -> list[Effect]:
         """Someone else switched the target: the timer follows (R3 to R5)."""
         self._settle()
+        self._wished = None  # what our own calls said no longer decides: manual wins
         if actual == "off":
             self._clear_settings()  # a target that is off runs with nothing
             self._suppress_windows()
@@ -783,6 +799,7 @@ class TimerCore:
         way, gets them alone, unless they may only go with a turn-on.
         """
         state = self._snapshot
+        self._wished = target
         in_flight = state.pending is not None and not self._unsent
         if in_flight and state.pending == target:
             return self._settings_for_running_target(settings)
@@ -825,6 +842,19 @@ class TimerCore:
                 case "silent":
                     return []
         return self._send(wish)
+
+    def _ask_again(self, wished: Literal["on", "off"]) -> list[Effect]:
+        """Make the wished state the pending wish again, and send it. An answer to a
+        call of ours shows the opposite and nothing was pending, because the wish was
+        settled by the state the target had before that call landed.
+
+        The answer is a change of the target's state, never a repeat of it, so it is
+        always answered. If the new call does not land either, the wish is pending like
+        any other that did not reach the target, and the reports that follow are
+        answered within the limit for reports that repeat the state.
+        """
+        self._snapshot = replace(self._snapshot, pending=wished)
+        return self._send(wished)
 
     def _owe(self, settings: Settings, *, turn_on_only: bool = False) -> None:
         """Make `settings`, if there are any, the ones the target has yet to take, and

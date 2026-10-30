@@ -11,7 +11,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 
-from custom_components.timerify.const import MAX_AUTOMATIC_RESENDS
+from custom_components.timerify.const import MAX_AUTOMATIC_RESENDS, Mode
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -21,6 +21,7 @@ from .helpers import (
     TURN_OFF,
     TURN_ON,
     advance,
+    call_service,
     set_number,
     state_of,
     timerify_warnings,
@@ -282,3 +283,105 @@ async def test_media_player_is_not_turned_on_again_by_repeated_reports(
     await fake_media_player.set_state("off")
 
     assert fake_media_player.calls == [("turn_on", "media_player.tv")] * 2
+
+
+# --- A device that reports after the call returned -----------------------------------
+#
+# Most cloud integrations take a command and show its result a second or two later. The
+# report carries the context of the call, so Timerify knows it as its own. When the user
+# changes their mind in between, the report that arrives is the opposite of what the
+# timer wants, and the boiler must still end up as the timer says.
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+async def test_run_for_zero_and_at_once_run_for_thirty_leaves_the_boiler_running(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    mode: Mode,
+) -> None:
+    """The boiler runs for half an hour. The user stops it and, before the cloud has
+    shown it off, starts it again. The late "off" must not leave it off while the
+    countdown runs: it is turned on again and goes off at the end."""
+    await setup_target(mode=mode)
+    await set_number(hass, NUMBER, 30)
+    fake_target.report_next_call_late()
+    await set_number(hass, NUMBER, 0)
+    await set_number(hass, NUMBER, 30)
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "on"
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, NUMBER) == "30"
+    await advance(hass, freezer, minutes=30)
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_start_and_at_once_stop_leave_a_strict_boiler_off(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user starts the boiler and, before the cloud has shown it on, stops it. The
+    late "on" would leave it running with the timer at zero, which strict mode forbids:
+    it is turned off."""
+    await setup_target(mode="strict")
+    fake_target.report_next_call_late()
+    await set_number(hass, NUMBER, 30)
+    await set_number(hass, NUMBER, 0)
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "off"
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, NUMBER) == "0"
+    assert state_of(hass, SENSOR) == "unknown"
+
+
+async def test_open_run_and_at_once_stop_leave_a_loose_boiler_off(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A loose boiler may run with the timer at zero, but the user's last word was to
+    stop it: the late "on" of the open-ended run is answered with an off."""
+    await setup_target(mode="loose")
+    fake_target.report_next_call_late()
+    await call_service(hass, "run", {"entity_id": NUMBER})
+    await set_number(hass, NUMBER, 0)
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_boiler_that_goes_on_refusing_late_is_asked_a_limited_number_of_times(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The correction is sent like any wish: a boiler that answers each one with the
+    old state, as its own, is asked 3 times more, and Timerify says so once."""
+    await setup_target(mode="strict")
+    await set_number(hass, NUMBER, 30)
+    fake_target.report_next_call_late()
+    await set_number(hass, NUMBER, 0)
+    await set_number(hass, NUMBER, 30)
+    fake_target.ignore_calls(echo_attribute=True)
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF] + [TURN_ON] * (
+        1 + MAX_AUTOMATIC_RESENDS
+    )
+    assert state_of(hass, TARGET_ID) == "off"
+    assert timerify_warnings(caplog) == [
+        "switch.boiler did not turn on after 4 attempts; Timerify will try again"
+        " when it reports a change or on the next command"
+    ]

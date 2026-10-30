@@ -357,6 +357,41 @@ async def test_enabling_during_the_window_starts_the_target(
     assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
 
 
+async def test_flipping_the_interval_off_and_on_behind_a_late_boiler_leaves_it_on(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler has run since half past six, and the cloud shows what it is told a
+    moment late. Seven o'clock: the user switches the interval off and, before the
+    boiler shows off, on again. The late "off" must not leave the boiler off while "Ends
+    at" says quarter past seven: it is turned on again, and goes off at the end."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:00"))
+    assert fake_target.calls == [TURN_ON]
+    fake_target.report_next_call_late()
+
+    await set_switch(hass, SWITCH, False)
+    await set_switch(hass, SWITCH, True)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 async def test_enabling_before_the_window_waits_for_it(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,

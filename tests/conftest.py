@@ -156,6 +156,8 @@ class FakeTarget:
     _ignoring: bool = False
     _echoing: bool = False
     _echoes: int = 0
+    _reporting_late: bool = False
+    _late: list[tuple[Obey, ServiceCall]] = field(default_factory=list)
     _held: HeldCall | None = None
 
     def _is_timerify_entity(self, entity_id: str) -> bool:
@@ -221,6 +223,20 @@ class FakeTarget:
         self._ignoring = False
         self._echoing = False
 
+    def report_next_call_late(self) -> None:
+        """Make the next service call succeed with the entity changing only when
+        `report_late` is called, as a cloud integration does that confirms a command
+        after the call returned. The change then carries the context of the call."""
+        self._reporting_late = True
+
+    async def report_late(self) -> None:
+        """The device reports what the calls it took did, in the order it took them,
+        and everything that follows settles."""
+        late, self._late = self._late, []
+        for obey, call in late:
+            obey(self, call)
+        await self.hass.async_block_till_done()
+
     def hold_next_call(self) -> HeldCall:
         """Make the next service call slow: it waits inside the device."""
         self._held = HeldCall()
@@ -264,6 +280,10 @@ class FakeTarget:
                 _, failure = self._failure
                 self._failure = None
                 raise failure
+            if self._reporting_late:
+                self._reporting_late = False
+                self._late.append((obey, call))
+                return
             if self._ignoring or self._ignore_next:
                 self._ignore_next = False
                 if self._echoing and self._echoes < ECHO_LIMIT:

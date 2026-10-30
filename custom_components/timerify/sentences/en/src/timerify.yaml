@@ -156,10 +156,14 @@ lists:
       from: 1441
       to: 10080
       words: false
+  # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
+  # degrees is usual, and water boils at 212), the bound the service form's selector has
+  # too; the device refuses what it cannot take. The numbers may be said as words: the
+  # table that costs is that of 500 numbers, a fraction of the minutes' (RULINGS.md).
   timerify_temperature:
     range:
       from: 1
-      to: 100
+      to: 250
       fractions: halves
   timerify_percent:
     range:

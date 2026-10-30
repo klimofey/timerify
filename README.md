@@ -529,7 +529,9 @@ What each does:
   is not understood at all. A thermostat, a water heater,
   a light, a fan or a humidifier takes its settings in the same sentence, in any order:
   the HVAC mode ("cooling", "heating", "auto", ...), a temperature ("24 degrees", "at
-  22.5"), a percentage ("at 40 percent"), and a mode of the device ("eco", "high").
+  22.5", "120 degrees" for a water heater in Fahrenheit; any number up to 250, in digits
+  or words, which the device then accepts or refuses by its own range), a percentage
+  ("at 40 percent"), and a mode of the device ("eco", "high").
   Only a device that has a setting is understood to be given it, and the request is
   checked against the device as `timerify.run` checks it: what it cannot do is refused,
   by voice and by tool alike.

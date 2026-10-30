@@ -862,6 +862,26 @@ those of the spec.
   fractions for a whole one are refused there, where every channel passes (`Coerce` would
   turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard to
   say must be said as it is written.
+- **A temperature can be said up to 250, in halves, as words or digits, because the
+  sentences do not know the unit of the device.** A house that counts in Fahrenheit sets
+  a water heater at 110 to 140 degrees, so a range that ended at 100 made "turn on the
+  tank for an hour at 120 degrees" not understood, while an LLM tool, which has no such
+  bound, could set it. The sentences cannot know the unit or the range of each device (a
+  list that holds a range per device is expressible, and would multiply the sentences by
+  the devices), so the range is the widest any device could be given: 250, the bound of
+  the service form's selector too, which is above the boiling point in Fahrenheit. The
+  controller still judges the number against the range the device reports, so 200 degrees
+  said to a heater that takes 100 to 150 is understood and refused with those numbers,
+  and a number past 250 is not understood. The numbers may be said as words: the table of
+  number words that the first request in a language builds is 500 numbers here (1 to 250
+  with the halves), which costs 0.13 s and 15 MB in Russian and 0.01 s and 2 MB in
+  English (hassil 3.12, a fresh process, as for the duration above), against 0.05 s and
+  5 MB before for a range of 1 to 100; the first Russian request that says a temperature
+  went from about 0.38 s to about 0.44 s through Assist. That is small, so the words stay, unlike
+  the week of minutes, which is digits only. The structural test that bounds the words
+  of every range counts the numbers of a range (the halves too) and where it ends.
+  Cost if wrong: a number above 250 is not understood, and a few tenths of a second of
+  the first Russian request in a language.
 - **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
   bare number after a duration is taken as a temperature, and only for a target that takes
   one (the next entry scopes it). Cost if wrong: a number that was meant as something else

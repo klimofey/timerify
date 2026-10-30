@@ -172,3 +172,26 @@ def fake_tank(provide_target: ProvideTarget) -> FakeTarget:
         },
         state_attributes={"temperature": 50, "operation_mode": "eco"},
     )
+
+
+@pytest.fixture
+def fake_fahrenheit_tank(provide_target: ProvideTarget) -> FakeTarget:
+    """`water_heater.tank` on a device called Tank, switched off: a water heater of a
+    house that counts in Fahrenheit, with a temperature of 100 to 150 degrees and the
+    operation modes `eco` and `electric`, as `fake_tank` is in Celsius."""
+    return provide_target(
+        "water_heater.tank",
+        WATER_HEATER_SERVICES,
+        name="Tank",
+        capability_attributes={
+            "min_temp": 100,
+            "max_temp": 150,
+            "operation_list": ["off", "eco", "electric"],
+            "supported_features": int(
+                WaterHeaterEntityFeature.TARGET_TEMPERATURE
+                | WaterHeaterEntityFeature.OPERATION_MODE
+                | WaterHeaterEntityFeature.ON_OFF
+            ),
+        },
+        state_attributes={"temperature": 120, "operation_mode": "eco"},
+    )

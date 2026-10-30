@@ -169,8 +169,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   wanted on, since the answer reports the timer's wish (`RULINGS.md`, "An answer says what
   the timer is set to do, not what the device shows"), and a wish is on or off. A third
   wording for an unavailable target (and the same in Russian) would say what is known.
-  `custom_components/timerify/voice/base.py:246-278` (`timer_slots`, its state `off`) and
-  `custom_components/timerify/sentences/en/src/timerify.yaml:197-205` (the answer, and the
+  `custom_components/timerify/voice/base.py:246-277` (`timer_slots`, its state `off`) and
+  `custom_components/timerify/sentences/en/src/timerify.yaml:201-209` (the answer, and the
   Russian twin).
 - **Wider English near-misses that name a device with a timer can reach core's turn off.**
   Timerify's sentences take the phrasings it knows, and a phrasing that it does not have,
@@ -214,7 +214,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   modes, with the set in the name's context; it multiplies the sentences and is its own
   step. `custom_components/timerify/voice/sentences.py:205-217` (`voice_setting_values`) and
   `custom_components/timerify/sentences/en/src/timerify.yaml:26-59` (the blocks of
-  `TimerifyRun`, scoped by domain, with the list of HVAC words at `:166`).
+  `TimerifyRun`, scoped by domain, with the list of HVAC words at `:180`).
 - **"For 1 hour 30" on a device that has no temperature is not understood.** A bare number
   after a duration is a temperature only for a thermostat or a water heater, since it is
   the spec's own "cooling, 24" with no unit; said of a switch it matches nothing of the
@@ -224,7 +224,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   ninety minutes for the others would be a sentence of its own in both languages, and
   would remove the wording with the case.
   `custom_components/timerify/sentences/en/src/timerify.yaml:26-59` (the data blocks scoped
-  by domain) and `:132` (`timerify_temperature_part`).
+  by domain) and `:133` (`timerify_temperature_part`).
 - **A directory at the path of the managed file stops the check of who owns it.**
   `_first_line` reads the first line of the file and treats only a missing file as
   nothing; a directory (or a file that cannot be read) at `custom_sentences/<language>/timerify.yaml`

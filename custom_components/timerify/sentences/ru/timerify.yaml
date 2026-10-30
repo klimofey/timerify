@@ -104,7 +104,7 @@ lists:
   timerify_temperature:
     range:
       from: 1
-      to: 100
+      to: 250
       fractions: halves
   timerify_percent:
     range:

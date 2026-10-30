@@ -532,6 +532,93 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
     ]
 
 
+HOT_WATER = [("turn_on", {}), ("set_temperature", {"temperature": 120.0})]
+"""The calls that turn the water heater on, at 120 degrees."""
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    ("text", "temperature"),
+    [
+        ("turn on the tank for an hour at 120 degrees", 120.0),
+        ("turn on the tank for an hour 120", 120.0),
+        ("turn on the tank for an hour at 140.5", 140.5),
+        ("turn on the tank for an hour at one hundred twenty degrees", 120.0),
+        ("turn on the tank for an hour at two hundred fifty degrees", 250.0),
+    ],
+)
+async def test_a_fahrenheit_water_heater_is_given_its_temperature_by_voice(
+    hass: HomeAssistant,
+    fake_fahrenheit_tank: FakeTarget,
+    setup_target: SetupTarget,
+    text: str,
+    temperature: float,
+) -> None:
+    """A water heater that counts in Fahrenheit is set at 110 to 140 degrees, which the
+    sentences used to refuse as not understood (they ended at 100); the controller still
+    judges the number against what this water heater takes."""
+    await with_voice_settings(hass, setup_target, fake_fahrenheit_tank)
+
+    response = await converse(hass, text)
+
+    assert reached(response) == RUN, speech(response)
+    if temperature <= 150:
+        assert fake_fahrenheit_tank.call_data == [
+            ("turn_on", {}),
+            ("set_temperature", {"temperature": temperature}),
+        ]
+    else:
+        assert refusal_of(response) == (
+            "250 is not a valid Temperature: it must be between 100 and 150."
+        )
+        assert fake_fahrenheit_tank.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_temperature_beyond_what_can_be_said_is_not_understood(
+    hass: HomeAssistant,
+    fake_fahrenheit_tank: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The bound is finite: the hottest water a heater makes is below the boiling
+    point, and a number past 250 is no temperature."""
+    await with_voice_settings(hass, setup_target, fake_fahrenheit_tank)
+
+    response = await converse(hass, "turn on the tank for an hour at 251 degrees")
+
+    assert reached(response) != RUN
+    assert fake_fahrenheit_tank.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_russian_speaker_gives_a_fahrenheit_water_heater_its_temperature(
+    hass: HomeAssistant,
+    fake_fahrenheit_tank: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The shipped Russian sentences take the same range: every way of asking in them,
+    with 120 degrees, turns the water heater on at 120."""
+    await with_voice_settings(hass, setup_target, fake_fahrenheit_tank)
+    texts = samples(
+        "ru",
+        RUN,
+        names=("Tank",),
+        numbers={"timerify_minutes": 60, "timerify_temperature": 120},
+        absent=SETTING_LISTS,
+    )
+    said = [text for text in texts if "120" in text]
+    assert said
+
+    for text in said:
+        fake_fahrenheit_tank.call_data.clear()
+
+        response = await converse(hass, text, language="ru")
+
+        assert reached(response) == RUN, text
+        assert fake_fahrenheit_tank.call_data == HOT_WATER, text
+        await converse(hass, "stop the tank timer")
+
+
 async def test_the_manual_installation_knows_the_hvac_words_but_not_the_modes(
     hass: HomeAssistant,
     fake_climate: FakeTarget,

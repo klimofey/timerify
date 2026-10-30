@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 import yaml
-from hassil.intents import Intents, RangeSlotList
+from hassil.intents import Intents, RangeFractionType, RangeSlotList
 from hassil.util import merge_dict
 from home_assistant_intents import get_intents
 from homeassistant.core import HomeAssistant
@@ -126,13 +126,27 @@ def test_a_duration_can_be_said_past_the_longest_timer(language: str) -> None:
     assert long_minutes.digits
 
 
+def costly_words(slot_list: RangeSlotList) -> list[str]:
+    """What makes the words of a range cost more than a day of minutes would: the first
+    request in a language builds a table of the number words of every number a range
+    holds (fractions as well as whole numbers), so it grows with how many there are and,
+    since a larger number is more words, with how large the largest is."""
+    problems = []
+    if sum(1 for _ in slot_list.get_numbers()) > MAX_MINUTES:
+        problems.append("holds more numbers than a day has minutes")
+    if slot_list.stop > MAX_MINUTES:
+        problems.append("goes past the number of minutes in a day")
+    return problems
+
+
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 def test_numbers_said_as_words_stay_within_a_day(language: str) -> None:
     """The first request in a language builds a table of the number words of every
     range that may be said as words, and what it costs grows with the size of the
     ranges: about 0.3 s for a day of minutes in Russian, and 4.5 s and 120 MB for a
-    week. So the range lists of Timerify that allow words never hold more than a day
-    of minutes, whatever they count; a longer one has to be said in digits only."""
+    week. So the range lists of Timerify that allow words neither hold more numbers
+    than a day has minutes nor go past that number, whatever they count; a longer one
+    has to be said in digits only."""
     spoken = {
         name: slot_list
         for name, slot_list in timerify_intents(language).slot_lists.items()
@@ -141,10 +155,47 @@ def test_numbers_said_as_words_stay_within_a_day(language: str) -> None:
         and slot_list.words
     }
 
-    assert {"timerify_hours", "timerify_minutes"} <= set(spoken)
+    assert {"timerify_hours", "timerify_minutes", "timerify_temperature"} <= set(spoken)
     for name, slot_list in spoken.items():
         assert isinstance(slot_list, RangeSlotList)
-        assert slot_list.stop - slot_list.start + 1 <= MAX_MINUTES, name
+        assert costly_words(slot_list) == [], name
+
+
+def test_the_cost_of_words_is_bounded_by_where_a_range_ends_as_well_as_its_size() -> (
+    None
+):
+    """A range of few numbers that begins late is as costly as one that begins at one:
+    its words are long. And a range with fractions holds twice the numbers it seems
+    to."""
+    assert costly_words(RangeSlotList(start=1, stop=MAX_MINUTES, name="a")) == []
+    assert costly_words(RangeSlotList(start=5000, stop=5100, name="b")) == [
+        "goes past the number of minutes in a day"
+    ]
+    halves = RangeSlotList(
+        start=1,
+        stop=MAX_MINUTES // 2 + 1,
+        fraction_type=RangeFractionType.HALVES,
+        name="c",
+    )
+    assert costly_words(halves) == ["holds more numbers than a day has minutes"]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_temperature_can_be_said_as_high_as_a_water_heater_is_set(
+    language: str,
+) -> None:
+    """A water heater that counts in Fahrenheit is set at 110 to 140 degrees, and water
+    boils at 212, so a temperature is understood up to 250, the bound of the service
+    form's selector, in halves, and as words as well as digits: that is 500 numbers,
+    well within what a day of minutes costs. What the device cannot take is refused by
+    the controller, which knows the device."""
+    temperature = timerify_intents(language).slot_lists["timerify_temperature"]
+
+    assert isinstance(temperature, RangeSlotList)
+    assert (temperature.start, temperature.stop) == (1, 250)
+    assert temperature.fraction_type is RangeFractionType.HALVES
+    assert temperature.words
+    assert temperature.digits
 
 
 def test_every_language_has_the_same_intents_and_responses() -> None:

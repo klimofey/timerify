@@ -1,6 +1,7 @@
 {
   "domain": "timerify",
   "name": "Timerify",
+  "after_dependencies": ["conversation", "llm"],
   "codeowners": ["@klimofey"],
   "config_flow": true,
   "dependencies": [],

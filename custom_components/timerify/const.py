@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping
 from datetime import timedelta
+from pathlib import Path
 from types import MappingProxyType
 from typing import Final, Literal
 
@@ -57,6 +58,14 @@ MAX_AUTOMATIC_RESENDS: Final = 3
 merely repeat the target's state, before the timer stops asking until the state
 changes or a command wants the wish again. Without a bound, a device that refuses a
 command and answers it with a report of its old state would be commanded for ever."""
+
+VOICE_LANGUAGES: Final = ("en", "ru")
+"""The languages Timerify ships sentences for: a directory of `sentences/` each."""
+SENTENCES_DIR: Final = Path(__file__).parent / "sentences"
+"""The sentence sources for the built-in agent, a directory per language."""
+LIST_TARGET: Final = "timerify_target"
+"""The list of the sentence sources that holds the names of the targets of the timers,
+which the sentences use as the slot `name`."""
 
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may

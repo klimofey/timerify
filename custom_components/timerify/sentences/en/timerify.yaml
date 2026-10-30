@@ -1,0 +1,34 @@
+# Timerify's sentences for the built-in agent, in English.
+#
+# The list timerify_target is empty here: the names of the devices that have a timer are
+# put into it, either by the Voice settings entry of Timerify, which writes this file
+# and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says.
+language: en
+intents:
+  TimerifyTimeLeft:
+    data:
+      - sentences:
+          - "how (much time|long) is left (on|for) [<the>] {timerify_target:name}"
+          - "how long will [<the>] {timerify_target:name} (run|stay on|be on|keep running)"
+          - "(when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut) off"
+lists:
+  timerify_target:
+    values: []
+responses:
+  intents:
+    TimerifyTimeLeft:
+      default: |-
+        {%- if slots.state == "counting" -%}
+          {%- set parts = [] -%}
+          {%- if slots.left_hours > 0 -%}
+            {%- set parts = parts + [slots.left_hours ~ (" hour" if slots.left_hours == 1 else " hours")] -%}
+          {%- endif -%}
+          {%- if slots.left_minutes > 0 -%}
+            {%- set parts = parts + [slots.left_minutes ~ (" minute" if slots.left_minutes == 1 else " minutes")] -%}
+          {%- endif -%}
+          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ " tomorrow" if slots.ends_in_days == 1 else "" }}.
+        {%- elif slots.state == "open" -%}
+          {{ slots.target }} is on without a timer.
+        {%- else -%}
+          {{ slots.target }} is off and has no timer.
+        {%- endif -%}

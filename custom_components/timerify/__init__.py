@@ -13,6 +13,7 @@ from .const import CONF_TARGET, DOMAIN
 from .controller import TargetController, TimerifyConfigEntry
 from .services import async_setup_services
 from .store import TimerStore
+from .voice import async_register_intents
 
 PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
 
@@ -20,8 +21,10 @@ CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the services, which belong to the integration, not to a timer."""
+    """Register the services and the intent handlers, which belong to the integration,
+    not to a timer."""
     async_setup_services(hass)
+    async_register_intents(hass)
     return True
 
 

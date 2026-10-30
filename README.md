@@ -238,9 +238,11 @@ an interval removes its switch.
 - **Working days** and **Non-working days**: follow a **Workday sensor**, a binary sensor of
   Home Assistant's [Workday integration](https://www.home-assistant.io/integrations/workday/),
   which knows your country's public holidays and the working week you set in it. Its
-  default week is Monday to Friday in every country, so set the days in the sensor's own
-  options (**Days to include**; in Israel, Sunday to Thursday), and Timerify follows. A
-  boiler that runs "on working days at 06:30" skips a holiday on its own.
+  default week is Monday to Friday in every country, so set the week in the sensor's own
+  options, both fields: **Days to include** and **Days to exclude** — a day in both lists
+  is excluded. In Israel: include Sunday to Thursday, exclude Friday, Saturday and holidays.
+  Timerify follows the sensor. A boiler that runs "on working days at 06:30" skips a
+  holiday on its own.
 
 The Workday sensor belongs to the timer. If your house has one, the last step of adding a
 timer asks for it, and the first interval you add then offers working days from the start.

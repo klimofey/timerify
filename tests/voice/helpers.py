@@ -22,20 +22,26 @@ from homeassistant.components import conversation
 from homeassistant.components.homeassistant.exposed_entities import (
     async_expose_entity,
 )
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.config_entries import SOURCE_USER, ConfigEntry
+from homeassistant.const import EVENT_CALL_SERVICE
+from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callback
+from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import intent
+from homeassistant.helpers.template import Template
 
 from custom_components.timerify.const import (
+    CONF_LANGUAGES,
+    CONF_WRITE_SENTENCES,
+    DOMAIN,
     LIST_TARGET,
+    MANUAL_SENTENCES_DIR,
     SENTENCES_DIR,
     VOICE_LANGUAGES,
 )
+from custom_components.timerify.voice.sentences import load_sources
 
 ASSISTANT: Final = "conversation"
 """The assistant the built-in agent asks Home Assistant about exposure as."""
-MANUAL_DIR: Final = "timerify_manual"
-"""The directory of `custom_sentences/<lang>/` that the manual installation copies the
-sentence files into."""
 NAMES_FILE: Final = "timerify_names.yaml"
 """The file of the manual installation that lists the targets' names."""
 
@@ -120,6 +126,60 @@ def expose(hass: HomeAssistant, entity_id: str, exposed: bool) -> None:
     async_expose_entity(hass, ASSISTANT, entity_id, exposed)
 
 
+def counting(
+    *, hours: int = 0, minutes: int = 0, days: int = 0, target: str = "Boiler"
+) -> dict[str, Any]:
+    """The slots a handler gives to the answer about a timer that counts: `hours` and
+    `minutes` left, ending `days` dates from today."""
+    return {
+        "state": "counting",
+        "target": target,
+        "left_total": hours * 60 + minutes,
+        "left_hours": hours,
+        "left_minutes": minutes,
+        "ends_at": "11:00",
+        "ends_in_days": days,
+    }
+
+
+RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
+    ("TimerifyTimeLeft", "default"): (
+        counting(minutes=1),
+        counting(minutes=2),
+        counting(minutes=5),
+        counting(minutes=21),
+        counting(hours=1),
+        counting(hours=1, minutes=30),
+        counting(hours=2, days=1),
+        counting(hours=5, days=2),
+        counting(hours=2, days=5),
+        counting(hours=2, days=21),
+        {"state": "open", "target": "Boiler"},
+        {"state": "off", "target": "Boiler"},
+    ),
+}
+"""For each answer of the sentence files, by intent and response key, the slots a
+handler gives it in the cases it tells apart: every counting form of the language's
+plural rules, a day, and the states without a countdown. A task that adds an answer adds
+its slots here."""
+
+
+def render_response(
+    hass: HomeAssistant, template: str, slots: Mapping[str, Any]
+) -> str:
+    """What the built-in agent says for an answer template and the slots of a handler:
+    the template rendered with the variables the agent gives it, and its whitespace
+    normalised as the agent does."""
+    rendered = Template(template, hass).async_render(
+        {
+            "slots": dict(slots),
+            "state": None,
+            "query": {"matched": [], "unmatched": []},
+        }
+    )
+    return " ".join(str(rendered).strip().split())
+
+
 def without_digits(text: str) -> str:
     """`text` with its numbers taken out, so that two answers that differ only in the
     count compare equal."""
@@ -132,13 +192,66 @@ def words(text: str) -> frozenset[str]:
     return frozenset(re.findall(r"[^\W\d_]+", text))
 
 
-def load_sources(language: str) -> dict[str, Any]:
-    """The sentence sources of `language` as the built-in agent reads them: every file
-    of the language's directory, merged, the YAML read by the agent's own loader."""
-    sources: dict[str, Any] = {}
-    for path in sorted((SENTENCES_DIR / language).glob("*.yaml")):
-        merge_dict(sources, yaml.safe_load(path.read_text("utf-8")))
-    return sources
+async def add_voice_entry(
+    hass: HomeAssistant,
+    *,
+    write: bool = True,
+    languages: Sequence[str] = VOICE_LANGUAGES,
+) -> ConfigEntry:
+    """Add the Voice settings entry the way the integrations page does: "Add entry",
+    "Voice settings" in the menu, and the form filled in. Returns the entry, set up."""
+    menu = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    form = await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "voice_settings"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        form["flow_id"],
+        {CONF_WRITE_SENTENCES: write, CONF_LANGUAGES: list(languages)},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    return result["result"]
+
+
+def managed_file(hass: HomeAssistant, language: str) -> Path:
+    """Where the Voice settings entry writes the sentences of `language`."""
+    return Path(hass.config.path("custom_sentences", language, "timerify.yaml"))
+
+
+def listed(
+    hass: HomeAssistant, language: str, list_name: str = LIST_TARGET
+) -> list[dict[str, Any]]:
+    """The values of the list `list_name` in the managed file of `language`."""
+    written = yaml.safe_load(managed_file(hass, language).read_text("utf-8"))
+    values: list[dict[str, Any]] = written["lists"][list_name]["values"]
+    return values
+
+
+def conversation_reloads(hass: HomeAssistant) -> list[ServiceCall]:
+    """Start recording the calls of `conversation.reload`; the list fills as they are
+    made."""
+    calls: list[ServiceCall] = []
+
+    @callback
+    def record(event: Event[dict[str, Any]]) -> None:
+        if (event.data["domain"], event.data["service"]) == (
+            "conversation",
+            "reload",
+        ):
+            calls.append(
+                ServiceCall(
+                    hass,
+                    event.data["domain"],
+                    event.data["service"],
+                    event.data["service_data"],
+                    event.context,
+                )
+            )
+
+    hass.bus.async_listen(EVENT_CALL_SERVICE, record)
+    return calls
 
 
 async def copy_sentences(hass: HomeAssistant, names: Sequence[str]) -> None:
@@ -152,7 +265,9 @@ async def copy_sentences(hass: HomeAssistant, names: Sequence[str]) -> None:
 
     def install() -> None:
         for language in VOICE_LANGUAGES:
-            directory = Path(hass.config.path("custom_sentences", language, MANUAL_DIR))
+            directory = Path(
+                hass.config.path("custom_sentences", language, MANUAL_SENTENCES_DIR)
+            )
             directory.mkdir(parents=True, exist_ok=True)
             for source in (SENTENCES_DIR / language).glob("*.yaml"):
                 shutil.copy(source, directory / source.name)

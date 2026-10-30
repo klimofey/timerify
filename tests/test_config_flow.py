@@ -53,9 +53,14 @@ pytestmark = pytest.mark.usefixtures("hass_storage")
 
 
 async def start_flow(hass: HomeAssistant) -> FlowResult:
-    """Press "Add entry" on the integration page."""
-    return await hass.config_entries.flow.async_init(
+    """Press "Add entry" on the integration page and "Add a timer" in the menu it
+    shows; return the form that asks for the target."""
+    menu = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert menu["type"] is FlowResultType.MENU
+    return await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "target"}
     )
 
 
@@ -138,7 +143,7 @@ async def test_add_strict_target_in_two_steps(
     """Strict mode asks for the default duration after the target and mode."""
     result = await start_flow(hass)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "target"
 
     result = await submit(hass, result, {CONF_TARGET: TARGET_ID, CONF_MODE: "strict"})
     assert result["type"] is FlowResultType.FORM
@@ -306,7 +311,7 @@ async def test_entity_that_cannot_be_turned_on_and_off_is_rejected(
     )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "target"
     assert result["errors"] == {"base": "target_not_supported"}
 
 
@@ -404,7 +409,7 @@ async def test_domain_without_turn_on_and_off_is_not_supported(
     )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "target"
     assert result["errors"] == {"base": "target_not_supported"}
 
 
@@ -436,7 +441,7 @@ async def test_fallback_entity_in_other_state_is_rejected(
     )
 
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "target"
     assert result["errors"] == {"base": "not_switchable"}
 
 
@@ -458,9 +463,9 @@ async def test_fallback_entity_without_a_state_is_rejected(
     [
         ("on", "duration", None),
         ("off", "duration", None),
-        ("open", "user", {"base": "not_switchable"}),
-        ("home", "user", {"base": "not_switchable"}),
-        ("unavailable", "user", {"base": "not_switchable"}),
+        ("open", "target", {"base": "not_switchable"}),
+        ("home", "target", {"base": "not_switchable"}),
+        ("unavailable", "target", {"base": "not_switchable"}),
     ],
 )
 async def test_group_is_judged_by_its_state(

@@ -1,0 +1,37 @@
+# Timerify's sentences for the built-in agent, in English: the source of
+# sentences/en/timerify.yaml, which scripts/generate_sentences.py writes from this file
+# and macros.jinja. Edit these two, never the file it writes.
+#
+# The list timerify_target is empty here: the names of the devices that have a timer are
+# put into it, either by the Voice settings entry of Timerify, which writes this file
+# and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says.
+language: en
+intents:
+  TimerifyTimeLeft:
+    data:
+      - sentences:
+          - "how (much time|long) is left (on|for) [<the>] {timerify_target:name}"
+          - "how long will [<the>] {timerify_target:name} (run|stay on|be on|keep running)"
+          - "(when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut) off"
+lists:
+  timerify_target:
+    values: []
+# An answer calls the macros of macros.jinja by name.
+responses:
+  intents:
+    TimerifyTimeLeft:
+      default: |-
+        {%- if slots.state == "counting" -%}
+          {%- set parts = [] -%}
+          {%- if slots.left_hours > 0 -%}
+            {%- set parts = parts + [slots.left_hours ~ " " ~ plural(slots.left_hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if slots.left_minutes > 0 -%}
+            {%- set parts = parts + [slots.left_minutes ~ " " ~ plural(slots.left_minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+        {%- elif slots.state == "open" -%}
+          {{ slots.target }} is on without a timer.
+        {%- else -%}
+          {{ slots.target }} is off and has no timer.
+        {%- endif -%}

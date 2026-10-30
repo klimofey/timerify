@@ -19,7 +19,7 @@ from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 from homeassistant.util import language as language_util
 
-from ..const import DOMAIN, VOICE_LANGUAGES
+from ..const import DOMAIN, VOICE_LANGUAGES, is_voice_options
 from ..controller import TimerifyConfigEntry
 from ..core import remaining_minutes
 from ..domains import actual_state
@@ -48,8 +48,13 @@ def whole_slot(value: float) -> int:
 
 
 def loaded_timers(hass: HomeAssistant) -> list[TimerifyConfigEntry]:
-    """The timers that are set up."""
-    return list(hass.config_entries.async_loaded_entries(DOMAIN))
+    """The timers that are set up: the loaded entries of Timerify, but for the voice
+    settings, which is not a timer."""
+    return [
+        entry
+        for entry in hass.config_entries.async_loaded_entries(DOMAIN)
+        if not is_voice_options(entry.options)
+    ]
 
 
 async def async_match_timer(

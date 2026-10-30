@@ -1,0 +1,241 @@
+"""The sentence files Timerify writes for the built-in agent: what goes into them, and
+the proof that the built-in agent can read them.
+
+The shipped sentences (`sentences/<language>/*.yaml`) are complete but for the names of
+the devices; the names are what this module adds. A file that Home Assistant cannot load
+makes the built-in agent fail for the whole language, whatever the request, so a file is
+built here, parsed the way the agent parses it, and written only when it passes
+(`validate`).
+
+Everything here is blocking, except `voice_names`, and runs in the executor.
+"""
+
+import copy
+import re
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Final
+
+from hassil.expression import (
+    Expression,
+    ListReference,
+    RuleReference,
+    Sentence,
+    TextChunk,
+)
+from hassil.expression import Sequence as SequenceExpression
+from hassil.intents import Intent, Intents, TextSlotList
+from hassil.util import is_template, merge_dict, normalize_text, remove_punctuation
+from home_assistant_intents import get_intents
+from homeassistant.core import HomeAssistant, callback, split_entity_id
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import intent
+from homeassistant.util.yaml import dump, load_yaml_dict
+
+from ..const import LIST_TARGET, MANAGED_HEADER, SENTENCES_DIR
+from .base import loaded_timers
+
+NAME_LISTS: Final = (LIST_TARGET,)
+"""The lists of the sentences that hold names as people say them, which `validate`
+proves are matched as said."""
+RULE_PREFIX: Final = "timerify_"
+"""What the names of the lists and expansion rules the sentences define start with."""
+
+_TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
+
+
+class InvalidSentences(ValueError):
+    """Sentences the built-in agent would not load, or would not match as said."""
+
+
+@dataclass(frozen=True)
+class VoiceName:
+    """One way a target is called: what is said, and what is meant by it."""
+
+    spoken: str
+    """The name as the built-in agent compares it with what it hears: punctuation
+    removed."""
+    name: str
+    """The name as Home Assistant shows it, which the intent receives."""
+    domain: str
+    """The domain of the target."""
+
+
+def spoken_form(name: str) -> str:
+    """The name as the built-in agent compares it with what it hears, which is how it
+    lists the names of every entity it knows."""
+    return remove_punctuation(name).strip()
+
+
+def escape_template(text: str) -> str:
+    """`text` as a value of a list that is read as the text it is.
+
+    Home Assistant reads a value that has any of the characters `()[]{}<>|@` as a
+    sentence template: a backslash makes such a character itself. A backslash is itself
+    only until a template character is there to be escaped, so a value without any is
+    left as it is, and one with any has its backslashes escaped as well.
+    """
+    if not is_template(text):
+        return text
+    return _TEMPLATE_CHARACTERS.sub(r"\\\1", text)
+
+
+@callback
+def voice_names(hass: HomeAssistant) -> list[VoiceName]:
+    """Every name the built-in agent would know the targets of the timers by.
+
+    The names of an entity are its aliases, the computed name among them, as the
+    built-in agent lists them, so that a name is matched as it is for any other
+    entity. A target that has no state yet is listed by its registry entry. A name that
+    is nothing but punctuation is left out: it would match anywhere.
+    """
+    registry = er.async_get(hass)
+    names: list[VoiceName] = []
+    for entry in loaded_timers(hass):
+        entity_id = entry.runtime_data.target_entity_id
+        registered = registry.async_get(entity_id)
+        if (state := hass.states.get(entity_id)) is not None:
+            aliases = intent.async_get_entity_aliases(hass, registered, state=state)
+        elif registered is not None:
+            aliases = er.async_get_entity_aliases(hass, registered, allow_empty=False)
+        else:
+            aliases = []
+        domain = split_entity_id(entity_id)[0]
+        names.extend(
+            VoiceName(spoken, alias, domain)
+            for alias in aliases
+            if (spoken := spoken_form(alias))
+        )
+    return names
+
+
+def load_sources(language: str) -> dict[str, Any]:
+    """The shipped sentences of `language` as the built-in agent reads them: every file
+    of the language's directory, merged, in the order of their names."""
+    sources: dict[str, Any] = {}
+    for path in sorted((SENTENCES_DIR / language).glob("*.yaml")):
+        merge_dict(sources, load_yaml_dict(path))
+    return sources
+
+
+def build(sources: Mapping[str, Any], names: Sequence[VoiceName]) -> dict[str, Any]:
+    """The sentences of `sources` with the list of the targets' names filled in.
+
+    A name is listed under what is said (`in`, escaped so that it is read as text) and
+    what it means (`out`), with the domain of its target as context.
+    """
+    built = copy.deepcopy(dict(sources))
+    built.setdefault("lists", {})[LIST_TARGET] = {
+        "values": [
+            {
+                "in": escape_template(name.spoken),
+                "out": name.name,
+                "context": {"domain": name.domain},
+            }
+            for name in names
+        ]
+    }
+    return built
+
+
+def validate(language: str, built: Mapping[str, Any]) -> None:
+    """Prove that the built-in agent can load `built` next to its own sentences of
+    `language`, and will match the names in it as they are said.
+
+    Parsing the dictionary is not enough: Home Assistant parses a sentence on its first
+    use, and a sentence that is not a template does not fail until it is matched. So
+    this also parses every sentence of every intent `built` defines, checks that every
+    list and expansion rule they and Timerify's own rules use is there, and that each
+    name is read as exactly the text it stands for.
+
+    Raises `InvalidSentences` for the first thing that is wrong.
+    """
+    core = get_intents(language)
+    if core is None:
+        raise InvalidSentences(f"Home Assistant has no sentences in {language}")
+    try:
+        merged = copy.deepcopy(core)  # Merging changes the dictionary it merges into.
+        merge_dict(merged, built)
+        intents = Intents.from_dict(merged)
+        own_intents = [intents.intents[name] for name in built.get("intents", {})]
+        _check_references(intents, own_intents)
+        for list_name in NAME_LISTS:
+            _check_names(intents, built, list_name)
+    except InvalidSentences:
+        raise
+    except Exception as err:
+        raise InvalidSentences(f"{type(err).__name__}: {err}") from err
+
+
+def render(built: Mapping[str, Any]) -> str:
+    """The text of the file for `built`."""
+    return f"{MANAGED_HEADER}\n{dump(dict(built))}"
+
+
+def _references(expression: Expression) -> Iterator[ListReference | RuleReference]:
+    """The lists and rules an expression refers to, at any depth."""
+    if isinstance(expression, ListReference | RuleReference):
+        yield expression
+    for item in getattr(expression, "items", ()):
+        yield from _references(item)
+
+
+def _check_references(intents: Intents, own_intents: Sequence[Intent]) -> None:
+    """Every list and expansion rule that a sentence of the intents, or a rule that
+    Timerify defines, refers to exists in the sentences, global or of its data block.
+
+    Reading the sentences is what parses them, which Home Assistant leaves until a
+    sentence is first matched: one that is not a template fails here.
+    """
+
+    def check(
+        sentence: Sentence, lists: Mapping[str, Any], rules: Mapping[str, Any]
+    ) -> None:
+        for reference in _references(sentence.expression):
+            if isinstance(reference, ListReference):
+                if (
+                    reference.list_name not in lists
+                    and not reference.is_inline_range
+                    and not reference.is_capture
+                ):
+                    raise InvalidSentences(f"No list {reference.list_name}")
+            elif reference.rule_name not in rules:
+                raise InvalidSentences(f"No expansion rule {reference.rule_name}")
+
+    for rule_name, rule in intents.expansion_rules.items():
+        if rule_name.startswith(RULE_PREFIX):
+            check(rule, intents.slot_lists, intents.expansion_rules)
+    for own in own_intents:
+        for data in own.data:
+            lists = {**intents.slot_lists, **data.slot_lists}
+            rules = {**intents.expansion_rules, **data.expansion_rules}
+            for sentence in (*data.sentences, *data.expansion_rules.values()):
+                check(sentence, lists, rules)
+
+
+def _text_of(expression: Expression) -> str | None:
+    """The text that `expression` is read as, if it is nothing but text: parts that
+    were split where a character was escaped are put together again."""
+    if isinstance(expression, TextChunk):
+        return expression.text
+    if type(expression) is SequenceExpression:
+        parts = [_text_of(item) for item in expression.items]
+        if all(part is not None for part in parts):
+            return "".join(part for part in parts if part is not None)
+    return None
+
+
+def _check_names(intents: Intents, built: Mapping[str, Any], list_name: str) -> None:
+    """Every name listed in `list_name` is read as the text that it is said as."""
+    slot_list = intents.slot_lists[list_name]
+    if not isinstance(slot_list, TextSlotList):
+        raise InvalidSentences(f"{list_name} is not a list of names")
+    for value, parsed in zip(
+        built["lists"][list_name]["values"], slot_list.values, strict=True
+    ):
+        wanted = normalize_text(spoken_form(value["out"]))
+        if _text_of(parsed.text_in) != wanted:
+            raise InvalidSentences(
+                f"{value['out']!r} would not be matched as said: it is listed as"
+                f" {value['in']!r}"
+            )

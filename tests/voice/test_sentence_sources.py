@@ -19,9 +19,10 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.voice import HANDLER_TYPES
 from custom_components.timerify.voice.base import TimerifyIntentHandler
+from custom_components.timerify.voice.sentences import load_sources
 
 from ..conftest import FakeTarget, SetupTarget
-from .helpers import load_sources, samples
+from .helpers import samples
 
 PREFIX = "timerify_"
 INTENDED_SLOT_VALUES: dict[str, tuple[type, tuple[Any, ...]]] = {

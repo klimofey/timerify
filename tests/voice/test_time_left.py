@@ -14,6 +14,8 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.template import Template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.timerify.voice.sentences import load_sources
+
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import (
     NUMBER,
@@ -32,7 +34,6 @@ from .helpers import (
     converse,
     copy_sentences,
     expose,
-    load_sources,
     samples,
     speech,
     talk,
@@ -173,7 +174,8 @@ async def test_three_days_or_more_are_counted_by_the_plural_rules(
     days or more is tried on the sentence source itself, with the slots a handler gives
     to a timer that ends that many dates on. English says every count one way, Russian
     one of three ways."""
-    source = load_sources(language)["responses"]["intents"][TIME_LEFT]["default"]
+    sources = await hass.async_add_executor_job(load_sources, language)
+    source = sources["responses"]["intents"][TIME_LEFT]["default"]
 
     def said_for(days: int) -> str:
         slots = {

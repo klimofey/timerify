@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 DOMAIN: Final = "timerify"
 
@@ -66,6 +66,40 @@ SENTENCES_DIR: Final = Path(__file__).parent / "sentences"
 LIST_TARGET: Final = "timerify_target"
 """The list of the sentence sources that holds the names of the targets of the timers,
 which the sentences use as the slot `name`."""
+MANUAL_SENTENCES_DIR: Final = "timerify_manual"
+"""The directory of `custom_sentences/<language>/` that the sentence files are copied
+into by hand. The managed file has a name of its own beside it, and the two are never
+meant to be there together."""
+
+CONF_KIND: Final = "kind"
+"""Option that tells what an entry is: absent for a timer, `KIND_VOICE_SETTINGS` for the
+entry that writes the sentence files."""
+KIND_VOICE_SETTINGS: Final = "voice_settings"
+CONF_WRITE_SENTENCES: Final = "write_sentence_files"
+"""Option of the voice settings: whether Timerify writes the sentence files for the
+built-in agent."""
+CONF_LANGUAGES: Final = "languages"
+"""Option of the voice settings: the languages the sentence files are written in, a
+subset of `VOICE_LANGUAGES`."""
+VOICE_UNIQUE_ID: Final = "voice_settings"
+"""The unique id of the voice settings entry, of which there is at most one."""
+VOICE_SYNC_COOLDOWN: Final = 1.0
+"""How long, in seconds, the sentence files wait for further changes of the timers or
+of the names of their targets before they are written again."""
+SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
+"""Sent when a timer is set up or unloaded, so that the names of the targets are listed
+again."""
+MANAGED_HEADER: Final = (
+    "# Managed by Timerify. Do not edit:"
+    " this file is rewritten whenever a timer changes."
+)
+"""The first line of every sentence file Timerify writes."""
+
+
+def is_voice_options(options: Mapping[str, Any]) -> bool:
+    """Whether the options are those of the voice settings, not of a timer."""
+    return options.get(CONF_KIND) == KIND_VOICE_SETTINGS
+
 
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may

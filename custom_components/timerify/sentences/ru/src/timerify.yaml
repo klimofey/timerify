@@ -1,0 +1,47 @@
+# Timerify's sentences for the built-in agent, in Russian: the source of
+# sentences/ru/timerify.yaml, which scripts/generate_sentences.py writes from this file
+# and macros.jinja. Edit these two, never the file it writes.
+#
+# The list timerify_target is empty here: the names of the devices that have a timer are
+# put into it, either by the Voice settings entry of Timerify, which writes this file
+# and the names to custom_sentences/ru/timerify.yaml, or by hand, as the README says.
+#
+# A name cannot be declined, so the sentences put it where the nominative is natural,
+# and an answer starts with it, followed by a colon.
+language: ru
+intents:
+  TimerifyTimeLeft:
+    data:
+      - sentences:
+          - "сколько [времени] осталось (у таймера|на таймере) {timerify_target:name}"
+          - "через сколько (выключится|отключится) {timerify_target:name}"
+          - "когда (выключится|отключится) {timerify_target:name}"
+          - "сколько [ещё|еще] будет работать {timerify_target:name}"
+lists:
+  timerify_target:
+    values: []
+# An answer calls the macros of macros.jinja by name.
+responses:
+  intents:
+    TimerifyTimeLeft:
+      default: |-
+        {%- if slots.state == "counting" -%}
+          {%- set parts = [] -%}
+          {%- if slots.left_hours > 0 -%}
+            {%- set parts = parts + [slots.left_hours ~ " " ~ plural(slots.left_hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if slots.left_minutes > 0 -%}
+            {%- set parts = parts + [slots.left_minutes ~ " " ~ plural(slots.left_minutes, "минута", "минуты", "минут")] -%}
+          {%- endif -%}
+          {%- set first = slots.left_hours if slots.left_hours > 0 else slots.left_minutes -%}
+          {%- if first % 10 == 1 and first % 100 != 11 -%}
+            {%- set verb = "остался" if slots.left_hours > 0 else "осталась" -%}
+          {%- else -%}
+            {%- set verb = "осталось" -%}
+          {%- endif -%}
+          {{ slots.target }}: {{ verb }} {{ parts | join(" и ") }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+        {%- elif slots.state == "open" -%}
+          {{ slots.target }}: включено без таймера.
+        {%- else -%}
+          {{ slots.target }}: выключено, таймера нет.
+        {%- endif -%}

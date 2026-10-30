@@ -423,8 +423,17 @@ async def add_timer(
     flow = await request_json(
         session, "POST", flow_path, access_token, json={"handler": DOMAIN}
     )
+    if flow["type"] != "menu" or "target" not in flow["menu_options"]:
+        raise SmokeFailure(f"The flow should offer to add a timer, but gave {flow}")
+    flow = await request_json(
+        session,
+        "POST",
+        f"{flow_path}/{flow['flow_id']}",
+        access_token,
+        json={"next_step_id": "target"},
+    )
     for step_id, user_input in (
-        ("user", {"target": target, "mode": "strict"}),
+        ("target", {"target": target, "mode": "strict"}),
         ("duration", {"default_duration": 30}),
     ):
         if flow["type"] != "form" or flow["step_id"] != step_id:

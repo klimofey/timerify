@@ -37,3 +37,7 @@ allowed-confusables = ["–"]
 python_version = "3.14"
 strict = true
 files = ["custom_components", "scripts"]
+# A script imports the integration as `custom_components.timerify`, the name the tests
+# know it by, so a module is named from the project root, not from its own directory.
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR"

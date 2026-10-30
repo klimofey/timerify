@@ -1,9 +1,15 @@
-"""Config and options flows: pick a target, bind it, set the default duration.
+"""Config and options flows: pick a target, bind it, set the default duration; or set up
+the voice sentences.
 
+The flow starts with a menu: add a timer, or, while there is none, the voice settings.
 Adding a timer takes the entity and the binding mode, in strict mode a default
 duration, and, in a house that has a Workday sensor, that sensor. The options flow
 changes the mode, the duration and the sensor; the target stays. Schedule intervals are
 subentries of the timer's entry, added, edited and deleted one by one from its page.
+
+The voice settings are an entry of their own, of which there is one: whether Timerify
+writes the sentence files for the built-in agent, and in which languages. The options
+flow of that entry has the same two fields.
 
 The picker offers the domains of the table in `domains.py` and, for any entity that
 can be turned on and off, every other domain that has both services.
@@ -31,7 +37,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import DOMAIN as HOMEASSISTANT_DOMAIN
 from homeassistant.core import HomeAssistant, callback, split_entity_id
-from homeassistant.data_entry_flow import section
+from homeassistant.data_entry_flow import AbortFlow, section
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
@@ -40,27 +46,38 @@ from homeassistant.helpers.schema_config_entry_flow import (
     SchemaConfigFlowHandler,
     SchemaFlowError,
     SchemaFlowFormStep,
+    SchemaFlowMenuStep,
 )
-from homeassistant.helpers.translation import async_get_translations
+from homeassistant.helpers.translation import (
+    async_get_cached_translations,
+    async_get_translations,
+)
 from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DAYS,
     CONF_DEFAULT_DURATION,
     CONF_END,
+    CONF_KIND,
+    CONF_LANGUAGES,
     CONF_MODE,
     CONF_SETTINGS,
     CONF_START,
     CONF_TARGET,
     CONF_WEEKDAYS,
     CONF_WORKDAY_SENSOR,
+    CONF_WRITE_SENTENCES,
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
+    KIND_VOICE_SETTINGS,
     MAX_MINUTES,
     SUBENTRY_INTERVAL,
+    VOICE_LANGUAGES,
+    VOICE_UNIQUE_ID,
     WORKDAY_DOMAIN,
     DaysMode,
     Mode,
+    is_voice_options,
 )
 from .domains import (
     SUPPORTED_DOMAINS,
@@ -73,6 +90,7 @@ from .domains import (
 from .schedule import interval_title
 from .services import SETTINGS_SCHEMA
 from .target import target_name
+from .voice.base import voice_language
 
 
 def offered_domains(hass: HomeAssistant) -> list[str]:
@@ -286,21 +304,129 @@ _WORKDAY_STEP = SchemaFlowFormStep(
     _workday_schema, validate_user_input=_validate_workday
 )
 
+
+def _voice_entry(hass: HomeAssistant) -> ConfigEntry | None:
+    """The entry that holds the voice settings, if there is one, disabled or not."""
+    return next(
+        (
+            entry
+            for entry in hass.config_entries.async_entries(DOMAIN)
+            if is_voice_options(entry.options)
+        ),
+        None,
+    )
+
+
+async def _menu_options(handler: SchemaCommonFlowHandler) -> list[str]:
+    """What can be added: a timer always, the voice settings while there are none."""
+    if _voice_entry(handler.parent_handler.hass) is None:
+        return ["target", "voice_settings"]
+    return ["target"]
+
+
+def _voice_language_selector() -> selector.SelectSelector:
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=list(VOICE_LANGUAGES),
+            multiple=True,
+            mode=selector.SelectSelectorMode.LIST,
+            translation_key="voice_language",
+        )
+    )
+
+
+async def _voice_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
+    """The form of the voice settings. A new entry starts with the sentences written in
+    the language of the house if Timerify has sentences in it, else in English; a
+    change shows what is there."""
+    flow = handler.parent_handler
+    if isinstance(flow, ConfigFlow):
+        return probatio.Schema(
+            {
+                probatio.Required(CONF_WRITE_SENTENCES, default=True): (
+                    selector.BooleanSelector()
+                ),
+                probatio.Required(
+                    CONF_LANGUAGES,
+                    default=lambda: [voice_language(flow.hass.config.language)],
+                ): _voice_language_selector(),
+            }
+        )
+    return probatio.Schema(
+        {
+            probatio.Required(CONF_WRITE_SENTENCES): selector.BooleanSelector(),
+            probatio.Required(CONF_LANGUAGES): _voice_language_selector(),
+        }
+    )
+
+
+async def _validate_voice_settings(
+    handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Accept the voice settings if at least one language is chosen; keep the languages
+    in the order Timerify lists them.
+
+    A new entry is the only one of its kind: the menu does not offer it a second time,
+    and a flow opened before the first was done is turned away here. Its title is
+    translated when it is made, since the title of an entry is not looked up later and
+    this step is where the translations can be waited for.
+    """
+    flow = handler.parent_handler
+    if isinstance(flow, ConfigFlow) and _voice_entry(flow.hass) is not None:
+        raise AbortFlow("voice_settings_exist")
+    languages = [
+        language
+        for language in VOICE_LANGUAGES
+        if language in user_input[CONF_LANGUAGES]
+    ]
+    if not languages:
+        raise SchemaFlowError("languages_required")
+    accepted = {**user_input, CONF_LANGUAGES: languages}
+    if isinstance(flow, ConfigFlow):
+        await flow.async_set_unique_id(VOICE_UNIQUE_ID, raise_on_progress=False)
+        await async_get_translations(
+            flow.hass, flow.hass.config.language, "config", [DOMAIN]
+        )
+        accepted[CONF_KIND] = KIND_VOICE_SETTINGS
+    return accepted
+
+
+_VOICE_STEP = SchemaFlowFormStep(
+    _voice_schema, validate_user_input=_validate_voice_settings
+)
+
+
+async def _options_init_schema(
+    handler: SchemaCommonFlowHandler,
+) -> probatio.Schema | None:
+    """The first form of the options: a timer's mode. The voice settings have none, and
+    go to their own form."""
+    if is_voice_options(handler.options):
+        return None
+    return probatio.Schema({probatio.Required(CONF_MODE): _mode_selector()})
+
+
+async def _after_options_init(options: dict[str, Any]) -> str:
+    if is_voice_options(options):
+        return "voice_settings"
+    return await _after_mode(options)
+
+
 CONFIG_FLOW: Final = {
-    "user": SchemaFlowFormStep(
+    "user": SchemaFlowMenuStep(_menu_options),
+    "target": SchemaFlowFormStep(
         _target_schema,
         validate_user_input=_validate_target,
         next_step=_after_mode,
     ),
+    "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
     "workday": _WORKDAY_STEP,
 }
 
 OPTIONS_FLOW: Final = {
-    "init": SchemaFlowFormStep(
-        probatio.Schema({probatio.Required(CONF_MODE): _mode_selector()}),
-        next_step=_after_mode,
-    ),
+    "init": SchemaFlowFormStep(_options_init_schema, next_step=_after_options_init),
+    "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
     "workday": _WORKDAY_STEP,
 }
@@ -536,7 +662,13 @@ class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
 
     @override
     def async_config_entry_title(self, options: Mapping[str, Any]) -> str:
-        """Name the entry after its target."""
+        """Name a timer after its target, and the voice settings as the translations of
+        the house's language call them (see `_validate_voice_settings`)."""
+        if is_voice_options(options):
+            translations = async_get_cached_translations(
+                self.hass, self.hass.config.language, "config", DOMAIN
+            )
+            return translations[f"component.{DOMAIN}.config.step.voice_settings.title"]
         return target_name(self.hass, options[CONF_TARGET])
 
     @classmethod
@@ -545,5 +677,8 @@ class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     def async_get_supported_subentry_types(
         cls, config_entry: ConfigEntry
     ) -> dict[str, type[ConfigSubentryFlow]]:
-        """A timer holds its schedule intervals as subentries."""
+        """A timer holds its schedule intervals as subentries; the voice settings hold
+        none."""
+        if is_voice_options(config_entry.options):
+            return {}
         return {SUBENTRY_INTERVAL: IntervalSubentryFlow}

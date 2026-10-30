@@ -147,10 +147,10 @@ not repeated beside its successor.
   (`stored_timer_invalid`), whose translated reason says what is wrong and tells the
   user to remove the timer and add it again, not with a bare `ValueError`. Only the
   timer's own code writes the file, so such a file means a defect, and it should show when
-  the timer loads, not as a target switched for reasons nobody can follow. Versions 2 and 3 were never released before their keys were
-  complete, so they need no further steps. Cost if wrong: a version 2 or 3 file written by
-  a development build from between the changes lacks a key and fails to load; that exists
-  on developer machines only.
+  the timer loads, not as a target switched for reasons nobody can follow. Versions 2 and
+  3 were never released before their keys were complete, so they need no further steps.
+  Cost if wrong: a version 2 or 3 file written by a development build from between the
+  changes lacks a key and fails to load; that exists on developer machines only.
 - **The snapshot is stored before a command is sent.** A restart during a slow call would
   otherwise lose a newly set countdown.
 - **At start-up the merge of the windows arms the stored wake-up.** `set_windows` always

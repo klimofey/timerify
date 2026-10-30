@@ -22,8 +22,9 @@ async def test_integration_is_discovered(hass: HomeAssistant) -> None:
 
 
 async def test_voice_integrations_load_before_timerify(hass: HomeAssistant) -> None:
-    """Timerify imports from the conversation and llm integrations, so Home Assistant
-    installs what they need before it imports Timerify."""
+    """The manifest names conversation and llm as after-dependencies, so Home Assistant
+    sets them up before Timerify when they are configured, and installs what they need
+    before it loads Timerify's voice code."""
     integration = await async_get_integration(hass, DOMAIN)
 
     assert integration.after_dependencies == ["conversation", "llm"]

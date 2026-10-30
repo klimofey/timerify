@@ -11,10 +11,20 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
+from homeassistant.helpers.template import Template
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
-from ..helpers import NUMBER, TARGET_ID, advance, advance_to, local, set_number
+from ..helpers import (
+    NUMBER,
+    TARGET_ID,
+    TURN_OFF,
+    advance,
+    advance_to,
+    local,
+    set_number,
+    state_of,
+)
 from .helpers import (
     HOUR_CLASSES,
     MINUTE_CLASSES,
@@ -22,9 +32,12 @@ from .helpers import (
     converse,
     copy_sentences,
     expose,
+    load_sources,
     samples,
     speech,
+    talk,
     without_digits,
+    words,
 )
 
 TIME_LEFT = "TimerifyTimeLeft"
@@ -32,6 +45,12 @@ LATE_EVENING = local(date(2026, 1, 5), "23:00")
 """From this time every count of hours up to 24 ends the next day, and every count of
 minutes below 60 ends the same day, so that answers to different counts differ in
 nothing but the count."""
+SPRING_FORWARD_EVE = local(date(2026, 3, 26), "23:30")
+"""Half an hour before the night the clocks of Jerusalem go forward: a full day later
+the wall clock shows 00:30 two dates on, since that day has 23 hours."""
+RUSSIAN_DAY_COUNTS = ((21, 31), (3, 4, 22, 23), (5, 6, 7, 11, 12, 14, 20, 25))
+"""Counts of days of three or more, grouped by the plural form Russian says them
+with (one, few, many)."""
 
 
 @pytest.fixture
@@ -103,6 +122,81 @@ async def test_time_left_past_midnight_says_tomorrow(
     )
 
 
+async def test_time_left_two_dates_on_says_the_day_after_tomorrow(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, boiler: MockConfigEntry
+) -> None:
+    """On the night the clocks go forward a full day ends two dates on, and the answer
+    still says which day."""
+    await advance_to(hass, freezer, SPRING_FORWARD_EVE)
+    await set_number(hass, NUMBER, 1440)
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert speech(response) == (
+        "24 hours left on Boiler, it turns off at 00:30 the day after tomorrow."
+    )
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_the_day_is_said_only_when_the_end_is_not_today(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    boiler: MockConfigEntry,
+    language: str,
+) -> None:
+    """An answer that ends today says no day; one that ends tomorrow adds a word for
+    it, and one two dates on adds another. The day words are told by what the answer
+    says more than the same answer for today does: a day in 24 hours and a day in 2
+    are said with the same words of the count (2 and 24 are of one plural class)."""
+    ask = samples(language, TIME_LEFT, numbers={})[0]
+
+    async def said_for(minutes: int) -> frozenset[str]:
+        await set_number(hass, NUMBER, minutes)
+        return words(speech(await converse(hass, ask, language)))
+
+    today = await said_for(120)
+    await advance_to(hass, freezer, LATE_EVENING)
+    tomorrow = await said_for(120)
+    await advance_to(hass, freezer, SPRING_FORWARD_EVE)
+    day_after = await said_for(1440)
+
+    assert tomorrow > today
+    assert day_after > today
+    assert tomorrow - today != day_after - today
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_three_days_or_more_are_counted_by_the_plural_rules(
+    hass: HomeAssistant, language: str
+) -> None:
+    """No timer runs for days (the number stops at 24 hours), so the wording of three
+    days or more is tried on the sentence source itself, with the slots a handler gives
+    to a timer that ends that many dates on. English says every count one way, Russian
+    one of three ways."""
+    source = load_sources(language)["responses"]["intents"][TIME_LEFT]["default"]
+
+    def said_for(days: int) -> str:
+        slots = {
+            "state": "counting",
+            "target": "Boiler",
+            "left_total": 120,
+            "left_hours": 2,
+            "left_minutes": 0,
+            "ends_at": "11:00",
+            "ends_in_days": days,
+        }
+        return Template(source, hass).async_render({"slots": slots})
+
+    groups = RUSSIAN_DAY_COUNTS if language == "ru" else (sum(RUSSIAN_DAY_COUNTS, ()),)
+    forms = []
+    for group in groups:
+        answers = {without_digits(said_for(days)) for days in group}
+        assert len(answers) == 1, answers
+        forms.append(answers.pop())
+    assert len(set(forms)) == len(forms), forms
+    assert all(str(days) in said_for(days) for days in sum(RUSSIAN_DAY_COUNTS, ()))
+
+
 async def test_time_left_on_an_idle_target(
     hass: HomeAssistant, boiler: MockConfigEntry
 ) -> None:
@@ -126,6 +220,23 @@ async def test_time_left_on_a_loose_target_running_without_a_timer(
     response = await converse(hass, "how much time is left on the boiler")
 
     assert speech(response) == "Boiler is on without a timer."
+
+
+async def test_a_follow_up_can_say_it_after_asking_how_long_is_left(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """Asking about the boiler makes it what "it" means in that conversation: the
+    agent remembers the target of an answer, and "turn it off" finds the boiler."""
+    await set_number(hass, NUMBER, 45)
+    asked = await talk(hass, "how much time is left on the boiler")
+
+    elsewhere = await talk(hass, "turn it off")
+    assert TURN_OFF not in fake_target.calls, speech(elsewhere.response)
+
+    followed = await talk(hass, "turn it off", conversation_id=asked.conversation_id)
+
+    assert TURN_OFF in fake_target.calls, speech(followed.response)
+    assert state_of(hass, NUMBER) == "0"
 
 
 @pytest.mark.parametrize(

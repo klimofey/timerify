@@ -162,5 +162,4 @@ async def test_handlers_are_registered_once_per_intent(
         if isinstance(handler, TimerifyIntentHandler)
     )
     assert registered == sorted(handler.intent_type for handler in HANDLER_TYPES)
-    assert len(set(registered)) == len(registered)
     assert "is being overwritten" not in caplog.text

@@ -88,14 +88,26 @@ COMMAND_CLASSES: Final = PluralClasses(
 )
 
 
+async def talk(
+    hass: HomeAssistant,
+    text: str,
+    language: str = "en",
+    *,
+    conversation_id: str | None = None,
+) -> conversation.ConversationResult:
+    """Say `text` to the built-in agent, in the conversation `conversation_id` (a new
+    one without), and return its result: the answer and the conversation's id."""
+    return await conversation.async_converse(
+        hass, text, conversation_id, Context(), language=language
+    )
+
+
 async def converse(
     hass: HomeAssistant, text: str, language: str = "en"
 ) -> intent.IntentResponse:
-    """Say `text` to the built-in agent and return its answer."""
-    result = await conversation.async_converse(
-        hass, text, None, Context(), language=language
-    )
-    return result.response
+    """Say `text` to the built-in agent, as the first thing of a conversation, and
+    return its answer."""
+    return (await talk(hass, text, language)).response
 
 
 def speech(response: intent.IntentResponse) -> str:
@@ -112,6 +124,12 @@ def without_digits(text: str) -> str:
     """`text` with its numbers taken out, so that two answers that differ only in the
     count compare equal."""
     return re.sub(r"\d+", "", text)
+
+
+def words(text: str) -> frozenset[str]:
+    """The words `text` is made of, without numbers and punctuation: two answers can be
+    compared by the words one has and the other has not."""
+    return frozenset(re.findall(r"[^\W\d_]+", text))
 
 
 def load_sources(language: str) -> dict[str, Any]:

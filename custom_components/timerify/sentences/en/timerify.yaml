@@ -14,10 +14,22 @@ intents:
 lists:
   timerify_target:
     values: []
+# The macro day(n) words the number of dates between today and the day a timer ends on:
+# nothing for today, and a leading space before the words, so that it follows a time.
+# An answer that names a day pastes it in as it is.
 responses:
   intents:
     TimerifyTimeLeft:
       default: |-
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
         {%- if slots.state == "counting" -%}
           {%- set parts = [] -%}
           {%- if slots.left_hours > 0 -%}
@@ -26,7 +38,7 @@ responses:
           {%- if slots.left_minutes > 0 -%}
             {%- set parts = parts + [slots.left_minutes ~ (" minute" if slots.left_minutes == 1 else " minutes")] -%}
           {%- endif -%}
-          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ " tomorrow" if slots.ends_in_days == 1 else "" }}.
+          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
         {%- elif slots.state == "open" -%}
           {{ slots.target }} is on without a timer.
         {%- else -%}

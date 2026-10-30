@@ -212,8 +212,9 @@ class TimerifyIntentHandler(intent.IntentHandler):
         """Find the timer, let the subclass act on it, and answer.
 
         A refusal of the controller is a quiet error of the answer, in the language of
-        the request; anything else is a failure and propagates. A query answers with
-        the target's state; an action with the target as its result.
+        the request; anything else is a failure and propagates. The target is the
+        result of the answer; a query is also a query answer, with the target's state
+        as the state it matched.
         """
         hass = intent_obj.hass
         response = intent_obj.create_response()
@@ -230,20 +231,22 @@ class TimerifyIntentHandler(intent.IntentHandler):
             )
             return response
         entity_id = entry.runtime_data.target_entity_id
+        # The target is the result of a query as much as of an action, as in the
+        # answers of Home Assistant's own handlers: it is what "it" means to the
+        # built-in agent in the conversation's next sentence.
+        response.async_set_results(
+            success_results=[
+                intent.IntentResponseTarget(
+                    type=intent.IntentResponseTargetType.ENTITY,
+                    name=target_name(hass, entity_id),
+                    id=entity_id,
+                )
+            ]
+        )
         if self.read_only:
             response.response_type = intent.IntentResponseType.QUERY_ANSWER
             state = hass.states.get(entity_id)
             response.async_set_states(matched_states=[] if state is None else [state])
-        else:
-            response.async_set_results(
-                success_results=[
-                    intent.IntentResponseTarget(
-                        type=intent.IntentResponseTargetType.ENTITY,
-                        name=target_name(hass, entity_id),
-                        id=entity_id,
-                    )
-                ]
-            )
         return response
 
     async def async_handle_timer(

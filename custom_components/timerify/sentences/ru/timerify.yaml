@@ -18,6 +18,10 @@ intents:
 lists:
   timerify_target:
     values: []
+# The macros plural(n, one, few, many) and day(n) are meant for every answer: day(n) words
+# the number of dates between today and the day a timer ends on (nothing for today, and a
+# trailing space after the words, so that it precedes a time). An answer that counts or
+# names a day pastes them in as they are.
 responses:
   intents:
     TimerifyTimeLeft:
@@ -29,6 +33,15 @@ responses:
             {{ few }}
           {%- else -%}
             {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
           {%- endif -%}
         {%- endmacro -%}
         {%- if slots.state == "counting" -%}
@@ -45,7 +58,7 @@ responses:
           {%- else -%}
             {%- set verb = "осталось" -%}
           {%- endif -%}
-          {{ slots.target }}: {{ verb }} {{ parts | join(" и ") }}, выключится {{ "завтра " if slots.ends_in_days == 1 else "" }}в {{ slots.ends_at }}.
+          {{ slots.target }}: {{ verb }} {{ parts | join(" и ") }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
         {%- elif slots.state == "open" -%}
           {{ slots.target }}: включено без таймера.
         {%- else -%}

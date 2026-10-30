@@ -315,7 +315,7 @@ class TargetController:
 
         Switching off is an edit of the schedule (S2): the window goes and the timer,
         if the schedule's, follows at once. Switching on works the interval's window
-        out and, if it is open, the boiler runs for the rest of it. The flag is kept in
+        out and, if it is open, the target runs for the rest of it. The flag is kept in
         the timer's file; nothing is reloaded.
 
         Switching on is one change: the flag is recorded and shown with the window, once

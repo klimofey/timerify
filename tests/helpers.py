@@ -13,6 +13,7 @@ from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_state_report_event,
@@ -90,14 +91,19 @@ def prefilled(schema: probatio.Schema) -> dict[str, Any]:
     """What the frontend puts in a form before the user touches it, which is what it
     submits then: for each field its suggested value, else its default, and for a
     section, when neither is there, what its fields hold, if the section is required
-    or anything is in it. (`computeInitialHaFormData` in the frontend takes that
-    order: a default on a section hides what is inside it.)"""
+    or anything is in it. A required time field with neither is midnight. The names
+    are those of `computeInitialHaFormData` in the frontend, which takes that order: a
+    default on a section hides what is inside it."""
     values: dict[str, Any] = {}
     for marker, validator in schema.schema.items():
         if (shown := (marker.description or {}).get("suggested_value")) is not None:
             values[marker.schema] = shown
         elif callable(marker.default):
             values[marker.schema] = marker.default()
+        elif isinstance(marker, probatio.Required) and isinstance(
+            validator, selector.TimeSelector
+        ):
+            values[marker.schema] = "00:00:00"
         elif isinstance(validator, section):
             inside = prefilled(validator.schema)
             if inside or isinstance(marker, probatio.Required):

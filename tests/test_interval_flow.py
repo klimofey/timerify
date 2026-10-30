@@ -205,14 +205,20 @@ async def test_new_interval_form_offers_every_day_and_no_times(
 ) -> None:
     """The form lists the kind of days, the weekdays, the start and the end, in that
     order; a target without a Workday sensor starts on its weekdays, every day is
-    ticked and the times are left to the user."""
+    ticked and the times are left to the user: they hold nothing, and the frontend
+    shows midnight for a required time that nobody has set."""
     entry = await setup_target()
 
     form = await open_form(hass, entry)
 
     schema = form["data_schema"]
     assert list(fields_of(schema)) == ["days", "weekdays", "start", "end"]
-    assert prefilled(schema) == {"days": "weekdays", "weekdays": list(WEEK)}
+    assert prefilled(schema) == {
+        "days": "weekdays",
+        "weekdays": list(WEEK),
+        "start": "00:00:00",
+        "end": "00:00:00",
+    }
     days = fields_of(schema)["days"]
     assert days.config["options"] == ["weekdays", "workdays", "non_workdays"]
     assert days.config["translation_key"] == "interval_days"
@@ -220,6 +226,24 @@ async def test_new_interval_form_offers_every_day_and_no_times(
     assert weekdays.config["options"] == list(WEEK)
     assert weekdays.config["multiple"] is True
     assert weekdays.config["translation_key"] == "weekday"
+
+
+async def test_submitting_the_form_untouched_is_refused_not_added_at_midnight(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Pressing Submit on the new form sends midnight for both times, as the frontend
+    fills them: that is an interval that starts and ends together, and the form says so
+    beside the end."""
+    entry = await setup_target()
+    form = await open_form(hass, entry)
+
+    result = await hass.config_entries.subentries.async_configure(
+        form["flow_id"], prefilled(form["data_schema"])
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"end": "same_start_and_end"}
+    assert not entry.subentries
 
 
 @pytest.mark.parametrize(
@@ -748,6 +772,8 @@ async def test_days_default_to_working_days_with_a_sensor(
     assert prefilled(form["data_schema"]) == {
         "days": "workdays",
         "weekdays": list(WEEK),
+        "start": "00:00:00",
+        "end": "00:00:00",
     }
 
     subentry_id = await add_interval(

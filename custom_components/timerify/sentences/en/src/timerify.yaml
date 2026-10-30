@@ -68,6 +68,21 @@ intents:
       - sentences:
           - "(stop|cancel) [<the>] {timerify_target:name} timer"
           - "(stop|cancel) the timer (on|of) [<the>] {timerify_target:name}"
+  TimerifyListCommands:
+    data:
+      - sentences:
+          - "what is (planned|scheduled) for [<the>] {timerify_target:name}"
+          - "what (commands are|is) pending (for|on) [<the>] {timerify_target:name}"
+  TimerifyCancelCommands:
+    data:
+      - sentences:
+          - "cancel (the|all) (planned|pending) commands (for|of) [<the>] {timerify_target:name}"
+        slots:
+          which: "all"
+      - sentences:
+          - "cancel the next (planned|pending) command (for|of) [<the>] {timerify_target:name}"
+        slots:
+          which: "next"
 # How long: hours and minutes, each alone or both, or a phrase such as "half an hour";
 # and how much more: "30 more minutes".
 expansion_rules:
@@ -149,3 +164,19 @@ responses:
       default: "{{ timer_now(slots) }}"
     TimerifyDelayedCommand:
       delayed: "{{ timer_later(slots) }}"
+    TimerifyListCommands:
+      default: |-
+        {%- if slots.count == 0 -%}
+          {{ slots.target }} has no planned commands.
+        {%- else -%}
+          {{ slots.target }} has {{ slots.count }} planned {{ plural(slots.count, "command", "commands") }}: {{ planned_commands(slots.commands) }}.
+        {%- endif -%}
+    TimerifyCancelCommands:
+      default: |-
+        {%- if slots.cancelled == 0 -%}
+          {{ slots.target }} has no planned commands, so nothing was cancelled.
+        {%- elif slots.which == "next" -%}
+          Cancelled the next planned command for {{ slots.target }}: {{ planned_command(slots.commands[0]) }}.
+        {%- else -%}
+          Cancelled {{ slots.cancelled }} planned {{ plural(slots.cancelled, "command", "commands") }} for {{ slots.target }}.
+        {%- endif -%}

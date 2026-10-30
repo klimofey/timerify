@@ -193,8 +193,8 @@ class TargetController:
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
     `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
-    `async_set_interval_enabled`) waits for its turn and raises HomeAssistantError
-    (`timer_unloaded`) if the timer was unloaded meanwhile.
+    `async_cancel_commands`, `async_set_interval_enabled`) waits for its turn and raises
+    HomeAssistantError (`timer_unloaded`) if the timer was unloaded meanwhile.
     """
 
     def __init__(
@@ -400,23 +400,55 @@ class TargetController:
         await self._command(turn_off_at)
         return running
 
-    async def async_cancel_command(self, command_id: str) -> None:
-        """Forget the pending command with that id.
+    async def async_cancel_command(self, command_id: str) -> Command:
+        """Forget the pending command with that id and return it.
 
-        Raises ServiceValidationError when this timer keeps no such command.
+        Raises ServiceValidationError (`unknown_command`) when this timer keeps no such
+        command.
         """
+        cancelled: Command
 
         def cancel(now: datetime) -> list[Effect]:
-            try:
-                return self._core.cancel_command(now, command_id)
-            except KeyError as err:
+            nonlocal cancelled
+            found = next(
+                (c for c in self.snapshot.commands if c.id == command_id), None
+            )
+            if found is None:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="unknown_command",
                     translation_placeholders={"command_id": command_id},
-                ) from err
+                )
+            cancelled = found
+            return self._core.cancel_command(now, command_id)
 
         await self._command(cancel)
+        return cancelled
+
+    async def async_cancel_commands(
+        self, which: Literal["next", "all"]
+    ) -> tuple[Command, ...]:
+        """Forget the pending command that is due first, or every one, and return what
+        was forgotten, in the order the commands are due; nothing when none is pending.
+
+        Which commands there are is judged when the call gets its turn, so a command
+        that was added while it waited is cancelled with the rest.
+        """
+        cancelled: tuple[Command, ...] = ()
+
+        def cancel(now: datetime) -> list[Effect]:
+            nonlocal cancelled
+            pending = self.snapshot.commands
+            cancelled = pending[:1] if which == "next" else pending
+            effects: list[Effect] = []
+            for command in cancelled:
+                # Every cancel re-arms for the timer it leaves and reports the change,
+                # so the effects of the last one are the ones to carry out.
+                effects = self._core.cancel_command(now, command.id)
+            return effects
+
+        await self._command(cancel)
+        return cancelled
 
     async def async_set_interval_enabled(self, interval_id: str, enabled: bool) -> None:
         """Switch a schedule interval on or off.

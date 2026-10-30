@@ -43,6 +43,21 @@ intents:
     data:
     - sentences:
       - (останови|отмени|сбрось|выключи|отключи) таймер [у|на|для] {timerify_target:name}
+  TimerifyListCommands:
+    data:
+    - sentences:
+      - что (запланировано|назначено) (у таймера|на таймере|для таймера) {timerify_target:name}
+      - какие команды (запланированы|назначены|отложены) (у таймера|на таймере|для таймера) {timerify_target:name}
+  TimerifyCancelCommands:
+    data:
+    - sentences:
+      - (отмени|удали|сбрось) [все] (запланированные|назначенные|отложенные) команды (у таймера|на таймере|для таймера) {timerify_target:name}
+      slots:
+        which: all
+    - sentences:
+      - (отмени|удали|сбрось) (следующую|ближайшую) (запланированную|назначенную|отложенную) команду (у таймера|на таймере|для таймера) {timerify_target:name}
+      slots:
+        which: next
 expansion_rules:
   timerify_turn_on: (включи|запусти)[ть]
   timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
@@ -289,3 +304,92 @@ responses:
           {%- endif -%}
         {%- endmacro -%}
         {{ timer_later(slots) }}
+    TimerifyListCommands:
+      default: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration_for(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+          {%- endif -%}
+          {{- parts | join(" и ") -}}
+        {%- endmacro -%}
+        {%- macro planned_command(command) -%}
+          {{ "включить" if command.action == "on" else "выключить" }} {{ day(command.in_days) }}в {{ command.at }}
+          {%- if command.minutes -%}
+            {{ " на " ~ duration_for(command.minutes // 60, command.minutes % 60) }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro planned_commands(commands) -%}
+          {%- for command in commands -%}
+            {{ planned_command(command) }}{{ "; " if not loop.last else "" }}
+          {%- endfor -%}
+        {%- endmacro -%}
+        {%- if slots.count == 0 -%}
+          {{ slots.target }}: запланированных команд нет.
+        {%- else -%}
+          {{ slots.target }}: {{ plural(slots.count, "запланирована", "запланировано", "запланировано") }} {{ slots.count }} {{ plural(slots.count, "команда", "команды", "команд") }}: {{ planned_commands(slots.commands) }}.
+        {%- endif -%}
+    TimerifyCancelCommands:
+      default: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration_for(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+          {%- endif -%}
+          {{- parts | join(" и ") -}}
+        {%- endmacro -%}
+        {%- macro planned_command(command) -%}
+          {{ "включить" if command.action == "on" else "выключить" }} {{ day(command.in_days) }}в {{ command.at }}
+          {%- if command.minutes -%}
+            {{ " на " ~ duration_for(command.minutes // 60, command.minutes % 60) }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- if slots.cancelled == 0 -%}
+          {{ slots.target }}: запланированных команд нет, отменять нечего.
+        {%- elif slots.which == "next" -%}
+          {{ slots.target }}: отменена ближайшая запланированная команда: {{ planned_command(slots.commands[0]) }}.
+        {%- else -%}
+          {{ slots.target }}: {{ plural(slots.cancelled, "отменена", "отменено", "отменено") }} {{ slots.cancelled }} {{ plural(slots.cancelled, "запланированная команда", "запланированные команды", "запланированных команд") }}.
+        {%- endif -%}

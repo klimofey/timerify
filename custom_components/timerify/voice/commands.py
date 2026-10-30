@@ -1,8 +1,9 @@
-"""The handler that plans a command to turn a target on or off later."""
+"""The handlers that plan a command to turn a target on or off later, list the commands
+that are planned, and cancel them."""
 
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import Any, ClassVar, Final
+from typing import Any, ClassVar, Final, Literal
 
 import probatio
 from homeassistant.exceptions import ServiceValidationError
@@ -12,6 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import DOMAIN
 from ..controller import TimerifyConfigEntry, command_when
+from ..core import Command
 from ..services import command_time
 from ..target import target_name
 from .base import (
@@ -146,3 +148,108 @@ def _clock_time_of(slots: Mapping[str, Any]) -> datetime | None:
             translation_domain=DOMAIN, translation_key="invalid_command_time"
         ) from err
     return moment
+
+
+def command_slots(command: Command, now: datetime) -> dict[str, Any]:
+    """What an answer says about a planned command: its `id`, its `action` (`on` or
+    `off`), when it is due as `at` and `in_days` (see `clock_slots`), how many `minutes`
+    an "on" then runs (None when it has no time of its own), and the `settings` it turns
+    the target on with, which an answer does not speak and an LLM is given."""
+    return {
+        "id": command.id,
+        "action": command.action,
+        **clock_slots(command.at, now),
+        "minutes": command.minutes,
+        "settings": dict(command.settings),
+    }
+
+
+class ListCommandsHandler(TimerifyIntentHandler):
+    """What is planned for the boiler: the commands that wait for their time, in the
+    order they are due. A query, which changes nothing."""
+
+    intent_type = "TimerifyListCommands"
+    tool_name = "timerify__list_commands"
+    title = "List planned commands"
+    description = (
+        "Lists the commands planned for a device that has a Timerify timer, in the"
+        " order they are due. Each has an 'id' to cancel it by, whether it turns the"
+        " device 'on' or 'off', when it is due ('at' is the time of day on the clock of"
+        " the house and 'in_days' the number of dates from today, 0 for today), for how"
+        " many 'minutes' a command to turn on then runs (none when it has no time of"
+        " its own), and the 'settings' it turns the device on with. 'name' is the name"
+        " of the device, as the prompt lists it."
+    )
+    read_only = True
+    slot_schema: ClassVar[dict[Any, Any]] = {probatio.Required("name"): cv.string}
+
+    async def async_handle_timer(
+        self,
+        intent_obj: intent.Intent,
+        entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
+        response: intent.IntentResponse,
+    ) -> None:
+        controller = entry.runtime_data
+        now = dt_util.utcnow()
+        commands = controller.snapshot.commands
+        response.async_set_speech_slots(
+            {
+                "target": target_name(intent_obj.hass, controller.target_entity_id),
+                "count": len(commands),
+                "commands": [command_slots(command, now) for command in commands],
+            }
+        )
+
+
+class CancelCommandsHandler(TimerifyIntentHandler):
+    """Cancel the planned commands of the boiler: every one, or the next, or one by its
+    id (an LLM has the ids; a voice cannot say one). A cancelled command never runs
+    (P2). Cancelling again changes nothing more."""
+
+    intent_type = "TimerifyCancelCommands"
+    tool_name = "timerify__cancel_commands"
+    title = "Cancel planned commands"
+    description = (
+        "Cancels commands planned for a device that has a Timerify timer, so that they"
+        " never run. 'which' is 'all' to cancel every planned command or 'next' to"
+        " cancel only the one that is due first; it defaults to 'all'. 'command_id'"
+        " cancels the one command with that id instead, as the list of planned commands"
+        " gives it, and then 'which' is not used. 'name' is the name of the device, as"
+        " the prompt lists it."
+    )
+    idempotent = True
+    slot_schema: ClassVar[dict[Any, Any]] = {
+        probatio.Required("name"): cv.string,
+        probatio.Optional("which"): probatio.In(["next", "all"]),
+        probatio.Optional("command_id"): cv.string,
+    }
+
+    async def async_handle_timer(
+        self,
+        intent_obj: intent.Intent,
+        entry: TimerifyConfigEntry,
+        slots: Mapping[str, Any],
+        response: intent.IntentResponse,
+    ) -> None:
+        controller = entry.runtime_data
+        said: Literal["next", "all", "id"]
+        cancelled: tuple[Command, ...]
+        if "command_id" in slots:
+            said = "id"
+            cancelled = (
+                await controller.async_cancel_command(slots["command_id"]["value"]),
+            )
+        else:
+            which: Literal["next", "all"] = slots.get("which", {}).get("value", "all")
+            said = which
+            cancelled = await controller.async_cancel_commands(which)
+        now = dt_util.utcnow()
+        response.async_set_speech_slots(
+            {
+                "target": target_name(intent_obj.hass, controller.target_entity_id),
+                "which": said,
+                "cancelled": len(cancelled),
+                "commands": [command_slots(command, now) for command in cancelled],
+            }
+        )

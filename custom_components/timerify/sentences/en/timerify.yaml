@@ -49,6 +49,21 @@ intents:
     - sentences:
       - (stop|cancel) [<the>] {timerify_target:name} timer
       - (stop|cancel) the timer (on|of) [<the>] {timerify_target:name}
+  TimerifyListCommands:
+    data:
+    - sentences:
+      - what is (planned|scheduled) for [<the>] {timerify_target:name}
+      - what (commands are|is) pending (for|on) [<the>] {timerify_target:name}
+  TimerifyCancelCommands:
+    data:
+    - sentences:
+      - cancel (the|all) (planned|pending) commands (for|of) [<the>] {timerify_target:name}
+      slots:
+        which: all
+    - sentences:
+      - cancel the next (planned|pending) command (for|of) [<the>] {timerify_target:name}
+      slots:
+        which: next
 expansion_rules:
   timerify_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
   timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes} more minute[s])
@@ -275,3 +290,88 @@ responses:
           {%- endif -%}
         {%- endmacro -%}
         {{ timer_later(slots) }}
+    TimerifyListCommands:
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- macro planned_command(command) -%}
+          turn {{ command.action }} at {{ command.at }}{{ day(command.in_days) }}
+          {%- if command.minutes -%}
+            {{ " for " ~ duration(command.minutes // 60, command.minutes % 60) }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro planned_commands(commands) -%}
+          {%- for command in commands -%}
+            {{ planned_command(command) }}{{ "; " if not loop.last else "" }}
+          {%- endfor -%}
+        {%- endmacro -%}
+        {%- if slots.count == 0 -%}
+          {{ slots.target }} has no planned commands.
+        {%- else -%}
+          {{ slots.target }} has {{ slots.count }} planned {{ plural(slots.count, "command", "commands") }}: {{ planned_commands(slots.commands) }}.
+        {%- endif -%}
+    TimerifyCancelCommands:
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- macro planned_command(command) -%}
+          turn {{ command.action }} at {{ command.at }}{{ day(command.in_days) }}
+          {%- if command.minutes -%}
+            {{ " for " ~ duration(command.minutes // 60, command.minutes % 60) }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- if slots.cancelled == 0 -%}
+          {{ slots.target }} has no planned commands, so nothing was cancelled.
+        {%- elif slots.which == "next" -%}
+          Cancelled the next planned command for {{ slots.target }}: {{ planned_command(slots.commands[0]) }}.
+        {%- else -%}
+          Cancelled {{ slots.cancelled }} planned {{ plural(slots.cancelled, "command", "commands") }} for {{ slots.target }}.
+        {%- endif -%}

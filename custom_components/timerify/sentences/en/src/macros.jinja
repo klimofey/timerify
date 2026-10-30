@@ -60,3 +60,20 @@
     {{ slots.target }} is already off; nothing changed.
   {%- endif -%}
 {%- endmacro -%}
+
+{#- A planned command, from the slots a handler gives it: what it does, when, and for how
+    long a command to turn on then runs, if it has a time of its own. What it turns the
+    device on with is not said. -#}
+{%- macro planned_command(command) -%}
+  turn {{ command.action }} at {{ command.at }}{{ day(command.in_days) }}
+  {%- if command.minutes -%}
+    {{ " for " ~ duration(command.minutes // 60, command.minutes % 60) }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- The planned commands, in the order they are given, set apart by semicolons. -#}
+{%- macro planned_commands(commands) -%}
+  {%- for command in commands -%}
+    {{ planned_command(command) }}{{ "; " if not loop.last else "" }}
+  {%- endfor -%}
+{%- endmacro -%}

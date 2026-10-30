@@ -230,12 +230,84 @@ LATER_CASES: Final[Sequence[Mapping[str, Any]]] = (
 tells apart: a command to turn on that was kept, the countdown that was set to turn
 off (each today and on another date), and a turn off of a target that is not running."""
 
+
+def planned(
+    action: str = "on", *, at: str = "09:15", days: int = 0, minutes: int | None = None
+) -> dict[str, Any]:
+    """The slots a handler gives to a planned command: `days` dates from today, and for
+    a command to turn on, the `minutes` it then runs."""
+    return {
+        "id": "c1",
+        "action": action,
+        "at": at,
+        "in_days": days,
+        "minutes": minutes,
+        "settings": {},
+    }
+
+
+def listing(*commands: Mapping[str, Any], count: int | None = None) -> dict[str, Any]:
+    """The slots a handler gives to the answer about what is planned: the `commands`,
+    and a `count` of them (as many as there are unless a case says otherwise)."""
+    return {
+        "target": "Boiler",
+        "count": len(commands) if count is None else count,
+        "commands": list(commands),
+    }
+
+
+def cancelling(which: str, *commands: Mapping[str, Any]) -> dict[str, Any]:
+    """The slots a handler gives to the answer about cancelling the `commands`, the way
+    `which` says: `next`, `all`, or `id` (one by its id)."""
+    return {
+        "target": "Boiler",
+        "which": which,
+        "cancelled": len(commands),
+        "commands": list(commands),
+    }
+
+
+LIST_CASES: Final[Sequence[Mapping[str, Any]]] = (
+    listing(),
+    listing(planned()),
+    listing(planned(minutes=1)),
+    listing(planned(minutes=60), planned("off", at="11:00")),
+    listing(planned(minutes=90, days=1)),
+    listing(planned("off", days=2), planned(days=3), planned(days=21, minutes=45)),
+    *(
+        listing(*[planned(at=f"09:{n:02d}") for n in range(count)])
+        for count in (3, 5, 11, 21)
+    ),
+)
+"""The slots a handler gives to the answer about what is planned, in the cases it tells
+apart: nothing, a command to turn on with a time of its own and without, to turn off,
+each of the days words, and the counts of commands of each plural form."""
+CANCEL_CASES: Final[Sequence[Mapping[str, Any]]] = (
+    cancelling("all"),
+    cancelling("next"),
+    cancelling("all", planned()),
+    cancelling("all", planned(), planned("off")),
+    *(
+        cancelling("all", *[planned(at=f"09:{n:02d}") for n in range(count)])
+        for count in (3, 5, 11, 21)
+    ),
+    cancelling("next", planned()),
+    cancelling("next", planned(minutes=60, days=1)),
+    cancelling("next", planned("off", days=2)),
+    cancelling("id", planned()),
+)
+"""The slots a handler gives to the answer about cancelling commands, in the cases it
+tells apart: none, the next one (each of the ways a command is said), every one, with
+the counts of each plural form, and one by its id."""
+
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyTimeLeft", "default"): TIMER_CASES,
     ("TimerifyRun", "default"): TIMER_CASES,
     ("TimerifyAddTime", "default"): TIMER_CASES,
     ("TimerifyStop", "default"): TIMER_CASES,
     ("TimerifyDelayedCommand", "delayed"): LATER_CASES,
+    ("TimerifyListCommands", "default"): LIST_CASES,
+    ("TimerifyCancelCommands", "default"): CANCEL_CASES,
 }
 """For each answer of the sentence files, by intent and response key, the slots a
 handler gives it in the cases it tells apart. A task that adds an answer adds its slots
@@ -553,6 +625,29 @@ def samples(
             for text in (said, minimal):
                 if text is not None and text not in found:
                     found.append(text)
+    return found
+
+
+def every_text(
+    language: str, intent_type: str, *, name: str = "Boiler"
+) -> list[tuple[str, Mapping[str, Any]]]:
+    """Every text the shipped sentences of the intent can be said as, each with the
+    slots its data block fixes, for an intent whose sentences take no number: the
+    target is `name`, and the optional parts are said and left out, every alternative
+    in turn. For the intents with a few alternatives this is exhaustive and still a
+    couple of hundred texts at most; `samples` is the bounded sampler for the rest."""
+    intents = _intents_of(language)
+    found: list[tuple[str, Mapping[str, Any]]] = []
+    for data in intents.intents[intent_type].data:
+        slot_lists = _one_value(
+            {**intents.slot_lists, **data.slot_lists}, [name], {}, {}, ()
+        )
+        rules = {**intents.expansion_rules, **data.expansion_rules}
+        for sentence in data.sentences:
+            for sampled in sample_sentence(
+                sentence, dict(slot_lists), dict(rules), language=language
+            ):
+                found.append((sampled.strip(), dict(data.slots)))
     return found
 
 

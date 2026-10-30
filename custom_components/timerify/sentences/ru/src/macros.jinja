@@ -66,3 +66,20 @@
     {{ slots.target }}: уже выключено, ничего не изменилось.
   {%- endif -%}
 {%- endmacro -%}
+
+{#- A planned command, from the slots a handler gives it: what it does, when, and for how
+    long a command to turn on then runs, if it has a time of its own. What it turns the
+    device on with is not said. -#}
+{%- macro planned_command(command) -%}
+  {{ "включить" if command.action == "on" else "выключить" }} {{ day(command.in_days) }}в {{ command.at }}
+  {%- if command.minutes -%}
+    {{ " на " ~ duration_for(command.minutes // 60, command.minutes % 60) }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- The planned commands, in the order they are given, set apart by semicolons. -#}
+{%- macro planned_commands(commands) -%}
+  {%- for command in commands -%}
+    {{ planned_command(command) }}{{ "; " if not loop.last else "" }}
+  {%- endfor -%}
+{%- endmacro -%}

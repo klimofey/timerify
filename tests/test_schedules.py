@@ -8,6 +8,7 @@ event with its own jump: one jump is one catch-up.
 
 import logging
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -33,6 +34,7 @@ from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     AC_ENDS_AT,
     AC_ID,
+    AC_NUMBER,
     JERUSALEM,
     NUMBER,
     SENSOR,
@@ -41,6 +43,7 @@ from .helpers import (
     TURN_OFF,
     TURN_ON,
     WEEK,
+    add_command,
     add_interval,
     advance_to,
     call_service,
@@ -48,11 +51,15 @@ from .helpers import (
     iso,
     local,
     open_sunday,
+    payload,
     restart,
     restart_after,
+    saved,
+    set_number,
     state_of,
     timerify_info,
     timerify_warnings,
+    window_json,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -746,6 +753,60 @@ async def test_overnight_restart_does_not_flap(
     assert state_of(hass, SENSOR) == iso(MONDAY, "07:15")
     await advance_to(hass, freezer, local(MONDAY, "07:15"))
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_downtime_across_an_end_a_window_and_two_commands_ends_in_one_turn_on(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """At six the AC runs for twenty minutes, an interval from 06:30 to 07:15 is set,
+    and two commands wait: off at 06:45, and on at 07:00 for an hour on heat. Home
+    Assistant is down from then until ten past seven, and the AC is switched off by
+    hand meanwhile. Everything fell due in turn while nobody looked: the AC is turned
+    on once, on heat, for the hour the command asked for. The window that the off
+    command stopped does not take the AC back."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await set_number(hass, AC_NUMBER, 20)
+    await add_command(hass, AC_NUMBER, action="off", at="2026-01-04 06:45:00")
+    await add_command(
+        hass,
+        AC_NUMBER,
+        action="on",
+        at="2026-01-04 07:00:00",
+        minutes=60,
+        hvac_mode="heat",
+    )
+    await hass.config_entries.async_unload(entry.entry_id)
+    fake_climate.write("off")
+    asked = len(fake_climate.calls)
+    freezer.move_to(local(SUNDAY, "07:10"))
+
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert fake_climate.call_data[asked:] == [("set_hvac_mode", {"hvac_mode": "heat"})]
+    assert state_of(hass, AC_ID) == "heat"
+    assert state_of(hass, AC_ENDS_AT) == iso(SUNDAY, "08:00")
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "08:00"),
+        windows=[
+            window_json(
+                interval,
+                local(SUNDAY, "06:30"),
+                local(SUNDAY, "07:15"),
+                started=True,
+                suppressed=True,
+            )
+        ],
+    )
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(SUNDAY, "08:00"))
+    assert fake_climate.calls[asked:] == [("set_hvac_mode", AC_ID), ("turn_off", AC_ID)]
 
 
 # --- Settings of an interval --------------------------------------------------------

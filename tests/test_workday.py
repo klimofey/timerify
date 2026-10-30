@@ -224,7 +224,7 @@ async def test_unavailable_workday_sensor_delays_the_window_until_it_reports(
     assert warning.startswith(NOT_ASKED)
     assert "the schedule of switch.boiler waits until it reports" in warning
 
-    freezer.move_to(local(MONDAY, "06:40"))
+    await advance_to(hass, freezer, local(MONDAY, "06:40"))
     await fake_workday.set_available(True)
 
     assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
@@ -387,7 +387,7 @@ async def test_an_unknown_answer_leaves_a_running_window_alone(
     entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
     await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
-    freezer.move_to(local(SUNDAY, "06:40"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
 
     await fake_workday.set_available(False)
 
@@ -528,7 +528,7 @@ async def test_window_that_is_stored_stays_while_the_sensor_is_away_at_start_up(
     entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
     await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
-    freezer.move_to(local(SUNDAY, "06:50"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
     await fake_workday.set_available(False)
 
     await restart(hass, entry)
@@ -950,7 +950,7 @@ async def test_editing_a_running_interval_to_days_off_stops_the_boiler(
         hass, entry, days="workdays", start="06:30", end="07:15"
     )
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
-    freezer.move_to(local(SUNDAY, "06:40"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
 
     await edit_interval(hass, entry, subentry_id, days="non_workdays")
 

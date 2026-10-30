@@ -560,7 +560,10 @@ What each does:
   then, replacing its end; for a target that is off nothing changes, and the answer says
   so. A delay is at most a week for a command to turn on and a day for one to turn off,
   and a timer keeps at most 20 pending commands; each is refused with a message when it
-  is too much. Devices without a timer keep Home Assistant's delayed commands untouched.
+  is too much. By voice the hours, the minutes and the seconds of a delay are each at most
+  100, as in Home Assistant's own sentences, and a longer delay is not understood: use the
+  tool or the service for it. Devices without a timer keep Home Assistant's delayed
+  commands untouched.
 - **What is planned** lists the pending commands, in the order they are due, by the
   time they run at and for how long. Their settings are not said.
 - **Cancel** takes away all of them (the default) or the next one; saying "the next" again

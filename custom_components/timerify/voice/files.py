@@ -99,12 +99,15 @@ class WriteResult(Enum):
 def _first_line(path: Path) -> str | None:
     """The first line of the file at `path`, without its line break; None if there is no
     such file. What is not text is read as the replacement character, which no header
-    has."""
+    has. A directory is there and is no file, so it has no first line: it is not what
+    Timerify wrote, and it is read as one that is no header."""
     try:
         with path.open(encoding="utf-8", errors="replace") as file:
             return file.readline().removesuffix("\n")
     except FileNotFoundError:
         return None
+    except IsADirectoryError:
+        return ""
 
 
 def _write_if_changed(
@@ -176,11 +179,18 @@ class SentenceFiles:
     """The sentence files of the voice settings entry, and what keeps them current.
 
     The first writing happens before the entry is set up when Home Assistant is running,
-    and once it has started otherwise, when every timer is there to be listed. Only
-    after it do changes cause writing: a timer set up or unloaded, which an edit of the
+    and once it has started otherwise, when every timer is there to be listed. Changes
+    cause writing from just before it: a timer set up or unloaded, which an edit of the
     title of an interval of its schedule is, and a rename of a target, of its device or
-    of an alias of it. A burst of changes is one writing, `VOICE_SYNC_COOLDOWN` after
-    the last.
+    of an alias of it.
+
+    A change is written `VOICE_SYNC_COOLDOWN` after the first of the changes that come
+    in a row, and never twice within a cooldown: the debouncer (with `immediate=False`)
+    does not move its timer for the changes that follow, so a burst that lasts longer
+    than the cooldown is written more than once. Nor does it keep a call that falls due
+    while a writing is under way, taking the writing for the one that covers it, and a
+    writing that began before the change does not; so a writing that finds a change
+    came in while it ran schedules another (`async_sync`).
     """
 
     def __init__(self, hass: HomeAssistant, entry: VoiceConfigEntry) -> None:
@@ -193,6 +203,9 @@ class SentenceFiles:
             immediate=False,
             function=self.async_sync,
         )
+        self._changes = 0
+        """How many changes of what the names depend on have been seen. A writing that
+        finds it has moved by the time it ends has not written the last of them."""
         self._warned_about_manual = False
         self._warned_about_foreign: set[Path] = set()
 
@@ -210,9 +223,14 @@ class SentenceFiles:
         await self._async_first_sync()
 
     async def _async_first_sync(self) -> None:
-        """Write the files, then follow what their names depend on."""
-        async with self._debouncer.async_lock():
-            await self.async_sync()
+        """Follow what the names depend on, then write the files.
+
+        The following starts first: the writing awaits the executor and the built-in
+        agent, and a timer set up or a target renamed meanwhile would otherwise be
+        listed only after the next change. A change that comes in during the writing is
+        written by one after it (`async_sync`); one that comes in before it is in it,
+        and a writing that finds nothing changed writes nothing and tells nobody.
+        """
         hass = self._hass
         self._entry.async_on_unload(
             async_dispatcher_connect(hass, SIGNAL_TIMERS_CHANGED, self._changed)
@@ -227,6 +245,8 @@ class SentenceFiles:
                 dr.EVENT_DEVICE_REGISTRY_UPDATED, self._device_updated
             )
         )
+        async with self._debouncer.async_lock():
+            await self.async_sync()
 
     async def async_stop(self) -> None:
         """Stop writing: nothing waiting for the cooldown is written, and a writing
@@ -245,6 +265,7 @@ class SentenceFiles:
         in the log: a file the built-in agent cannot load breaks it for the language.
         """
         hass = self._hass
+        changes_seen = self._changes
         chosen = [
             language
             for language in VOICE_LANGUAGES
@@ -278,6 +299,8 @@ class SentenceFiles:
         finally:
             if changed:
                 await _async_reload_sentences(hass)
+        if self._changes != changes_seen:
+            self._debouncer.async_schedule_call()
 
     def _note_foreign(self, language: str, path: Path, foreign: bool) -> None:
         """Say, once, that a file Timerify did not write is where its file for
@@ -322,6 +345,7 @@ class SentenceFiles:
     def _changed(self) -> None:
         """Something that the names depend on may have changed: write again soon."""
         if not self._hass.is_stopping:
+            self._changes += 1
             self._debouncer.async_schedule_call()
 
     def _targets(self) -> set[str]:

@@ -79,8 +79,11 @@ def test_services_are_translated(language: str) -> None:
 @pytest.mark.parametrize("language", LANGUAGES)
 def test_no_text_contains_markup(language: str) -> None:
     """Home Assistant takes a text for HTML when it has a tag in it, and hassfest
-    refuses the integration: this is the check hassfest makes, run on every text of
-    every language, so that Docker is not the only place it is made."""
+    refuses the integration for one. This runs the check that fails it, Home
+    Assistant's own `string_with_no_html`, on every text of every language, so that
+    Docker is not the only place that mistake is found. It is the one check of the
+    several that hassfest makes on the translations, and the hassfest run stays the
+    proof of the rest."""
     refused: dict[str, str] = {}
     for path, text in texts_in(translations_of(language)).items():
         try:

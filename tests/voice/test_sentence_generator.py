@@ -8,10 +8,9 @@ from pathlib import Path
 
 import pytest
 from homeassistant.core import HomeAssistant
-from homeassistant.util.yaml import load_yaml_dict
 
 from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
-from custom_components.timerify.voice.sentences import load_sources
+from custom_components.timerify.voice.sentences import load_sources, read_back
 from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 from scripts.generate_sentences import (
     COMMAND,
@@ -74,7 +73,9 @@ def test_shipped_answers_are_blocks_not_lines_of_escapes(language: str) -> None:
     """The shipped files are the ones people read to copy a sentence or to see how an
     answer is said."""
     for name, text in render(language).items():
-        answers = load_yaml_dict(SENTENCES_DIR / language / SOURCES / name)
+        answers = read_back(
+            (SENTENCES_DIR / language / SOURCES / name).read_text("utf-8")
+        )
         for keys in answers.get("responses", {}).get("intents", {}).values():
             for key in keys:
                 assert re.search(rf"^\s+{key}: \|-?$", text, re.MULTILINE), (name, key)

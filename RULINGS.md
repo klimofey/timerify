@@ -831,8 +831,12 @@ those of the spec.
   `timerify_minutes_count`, so the handler cannot tell the two apart, and both languages
   have the same shape. A test pins the shape, and another that no range list of Timerify
   that allows words is larger than a day of minutes (the structure, not the time, which
-  varies by machine). Cost if wrong: "for two thousand minutes" said in words is not
-  understood, while "for 2000 minutes" is, and answered with the limit.
+  varies by machine). Cost if wrong: "turn on the boiler for two thousand minutes" said
+  in words matches no sentence of Timerify's, and the answer is the built-in agent's
+  "Sorry, I am not aware of any device called boiler for two thousand minutes", which
+  reads the count as part of the name and so says that the boiler does not exist, while
+  "for 2000 minutes" is understood and answered with the limit ("A timer runs for 1 min to
+  24 h.").
 - **"Turn off X in N" decides whether the target is running under the controller's lock,
   from the desired state: a countdown above zero, else the pending wish, else the target
   being on.** A running target gets its countdown set to end then, whatever it was (shorter
@@ -1016,15 +1020,23 @@ those of the spec.
 - **Files are removed when the option is unticked, and when the entry is removed or
   disabled, and for a language no longer chosen; they stay across a reload and a restart,
   and are written only when their text changes, then one `conversation.reload` for all
-  languages.** There is no churn at start-up or reload: the listeners attach after the
-  first write and ignore events while the entry is stopping, and the debouncer is shut down
-  before the files are removed, or a write could bring them back. The reload is not by
+  languages.** There is no churn at start-up or reload: the first write comes when every
+  timer is there, and a write that finds the text unchanged writes nothing and tells
+  nobody. The listeners attach just before it, so that a timer set up or a target renamed
+  while it runs is not missed (it is written by the write that follows), and they ignore
+  events while the entry is stopping; the debouncer is shut down before the files are
+  removed, or a write could bring them back. The reload is not by
   language, because a reload by language misses the regional caches of the built-in agent;
   every cached language is rebuilt. Cost if wrong: none.
 - **The file is rewritten when a timer is set up, unloaded or reloaded, when a target's
   entity or device changes its name or aliases, and when a schedule interval is added,
-  deleted or renamed; the burst is debounced.** The first write happens before set-up
-  returns when Home Assistant is running, and at start otherwise. A new mode that a device
+  deleted or renamed; the changes are debounced.** A change is written one cooldown
+  (`VOICE_SYNC_COOLDOWN`, one second) after the first of the changes that come in a row,
+  never twice within a cooldown, so a burst that lasts longer is written more than once;
+  Home Assistant's `Debouncer` does not move its timer for the changes that follow and
+  drops a call that falls due while a write runs, so a write that finds a change came in
+  during it schedules another. The first write happens before set-up returns when Home
+  Assistant is running, and at start otherwise. A new mode that a device
   reports later (a firmware update) and a changed friendly name of a target that is not in
   the registry are picked up at the next trigger (`docs/followups.md`). Cost if wrong: such
   a name or mode is missing from the file until then.

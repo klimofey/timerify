@@ -21,7 +21,7 @@ from homeassistant.config_entries import (
     ConfigEntryDisabler,
     ConfigEntryState,
 )
-from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResult, FlowResultType
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -50,7 +50,7 @@ from custom_components.timerify.voice.sentences import (
     render,
 )
 
-from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
+from ..conftest import SWITCH_SERVICES, FakeTarget, HeldCall, ProvideTarget, SetupTarget
 from ..helpers import (
     AC_ID,
     TARGET_ID,
@@ -1281,6 +1281,50 @@ async def test_leaving_takes_what_timerify_wrote_and_not_what_it_did_not(
 
 
 @pytest.mark.usefixtures("assist")
+async def test_a_directory_where_the_file_belongs_is_not_timerifys_either(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A folder called `timerify.yaml` cannot be read as a file, and is no file that
+    Timerify wrote: it is left, its language is not written, the other language is, and
+    the log says what is in the way."""
+    await setup_target()
+    folder = managed_file(hass, "en")
+    await hass.async_add_executor_job(folder.mkdir, 0o755, True)
+
+    entry = await add_voice_entry(hass, languages=("en", "ru"))
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert folder.is_dir()
+    assert listed(hass, "ru") == [BOILER]
+    warnings = timerify_warnings(caplog)
+    assert len(warnings) == 1
+    assert str(folder) in warnings[0]
+    assert "not written by Timerify" in warnings[0]
+
+
+@pytest.mark.parametrize("action", ["remove", "disable"])
+@pytest.mark.usefixtures("assist")
+async def test_leaving_does_not_take_a_directory_where_the_file_belongs(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    action: str,
+) -> None:
+    await setup_target()
+    entry = await add_voice_entry(hass, languages=("ru",))
+    folder = managed_file(hass, "en")
+    await hass.async_add_executor_job(folder.mkdir, 0o755, True)
+
+    await leave(hass, entry, action)
+
+    assert folder.is_dir()
+    assert not managed_file(hass, "ru").exists()
+
+
+@pytest.mark.usefixtures("assist")
 async def test_a_managed_file_that_was_edited_is_written_again(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
@@ -1433,6 +1477,89 @@ async def test_changes_while_home_assistant_stops_are_not_written(
 
     assert is_stamped(hass, "en")
     assert reloads == []
+
+
+def slow_reload(hass: HomeAssistant) -> HeldCall:
+    """Make the built-in agent slow to reload its sentences: every `conversation.reload`
+    waits inside it until the call is released, and `reached` says one is there."""
+    slow = HeldCall()
+
+    async def reload(call: ServiceCall) -> None:
+        slow.reached.set()
+        await slow.release.wait()
+
+    hass.services.async_register("conversation", "reload", reload)
+    return slow
+
+
+async def rename_the_boiler(hass: HomeAssistant, name: str) -> None:
+    """The user renames the boiler on its entity page."""
+    er.async_get(hass).async_update_entity(TARGET_ID, name=name)
+
+
+def let_the_cooldown_pass_without_waiting(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    """Move the clock past the cooldown and run what falls due, without waiting for the
+    tasks that are under way: a writing that is held cannot be waited for."""
+    freezer.tick(timedelta(seconds=VOICE_SYNC_COOLDOWN))
+    async_fire_time_changed(hass)
+
+
+async def test_a_target_renamed_while_the_files_are_first_written_is_listed_as_renamed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The built-in agent takes a while to read the first files, and the boiler is
+    renamed meanwhile. The files are written again for the new name, not left with the
+    old one until something else changes."""
+    await setup_target()
+    slow = slow_reload(hass)
+    adding = hass.async_create_task(add_voice_entry(hass, languages=("en",)))
+    await slow.reached.wait()
+
+    await rename_the_boiler(hass, "Water heater")
+    slow.release.set()
+    await adding
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert [value["in"] for value in listed(hass, "en")] == ["Water heater"]
+
+
+@pytest.mark.parametrize("first", [True, False], ids=["first writing", "later writing"])
+async def test_a_target_renamed_during_a_writing_that_outlasts_the_cooldown_is_listed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    first: bool,
+) -> None:
+    """The writing is still under way when the cooldown of a rename made during it ends,
+    on a slow machine. Home Assistant's debouncer takes the writing for the one that
+    covers the change and drops the call, so the writing itself must see that a change
+    came in meanwhile and write again."""
+    await setup_target()
+    if first:
+        slow = slow_reload(hass)
+        adding = hass.async_create_task(add_voice_entry(hass, languages=("en",)))
+    else:
+        await add_voice_entry(hass, languages=("en",))
+        slow = slow_reload(hass)
+        await rename_the_boiler(hass, "Kettle")
+        let_the_cooldown_pass_without_waiting(hass, freezer)
+    await slow.reached.wait()
+
+    await rename_the_boiler(hass, "Water heater")
+    let_the_cooldown_pass_without_waiting(hass, freezer)
+    slow.release.set()
+    await hass.async_block_till_done()
+    if first:
+        await adding
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert [value["in"] for value in listed(hass, "en")] == ["Water heater"]
 
 
 # Files by hand, and no conversation

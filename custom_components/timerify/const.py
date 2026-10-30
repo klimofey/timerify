@@ -100,8 +100,9 @@ subset of `VOICE_LANGUAGES`."""
 VOICE_UNIQUE_ID: Final = "voice_settings"
 """The unique id of the voice settings entry, of which there is at most one."""
 VOICE_SYNC_COOLDOWN: Final = 1.0
-"""How long, in seconds, the sentence files wait for further changes of the timers or
-of the names of their targets before they are written again."""
+"""How long, in seconds, a change of the timers or of the names of their targets waits
+before the sentence files are written, counted from the first of the changes that come
+in a row, and the least time between two writings."""
 SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
 """Sent when a timer is set up or unloaded, so that the names of the targets are listed
 again."""

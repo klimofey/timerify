@@ -152,7 +152,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   device that changes its own list of modes (a firmware update). The fix is to follow the
   `state_changed` events of the targets when the name or the modes differ from the ones
   last written. The managed entry is the only one affected; the manual route is redone by
-  hand anyway. `custom_components/timerify/voice/files.py:333-354` (`_entity_updated`,
+  hand anyway. `custom_components/timerify/voice/files.py:356-378` (`_entity_updated`,
   `_device_updated`, the only triggers) and `custom_components/timerify/voice/sentences.py:156-181`
   (`voice_names`, the name of a target with no registry entry).
 - **A one-time repair issue listing interval switches exposed under 0.3.0.** Version 0.3.0
@@ -225,12 +225,26 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   would remove the wording with the case.
   `custom_components/timerify/sentences/en/src/timerify.yaml:26-59` (the data blocks scoped
   by domain) and `:133` (`timerify_temperature_part`).
-- **A directory at the path of the managed file stops the check of who owns it.**
-  `_first_line` reads the first line of the file and treats only a missing file as
-  nothing; a directory (or a file that cannot be read) at `custom_sentences/<language>/timerify.yaml`
-  raises `IsADirectoryError` or `PermissionError` out of the writing of that language.
-  It should count as a file that is not Timerify's: not written, and the warning that
-  names the path. `custom_components/timerify/voice/files.py:99-107`.
+- **A delay said by voice is at most 100 hours, 100 minutes and 100 seconds, each.** The
+  delayed commands take Home Assistant's own number lists for the delay (`timer_hours`,
+  `timer_minutes` and `timer_seconds`, 1 to 100 in both languages), so "turn off the boiler
+  in 2000 minutes" is answered "Sorry, I couldn't understand that", and so is "in 120
+  minutes", though a turn-off may be a day ahead and a turn-on a week ahead through the
+  tools and the services, which is what the README says of the limits. The user hears no
+  limit. The fix is delay lists of Timerify's own, digits only past what a table of words
+  can bear (as `timerify_long_minutes` is, see the duration entry of RULINGS), and the
+  refusal that names the limit. `scripts/generate_core_commands.py:107` (`_DELAY_SLOT`)
+  and `:282`, which name core's lists in `sentences/<language>/core_commands.yaml:4-5`.
+
+- **The warning about settings the target cannot take reads the title of an interval that
+  may be deleted.** While the reload that follows the deletion of an interval waits for its
+  turn, the timer that is still loaded keeps the interval, and `_with_settings_the_target_takes`
+  looks its title up in the entry, which no longer has it: a `KeyError` in the working out
+  of the windows, the same class as the one the schedule commands had
+  (`async_set_schedule_enabled`, fixed). Found by reading; not reproduced, since a test
+  cannot wait for the windows of a timer whose reload it holds back. The fix is to read
+  the intervals that the entry has in the one place that works the windows out.
+  `custom_components/timerify/controller.py:688`.
 
 ## Tests
 
@@ -247,17 +261,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (the checklist of phase 4), and a fixture file of rendered answers, which the hook would
   allow under `sentences/ru/`, would pin them. `tests/voice/test_time_left.py:345-355` and
   `tests/voice/helpers.py:366` (`assert_one_form_per_class`).
-- **The translation markup test claims to be the check hassfest makes.** It runs Home
-  Assistant's `string_with_no_html` on every text, which is the check that hassfest failed
-  a string on, but hassfest checks the same strings in other ways too (the review named
-  placeholders in single quotes, space at either end, and links written as URLs). The
-  docstring should say what it checks, or the other checks should be added, and the
-  hassfest run stays the proof. `tests/test_translations.py:79-82`.
-- **One generator test reads the sources with another loader than the product.**
-  `test_shipped_answers_are_blocks_not_lines_of_escapes` reads each source file with
-  `load_yaml_dict` while the product reads them with `voice.sentences.load_sources`; both
-  read the same files today, but a test that reads as the product does cannot drift from
-  it. `tests/voice/test_sentence_generator.py:11` (the import) and `:77`.
 
 ## Accepted
 

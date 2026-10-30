@@ -170,7 +170,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   the timer is set to do, not what the device shows"), and a wish is on or off. A third
   wording for an unavailable target (and the same in Russian) would say what is known.
   `custom_components/timerify/voice/base.py:246-278` (`timer_slots`, its state `off`) and
-  `custom_components/timerify/sentences/en/src/timerify.yaml:187-195` (the answer, and the
+  `custom_components/timerify/sentences/en/src/timerify.yaml:197-205` (the answer, and the
   Russian twin).
 - **Wider English near-misses that name a device with a timer can reach core's turn off.**
   Timerify's sentences take the phrasings it knows, and a phrasing that it does not have,

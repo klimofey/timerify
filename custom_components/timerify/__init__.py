@@ -22,6 +22,7 @@ from .voice.files import (
     async_unload_voice_entry,
     is_voice_entry,
 )
+from .websocket import async_register_websocket_commands
 
 PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
 
@@ -29,10 +30,11 @@ CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the services and the intent handlers, which belong to the integration,
-    not to a timer."""
+    """Register the services, the intent handlers and the websocket commands, which
+    belong to the integration, not to a timer."""
     async_setup_services(hass)
     async_register_intents(hass)
+    async_register_websocket_commands(hass)
     return True
 
 

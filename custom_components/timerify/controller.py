@@ -50,6 +50,7 @@ from .const import (
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
+    MAX_LISTED_INTERVALS,
     MAX_MINUTES,
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
@@ -479,10 +480,10 @@ class TargetController:
 
         Raises ServiceValidationError, before anything is switched, when the timer has
         no interval (`no_schedule`) and when none has the title (`unknown_interval`,
-        which lists the titles that can be asked for; `no_interval_titles` when there
-        is none, every title being nothing but punctuation). A
-        timer that is unloaded part-way says so (`timer_unloaded`); the intervals
-        switched until then stay switched.
+        which lists the titles that can be asked for, and says how many it leaves out
+        when it is long; `no_interval_titles` when there is none, every title being
+        nothing but punctuation). A timer that is unloaded part-way says so
+        (`timer_unloaded`); the intervals switched until then stay switched.
         """
         async with self._lock:
             self._raise_if_unloaded()
@@ -518,7 +519,13 @@ class TargetController:
     ) -> ServiceValidationError:
         """The refusal of a title that no interval has. It lists the titles that can be
         asked for, so that the one who asked can ask again: those that are not nothing
-        but punctuation, each once."""
+        but punctuation, each once, the first `MAX_LISTED_INTERVALS` of them and the
+        number of the others.
+
+        The titles go into the message bare, apart by semicolons (a title may have a
+        comma, as the one an interval is made with does): the quotes around them are
+        for the translation of each language to choose.
+        """
         target = target_name(self._hass, self.target_entity_id)
         askable = [title for title in dict.fromkeys(titles) if title_key(title)]
         if not askable:
@@ -527,14 +534,20 @@ class TargetController:
                 translation_key="no_interval_titles",
                 translation_placeholders={"target": target},
             )
+        listed = askable[:MAX_LISTED_INTERVALS]
+        placeholders = {
+            "target": target,
+            "interval": asked,
+            "intervals": "; ".join(listed),
+        }
+        key = "unknown_interval"
+        if len(listed) < len(askable):
+            key = "unknown_interval_and_more"
+            placeholders["more"] = str(len(askable) - len(listed))
         return ServiceValidationError(
             translation_domain=DOMAIN,
-            translation_key="unknown_interval",
-            translation_placeholders={
-                "target": target,
-                "interval": asked,
-                "intervals": ", ".join(f'"{title}"' for title in askable),
-            },
+            translation_key=key,
+            translation_placeholders=placeholders,
         )
 
     async def _async_set_interval_enabled_locked(

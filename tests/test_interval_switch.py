@@ -22,7 +22,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
-from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.const import DOMAIN, MAX_LISTED_INTERVALS
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -771,7 +771,7 @@ async def test_an_unknown_title_switches_nothing_and_says_which(
     assert raised.value.translation_placeholders == {
         "target": "Boiler",
         "interval": "Noon",
-        "intervals": '"Morning", "Evening"',
+        "intervals": "Morning; Evening",
     }
     assert schedule_switches(hass) == ("on", "on")
     assert saved(hass_storage, entry) == stored
@@ -870,7 +870,7 @@ async def test_a_title_of_punctuation_asks_for_nothing(
     assert raised.value.translation_placeholders == {
         "target": "Boiler",
         "interval": asked,
-        "intervals": '"Evening"',
+        "intervals": "Evening",
     }
     assert schedule_switches(hass) == ("on", "on")
 
@@ -893,6 +893,85 @@ async def test_a_schedule_with_no_title_to_ask_for_says_so(
     assert raised.value.translation_key == "no_interval_titles"
     assert raised.value.translation_placeholders == {"target": "Boiler"}
     assert schedule_switches(hass) == ("on", "on")
+
+
+async def test_the_titles_a_refusal_lists_are_bare_and_each_listed_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The refusal gives the titles as they are, apart by semicolons, because the
+    translation of each language frames them in its own quotes and a title may have a
+    comma of its own (the one an interval is given when it is made does); two intervals
+    of a title list it once."""
+    entry, _, evening = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, evening, "Morning")
+    await add_interval(hass, entry, start="22:00", end="23:00")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == "unknown_interval"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "Morning; 22:00–23:00, Mon–Sun",
+    }
+
+
+@pytest.mark.parametrize(
+    ("intervals", "key", "listed", "more"),
+    [
+        pytest.param(
+            MAX_LISTED_INTERVALS, "unknown_interval", MAX_LISTED_INTERVALS, None
+        ),
+        pytest.param(
+            MAX_LISTED_INTERVALS + 1,
+            "unknown_interval_and_more",
+            MAX_LISTED_INTERVALS,
+            "1",
+        ),
+        pytest.param(
+            MAX_LISTED_INTERVALS + 3,
+            "unknown_interval_and_more",
+            MAX_LISTED_INTERVALS,
+            "3",
+        ),
+    ],
+    ids=["all-fit", "one-more", "three-more"],
+)
+async def test_a_long_list_of_titles_is_cut_and_says_how_many_are_left_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    intervals: int,
+    key: str,
+    listed: int,
+    more: str | None,
+) -> None:
+    """A refusal is read aloud and read by an agent, so it names the first titles and
+    counts the rest instead of reciting a whole house of intervals; the count is a
+    placeholder of the message that says it, which only a cut list has."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    for number in range(1, intervals + 1):
+        subentry_id = await add_interval(
+            hass, entry, start=f"{number:02d}:00", end=f"{number:02d}:30"
+        )
+        await retitle_interval(hass, entry, subentry_id, f"Title {number}")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == key
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "; ".join(f"Title {number}" for number in range(1, listed + 1)),
+        **({} if more is None else {"more": more}),
+    }
 
 
 @pytest.mark.parametrize("interval", [None, "Morning"])

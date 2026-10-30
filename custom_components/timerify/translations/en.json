@@ -469,7 +469,10 @@
       "message": "{target} has no schedule. Add an interval to its timer first."
     },
     "unknown_interval": {
-      "message": "{target} has no schedule interval called {interval}. Its intervals are {intervals}."
+      "message": "{target} has no schedule interval called \"{interval}\". Its intervals: {intervals}."
+    },
+    "unknown_interval_and_more": {
+      "message": "{target} has no schedule interval called \"{interval}\". Its first intervals: {intervals}; and {more} more."
     },
     "no_interval_titles": {
       "message": "{target} has no schedule interval that can be asked for by title. Give its intervals titles with letters or digits first."

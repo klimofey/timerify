@@ -60,7 +60,7 @@ EVENING = "switch.boiler_schedule_18_00_19_00_mon_sun"
 """The switches of the intervals from 06:30 to 07:15 and from 18:00 to 19:00."""
 OFF = "The schedule of Boiler is off."
 ON = "The schedule of Boiler is on."
-BOILER_INTERVALS = '"Morning", "Evening"'
+BOILER_INTERVALS = "Morning; Evening"
 """How a refusal lists the titles of the intervals the boiler has."""
 
 
@@ -335,6 +335,89 @@ async def test_an_interval_that_is_not_the_timers_is_refused(
     ).format(target="Boiler", interval="Night", intervals=BOILER_INTERVALS)
     assert switches(hass) == ("on", "on")
     assert state_of(hass, "switch.fan_schedule_22_00_23_00_mon_sun") == "on"
+
+
+async def test_a_refusal_lists_what_can_be_asked_for_apart_by_semicolons(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    scheduled: MockConfigEntry,
+    setup_target: SetupTarget,
+) -> None:
+    """The title an interval gets when nobody titles it has a comma, so what is listed
+    is set apart by semicolons and the one title stays one."""
+    await add_interval(hass, scheduled, start="22:00", end="23:00")
+    fan = await setup_target(target=fake_fan.entity_id)
+    night = await add_interval(hass, fan, start="22:00", end="23:00")
+    await retitle_interval(hass, fan, night, "Night")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    response = await converse(hass, "turn off the Night schedule of the Boiler")
+
+    assert reached(response) == SET_SCHEDULE
+    assert refusal_of(response) == (
+        'Boiler has no schedule interval called "Night". '
+        "Its intervals: Morning; Evening; 22:00\u201323:00, Mon\u2013Sun."
+    )
+
+
+async def test_a_long_list_of_titles_is_cut_to_what_can_be_heard(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    scheduled: MockConfigEntry,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler has seven intervals and is asked for the fan's Night: the answer
+    names the first five and counts the other two, instead of reading out the house."""
+    for hour in (1, 2, 3, 4, 5):
+        interval = await add_interval(
+            hass, scheduled, start=f"{hour:02d}:00", end=f"{hour:02d}:30"
+        )
+        await retitle_interval(hass, scheduled, interval, f"Slot {hour}")
+    fan = await setup_target(target=fake_fan.entity_id)
+    night = await add_interval(hass, fan, start="22:00", end="23:00")
+    await retitle_interval(hass, fan, night, "Night")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    response = await converse(hass, "turn off the Night schedule of the Boiler")
+
+    assert reached(response) == SET_SCHEDULE
+    assert refusal_of(response) == (
+        'Boiler has no schedule interval called "Night". '
+        "Its first intervals: Morning; Evening; Slot 1; Slot 2; Slot 3; and 2 more."
+    )
+    assert switches(hass) == ("on", "on")
+
+
+async def test_a_schedule_with_no_title_to_ask_for_says_so_to_the_voice(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_fan: FakeTarget,
+    scheduled: MockConfigEntry,
+    setup_target: SetupTarget,
+) -> None:
+    """Every interval of the boiler is titled by punctuation alone, which cannot be
+    said. Asked for the fan's Night, the boiler does not list nothing: it says that none
+    of its intervals can be asked for by title, and what to do about it."""
+    for interval in list(scheduled.subentries):
+        await retitle_interval(hass, scheduled, interval, "?!")
+    fan = await setup_target(target=fake_fan.entity_id)
+    night = await add_interval(hass, fan, start="22:00", end="23:00")
+    await retitle_interval(hass, fan, night, "Night")
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    response = await converse(hass, "turn off the Night schedule of the Boiler")
+
+    assert reached(response) == SET_SCHEDULE
+    assert refusal_of(response) == (
+        "Boiler has no schedule interval that can be asked for by title. "
+        "Give its intervals titles with letters or digits first."
+    )
+    assert switches(hass) == ("on", "on")
 
 
 async def test_a_title_nobody_has_is_not_understood(
@@ -923,8 +1006,99 @@ async def test_llm_asking_for_an_interval_of_punctuation_switches_nothing(
     assert refused["response_type"] == "error"
     assert refused["speech"]["plain"]["speech"] == translated(
         "en", "exceptions", "unknown_interval", "message"
-    ).format(target="Boiler", interval="?", intervals='"Evening"')
+    ).format(target="Boiler", interval="?", intervals="Evening")
     assert switches(hass) == ("on", "on")
+
+
+async def test_llm_is_told_the_titles_in_the_quotes_of_its_language(
+    hass: HomeAssistant, scheduled: MockConfigEntry
+) -> None:
+    """The quotes around the asked title are the language's own, English straight and
+    Russian guillemets, and the titles listed are bare, so that no sentence mixes two
+    kinds."""
+    english = await call_tool(
+        await assist_api(hass),
+        "timerify__set_schedule",
+        {"name": "Boiler", "enabled": False, "interval": "Noon"},
+    )
+    russian = await call_tool(
+        await assist_api(hass, "ru"),
+        "timerify__set_schedule",
+        {"name": "Boiler", "enabled": False, "interval": "Noon"},
+    )
+
+    assert english["speech"]["plain"]["speech"] == (
+        'Boiler has no schedule interval called "Noon". '
+        "Its intervals: Morning; Evening."
+    )
+    said = russian["speech"]["plain"]["speech"]
+    assert said == translated("ru", "exceptions", "unknown_interval", "message").format(
+        target="Boiler", interval="Noon", intervals=BOILER_INTERVALS
+    )
+    assert "\u00abNoon\u00bb" in said
+    assert '"' not in said
+    assert switches(hass) == ("on", "on")
+
+
+async def test_llm_is_told_how_many_titles_are_left_out_in_its_language(
+    hass: HomeAssistant, scheduled: MockConfigEntry
+) -> None:
+    """Seven intervals are more than a refusal lists: the first five are named and the
+    rest counted, in English and in Russian."""
+    for hour in (1, 2, 3, 4, 5):
+        interval = await add_interval(
+            hass, scheduled, start=f"{hour:02d}:00", end=f"{hour:02d}:30"
+        )
+        await retitle_interval(hass, scheduled, interval, f"Slot {hour}")
+    listed = "Morning; Evening; Slot 1; Slot 2; Slot 3"
+
+    english = await call_tool(
+        await assist_api(hass),
+        "timerify__set_schedule",
+        {"name": "Boiler", "enabled": False, "interval": "Noon"},
+    )
+    russian = await call_tool(
+        await assist_api(hass, "ru"),
+        "timerify__set_schedule",
+        {"name": "Boiler", "enabled": False, "interval": "Noon"},
+    )
+
+    assert english["speech"]["plain"]["speech"] == (
+        'Boiler has no schedule interval called "Noon". '
+        f"Its first intervals: {listed}; and 2 more."
+    )
+    assert russian["speech"]["plain"]["speech"] == translated(
+        "ru", "exceptions", "unknown_interval_and_more", "message"
+    ).format(target="Boiler", interval="Noon", intervals=listed, more="2")
+    assert switches(hass) == ("on", "on")
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_llm_is_told_when_no_title_can_be_asked_for(
+    hass: HomeAssistant, scheduled: MockConfigEntry, language: str
+) -> None:
+    """The intervals of the boiler are titled by punctuation alone, which neither the
+    voice nor a tool can ask for: the refusal says so in the language of the request
+    instead of listing nothing, and the whole schedule is still there to switch."""
+    for interval in list(scheduled.subentries):
+        await retitle_interval(hass, scheduled, interval, "?!")
+    api = await assist_api(hass, language)
+
+    refused = await call_tool(
+        api,
+        "timerify__set_schedule",
+        {"name": "Boiler", "enabled": False, "interval": "Morning"},
+    )
+    whole = await call_tool(
+        api, "timerify__set_schedule", {"name": "Boiler", "enabled": False}
+    )
+
+    assert refused["response_type"] == "error"
+    assert refused["speech"]["plain"]["speech"] == translated(
+        language, "exceptions", "no_interval_titles", "message"
+    ).format(target="Boiler")
+    assert whole["speech_slots"]["count"] == 2
+    assert switches(hass) == ("off", "off")
 
 
 async def test_llm_leaving_the_interval_blank_means_the_whole_schedule(

@@ -50,6 +50,10 @@ MAX_COMMAND_AHEAD: Final = timedelta(days=7)
 MAX_DELAY_MINUTES: Final = 10080
 """The longest delay of a pending command: a week, in minutes."""
 
+MAX_LISTED_INTERVALS: Final = 5
+"""How many interval titles a refusal names when it tells which ones can be asked for:
+it is spoken and read by an agent, and the rest are counted, not recited."""
+
 SERVICE_CALL_TIMEOUT: Final = timedelta(seconds=30)
 """How long a turn_on or turn_off call may take before it counts as failed."""
 

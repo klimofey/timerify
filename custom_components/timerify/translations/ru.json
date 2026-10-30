@@ -471,6 +471,9 @@
     "unknown_interval": {
       "message": "{target}: в расписании нет интервала «{interval}». Есть: {intervals}."
     },
+    "unknown_interval_and_more": {
+      "message": "{target}: в расписании нет интервала «{interval}». Первые интервалы: {intervals}; и ещё {more}."
+    },
     "no_interval_titles": {
       "message": "{target}: ни один интервал расписания нельзя назвать по заголовку. Сначала дайте интервалам заголовки из букв или цифр."
     },

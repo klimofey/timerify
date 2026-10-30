@@ -69,21 +69,25 @@ intents:
     - sentences:
       - <turn> on [<the>] {timerify_target:name} schedule
       - <turn> [<the>] {timerify_target:name} schedule on
-      - <turn> on the schedule of [<the>] {timerify_target:name}
+      - <turn> on the schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> the schedule (of|for) [<the>] {timerify_target:name} on
       - (enable|resume) [<the>] {timerify_target:name} schedule
-      - (enable|resume) the schedule of [<the>] {timerify_target:name}
-      - <turn> on [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
-      - (enable|resume) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      - (enable|resume) the schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> on [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} on
+      - (enable|resume) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
       slots:
         enabled: true
     - sentences:
       - <turn> off [<the>] {timerify_target:name} schedule
       - <turn> [<the>] {timerify_target:name} schedule off
-      - <turn> off the schedule of [<the>] {timerify_target:name}
+      - <turn> off the schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> the schedule (of|for) [<the>] {timerify_target:name} off
       - (disable|pause) [<the>] {timerify_target:name} schedule
-      - (disable|pause) the schedule of [<the>] {timerify_target:name}
-      - <turn> off [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
-      - (disable|pause) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}
+      - (disable|pause) the schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> off [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} off
+      - (disable|pause) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
       slots:
         enabled: false
 expansion_rules:

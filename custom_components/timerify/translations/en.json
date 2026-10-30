@@ -469,7 +469,10 @@
       "message": "{target} has no schedule. Add an interval to its timer first."
     },
     "unknown_interval": {
-      "message": "{target} has no schedule interval called {interval}."
+      "message": "{target} has no schedule interval called {interval}. Its intervals are {intervals}."
+    },
+    "no_interval_titles": {
+      "message": "{target} has no schedule interval that can be asked for by title. Give its intervals titles with letters or digits first."
     },
     "timer_unloaded": {
       "message": "This timer was unloaded while the call waited, so nothing was changed. Try again once the timer is loaded."

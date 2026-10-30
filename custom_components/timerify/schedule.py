@@ -141,12 +141,34 @@ def interval_title(data: Mapping[str, Any], labels: Mapping[str, str]) -> str:
     return f"{data[CONF_START]}–{data[CONF_END]}, {label}"
 
 
+_DASHES: Final = str.maketrans(
+    dict.fromkeys(
+        "\N{HYPHEN}\N{NON-BREAKING HYPHEN}"
+        "\N{FIGURE DASH}\N{EN DASH}\N{EM DASH}\N{HORIZONTAL BAR}\N{MINUS SIGN}",
+        "-",
+    )
+)
+"""Every dash that a title may be written with, as the hyphen a keyboard has."""
+_YO: Final = "\N{CYRILLIC SMALL LETTER IO}"
+_YE: Final = "\N{CYRILLIC SMALL LETTER IE}"
+"""Russian prints the one for the other, and a speech recogniser does not tell them
+apart."""
+
+
 def title_key(title: str) -> str:
     """What the titles of intervals are compared by when one is meant by what was said
-    or typed: the title as the built-in agent hears it, without punctuation, case and
-    the space around it. So `Morning!` is meant by "morning", and two intervals that
-    carry the same title are meant together."""
-    return remove_punctuation(title).strip().casefold()
+    or typed: the title as the built-in agent hears it, without punctuation and case,
+    with the differences that a keyboard or a speech recogniser does not carry made
+    none. Every dash is a hyphen, a Russian "yo" is a "ye", and a run of space is one
+    space. So `Morning!` is meant by "morning", the `06:30–07:15, Mon–Sun` that an
+    interval is titled by when it is made by `06:30-07:15, Mon-Sun`, and two intervals
+    that carry the same title are meant together.
+
+    A title of nothing but punctuation has the key `""`, which is no title at all: the
+    built-in agent does not know it either.
+    """
+    unpunctuated = remove_punctuation(title).translate(_DASHES)
+    return " ".join(unpunctuated.casefold().replace(_YO, _YE).split())
 
 
 def _weekdays_label(weekdays: list[str], labels: Mapping[str, str]) -> str:

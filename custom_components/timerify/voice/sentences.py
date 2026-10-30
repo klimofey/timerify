@@ -79,17 +79,27 @@ class InvalidSentences(ValueError):
 
 @dataclass(frozen=True)
 class VoiceName:
-    """One way a target, or a schedule interval of its timer, is called: what is said,
-    and what is meant by it."""
+    """One way a target is called: what is said, and what is meant by it."""
 
     spoken: str
     """The name as the built-in agent compares it with what it hears: punctuation
     removed."""
     name: str
-    """The name as Home Assistant shows it, which the intent receives: the title of an
-    interval."""
+    """The name as Home Assistant shows it, which the intent receives."""
     domain: str
-    """The domain of the target, which an interval is the schedule of as well."""
+    """The domain of the target."""
+
+
+@dataclass(frozen=True)
+class VoiceTitle:
+    """One way a schedule interval is called: what is said, and what is meant by it.
+    A title belongs to no domain: timers of any domain may have an interval of it."""
+
+    spoken: str
+    """The title as the built-in agent compares it with what it hears: punctuation
+    removed."""
+    title: str
+    """The title as the interval has it, which the intent receives."""
 
 
 @dataclass(frozen=True)
@@ -172,7 +182,7 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
 
 
 @callback
-def interval_names(hass: HomeAssistant) -> list[VoiceName]:
+def interval_names(hass: HomeAssistant) -> list[VoiceTitle]:
     """Every title the built-in agent would know the schedule intervals of the timers
     by, each once however many timers have an interval of that title.
 
@@ -180,16 +190,15 @@ def interval_names(hass: HomeAssistant) -> list[VoiceName]:
     what is meant is the title as it is, which names the interval to the timer. A title
     that is nothing but punctuation is left out: it would match anywhere.
     """
-    names: dict[tuple[str, str], VoiceName] = {}
+    titles: dict[tuple[str, str], VoiceTitle] = {}
     for entry in loaded_timers(hass):
-        domain = split_entity_id(entry.runtime_data.target_entity_id)[0]
         for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
             spoken = spoken_form(subentry.title)
             if spoken:
-                names.setdefault(
-                    (spoken, subentry.title), VoiceName(spoken, subentry.title, domain)
+                titles.setdefault(
+                    (spoken, subentry.title), VoiceTitle(spoken, subentry.title)
                 )
-    return list(names.values())
+    return list(titles.values())
 
 
 @callback
@@ -221,7 +230,7 @@ def build(
     sources: Mapping[str, Any],
     names: Sequence[VoiceName],
     settings: VoiceSettingValues = NO_SETTING_VALUES,
-    intervals: Sequence[VoiceName] = (),
+    intervals: Sequence[VoiceTitle] = (),
 ) -> dict[str, Any]:
     """The sentences of `sources` with the lists of what the targets are called, what
     the schedule intervals are called and what can be turned on in filled in.
@@ -246,7 +255,7 @@ def build(
     }
     lists[LIST_INTERVAL] = {
         "values": [
-            {"in": escape_template(interval.spoken), "out": interval.name}
+            {"in": escape_template(interval.spoken), "out": interval.title}
             for interval in intervals
         ]
     }

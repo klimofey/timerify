@@ -58,6 +58,7 @@ from ..helpers import (
     advance,
     restart,
     retitle_interval,
+    state_of,
 )
 from .helpers import (
     add_voice_entry,
@@ -837,43 +838,47 @@ async def test_title_left_empty_by_punctuation_is_skipped(
     assert listed(hass, "en", LIST_INTERVAL) == [interval_values("Evening")]
 
 
-@pytest.mark.parametrize(
-    "title",
-    [
-        "Morning (weekdays)",
-        "Lamp [2]",
-        "A|B lamp",
-        "<Hall>",
-        "Tea {pot}",
-        "me@home",
-        "Back\\slash",
-        "A\\(b",
-        "Morning!",
-        "06:30–07:15, Mon–Sun",
-    ],
-)
+AWKWARD_TITLES = [
+    "Morning (weekdays)",
+    "Lamp [2]",
+    "A|B lamp",
+    "<Hall>",
+    "Tea {pot}",
+    "me@home",
+    "Back\\slash",
+    "A\\(b",
+    "Morning!",
+    "06:30–07:15, Mon–Sun",
+]
+"""Titles with a character that Home Assistant reads as part of a sentence template, or
+that its agent cleans away when it hears the title."""
+
+
 @pytest.mark.usefixtures("assist")
 async def test_titles_are_listed_so_that_they_match_as_said(
-    hass: HomeAssistant,
-    fake_target: FakeTarget,
-    setup_target: SetupTarget,
-    title: str,
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
     """A title with a character that Home Assistant reads as part of a sentence
-    template is written so that it is read as the title; the file loads and the title,
-    said as it is, reaches the timer and switches its interval."""
+    template is written so that it is read as the title: the file with all of them
+    loads, and each title, said as it is, reaches the timer and switches its own
+    interval and no other."""
     boiler = await setup_target()
-    await add_titled_interval(hass, boiler, title)
+    for index, title in enumerate(AWKWARD_TITLES):
+        await add_titled_interval(hass, boiler, title, start=f"06:{index:02d}")
 
     await add_voice_entry(hass, languages=("en",))
 
-    assert [value["out"] for value in listed(hass, "en", LIST_INTERVAL)] == [title]
-    response = await converse(hass, f"turn off the {title} schedule of the boiler")
-    assert response.intent is not None
-    assert response.intent.intent_type == "TimerifySetSchedule"
-    assert boiler.runtime_data.snapshot.disabled_intervals == frozenset(
-        boiler.subentries
+    assert [value["out"] for value in listed(hass, "en", LIST_INTERVAL)] == (
+        AWKWARD_TITLES
     )
+    for index, title in enumerate(AWKWARD_TITLES):
+        response = await converse(hass, f"turn off the {title} schedule of the boiler")
+
+        assert reached(response) == "TimerifySetSchedule", title
+        assert [
+            state_of(hass, f"switch.boiler_schedule_06_{other:02d}_23_00_mon_sun")
+            for other in range(len(AWKWARD_TITLES))
+        ] == ["off"] * (index + 1) + ["on"] * (len(AWKWARD_TITLES) - index - 1), title
 
 
 @pytest.mark.usefixtures("assist")

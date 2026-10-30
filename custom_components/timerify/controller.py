@@ -9,7 +9,7 @@ the next event is looked at.
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
@@ -478,17 +478,19 @@ class TargetController:
         so that no other command comes between them.
 
         Raises ServiceValidationError, before anything is switched, when the timer has
-        no interval (`no_schedule`) and when none has the title (`unknown_interval`). A
+        no interval (`no_schedule`) and when none has the title (`unknown_interval`,
+        which lists the titles that can be asked for; `no_interval_titles` when there
+        is none, every title being nothing but punctuation). A
         timer that is unloaded part-way says so (`timer_unloaded`); the intervals
         switched until then stay switched.
         """
         async with self._lock:
             self._raise_if_unloaded()
-            titles = {
+            every_title = {
                 interval_id: self._entry.subentries[interval_id].title
                 for interval_id in self._intervals
             }
-            if not titles:
+            if not every_title:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="no_schedule",
@@ -496,26 +498,44 @@ class TargetController:
                         "target": target_name(self._hass, self.target_entity_id)
                     },
                 )
+            titles = every_title
             if interval is not None:
                 wanted = title_key(interval)
                 titles = {
                     interval_id: title
-                    for interval_id, title in titles.items()
-                    if title_key(title) == wanted
+                    for interval_id, title in every_title.items()
+                    if wanted and title_key(title) == wanted
                 }
                 if not titles:
-                    raise ServiceValidationError(
-                        translation_domain=DOMAIN,
-                        translation_key="unknown_interval",
-                        translation_placeholders={
-                            "target": target_name(self._hass, self.target_entity_id),
-                            "interval": interval,
-                        },
-                    )
+                    raise self._unknown_interval(interval, every_title.values())
             for interval_id in titles:
                 self._raise_if_unloaded()
                 await self._async_set_interval_enabled_locked(interval_id, enabled)
             return tuple(titles.values())
+
+    def _unknown_interval(
+        self, asked: str, titles: Iterable[str]
+    ) -> ServiceValidationError:
+        """The refusal of a title that no interval has. It lists the titles that can be
+        asked for, so that the one who asked can ask again: those that are not nothing
+        but punctuation, each once."""
+        target = target_name(self._hass, self.target_entity_id)
+        askable = [title for title in dict.fromkeys(titles) if title_key(title)]
+        if not askable:
+            return ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_interval_titles",
+                translation_placeholders={"target": target},
+            )
+        return ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="unknown_interval",
+            translation_placeholders={
+                "target": target,
+                "interval": asked,
+                "intervals": ", ".join(f'"{title}"' for title in askable),
+            },
+        )
 
     async def _async_set_interval_enabled_locked(
         self, interval_id: str, enabled: bool

@@ -87,25 +87,32 @@ intents:
     data:
       # The whole schedule of a device, or the interval of a title: on and off are
       # separate blocks, each fixing what it means. An interval is said by its title,
-      # which timerify_interval holds.
+      # which timerify_interval holds. The schedule "of" and "for" a device are one, and
+      # on or off comes before the noun or after it, since a phrasing that is left out
+      # here is not left alone: the built-in agent takes "turn off the schedule for the
+      # boiler" for a turn off of the boiler.
       - sentences:
           - "<turn> on [<the>] {timerify_target:name} schedule"
           - "<turn> [<the>] {timerify_target:name} schedule on"
-          - "<turn> on the schedule of [<the>] {timerify_target:name}"
+          - "<turn> on the schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} on"
           - "(enable|resume) [<the>] {timerify_target:name} schedule"
-          - "(enable|resume) the schedule of [<the>] {timerify_target:name}"
-          - "<turn> on [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
-          - "(enable|resume) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+          - "(enable|resume) the schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} on"
+          - "(enable|resume) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: true
       - sentences:
           - "<turn> off [<the>] {timerify_target:name} schedule"
           - "<turn> [<the>] {timerify_target:name} schedule off"
-          - "<turn> off the schedule of [<the>] {timerify_target:name}"
+          - "<turn> off the schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} off"
           - "(disable|pause) [<the>] {timerify_target:name} schedule"
-          - "(disable|pause) the schedule of [<the>] {timerify_target:name}"
-          - "<turn> off [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
-          - "(disable|pause) [<the>] {timerify_interval:interval} schedule of [<the>] {timerify_target:name}"
+          - "(disable|pause) the schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} off"
+          - "(disable|pause) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: false
 # How long: hours and minutes, each alone or both, or a phrase such as "half an hour";

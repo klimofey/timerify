@@ -62,18 +62,18 @@ intents:
     data:
     - sentences:
       - <timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
-      - <timerify_schedule_verb> расписание {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      - <timerify_schedule_verb> (расписание|интервал) {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
       slots:
         enabled: true
       expansion_rules:
         timerify_schedule_verb: (включи|включить|активируй|возобнови|возобновить)
     - sentences:
       - <timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
-      - <timerify_schedule_verb> расписание {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
+      - <timerify_schedule_verb> (расписание|интервал) {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}
       slots:
         enabled: false
       expansion_rules:
-        timerify_schedule_verb: (выключи|выключить|отключи|отключить|останови|остановить|приостанови|приостановить)
+        timerify_schedule_verb: (выключи|выключить|отключи|отключить|деактивируй|останови|остановить|приостанови|приостановить)
 expansion_rules:
   timerify_turn_on: (включи|запусти)[ть]
   timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})

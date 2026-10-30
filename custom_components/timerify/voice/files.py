@@ -45,6 +45,7 @@ from .sentences import (
     InvalidSentences,
     VoiceName,
     VoiceSettingValues,
+    VoiceTitle,
     build,
     interval_names,
     load_sources,
@@ -111,7 +112,7 @@ def _write_if_changed(
     language: str,
     names: Sequence[VoiceName],
     settings: VoiceSettingValues,
-    intervals: Sequence[VoiceName],
+    intervals: Sequence[VoiceTitle],
 ) -> WriteResult:
     """Build the sentences of `language`, check that the built-in agent can read the
     text that would be written, and write it to `path` unless it is what is there

@@ -475,12 +475,37 @@ type ProvideTarget = Callable[..., FakeTarget]
 
 
 @pytest.fixture
-async def provide_target(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory
-) -> ProvideTarget:
+def clock_at_start(freezer: FrozenDateTimeFactory) -> None:
+    """Freeze the clock at `START`, where every entity test starts."""
+    freezer.move_to(START)
+
+
+@pytest.fixture
+def hass_access_token(
+    hass: HomeAssistant, clock_at_start: None, hass_access_token: str
+) -> str:
+    """The access token of the admin, made with the clock at `START`.
+
+    A token is stamped with the clock, and one made before the clock goes back to
+    `START` is not valid yet, so a websocket test would be refused with `auth_invalid`
+    or not, depending on the order of its arguments.
+    """
+    return hass_access_token
+
+
+@pytest.fixture
+def hass_read_only_access_token(
+    hass: HomeAssistant, clock_at_start: None, hass_read_only_access_token: str
+) -> str:
+    """The access token of the user who is not an admin, made with the clock at
+    `START`; see `hass_access_token`."""
+    return hass_read_only_access_token
+
+
+@pytest.fixture
+async def provide_target(hass: HomeAssistant, clock_at_start: None) -> ProvideTarget:
     """Make an entity the way another integration provides it, switched off, at
     `START`: `provide(entity_id, services, device_name=..., ...)`."""
-    freezer.move_to(START)
     # Timerify adds switches, so the switch component runs whenever it does. It sets its
     # services up with itself, and would replace those of a fake that came before it.
     assert await async_setup_component(hass, "switch", {})

@@ -11,13 +11,18 @@ The answer is configuration, read from the entity registry and the entry, never 
 the running timer. The card asks again whenever the number comes back, which is while
 its entry is still starting after a restart or a reload, so the answer is the same
 whatever state the entry is in; the card shows a timer that did not start by its states.
-The command only reads, and tells nothing a user's states do not, so it is open to
-every user, not only to admins.
+The command only reads and is open to every user, not only to admins, but it tells a
+user only what the user may read, as the commands of Home Assistant that are about
+entities do: it refuses a user who may not read the number it is asked about, the target
+or one of the two sensors, and leaves out the interval switches the user may not read.
 """
 
 from typing import Any, Final, Literal, TypedDict
 
 import probatio
+from homeassistant.auth.models import User
+from homeassistant.auth.permissions import filter_entity_ids_by_permission
+from homeassistant.auth.permissions.const import POLICY_READ
 from homeassistant.components.websocket_api import async_register_command
 from homeassistant.components.websocket_api.connection import ActiveConnection
 from homeassistant.components.websocket_api.const import ERR_NOT_FOUND
@@ -25,6 +30,7 @@ from homeassistant.components.websocket_api.decorators import websocket_command
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
@@ -99,40 +105,61 @@ def _handle_timer(
     connection: ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Answer which timer the "Run for" number `entity_id` belongs to."""
+    """Answer which timer the "Run for" number `entity_id` belongs to.
+
+    The permission to read the number is checked before anything is looked up, so that
+    a user who may not read an entity cannot tell by the answer whether it is a timer's.
+    """
     entity_id: str = msg["entity_id"]
-    if (info := _timer_of_number(hass, entity_id)) is None:
-        connection.send_error(
-            msg["id"],
-            ERR_NOT_FOUND,
-            f"{entity_id} is not the Run for number of a Timerify timer",
-        )
+    user = connection.user
+    _require_read(user, entity_id)
+    try:
+        info = _timer_of_number(hass, entity_id)
+    except _TimerNotFound as err:
+        connection.send_error(msg["id"], ERR_NOT_FOUND, str(err))
         return
+    for told in (info["target"], info["ends_at"], info["next_command"]):
+        _require_read(user, told)
+    readable = set(
+        filter_entity_ids_by_permission(
+            user, (interval["entity_id"] for interval in info["intervals"]), POLICY_READ
+        )
+    )
+    info["intervals"] = [i for i in info["intervals"] if i["entity_id"] in readable]
     connection.send_result(msg["id"], info)
 
 
-def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo | None:
+def _require_read(user: User, entity_id: str) -> None:
+    """Refuse the whole answer to a user who may not read `entity_id`."""
+    if not user.permissions.check_entity(entity_id, POLICY_READ):
+        raise Unauthorized(entity_id=entity_id, permission=POLICY_READ)
+
+
+class _TimerNotFound(Exception):
+    """There is no timer to tell of; the message says why."""
+
+
+def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
     """What the card needs about the timer whose "Run for" number is `entity_id`, from
     the registry and the entry alone, whatever state the entry is in.
 
-    None when `entity_id` is not such a number, when it belongs to the voice settings
-    (which are not a timer), or when the timer cannot be told of: it has no target to
-    resolve, or one of its two sensors is not in the registry. A timer that was set up
-    has both sensors.
+    Raises `_TimerNotFound` when `entity_id` is not such a number (the voice settings
+    have none), or when the timer cannot be told of: it has no target to resolve, or one
+    of its two sensors is not in the registry. A timer that was set up has both sensors.
     """
     registry = er.async_get(hass)
-    entry = _entry_of_number(hass, registry, entity_id)
-    if entry is None:
-        return None
+    if (entry := _entry_of_number(hass, registry, entity_id)) is None:
+        raise _TimerNotFound(
+            f"{entity_id} is not the Run for number of a Timerify timer"
+        )
     target = er.async_resolve_entity_id(registry, entry.options[CONF_TARGET])
-    ends_at = registry.async_get_entity_id(
-        Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, KEY_ENDS_AT)
-    )
-    next_command = registry.async_get_entity_id(
-        Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, KEY_NEXT_COMMAND)
-    )
-    if target is None or ends_at is None or next_command is None:
-        return None
+    if target is None:
+        raise _TimerNotFound(
+            f"The target of the Timerify timer of {entity_id}"
+            " is not in the entity registry"
+        )
+    ends_at = _sensor(registry, entry, entity_id, KEY_ENDS_AT)
+    next_command = _sensor(registry, entry, entity_id, KEY_NEXT_COMMAND)
     mode: Mode = entry.options[CONF_MODE]
     on_rule = behaviour_for(target).on_rule
     return TimerInfo(
@@ -162,6 +189,25 @@ def _entry_of_number(
     if number.unique_id != timer_unique_id(entry.entry_id, KEY_RUN_FOR):
         return None
     return entry
+
+
+def _sensor(
+    registry: er.EntityRegistry, entry: ConfigEntry, number: str, key: str
+) -> str:
+    """The entity id of the sensor of the timer that has the key `key`, which every
+    timer that was set up has.
+
+    Raises `_TimerNotFound` when the registry has none; `number` is the timer's, for
+    the message.
+    """
+    sensor = registry.async_get_entity_id(
+        Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, key)
+    )
+    if sensor is None:
+        raise _TimerNotFound(
+            f"The Timerify timer of {number} has no {key} sensor in the entity registry"
+        )
+    return sensor
 
 
 def _intervals(registry: er.EntityRegistry, entry: ConfigEntry) -> list[IntervalInfo]:

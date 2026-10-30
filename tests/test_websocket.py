@@ -62,28 +62,21 @@ NO_OFFSET = "2026-01-05T07:00:00"
 
 @pytest.fixture
 async def client(
-    hass: HomeAssistant,
-    provide_target: ProvideTarget,
-    hass_ws_client: WebSocketGenerator,
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
 ) -> MockHAClientWebSocket:
-    """The dashboard's connection, of an admin.
-
-    `provide_target` comes first because it sets the clock to `START`: an access token
-    is stamped with the clock, and one made before the clock goes back to `START` is
-    not valid yet.
-    """
+    """The dashboard's connection, of an admin."""
     return await hass_ws_client(hass)
 
 
 @pytest.fixture
 async def read_only_client(
     hass: HomeAssistant,
-    provide_target: ProvideTarget,
     hass_ws_client: WebSocketGenerator,
     hass_read_only_user: MockUser,
     hass_read_only_access_token: str,
 ) -> MockHAClientWebSocket:
-    """The dashboard's connection, of a user who is not an admin; see `client`."""
+    """The dashboard's connection, of a user who is not an admin: the read-only group,
+    which may read every entity."""
     assert not hass_read_only_user.is_admin
     return await hass_ws_client(hass, hass_read_only_access_token)
 
@@ -171,8 +164,7 @@ async def test_command_waits_for_a_websocket_api_that_comes_later(
     setup_target: SetupTarget,
 ) -> None:
     """Timerify does not depend on the websocket API, so a timer may be set up before
-    it: the command is there when the first connection comes. (`fake_target` is before
-    `hass_ws_client` in the arguments for the reason given at `client`.)"""
+    it: the command is there when the first connection comes."""
     entry = await setup_target()
     assert "websocket_api" not in hass.config.components
     client = await hass_ws_client(hass)
@@ -311,11 +303,97 @@ async def test_user_who_is_not_an_admin_can_ask(
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """Every dashboard user sees the card, so every user may ask what it needs: the
-    answer reveals nothing their states do not."""
+    """Every dashboard user sees the card, so every user may ask what it needs."""
     entry = await setup_target()
 
     assert await found(read_only_client, NUMBER) == told_about(entry)
+
+
+# --- Telling a user only what the user may read -------------------------------------
+
+
+UNAUTHORIZED = {"code": "unauthorized", "message": "Unauthorized"}
+"""The refusal for a user whose policy does not let it read an entity."""
+
+
+def may_read_only(user: MockUser, *entity_ids: str) -> None:
+    """Give `user` a policy that lets it read these entities and no others."""
+    user.mock_policy(
+        {"entities": {"entity_ids": {entity_id: True for entity_id in entity_ids}}}
+    )
+
+
+async def test_user_who_may_read_every_entity_of_the_answer_is_told(
+    hass: HomeAssistant,
+    read_only_client: MockHAClientWebSocket,
+    hass_read_only_user: MockUser,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A policy that names the entities the card shows is as good as the whole house."""
+    entry = await setup_target()
+    evening = await add_interval(hass, entry, start="18:00", end="19:00")
+    await retitle_interval(hass, entry, evening, "Evening")
+    may_read_only(hass_read_only_user, NUMBER, TARGET_ID, SENSOR, NEXT, EVENING_SWITCH)
+
+    assert await found(read_only_client, NUMBER) == told_about(
+        entry, intervals=[{"entity_id": EVENING_SWITCH, "title": "Evening"}]
+    )
+
+
+@pytest.mark.parametrize("asked", [NUMBER, SENSOR, "number.nothing_here"])
+async def test_user_who_may_not_read_the_entity_asked_about_is_refused(
+    read_only_client: MockHAClientWebSocket,
+    hass_read_only_user: MockUser,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    asked: str,
+) -> None:
+    """The answer is refused before anything is looked up, so a user cannot tell
+    whether an entity it may not read is a timer's number: it is not told "not found"
+    for one that is not."""
+    await setup_target()
+    may_read_only(hass_read_only_user, *{TARGET_ID, SENSOR, NEXT} - {asked})
+
+    assert await refused(read_only_client, asked) == UNAUTHORIZED
+
+
+@pytest.mark.parametrize("denied", [TARGET_ID, SENSOR, NEXT])
+async def test_user_who_may_not_read_a_part_of_the_answer_is_refused(
+    read_only_client: MockHAClientWebSocket,
+    hass_read_only_user: MockUser,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    denied: str,
+) -> None:
+    """The card cannot work without the target and the two sensors, and an answer
+    without one would break what it is promised, so the user is refused the whole
+    answer, not told the ids of entities it may not read."""
+    await setup_target()
+    may_read_only(hass_read_only_user, *{NUMBER, TARGET_ID, SENSOR, NEXT} - {denied})
+
+    assert await refused(read_only_client, NUMBER) == UNAUTHORIZED
+
+
+async def test_interval_the_user_may_not_read_is_left_out(
+    hass: HomeAssistant,
+    read_only_client: MockHAClientWebSocket,
+    hass_read_only_user: MockUser,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The intervals are a list, and a list holds what the user may read: the others
+    are still there."""
+    entry = await setup_target()
+    evening = await add_interval(hass, entry, start="18:00", end="19:00")
+    night = await add_interval(hass, entry, start="20:00", end="21:00")
+    await retitle_interval(hass, entry, evening, "Evening")
+    await retitle_interval(hass, entry, night, "Night")
+    may_read_only(hass_read_only_user, NUMBER, TARGET_ID, SENSOR, NEXT, NIGHT_SWITCH)
+
+    result = await found(read_only_client, NUMBER)
+
+    assert result["intervals"] == [{"entity_id": NIGHT_SWITCH, "title": "Night"}]
 
 
 # --- What is not a timer's number ---------------------------------------------------
@@ -465,24 +543,39 @@ async def test_timer_whose_target_cannot_be_resolved_is_not_found(
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.SETUP_ERROR
 
-    assert await refused(client, NUMBER) == not_a_timer(NUMBER)
+    assert await refused(client, NUMBER) == {
+        "code": "not_found",
+        "message": (
+            f"The target of the Timerify timer of {NUMBER}"
+            " is not in the entity registry"
+        ),
+    }
 
 
-@pytest.mark.parametrize("sibling", [SENSOR, NEXT])
+@pytest.mark.parametrize(
+    ("sibling", "key"), [(SENSOR, "ends_at"), (NEXT, "next_command")]
+)
 async def test_missing_sibling_is_not_found(
     hass: HomeAssistant,
     client: MockHAClientWebSocket,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
     sibling: str,
+    key: str,
 ) -> None:
     """A timer that was set up has both sensors, so a number without one is not
-    answered with a timer the card cannot read."""
+    answered with a timer the card cannot read, and the refusal says which is
+    missing: the number is a timer's."""
     entry = await setup_target()
     await hass.config_entries.async_unload(entry.entry_id)
     er.async_get(hass).async_remove(sibling)
 
-    assert await refused(client, NUMBER) == not_a_timer(NUMBER)
+    assert await refused(client, NUMBER) == {
+        "code": "not_found",
+        "message": (
+            f"The Timerify timer of {NUMBER} has no {key} sensor in the entity registry"
+        ),
+    }
 
 
 # --- A timer that changes -----------------------------------------------------------

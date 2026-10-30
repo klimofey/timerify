@@ -435,6 +435,12 @@
     "setting_not_an_option": {
       "message": "{value} is not a valid {setting}: it must be one of {options}."
     },
+    "duration_out_of_range": {
+      "message": "A timer runs for 1 min to {max_hours} h."
+    },
+    "voice_setting_not_supported": {
+      "message": "{target} cannot be turned on with that setting."
+    },
     "delay_or_at": {
       "message": "Give the command either a delay or a time, not both and not neither."
     },

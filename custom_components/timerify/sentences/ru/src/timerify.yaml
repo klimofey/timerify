@@ -4,7 +4,11 @@
 #
 # The list timerify_target is empty here: the names of the devices that have a timer are
 # put into it, either by the Voice settings entry of Timerify, which writes this file
-# and the names to custom_sentences/ru/timerify.yaml, or by hand, as the README says.
+# and the names to custom_sentences/ru/timerify.yaml, or by hand, as the README says. So
+# are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
+# mode of a thermostat, the preset of a fan, the mode of a humidifier), and
+# timerify_hvac_mode, which the Voice settings entry cuts down to the HVAC modes that
+# the devices have.
 #
 # A name cannot be declined, so the sentences put it where the nominative is natural,
 # and an answer starts with it, followed by a colon.
@@ -17,8 +21,77 @@ intents:
           - "через сколько (выключится|отключится) {timerify_target:name}"
           - "когда (выключится|отключится) {timerify_target:name}"
           - "сколько [ещё|еще] будет работать {timerify_target:name}"
+  TimerifyRun:
+    data:
+      - sentences:
+          - "<timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]"
+          - "(поставь|установи|заведи) таймер {timerify_target:name} на <timerify_duration>"
+  TimerifyAddTime:
+    data:
+      - sentences:
+          - "(добавь|прибавь|накинь) [ещё|еще] <timerify_duration> (к таймеру|таймеру|к|для) {timerify_target:name}"
+          - "(ещё|еще) <timerify_duration> (к таймеру|таймеру|для) {timerify_target:name}"
+          - "продли [таймер] {timerify_target:name} на <timerify_duration>"
+  TimerifyStop:
+    data:
+      - sentences:
+          - "(останови|отмени|сбрось|выключи|отключи) таймер [у|на|для] {timerify_target:name}"
+# How long: hours and minutes, each alone or both, or a phrase such as "полчаса".
+expansion_rules:
+  timerify_turn_on: "(включи|запусти)[ть]"
+  timerify_duration: "(<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_hours_part: "{timerify_hours:hours} час[а|ов]"
+  timerify_minutes_part: "{timerify_minutes:minutes} минут[у|ы]"
+# What to turn a device on with, in any order, each part left out when it is not wanted:
+# an HVAC mode, a temperature, a percentage, and a mode of the device.
+  timerify_settings: "([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])"
+  timerify_hvac_part: "[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}"
+  timerify_temperature_part: "[на] {timerify_temperature:temperature} [градус[а|ов]]"
+  timerify_percent_part: "[на] {timerify_percent:percent} процент[а|ов]"
+  timerify_mode_part: "[(в режиме|режим|вентилятор)] {timerify_mode:mode}"
 lists:
   timerify_target:
+    values: []
+  timerify_hours:
+    range:
+      from: 1
+      to: 24
+  timerify_minutes:
+    range:
+      from: 1
+      to: 1440
+  timerify_temperature:
+    range:
+      from: 1
+      to: 100
+      fractions: halves
+  timerify_percent:
+    range:
+      from: 1
+      to: 100
+  timerify_duration_words:
+    values:
+      - in: "час"
+        out: 60
+      - in: "полчаса"
+        out: 30
+      - in: "полтора часа"
+        out: 90
+  timerify_hvac_mode:
+    values:
+      - in: "(охлаждени(е|я)|холод)"
+        out: cool
+      - in: "(обогрев|нагрев|отоплени(е|я)|тепло)"
+        out: heat
+      - in: "(осушени(е|я)|сушка)"
+        out: dry
+      - in: "(вентиляци(я|и)|только вентилятор)"
+        out: fan_only
+      - in: "(авто|автоматическ(ий|и))"
+        out: auto
+      - in: "(тепло и холод|обогрев и охлаждение|нагрев и охлаждение)"
+        out: heat_cool
+  timerify_mode:
     values: []
 # An answer calls the macros of macros.jinja by name.
 responses:
@@ -45,3 +118,9 @@ responses:
         {%- else -%}
           {{ slots.target }}: выключено, таймера нет.
         {%- endif -%}
+    TimerifyRun:
+      default: "{{ timer_now(slots) }}"
+    TimerifyAddTime:
+      default: "{{ timer_now(slots) }}"
+    TimerifyStop:
+      default: "{{ timer_now(slots) }}"

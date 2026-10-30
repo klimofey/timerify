@@ -8,12 +8,14 @@ result. A rule (a bound, a past time, a setting the target cannot take) lives in
 controller, never in a handler.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
-from typing import Any, ClassVar, final, override
+from typing import Any, ClassVar, Final, final, override
 
 import probatio
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import intent
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
@@ -22,7 +24,8 @@ from homeassistant.util import language as language_util
 from ..const import DOMAIN, VOICE_LANGUAGES, is_voice_options
 from ..controller import TimerifyConfigEntry
 from ..core import remaining_minutes
-from ..domains import actual_state
+from ..domains import actual_state, voice_settings
+from ..services import SETTINGS_SCHEMA
 from ..target import target_name
 
 DEFAULT_LANGUAGE = "en"
@@ -45,6 +48,77 @@ def whole_slot(value: float) -> int:
     if value < 0:
         raise probatio.Invalid("expected a number that is not negative")
     return int(value)
+
+
+def number_slot(value: float) -> float:
+    """A number a person or an agent gave for a setting, as it is, whole or not: the
+    temperature of a thermostat, the brightness of a light.
+
+    Nothing is converted, and a boolean passes as the number it is to Python: whether
+    `true` is a brightness, and whether 2.5 is a speed, is for `validate_settings` to
+    say, once, for every way in. The type hint is what the tool's parameter is
+    described by: a number.
+    """
+    if not isinstance(value, int | float):
+        raise probatio.Invalid("expected a number")
+    return value
+
+
+SETTING_SLOTS: Final[dict[Any, Any]] = {
+    probatio.Optional(str(marker)): (
+        cv.string if validator is cv.string else number_slot
+    )
+    for marker, validator in SETTINGS_SCHEMA.items()
+}
+"""The settings a target can be turned on with, as the slots of a sentence or of a tool,
+under the names the services give them. The services decide which settings there are;
+the slots only give the values their types, and `validate_settings` judges them."""
+
+PERCENT_SLOT: Final[dict[Any, Any]] = {probatio.Optional("percent"): number_slot}
+"""The slot that only sentences have besides the settings: "at 40 percent", which means
+the brightness of a light, the speed of a fan or the humidity of a humidifier,
+whichever the target has. Its companion, `mode`, is a setting of the services too."""
+
+_MEANINGS: Final = ("percent", "mode")
+"""The slots that mean whichever setting the target's domain has for them."""
+
+
+def duration_of(slots: Mapping[str, Any], prefix: str = "") -> int | None:
+    """The minutes that the slots `<prefix>hours` and `<prefix>minutes` say together;
+    None when neither is given."""
+    hours = slots.get(f"{prefix}hours")
+    minutes = slots.get(f"{prefix}minutes")
+    if hours is None and minutes is None:
+        return None
+    return 60 * (0 if hours is None else hours["value"]) + (
+        0 if minutes is None else minutes["value"]
+    )
+
+
+def settings_of(
+    hass: HomeAssistant, entry: TimerifyConfigEntry, slots: Mapping[str, Any]
+) -> dict[str, Any]:
+    """What the slots ask the target to be turned on with: the settings under their own
+    names, and what `percent` and `mode` mean for this target.
+
+    A setting asked for by its own name wins over the same setting asked for by
+    meaning. Whether the target takes the settings is not judged here.
+
+    Raises ServiceValidationError (`voice_setting_not_supported`) for a meaning that the
+    target's domain has no setting for.
+    """
+    named = {
+        key: slots[key]["value"]
+        for marker in SETTING_SLOTS
+        if (key := str(marker)) in slots and key not in _MEANINGS
+    }
+    meant = voice_settings(
+        hass,
+        entry.runtime_data.target_entity_id,
+        percent=slots.get("percent", {}).get("value"),
+        mode=slots.get("mode", {}).get("value"),
+    )
+    return {**meant, **named}
 
 
 def loaded_timers(hass: HomeAssistant) -> list[TimerifyConfigEntry]:
@@ -179,7 +253,12 @@ def timer_slots(
             "ends_at": clock["at"],
             "ends_in_days": clock["in_days"],
         }
-    on = actual_state(hass.states.get(controller.target_entity_id)) == "on"
+    # The target is on without a timer when it is wanted on: a turn-on that the target
+    # has not shown yet counts, and a turn-off that it has not shown yet does not.
+    if snapshot.pending is not None:
+        on = snapshot.pending == "on"
+    else:
+        on = actual_state(hass.states.get(controller.target_entity_id)) == "on"
     return {**slots, "state": "open" if on else "off"}
 
 

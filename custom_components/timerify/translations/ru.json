@@ -435,6 +435,12 @@
     "setting_not_an_option": {
       "message": "Значение {value} не подходит для настройки {setting}. Допустимые значения: {options}."
     },
+    "duration_out_of_range": {
+      "message": "Таймер работает от 1 мин до {max_hours} ч."
+    },
+    "voice_setting_not_supported": {
+      "message": "{target}: включить с такой настройкой нельзя."
+    },
     "delay_or_at": {
       "message": "Укажите для команды либо задержку, либо время: одно из двух."
     },

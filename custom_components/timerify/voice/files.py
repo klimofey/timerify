@@ -43,12 +43,14 @@ from .base import loaded_timers
 from .sentences import (
     InvalidSentences,
     VoiceName,
+    VoiceSettingValues,
     build,
     load_sources,
     read_back,
     render,
     validate,
     voice_names,
+    voice_setting_values,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,7 +105,10 @@ def _first_line(path: Path) -> str | None:
 
 
 def _write_if_changed(
-    path: Path, language: str, names: Sequence[VoiceName]
+    path: Path,
+    language: str,
+    names: Sequence[VoiceName],
+    settings: VoiceSettingValues,
 ) -> WriteResult:
     """Build the sentences of `language`, check that the built-in agent can read the
     text that would be written, and write it to `path` unless it is what is there
@@ -115,7 +120,7 @@ def _write_if_changed(
     first_line = _first_line(path)
     if first_line is not None and first_line != MANAGED_HEADER:
         return WriteResult.FOREIGN
-    text = render(build(load_sources(language), names))
+    text = render(build(load_sources(language), names, settings))
     validate(language, read_back(text))
     if first_line is not None and path.read_text("utf-8", errors="replace") == text:
         return WriteResult.UNCHANGED
@@ -241,6 +246,7 @@ class SentenceFiles:
             if language in self._entry.options[CONF_LANGUAGES]
         ]
         names = voice_names(hass)
+        settings = voice_setting_values(hass)
         await self._async_warn_about_manual_installs(chosen)
         changed = False
         try:
@@ -251,7 +257,7 @@ class SentenceFiles:
                     continue
                 try:
                     result = await hass.async_add_executor_job(
-                        _write_if_changed, path, language, names
+                        _write_if_changed, path, language, names, settings
                     )
                 except InvalidSentences as err:
                     _LOGGER.error(

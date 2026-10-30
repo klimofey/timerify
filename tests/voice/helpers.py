@@ -5,17 +5,20 @@ sentence files (`samples`), and the answers are compared with each other, not wi
 words (`without_digits`, `PluralClasses`).
 """
 
+import json
 import re
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from functools import cache
 from pathlib import Path
 from typing import Any, Final
 
 import yaml
+from freezegun.api import FrozenDateTimeFactory
 from hassil.intents import Intents, RangeSlotList, SlotList, TextSlotList
-from hassil.sample import sample_sentence
+from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
 from home_assistant_intents import get_intents
 from homeassistant.components import conversation
@@ -41,10 +44,20 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.voice.sentences import load_sources
 
+from ..helpers import advance_to, local
+
 ASSISTANT: Final = "conversation"
 """The assistant the built-in agent asks Home Assistant about exposure as."""
 NAMES_FILE: Final = "timerify_names.yaml"
 """The file of the manual installation that lists the targets' names."""
+TRANSLATIONS: Final = (
+    Path(__file__).parents[2] / "custom_components" / DOMAIN / "translations"
+)
+"""Where the translations of the integration are."""
+LATE_EVENING: Final = local(date(2026, 1, 5), "23:00")
+"""From this time every count of hours up to 24 ends the next day, and every count of
+minutes below 60 ends the same day, so that answers to different counts differ in
+nothing but the count."""
 
 
 @dataclass(frozen=True)
@@ -179,26 +192,71 @@ def counting(
     }
 
 
+TIMER_CASES: Final[Sequence[Mapping[str, Any]]] = (
+    counting(minutes=1),
+    counting(minutes=2),
+    counting(minutes=5),
+    counting(minutes=21),
+    counting(hours=1),
+    counting(hours=1, minutes=30),
+    counting(hours=2, days=1),
+    counting(hours=5, days=2),
+    counting(hours=2, days=5),
+    counting(hours=2, days=21),
+    {"state": "open", "target": "Boiler"},
+    {"state": "off", "target": "Boiler"},
+)
+"""The slots a handler gives to an answer about a timer, in the cases it tells apart:
+every counting form of the language's plural rules, a day, and the states without a
+countdown."""
+
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
-    ("TimerifyTimeLeft", "default"): (
-        counting(minutes=1),
-        counting(minutes=2),
-        counting(minutes=5),
-        counting(minutes=21),
-        counting(hours=1),
-        counting(hours=1, minutes=30),
-        counting(hours=2, days=1),
-        counting(hours=5, days=2),
-        counting(hours=2, days=5),
-        counting(hours=2, days=21),
-        {"state": "open", "target": "Boiler"},
-        {"state": "off", "target": "Boiler"},
-    ),
+    ("TimerifyTimeLeft", "default"): TIMER_CASES,
+    ("TimerifyRun", "default"): TIMER_CASES,
+    ("TimerifyAddTime", "default"): TIMER_CASES,
+    ("TimerifyStop", "default"): TIMER_CASES,
 }
 """For each answer of the sentence files, by intent and response key, the slots a
-handler gives it in the cases it tells apart: every counting form of the language's
-plural rules, a day, and the states without a countdown. A task that adds an answer adds
-its slots here."""
+handler gives it in the cases it tells apart. A task that adds an answer adds its slots
+here."""
+
+
+def translated(language: str, *path: str) -> str:
+    """A text of `translations/<language>.json`, by its path."""
+    node: Any = json.loads((TRANSLATIONS / f"{language}.json").read_text("utf-8"))
+    for key in path:
+        node = node[key]
+    return str(node)
+
+
+def reached(response: intent.IntentResponse) -> str | None:
+    """The intent the agent handed the sentence to, if it got as far as a handler."""
+    return None if response.intent is None else response.intent.intent_type
+
+
+async def assert_one_form_per_class(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    language: str,
+    classes: PluralClasses,
+    say: Callable[[int, int], Awaitable[str]],
+) -> None:
+    """Within a class of counts the answer `say` gives is the same one (the numbers
+    aside), and between the classes no two answers are alike.
+
+    `say(count, minutes_each)` makes the timer count `count` units of `minutes_each`
+    minutes, and gives the answer. The clock is moved first to where every count ends
+    on the same side of midnight (`LATE_EVENING`).
+    """
+    await advance_to(hass, freezer, LATE_EVENING)
+    forms = []
+    for group in classes.russian if language == "ru" else classes.english:
+        answers = [
+            without_digits(await say(count, classes.minutes_each)) for count in group
+        ]
+        assert len(set(answers)) == 1, answers
+        forms.append(answers[0])
+    assert len(set(forms)) == len(forms), forms
 
 
 def render_response(
@@ -352,25 +410,27 @@ def _one_value(
     names: Sequence[str],
     numbers: Mapping[str, int],
     texts: Mapping[str, str],
+    absent: Collection[str],
 ) -> dict[str, SlotList]:
     """The lists with each cut down to one value, which makes the sampling bounded.
 
     The target list gets the first of `names` (none: no value); a number list gets its
-    number from `numbers`, and is left out, so that a sentence that uses it fails to
-    sample, when `numbers` has none; a text list gets its value from `texts` or else
-    its first.
+    number from `numbers`, and no value when `numbers` has none, so that a sentence, or
+    a way of saying it, that needs the number cannot be said; a text list gets its
+    value from `texts` or else its first, and no value when it is one of `absent`.
     """
     bounded: dict[str, SlotList] = {}
     for name, slot_list in slot_lists.items():
         if name == LIST_TARGET:
             bounded[name] = TextSlotList.from_strings(names[:1], name=name)
         elif isinstance(slot_list, RangeSlotList):
-            if name in numbers:
-                bounded[name] = TextSlotList.from_strings(
-                    [str(numbers[name])], name=name
-                )
+            bounded[name] = TextSlotList.from_strings(
+                [str(numbers[name])] if name in numbers else [], name=name
+            )
         elif isinstance(slot_list, TextSlotList):
-            if name in texts:
+            if name in absent:
+                bounded[name] = TextSlotList(name=name, values=[])
+            elif name in texts:
                 bounded[name] = TextSlotList.from_strings([texts[name]], name=name)
             else:
                 bounded[name] = TextSlotList(name=name, values=slot_list.values[:1])
@@ -386,6 +446,7 @@ def samples(
     names: Sequence[str] = ("Boiler",),
     numbers: Mapping[str, int],
     texts: Mapping[str, str] | None = None,
+    absent: Collection[str] = (),
 ) -> list[str]:
     """Sentences of the intent as a user would say them, a bounded number.
 
@@ -399,7 +460,11 @@ def samples(
     found: list[str] = []
     for data in intents.intents[intent_type].data:
         slot_lists = _one_value(
-            {**intents.slot_lists, **data.slot_lists}, names, numbers, texts or {}
+            {**intents.slot_lists, **data.slot_lists},
+            names,
+            numbers,
+            texts or {},
+            absent,
         )
         rules = {**intents.expansion_rules, **data.expansion_rules}
         for sentence in data.sentences:
@@ -419,3 +484,15 @@ def samples(
                 if first is not None and (text := first.strip()) not in found:
                     found.append(text)
     return found
+
+
+def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:
+    """What the shipped list `list_name` of `language` says for each of its values: the
+    words that mean it, by what it means. The words of a language are read from the
+    sentence files, so that a test can say them without writing them."""
+    slot_list = _intents_of(language).slot_lists[list_name]
+    assert isinstance(slot_list, TextSlotList)
+    return {
+        str(value.value_out): list(sample_expression(value.text_in, language=language))
+        for value in slot_list.values
+    }

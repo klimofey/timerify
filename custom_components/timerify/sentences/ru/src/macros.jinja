@@ -27,3 +27,29 @@
     {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
   {%- endif -%}
 {%- endmacro -%}
+
+{#- Hours and minutes after "на", with their units in the accusative: "1 час и 30 минут",
+    "1 минуту". Nothing for neither. -#}
+{%- macro duration_for(hours, minutes) -%}
+  {%- set parts = [] -%}
+  {%- if hours > 0 -%}
+    {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+  {%- endif -%}
+  {%- if minutes > 0 -%}
+    {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+  {%- endif -%}
+  {{- parts | join(" и ") -}}
+{%- endmacro -%}
+
+{#- Where a timer stands after it was run, extended or stopped, from the slots a handler
+    gives: counting, on without a timer, or off. The name goes first, since it cannot be
+    declined. -#}
+{%- macro timer_now(slots) -%}
+  {%- if slots.state == "counting" -%}
+    {{ slots.target }}: включено на {{ duration_for(slots.left_hours, slots.left_minutes) }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+  {%- elif slots.state == "open" -%}
+    {{ slots.target }}: включено.
+  {%- else -%}
+    {{ slots.target }}: выключено.
+  {%- endif -%}
+{%- endmacro -%}

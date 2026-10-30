@@ -50,6 +50,7 @@ from .const import (
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
+    MAX_MINUTES,
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
@@ -95,6 +96,15 @@ def _local_time(moment: datetime) -> str:
     """`moment` the way the user reads the clock: Home Assistant's time zone, with its
     offset."""
     return dt_util.as_local(moment).isoformat(sep=" ", timespec="seconds")
+
+
+def duration_out_of_range() -> ServiceValidationError:
+    """The refusal of a timer that would run for no time or for more than a day."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="duration_out_of_range",
+        translation_placeholders={"max_hours": str(MAX_MINUTES // 60)},
+    )
 
 
 def _unloaded_error() -> HomeAssistantError:
@@ -208,13 +218,23 @@ class TargetController:
         self._entry.async_on_unload(async_at_started(self._hass, self._handle_started))
 
     async def async_set_minutes(self, minutes: int) -> None:
-        """Count down `minutes` from now; zero stops the timer."""
+        """Count down `minutes` from now; zero stops the timer.
+
+        Raises ServiceValidationError (`duration_out_of_range`), before anything runs,
+        for fewer than 0 minutes or more than a day.
+        """
+        if not 0 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         await self._command(
             lambda now: self._core.set_duration(now, timedelta(minutes=minutes))
         )
 
     async def async_add_minutes(self, minutes: int) -> None:
-        """Move the end of the countdown by `minutes`, which may be negative."""
+        """Move the end of the countdown by `minutes`, which may be negative.
+
+        The end is never more than a day ahead: adding past it runs for a day, whoever
+        asks and however much.
+        """
         await self._command(lambda now: self._core.add(now, timedelta(minutes=minutes)))
 
     async def async_run(
@@ -223,9 +243,11 @@ class TargetController:
         """Switch the target on for `minutes`, or without a duration (the default one
         in strict mode), with `settings` if there are any.
 
-        Raises ServiceValidationError, before anything runs, for settings that the
-        target cannot take.
+        Raises ServiceValidationError, before anything runs, for `minutes` outside 1 to
+        a day (`duration_out_of_range`) and for settings that the target cannot take.
         """
+        if minutes is not None and not 1 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         if minutes is None:
             await self._command(lambda now: self._core.run_open(now, owed))
@@ -250,15 +272,17 @@ class TargetController:
         `settings` what it turns the target on with; an "off" takes neither.
 
         Raises ServiceValidationError, before anything is kept, for an "off" with
-        either, for settings that the target cannot take, for a time that is not
-        ahead or is more than `MAX_COMMAND_AHEAD` ahead, and when the timer already
-        keeps `MAX_COMMANDS`.
+        either, for `minutes` outside 1 to a day (`duration_out_of_range`), for settings
+        that the target cannot take, for a time that is not ahead or is more than
+        `MAX_COMMAND_AHEAD` ahead, and when the timer already keeps `MAX_COMMANDS`.
         """
         if action == "off" and (minutes is not None or settings):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="off_takes_no_duration_or_settings",
             )
+        if minutes is not None and not 1 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         command_id = uuid4().hex
 

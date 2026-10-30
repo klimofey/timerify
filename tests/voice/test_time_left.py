@@ -4,6 +4,7 @@ Every scenario talks to the real built-in agent, with the sentences installed th
 manual way (see `copy_sentences`).
 """
 
+from collections.abc import Awaitable, Callable
 from datetime import date
 
 import pytest
@@ -29,11 +30,14 @@ from ..helpers import (
 )
 from .helpers import (
     HOUR_CLASSES,
+    LATE_EVENING,
     MINUTE_CLASSES,
     PluralClasses,
+    assert_one_form_per_class,
     converse,
     copy_sentences,
     expose,
+    reached,
     samples,
     speech,
     talk,
@@ -42,35 +46,12 @@ from .helpers import (
 )
 
 TIME_LEFT = "TimerifyTimeLeft"
-LATE_EVENING = local(date(2026, 1, 5), "23:00")
-"""From this time every count of hours up to 24 ends the next day, and every count of
-minutes below 60 ends the same day, so that answers to different counts differ in
-nothing but the count."""
 SPRING_FORWARD_EVE = local(date(2026, 3, 26), "23:30")
 """Half an hour before the night the clocks of Jerusalem go forward: a full day later
 the wall clock shows 00:30 two dates on, since that day has 23 hours."""
 RUSSIAN_DAY_COUNTS = ((21, 31), (3, 4, 22, 23), (5, 6, 7, 11, 12, 14, 20, 25))
 """Counts of days of three or more, grouped by the plural form Russian says them
 with (one, few, many)."""
-
-
-@pytest.fixture
-async def boiler(
-    hass: HomeAssistant,
-    fake_target: FakeTarget,
-    assist: None,
-    setup_target: SetupTarget,
-) -> MockConfigEntry:
-    """A timer on the Boiler, which Assist knows by the sentences of the manual
-    installation."""
-    entry = await setup_target()
-    await copy_sentences(hass, ["Boiler"])
-    return entry
-
-
-def reached(response: intent.IntentResponse) -> str | None:
-    """The intent the agent handed the sentence to, if it got as far as a handler."""
-    return None if response.intent is None else response.intent.intent_type
 
 
 async def test_time_left_while_counting(
@@ -340,36 +321,18 @@ async def test_russian_sentences_reach_time_left(
         assert response.intent.slots["name"]["value"] == "Boiler", text
 
 
-async def spoken_for_each_count(
-    hass: HomeAssistant, language: str, counts: tuple[int, ...], minutes_each: int
-) -> list[str]:
-    """What the answer says, without its numbers, after the timer is set to each of
-    `counts` units of `minutes_each` minutes."""
+async def said_after_counting(
+    hass: HomeAssistant, language: str
+) -> Callable[[int, int], Awaitable[str]]:
+    """What the answer to "how long is left" says after the timer is set to a count of
+    units, as `assert_one_form_per_class` asks for it."""
     ask = samples(language, TIME_LEFT, numbers={})[0]
-    answers = []
-    for count in counts:
+
+    async def say(count: int, minutes_each: int) -> str:
         await set_number(hass, NUMBER, count * minutes_each)
-        answers.append(without_digits(speech(await converse(hass, ask, language))))
-    return answers
+        return speech(await converse(hass, ask, language))
 
-
-async def assert_one_form_per_class(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    language: str,
-    classes: PluralClasses,
-) -> None:
-    """Within a class every count is answered the same way (the numbers aside),
-    and between the classes no two answers are alike."""
-    await advance_to(hass, freezer, LATE_EVENING)
-    forms = []
-    for group in classes.russian if language == "ru" else classes.english:
-        answers = await spoken_for_each_count(
-            hass, language, group, classes.minutes_each
-        )
-        assert len(set(answers)) == 1, answers
-        forms.append(answers[0])
-    assert len(set(forms)) == len(forms), forms
+    return say
 
 
 @pytest.mark.parametrize(
@@ -387,7 +350,9 @@ async def test_russian_counts_follow_the_plural_rules(
 ) -> None:
     """Russian counts three ways (one, few, many), by the last digits of the number;
     the tests prove the three-way split, not which word each class takes."""
-    await assert_one_form_per_class(hass, freezer, "ru", classes)
+    say = await said_after_counting(hass, "ru")
+
+    await assert_one_form_per_class(hass, freezer, "ru", classes, say)
 
 
 @pytest.mark.parametrize(
@@ -403,7 +368,9 @@ async def test_english_counts_follow_the_plural_rules(
     boiler: MockConfigEntry,
     classes: PluralClasses,
 ) -> None:
-    await assert_one_form_per_class(hass, freezer, "en", classes)
+    say = await said_after_counting(hass, "en")
+
+    await assert_one_form_per_class(hass, freezer, "en", classes, say)
 
 
 async def test_english_says_one_and_many(

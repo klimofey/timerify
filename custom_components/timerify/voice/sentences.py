@@ -12,7 +12,7 @@ Everything here is blocking, except `voice_names`, and runs in the executor.
 
 import copy
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -32,12 +32,16 @@ from homeassistant.core import HomeAssistant, callback, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
 
-from ..const import LIST_TARGET, MANAGED_HEADER, SENTENCES_DIR
+from ..const import (
+    LIST_HVAC_MODE,
+    LIST_MODE,
+    LIST_TARGET,
+    MANAGED_HEADER,
+    SENTENCES_DIR,
+)
+from ..domains import supported_settings
 from .base import loaded_timers
 
-NAME_LISTS: Final = (LIST_TARGET,)
-"""The lists of the sentences that hold names as people say them, which `validate`
-proves are matched as said."""
 RULE_PREFIX: Final = "timerify_"
 """What the names of the lists and expansion rules the sentences define start with."""
 
@@ -74,10 +78,40 @@ class VoiceName:
     """The domain of the target."""
 
 
+@dataclass(frozen=True)
+class VoiceSettingValues:
+    """The values of the settings that the targets support, which a person may say."""
+
+    hvac_modes: frozenset[str] = frozenset()
+    """The HVAC modes of the targets, as Home Assistant names them."""
+    modes: frozenset[str] = frozenset()
+    """The modes of the targets that "mode" means, as their devices name them: the fan
+    modes of thermostats, the presets of fans, the modes of humidifiers, the operation
+    modes of water heaters."""
+
+
+NO_SETTING_VALUES: Final = VoiceSettingValues()
+"""No target supports a setting that has words."""
+
+
 def spoken_form(name: str) -> str:
     """The name as the built-in agent compares it with what it hears, which is how it
     lists the names of every entity it knows."""
     return remove_punctuation(name).strip()
+
+
+def spoken_mode(mode: str) -> str:
+    """The mode of a device as a person says it: as the device names it, with the
+    underscores of a name such as `eco_plus` for spaces."""
+    return spoken_form(mode.replace("_", " "))
+
+
+NAME_LISTS: Final[Mapping[str, Callable[[str], str]]] = {
+    LIST_TARGET: spoken_form,
+    LIST_MODE: spoken_mode,
+}
+"""The lists of the sentences that hold names as people say them, each with how a value
+is said, which `validate` proves are matched as said."""
 
 
 def escape_template(text: str) -> str:
@@ -122,6 +156,22 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
     return names
 
 
+@callback
+def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
+    """The values of the settings that the targets of the timers support now, from their
+    states or, without one, their registry entries: the same judgement a command is
+    judged by, so that nothing is offered that a target would refuse."""
+    hvac_modes: set[str] = set()
+    modes: set[str] = set()
+    for entry in loaded_timers(hass):
+        for choice in supported_settings(hass, entry.runtime_data.target_entity_id):
+            if choice.name == "hvac_mode":
+                hvac_modes.update(choice.options)
+            elif choice.voice == "mode":
+                modes.update(choice.options)
+    return VoiceSettingValues(frozenset(hvac_modes), frozenset(modes))
+
+
 def load_sources(language: str) -> dict[str, Any]:
     """The shipped sentences of `language` as the built-in agent reads them: every file
     of the language's directory, merged, in the order of their names."""
@@ -131,14 +181,22 @@ def load_sources(language: str) -> dict[str, Any]:
     return sources
 
 
-def build(sources: Mapping[str, Any], names: Sequence[VoiceName]) -> dict[str, Any]:
-    """The sentences of `sources` with the list of the targets' names filled in.
+def build(
+    sources: Mapping[str, Any],
+    names: Sequence[VoiceName],
+    settings: VoiceSettingValues = NO_SETTING_VALUES,
+) -> dict[str, Any]:
+    """The sentences of `sources` with the lists of what the targets are called and
+    can be turned on in filled in.
 
     A name is listed under what is said (`in`, escaped so that it is read as text) and
-    what it means (`out`), with the domain of its target as context.
+    what it means (`out`), with the domain of its target as context. The words for an
+    HVAC mode are those of the sources that mean a mode some target supports; the modes
+    are listed as the devices name them, said with spaces for underscores.
     """
     built = copy.deepcopy(dict(sources))
-    built.setdefault("lists", {})[LIST_TARGET] = {
+    lists = built.setdefault("lists", {})
+    lists[LIST_TARGET] = {
         "values": [
             {
                 "in": escape_template(name.spoken),
@@ -148,7 +206,26 @@ def build(sources: Mapping[str, Any], names: Sequence[VoiceName]) -> dict[str, A
             for name in names
         ]
     }
+    lists[LIST_HVAC_MODE] = {
+        "values": [
+            word
+            for word in lists.get(LIST_HVAC_MODE, {}).get("values", [])
+            if word["out"] in settings.hvac_modes
+        ]
+    }
+    lists[LIST_MODE] = {"values": _mode_values(settings.modes)}
     return built
+
+
+def _mode_values(modes: Iterable[str]) -> list[dict[str, Any]]:
+    """The values of the list of modes: each said as `spoken_mode` says it, and meaning
+    the mode as the device names it. A mode that is nothing but punctuation is left
+    out: it would match anywhere."""
+    return [
+        {"in": escape_template(spoken), "out": mode}
+        for mode in sorted(modes)
+        if (spoken := spoken_mode(mode))
+    ]
 
 
 def validate(language: str, built: Mapping[str, Any]) -> None:
@@ -172,8 +249,8 @@ def validate(language: str, built: Mapping[str, Any]) -> None:
         intents = Intents.from_dict(merged)
         own_intents = [intents.intents[name] for name in built.get("intents", {})]
         _check_references(intents, own_intents)
-        for list_name in NAME_LISTS:
-            _check_names(intents, built, list_name)
+        for list_name, spoken in NAME_LISTS.items():
+            _check_names(intents, built, list_name, spoken)
     except InvalidSentences:
         raise
     except Exception as err:
@@ -256,15 +333,21 @@ def _text_of(expression: Expression) -> str | None:
     return None
 
 
-def _check_names(intents: Intents, built: Mapping[str, Any], list_name: str) -> None:
-    """Every name listed in `list_name` is read as the text that it is said as."""
+def _check_names(
+    intents: Intents,
+    built: Mapping[str, Any],
+    list_name: str,
+    spoken: Callable[[str], str],
+) -> None:
+    """Every name listed in `list_name` is read as the text that it is said as, which
+    is what `spoken` makes of what it means."""
     slot_list = intents.slot_lists[list_name]
     if not isinstance(slot_list, TextSlotList):
         raise InvalidSentences(f"{list_name} is not a list of names")
     for value, parsed in zip(
         built["lists"][list_name]["values"], slot_list.values, strict=True
     ):
-        wanted = normalize_text(spoken_form(value["out"]))
+        wanted = normalize_text(spoken(value["out"]))
         if _text_of(parsed.text_in) != wanted:
             raise InvalidSentences(
                 f"{value['out']!r} would not be matched as said: it is listed as"

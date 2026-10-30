@@ -12,6 +12,8 @@ import pytest
 import yaml
 
 from custom_components.timerify.const import (
+    LIST_HVAC_MODE,
+    LIST_MODE,
     LIST_TARGET,
     MANAGED_HEADER,
     VOICE_LANGUAGES,
@@ -19,6 +21,7 @@ from custom_components.timerify.const import (
 from custom_components.timerify.voice.sentences import (
     InvalidSentences,
     VoiceName,
+    VoiceSettingValues,
     build,
     dump_sentences,
     load_sources,
@@ -197,3 +200,88 @@ def test_a_text_written_as_a_block_is_read_back_as_it_was(text: str) -> None:
 
 def test_the_text_of_a_file_is_read_as_the_built_in_agent_reads_it() -> None:
     assert read_back("name: yes\nother: 'yes'\n") == {"name": True, "other": "yes"}
+
+
+SETTINGS = VoiceSettingValues(
+    hvac_modes=frozenset({"cool", "heat_cool", "fan_only"}),
+    modes=frozenset({"low", "eco_plus", "Turbo (quiet)"}),
+)
+"""What an air conditioner and a fan with strange presets between them can be turned
+on with."""
+
+
+def built_with_settings(language: str = "en") -> dict[str, Any]:
+    """The shipped sentences of `language` with names and `SETTINGS` in them."""
+    return build(load_sources(language), NAMES, SETTINGS)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_the_words_for_a_mode_are_those_of_the_modes_the_targets_have(
+    language: str,
+) -> None:
+    """Of the words of the sources only those that mean a mode some target supports
+    are kept, in the order of the sources."""
+    sources = load_sources(language)
+
+    built = build(sources, NAMES, SETTINGS)
+
+    kept = [value["out"] for value in built["lists"][LIST_HVAC_MODE]["values"]]
+    assert kept == ["cool", "fan_only", "heat_cool"]
+    assert built["lists"][LIST_HVAC_MODE]["values"] == [
+        value
+        for value in sources["lists"][LIST_HVAC_MODE]["values"]
+        if value["out"] in SETTINGS.hvac_modes
+    ]
+
+
+def test_the_modes_of_the_devices_are_listed_as_said_and_as_meant() -> None:
+    """Sorted, so that the file does not change when the devices list them in another
+    order; underscores are spaces when said and template characters are escaped."""
+    built = built_with_settings()
+
+    assert built["lists"][LIST_MODE]["values"] == [
+        {"in": r"Turbo \(quiet\)", "out": "Turbo (quiet)"},
+        {"in": "eco plus", "out": "eco_plus"},
+        {"in": "low", "out": "low"},
+    ]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_the_lists_of_settings_are_empty_without_a_target_that_takes_them(
+    language: str,
+) -> None:
+    built = build(load_sources(language), NAMES)
+
+    assert built["lists"][LIST_HVAC_MODE] == {"values": []}
+    assert built["lists"][LIST_MODE] == {"values": []}
+
+
+def test_a_mode_that_is_nothing_but_punctuation_is_left_out() -> None:
+    """It would match anywhere, as a name of the same kind would."""
+    built = build(
+        load_sources("en"), NAMES, VoiceSettingValues(modes=frozenset({"!!!", "low"}))
+    )
+
+    assert [value["out"] for value in built["lists"][LIST_MODE]["values"]] == ["low"]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_the_shipped_sentences_with_settings_are_fit_to_be_read(language: str) -> None:
+    validate(language, built_with_settings(language))
+
+
+def test_a_mode_that_would_not_be_matched_as_said_is_refused() -> None:
+    built = built_with_settings()
+    built["lists"][LIST_MODE]["values"][2]["in"] = "low|high"
+
+    with pytest.raises(InvalidSentences, match="would not be matched as said"):
+        validate("en", built)
+
+
+def test_building_with_settings_leaves_the_sources_as_they_were() -> None:
+    sources = load_sources("en")
+    before = copy.deepcopy(sources)
+
+    build(sources, NAMES, SETTINGS)
+
+    assert sources == before

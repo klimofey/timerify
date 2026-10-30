@@ -24,3 +24,27 @@
     {{ " in " ~ n ~ " days" }}
   {%- endif -%}
 {%- endmacro -%}
+
+{#- Hours and minutes with their units: "1 hour and 30 minutes". Nothing for neither. -#}
+{%- macro duration(hours, minutes) -%}
+  {%- set parts = [] -%}
+  {%- if hours > 0 -%}
+    {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+  {%- endif -%}
+  {%- if minutes > 0 -%}
+    {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+  {%- endif -%}
+  {{- parts | join(" and ") -}}
+{%- endmacro -%}
+
+{#- Where a timer stands after it was run, extended or stopped, from the slots a handler
+    gives: counting, on without a timer, or off. -#}
+{%- macro timer_now(slots) -%}
+  {%- if slots.state == "counting" -%}
+    {{ slots.target }} runs for {{ duration(slots.left_hours, slots.left_minutes) }}, until {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+  {%- elif slots.state == "open" -%}
+    {{ slots.target }} is on.
+  {%- else -%}
+    {{ slots.target }} is off.
+  {%- endif -%}
+{%- endmacro -%}

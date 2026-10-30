@@ -9,8 +9,79 @@ intents:
       - how long will [<the>] {timerify_target:name} (run|stay on|be on|keep running)
       - (when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut)
         off
+  TimerifyRun:
+    data:
+    - sentences:
+      - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      - <turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]
+      - run [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
+      - set [<the>] {timerify_target:name} timer to <timerify_duration>
+  TimerifyAddTime:
+    data:
+    - sentences:
+      - add (<timerify_duration>|<timerify_more_duration>) to [<the>] {timerify_target:name}
+      - (<timerify_duration> more|<timerify_more_duration>) on [<the>] {timerify_target:name}
+      - extend [<the>] {timerify_target:name} by <timerify_duration>
+  TimerifyStop:
+    data:
+    - sentences:
+      - (stop|cancel) [<the>] {timerify_target:name} timer
+      - (stop|cancel) the timer (on|of) [<the>] {timerify_target:name}
+expansion_rules:
+  timerify_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
+  timerify_more_duration: ({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes}
+    more minute[s])
+  timerify_hours_part: '{timerify_hours:hours} hour[s]'
+  timerify_minutes_part: '{timerify_minutes:minutes} minute[s]'
+  timerify_settings: ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>];
+    [<timerify_mode_part>])
+  timerify_hvac_part: '{timerify_hvac_mode:hvac_mode} [mode]'
+  timerify_temperature_part: '[at] {timerify_temperature:temperature} [degree[s]]'
+  timerify_percent_part: '[at] {timerify_percent:percent} percent'
+  timerify_mode_part: '[in] [fan] {timerify_mode:mode} [mode|fan]'
 lists:
   timerify_target:
+    values: []
+  timerify_hours:
+    range:
+      from: 1
+      to: 24
+  timerify_minutes:
+    range:
+      from: 1
+      to: 1440
+  timerify_temperature:
+    range:
+      from: 1
+      to: 100
+      fractions: halves
+  timerify_percent:
+    range:
+      from: 1
+      to: 100
+  timerify_duration_words:
+    values:
+    - in: an hour
+      out: 60
+    - in: half an hour
+      out: 30
+    - in: an hour and a half
+      out: 90
+  timerify_hvac_mode:
+    values:
+    - in: (cool|cooling)
+      out: cool
+    - in: (heat|heating)
+      out: heat
+    - in: (dry|drying)
+      out: dry
+    - in: fan only
+      out: fan_only
+    - in: auto
+      out: auto
+    - in: heat and cool
+      out: heat_cool
+  timerify_mode:
     values: []
 responses:
   intents:
@@ -32,17 +103,134 @@ responses:
             {{ " in " ~ n ~ " days" }}
           {%- endif -%}
         {%- endmacro -%}
-        {%- if slots.state == "counting" -%}
+        {%- macro duration(hours, minutes) -%}
           {%- set parts = [] -%}
-          {%- if slots.left_hours > 0 -%}
-            {%- set parts = parts + [slots.left_hours ~ " " ~ plural(slots.left_hours, "hour", "hours")] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
           {%- endif -%}
-          {%- if slots.left_minutes > 0 -%}
-            {%- set parts = parts + [slots.left_minutes ~ " " ~ plural(slots.left_minutes, "minute", "minutes")] -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
           {%- endif -%}
-          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- if slots.state == "counting" -%}
+          {{ duration(slots.left_hours, slots.left_minutes) }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
         {%- elif slots.state == "open" -%}
           {{ slots.target }} is on without a timer.
         {%- else -%}
           {{ slots.target }} is off and has no timer.
         {%- endif -%}
+    TimerifyRun:
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }} runs for {{ duration(slots.left_hours, slots.left_minutes) }}, until {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }} is on.
+          {%- else -%}
+            {{ slots.target }} is off.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}
+    TimerifyAddTime:
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }} runs for {{ duration(slots.left_hours, slots.left_minutes) }}, until {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }} is on.
+          {%- else -%}
+            {{ slots.target }} is off.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}
+    TimerifyStop:
+      default: |-
+        {%- macro plural(n, one, other) -%}
+          {%- if n == 1 -%}
+            {{ one }}
+          {%- else -%}
+            {{ other }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ " tomorrow" }}
+          {%- elif n == 2 -%}
+            {{ " the day after tomorrow" }}
+          {%- elif n > 2 -%}
+            {{ " in " ~ n ~ " days" }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+          {%- endif -%}
+          {{- parts | join(" and ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }} runs for {{ duration(slots.left_hours, slots.left_minutes) }}, until {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }} is on.
+          {%- else -%}
+            {{ slots.target }} is off.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}

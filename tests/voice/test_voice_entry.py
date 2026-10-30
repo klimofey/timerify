@@ -6,16 +6,15 @@ timers and their targets being added, renamed and removed, and what the built-in
 then answers. Files are written to the configuration directory of the test.
 """
 
-import json
 import logging
 import os
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.components.fan.const import FanEntityFeature
 from homeassistant.config_entries import (
     SOURCE_USER,
     ConfigEntry,
@@ -35,8 +34,11 @@ from custom_components.timerify.const import (
     CONF_WRITE_SENTENCES,
     DOMAIN,
     KIND_VOICE_SETTINGS,
+    LIST_HVAC_MODE,
+    LIST_MODE,
     MANAGED_HEADER,
     SUBENTRY_INTERVAL,
+    VOICE_LANGUAGES,
     VOICE_SYNC_COOLDOWN,
     VOICE_UNIQUE_ID,
 )
@@ -47,8 +49,8 @@ from custom_components.timerify.voice.sentences import (
     render,
 )
 
-from ..conftest import FakeTarget, SetupTarget
-from ..helpers import TARGET_ID, advance, restart
+from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
+from ..helpers import AC_ID, TARGET_ID, advance, restart
 from .helpers import (
     add_voice_entry,
     conversation_reloads,
@@ -57,8 +59,10 @@ from .helpers import (
     listed,
     managed_file,
     put_file,
+    reached,
     samples,
     speech,
+    translated,
 )
 
 TIME_LEFT = "TimerifyTimeLeft"
@@ -67,15 +71,6 @@ BOILER = {"in": "Boiler", "out": "Boiler", "context": {"domain": "switch"}}
 FAN = {"in": "Fan", "out": "Fan", "context": {"domain": "switch"}}
 AN_OLD_TIME = 1_000_000_000
 """A time, as the seconds since 1970, that no file written during a test has."""
-TRANSLATIONS = Path(__file__).parents[2] / "custom_components" / DOMAIN / "translations"
-
-
-def translated(language: str, *path: str) -> str:
-    """A text of `translations/<language>.json`, by its path."""
-    node: Any = json.loads((TRANSLATIONS / f"{language}.json").read_text("utf-8"))
-    for key in path:
-        node = node[key]
-    return str(node)
 
 
 async def open_menu(hass: HomeAssistant) -> FlowResult:
@@ -593,6 +588,122 @@ async def test_device_rename_follows_the_full_name(
 
     assert [value["in"] for value in listed(hass, "en")] == ["Geyser"]
     assert reached_time_left(await converse(hass, "how long is left on the geyser"))
+
+
+# The words for the settings the targets take
+
+
+def outs(values: list[dict[str, Any]]) -> list[Any]:
+    """What the values of a list mean, in the order they are listed."""
+    return [value["out"] for value in values]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_words_for_settings_come_with_the_targets_that_take_them(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_climate: FakeTarget,
+    fake_vent: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A house with a boiler only has no word for a mode; the air conditioner and the
+    fan bring theirs after the cooldown, and the agent reads them once."""
+    await setup_target()
+    await add_voice_entry(hass, languages=("en",))
+    reloads = conversation_reloads(hass)
+    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert listed(hass, "en", LIST_MODE) == []
+
+    await setup_target(target=AC_ID)
+    await setup_target(target=fake_vent.entity_id)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert outs(listed(hass, "en", LIST_HVAC_MODE)) == ["cool", "heat", "fan_only"]
+    assert outs(listed(hass, "en", LIST_MODE)) == [
+        "auto",
+        "eco",
+        "high",
+        "low",
+        "sleep",
+    ]
+    assert len(reloads) == 1
+    assert reached(await converse(hass, "turn on the AC for an hour cooling")) == (
+        "TimerifyRun"
+    )
+    assert fake_climate.call_data[0] == ("set_hvac_mode", {"hvac_mode": "cool"})
+
+
+@pytest.mark.usefixtures("assist")
+async def test_words_for_settings_leave_with_the_target(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    await setup_target()
+    ac_timer = await setup_target(target=AC_ID)
+    await add_voice_entry(hass, languages=("en",))
+    assert outs(listed(hass, "en", LIST_MODE)) == ["auto", "high", "low"]
+
+    await hass.config_entries.async_remove(ac_timer.entry_id)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert listed(hass, "en", LIST_MODE) == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_mode_is_listed_as_a_person_says_it(
+    hass: HomeAssistant, provide_target: ProvideTarget, setup_target: SetupTarget
+) -> None:
+    """A device names its presets with underscores; a person does not say them: the
+    list holds the words, and the name the device knows the preset by."""
+    vent = provide_target(
+        "fan.vent",
+        SWITCH_SERVICES,
+        name="Vent",
+        capability_attributes={
+            "preset_modes": ["eco_plus", "Turbo (quiet)"],
+            "supported_features": int(
+                FanEntityFeature.TURN_ON
+                | FanEntityFeature.TURN_OFF
+                | FanEntityFeature.PRESET_MODE
+            ),
+        },
+    )
+    await setup_target(target=vent.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+
+    assert sorted(listed(hass, "en", LIST_MODE), key=lambda value: value["out"]) == [
+        {"in": r"Turbo \(quiet\)", "out": "Turbo (quiet)"},
+        {"in": "eco plus", "out": "eco_plus"},
+    ]
+    response = await converse(hass, "turn on the vent for 10 minutes in eco plus mode")
+    assert reached(response) == "TimerifyRun"
+    assert vent.call_data == [("turn_on", {"preset_mode": "eco_plus"})]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_every_language_gets_the_same_modes(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The words for an HVAC mode differ by language, the modes they mean and the modes
+    of the devices do not."""
+    await setup_target(target=AC_ID)
+    await add_voice_entry(hass)
+
+    hvac = {
+        language: set(outs(listed(hass, language, LIST_HVAC_MODE)))
+        for language in VOICE_LANGUAGES
+    }
+    modes = {
+        language: listed(hass, language, LIST_MODE) for language in VOICE_LANGUAGES
+    }
+    assert hvac["en"] == hvac["ru"] == {"cool", "heat", "fan_only"}
+    assert modes["en"] == modes["ru"] != []
 
 
 # Names that are not plain words

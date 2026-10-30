@@ -4,7 +4,11 @@
 #
 # The list timerify_target is empty here: the names of the devices that have a timer are
 # put into it, either by the Voice settings entry of Timerify, which writes this file
-# and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says.
+# and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says. So
+# are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
+# mode of a thermostat, the preset of a fan, the mode of a humidifier), and
+# timerify_hvac_mode, which the Voice settings entry cuts down to the HVAC modes that
+# the devices have.
 language: en
 intents:
   TimerifyTimeLeft:
@@ -13,8 +17,81 @@ intents:
           - "how (much time|long) is left (on|for) [<the>] {timerify_target:name}"
           - "how long will [<the>] {timerify_target:name} (run|stay on|be on|keep running)"
           - "(when|what time) (does|will) [<the>] {timerify_target:name} (turn|switch|shut) off"
+  TimerifyRun:
+    data:
+      - sentences:
+          - "<turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]"
+          - "<turn> [<the>] {timerify_target:name} on for <timerify_duration> [<timerify_settings>]"
+          - "run [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]"
+          - "set [<the>] {timerify_target:name} timer to <timerify_duration>"
+  TimerifyAddTime:
+    data:
+      - sentences:
+          - "add (<timerify_duration>|<timerify_more_duration>) to [<the>] {timerify_target:name}"
+          - "(<timerify_duration> more|<timerify_more_duration>) on [<the>] {timerify_target:name}"
+          - "extend [<the>] {timerify_target:name} by <timerify_duration>"
+  TimerifyStop:
+    data:
+      - sentences:
+          - "(stop|cancel) [<the>] {timerify_target:name} timer"
+          - "(stop|cancel) the timer (on|of) [<the>] {timerify_target:name}"
+# How long: hours and minutes, each alone or both, or a phrase such as "half an hour";
+# and how much more: "30 more minutes".
+expansion_rules:
+  timerify_duration: "(<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_more_duration: "({timerify_hours:hours} more hour[s]|{timerify_minutes:minutes} more minute[s])"
+  timerify_hours_part: "{timerify_hours:hours} hour[s]"
+  timerify_minutes_part: "{timerify_minutes:minutes} minute[s]"
+# What to turn a device on with, in any order, each part left out when it is not wanted:
+# an HVAC mode, a temperature, a percentage, and a mode of the device.
+  timerify_settings: "([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])"
+  timerify_hvac_part: "{timerify_hvac_mode:hvac_mode} [mode]"
+  timerify_temperature_part: "[at] {timerify_temperature:temperature} [degree[s]]"
+  timerify_percent_part: "[at] {timerify_percent:percent} percent"
+  timerify_mode_part: "[in] [fan] {timerify_mode:mode} [mode|fan]"
 lists:
   timerify_target:
+    values: []
+  timerify_hours:
+    range:
+      from: 1
+      to: 24
+  timerify_minutes:
+    range:
+      from: 1
+      to: 1440
+  timerify_temperature:
+    range:
+      from: 1
+      to: 100
+      fractions: halves
+  timerify_percent:
+    range:
+      from: 1
+      to: 100
+  timerify_duration_words:
+    values:
+      - in: "an hour"
+        out: 60
+      - in: "half an hour"
+        out: 30
+      - in: "an hour and a half"
+        out: 90
+  timerify_hvac_mode:
+    values:
+      - in: "(cool|cooling)"
+        out: cool
+      - in: "(heat|heating)"
+        out: heat
+      - in: "(dry|drying)"
+        out: dry
+      - in: "fan only"
+        out: fan_only
+      - in: "auto"
+        out: auto
+      - in: "heat and cool"
+        out: heat_cool
+  timerify_mode:
     values: []
 # An answer calls the macros of macros.jinja by name.
 responses:
@@ -22,16 +99,15 @@ responses:
     TimerifyTimeLeft:
       default: |-
         {%- if slots.state == "counting" -%}
-          {%- set parts = [] -%}
-          {%- if slots.left_hours > 0 -%}
-            {%- set parts = parts + [slots.left_hours ~ " " ~ plural(slots.left_hours, "hour", "hours")] -%}
-          {%- endif -%}
-          {%- if slots.left_minutes > 0 -%}
-            {%- set parts = parts + [slots.left_minutes ~ " " ~ plural(slots.left_minutes, "minute", "minutes")] -%}
-          {%- endif -%}
-          {{ parts | join(" and ") }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+          {{ duration(slots.left_hours, slots.left_minutes) }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
         {%- elif slots.state == "open" -%}
           {{ slots.target }} is on without a timer.
         {%- else -%}
           {{ slots.target }} is off and has no timer.
         {%- endif -%}
+    TimerifyRun:
+      default: "{{ timer_now(slots) }}"
+    TimerifyAddTime:
+      default: "{{ timer_now(slots) }}"
+    TimerifyStop:
+      default: "{{ timer_now(slots) }}"

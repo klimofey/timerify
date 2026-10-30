@@ -10,9 +10,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import intent
 
 from .base import TimerifyIntentHandler
-from .timer import TimeLeftHandler
+from .timer import AddTimeHandler, RunHandler, StopHandler, TimeLeftHandler
 
-HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (TimeLeftHandler,)
+HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (
+    TimeLeftHandler,
+    RunHandler,
+    AddTimeHandler,
+    StopHandler,
+)
 """Every handler Timerify registers, one per intent type."""
 
 

@@ -1,9 +1,7 @@
 """What every handler is built from: slot validation, the language of a refusal, and
 the slots an answer is made of."""
 
-import json
 from datetime import timedelta
-from pathlib import Path
 from typing import Any
 
 import probatio
@@ -16,21 +14,13 @@ from custom_components.timerify.const import DOMAIN
 from custom_components.timerify.voice.base import (
     async_error_text,
     clock_slots,
+    duration_of,
     voice_language,
     whole_slot,
 )
 
 from ..helpers import JERUSALEM, START
-
-TRANSLATIONS = Path(__file__).parents[2] / "custom_components" / DOMAIN / "translations"
-
-
-def translated(language: str) -> dict[str, Any]:
-    """Timerify's backend translations in `language`, from the file."""
-    parsed: dict[str, Any] = json.loads(
-        (TRANSLATIONS / f"{language}.json").read_text("utf-8")
-    )
-    return parsed
+from .helpers import translated
 
 
 def refusal(key: str, **placeholders: str) -> HomeAssistantError:
@@ -39,6 +29,31 @@ def refusal(key: str, **placeholders: str) -> HomeAssistantError:
         translation_key=key,
         translation_placeholders=placeholders,
     )
+
+
+@pytest.mark.parametrize(
+    ("slots", "minutes"),
+    [
+        ({}, None),
+        ({"minutes": {"value": 45}}, 45),
+        ({"hours": {"value": 2}}, 120),
+        ({"hours": {"value": 1}, "minutes": {"value": 30}}, 90),
+        ({"hours": {"value": 0}}, 0),
+        ({"name": {"value": "Boiler"}}, None),
+    ],
+)
+def test_the_duration_of_slots_is_their_hours_and_minutes_together(
+    slots: dict[str, Any], minutes: int | None
+) -> None:
+    """None when neither is said: the open run, which the timer judges."""
+    assert duration_of(slots) == minutes
+
+
+def test_the_duration_of_slots_can_be_asked_by_prefix() -> None:
+    slots = {"hours": {"value": 1}, "delay_minutes": {"value": 15}}
+
+    assert duration_of(slots, "delay_") == 15
+    assert duration_of(slots) == 60
 
 
 @pytest.mark.parametrize("value", [0, 1, 15, 15.0, 1440, 1440.0])
@@ -102,10 +117,10 @@ async def test_a_refusal_is_spoken_in_the_language_of_the_request(
     """A regional language is spoken as its language; the wildcard of an MCP client and
     a language Timerify has no texts for are spoken in English."""
     err = refusal("setting_not_supported", target="Boiler", setting="hvac_mode")
-    english = translated("en")["exceptions"]["setting_not_supported"]["message"]
-    english_field = translated("en")["services"]["run"]["fields"]["hvac_mode"]["name"]
-    russian = translated("ru")["exceptions"]["setting_not_supported"]["message"]
-    russian_field = translated("ru")["services"]["run"]["fields"]["hvac_mode"]["name"]
+    english = translated("en", "exceptions", "setting_not_supported", "message")
+    english_field = translated("en", "services", "run", "fields", "hvac_mode", "name")
+    russian = translated("ru", "exceptions", "setting_not_supported", "message")
+    russian_field = translated("ru", "services", "run", "fields", "hvac_mode", "name")
 
     said = {
         language: await async_error_text(hass, language, err)

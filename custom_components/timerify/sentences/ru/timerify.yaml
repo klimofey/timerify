@@ -9,8 +9,76 @@ intents:
       - через сколько (выключится|отключится) {timerify_target:name}
       - когда (выключится|отключится) {timerify_target:name}
       - сколько [ещё|еще] будет работать {timerify_target:name}
+  TimerifyRun:
+    data:
+    - sentences:
+      - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
+      - (поставь|установи|заведи) таймер {timerify_target:name} на <timerify_duration>
+  TimerifyAddTime:
+    data:
+    - sentences:
+      - (добавь|прибавь|накинь) [ещё|еще] <timerify_duration> (к таймеру|таймеру|к|для)
+        {timerify_target:name}
+      - (ещё|еще) <timerify_duration> (к таймеру|таймеру|для) {timerify_target:name}
+      - продли [таймер] {timerify_target:name} на <timerify_duration>
+  TimerifyStop:
+    data:
+    - sentences:
+      - (останови|отмени|сбрось|выключи|отключи) таймер [у|на|для] {timerify_target:name}
+expansion_rules:
+  timerify_turn_on: (включи|запусти)[ть]
+  timerify_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
+  timerify_hours_part: '{timerify_hours:hours} час[а|ов]'
+  timerify_minutes_part: '{timerify_minutes:minutes} минут[у|ы]'
+  timerify_settings: ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>];
+    [<timerify_mode_part>])
+  timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
+  timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
+  timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
+  timerify_mode_part: '[(в режиме|режим|вентилятор)] {timerify_mode:mode}'
 lists:
   timerify_target:
+    values: []
+  timerify_hours:
+    range:
+      from: 1
+      to: 24
+  timerify_minutes:
+    range:
+      from: 1
+      to: 1440
+  timerify_temperature:
+    range:
+      from: 1
+      to: 100
+      fractions: halves
+  timerify_percent:
+    range:
+      from: 1
+      to: 100
+  timerify_duration_words:
+    values:
+    - in: час
+      out: 60
+    - in: полчаса
+      out: 30
+    - in: полтора часа
+      out: 90
+  timerify_hvac_mode:
+    values:
+    - in: (охлаждени(е|я)|холод)
+      out: cool
+    - in: (обогрев|нагрев|отоплени(е|я)|тепло)
+      out: heat
+    - in: (осушени(е|я)|сушка)
+      out: dry
+    - in: (вентиляци(я|и)|только вентилятор)
+      out: fan_only
+    - in: (авто|автоматическ(ий|и))
+      out: auto
+    - in: (тепло и холод|обогрев и охлаждение|нагрев и охлаждение)
+      out: heat_cool
+  timerify_mode:
     values: []
 responses:
   intents:
@@ -54,3 +122,123 @@ responses:
         {%- else -%}
           {{ slots.target }}: выключено, таймера нет.
         {%- endif -%}
+    TimerifyRun:
+      default: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration_for(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+          {%- endif -%}
+          {{- parts | join(" и ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }}: включено на {{ duration_for(slots.left_hours, slots.left_minutes) }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }}: включено.
+          {%- else -%}
+            {{ slots.target }}: выключено.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}
+    TimerifyAddTime:
+      default: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration_for(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+          {%- endif -%}
+          {{- parts | join(" и ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }}: включено на {{ duration_for(slots.left_hours, slots.left_minutes) }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }}: включено.
+          {%- else -%}
+            {{ slots.target }}: выключено.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}
+    TimerifyStop:
+      default: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro duration_for(hours, minutes) -%}
+          {%- set parts = [] -%}
+          {%- if hours > 0 -%}
+            {%- set parts = parts + [hours ~ " " ~ plural(hours, "час", "часа", "часов")] -%}
+          {%- endif -%}
+          {%- if minutes > 0 -%}
+            {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "минуту", "минуты", "минут")] -%}
+          {%- endif -%}
+          {{- parts | join(" и ") -}}
+        {%- endmacro -%}
+        {%- macro timer_now(slots) -%}
+          {%- if slots.state == "counting" -%}
+            {{ slots.target }}: включено на {{ duration_for(slots.left_hours, slots.left_minutes) }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+          {%- elif slots.state == "open" -%}
+            {{ slots.target }}: включено.
+          {%- else -%}
+            {{ slots.target }}: выключено.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_now(slots) }}

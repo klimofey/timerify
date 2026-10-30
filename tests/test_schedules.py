@@ -289,14 +289,44 @@ async def test_window_follows_the_clock_on_dst_days(
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
-async def test_window_in_the_hour_the_clock_skips_is_skipped(
+async def test_window_inside_the_skipped_hour_runs_an_hour_later(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """From 02:50 to 03:10 on the day the clock goes from 02:00 to 03:00 is no time at
-    all; the boiler waits for the next day's window."""
+    """The clock goes from 02:00 to 03:00 on 2026-03-27, so 02:10 and 02:50 do not exist
+    that day. Each happens an hour later, and the boiler runs from 03:10 to 03:50 by the
+    clock on the wall, which is 00:10 to 00:50 in UTC."""
+    await hass.config.async_set_time_zone(JERUSALEM)
+    freezer.move_to(local(date(2026, 3, 26), "12:00"))
+    entry = await setup_target()
+    await add_interval(hass, entry, start="02:10", end="02:50")
+    starts_at = datetime(2026, 3, 27, 0, 10, tzinfo=UTC)
+    ends_at = datetime(2026, 3, 27, 0, 50, tzinfo=UTC)
+
+    await advance_to(hass, freezer, starts_at - timedelta(minutes=1))
+    assert fake_target.calls == []
+
+    await advance_to(hass, freezer, starts_at)
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == ends_at.isoformat()
+
+    await advance_to(hass, freezer, ends_at)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_window_whose_shifted_start_passes_its_end_is_skipped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """On the day the clock goes from 02:00 to 03:00, 02:50 happens at 03:50, after the
+    03:10 that the interval ends at: there is no window that day, and the boiler waits
+    for the next day's."""
     await hass.config.async_set_time_zone(JERUSALEM)
     freezer.move_to(local(date(2026, 3, 26), "12:00"))
     entry = await setup_target()
@@ -900,11 +930,15 @@ def test_window_in_the_hour_the_clock_skips_lands_later_by_the_gap() -> None:
     assert window.end.astimezone(zone).time() == time(4, 0)
 
 
-def test_window_inside_the_hour_the_clock_skips_is_swallowed() -> None:
-    assert (
-        window_on(interval("02:50", "03:10"), date(2026, 3, 27), ZoneInfo(JERUSALEM))
-        is None
-    )
+def test_window_whose_shifted_start_reaches_its_end_is_swallowed() -> None:
+    """02:50 does not exist on 2026-03-27 in Jerusalem and happens at 03:50, after the
+    03:10 that the window ends at; so do 02:30 to 03:15 and 02:00 to 03:00."""
+    zone = ZoneInfo(JERUSALEM)
+    day = date(2026, 3, 27)
+
+    assert window_on(interval("02:30", "03:15"), day, zone) is None
+    assert window_on(interval("02:00", "03:00"), day, zone) is None
+    assert window_on(interval("02:50", "03:10"), day, zone) is None
 
 
 def test_window_in_the_hour_the_clock_repeats_starts_at_its_first_time() -> None:

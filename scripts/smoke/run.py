@@ -30,7 +30,7 @@ import argparse
 import asyncio
 import contextlib
 import sys
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
@@ -665,6 +665,14 @@ async def scenario_settings(session: aiohttp.ClientSession, refresh_token: str) 
         await expect_off_at(socket, timer, end)
 
 
+def the_only[Row](found: Iterable[Row], what: str) -> Row:
+    """The one row of `found`; none or several is a failure that says what was found."""
+    rows = list(found)
+    if len(rows) != 1:
+        raise SmokeFailure(f"Expected one {what}, found {len(rows)}: {rows}")
+    return rows[0]
+
+
 def is_schedule_switch_of(title: str) -> EntityMatcher:
     """Match the state `on` of the switch of the interval that is called `title`."""
     return lambda entity_id, state: (
@@ -743,13 +751,15 @@ async def scenario_schedule(
         subentries = await socket.call(
             "config_entries/subentries/list", entry_id=timer.entry_id
         )
-        (subentry,) = (row for row in subentries if row["title"] == title)
+        subentry = the_only(
+            (row for row in subentries if row["title"] == title),
+            f"subentry titled {title!r}",
+        )
         registry = await socket.call("config/entity_registry/list")
-        (row,) = (
-            row
-            for row in registry
-            if row["unique_id"]
-            == f"{timer.entry_id}_interval_{subentry['subentry_id']}"
+        unique_id = f"{timer.entry_id}_interval_{subentry['subentry_id']}"
+        row = the_only(
+            (row for row in registry if row["unique_id"] == unique_id),
+            f"entity with the unique id {unique_id}",
         )
         if row["device_id"] != timer.device_id:
             raise SmokeFailure(

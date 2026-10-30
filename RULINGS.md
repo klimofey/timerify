@@ -205,7 +205,7 @@ not repeated beside its successor.
   `run_open`, a due pending command) replaces them with unmarked ones, which a command may
   push onto a running target (P1). The change of the timer and the decision what to push
   stay in one atomic core call, which meets the §5.4 bullets. The `apply_if_on` keyword
-  that design note D3 gave `set_duration` and `run_open` is gone: it had no caller outside
+  that phase 2 gave `set_duration` and `run_open` is gone: it had no caller outside
   the tests, and a keyword was a second place deciding what the marker now decides alone,
   one that was lost when the target was unavailable. Cost if wrong: a future caller that
   must not push onto a running target does what S1 does, `_owe(..., turn_on_only=True)`.
@@ -323,11 +323,11 @@ only the final behaviour is written.
   not run**: it began during downtime, or was never applied. A window that already started
   keeps its `started` mark across the restart. Re-applying S1 would ignore a manual change
   (R8, and the anti-goal of §2: the user always wins over automation) and make a restart
-  mis-fire (§2 goal 5); D5 already says "unless suppressed". The design notes'
-  `window_started` and `window_changed` events (marked "e.g.") became fold items plus a
-  realignment: one wake-up path and no flap after a restart, which D4's "one alarm"
-  preferred. Cost if wrong: a user who expects a restart to bring back a window they
-  stopped.
+  mis-fire (§2 goal 5); a window the user stopped (S4) must not come back with it. The
+  first sketch of the core's interface had two events, `window_started` and
+  `window_changed`; they became fold items plus a realignment: one wake-up path, one alarm
+  for windows, commands and the end together, and no flap after a restart. Cost if wrong:
+  a user who expects a restart to bring back a window they stopped.
 - **S4 is two stored marks per occurrence, `started` and `suppressed`; a window applies S1
   once.** `started` says S1 has dealt with the opening (it set the timer, left it alone
   because it ends later, or found the window over); `suppressed` says the timer was zeroed
@@ -355,11 +355,11 @@ only the final behaviour is written.
   `test_window_start_after_a_restart_keeps_the_settings_of_an_unconfirmed_on`. Cost if
   wrong: none found.
 - **Turn-on-only settings are dropped, not applied, when the target is found on without
-  our turn-on list completing** (D6, store key `owed_turn_on_only`): it came back already
-  on, someone switched it on, the turn-on on its way carries none, the file was restored
-  that way. The target is running by someone else's hand. One place decides it,
-  `_deliver_settings`, so no second path can disagree. Cost if wrong: none found; the
-  exception is the next entry.
+  our turn-on list completing** (store key `owed_turn_on_only`, so the rule survives
+  unavailability and restarts): it came back already on, someone switched it on, the
+  turn-on on its way carries none, the file was restored that way. The target is running
+  by someone else's hand. One place decides it, `_deliver_settings`, so no second path can
+  disagree. Cost if wrong: none found; the exception is the next entry.
 - **One exception, which releases the settings: our own turn-on switched the target on but
   a later call of the same list failed.** When the target then reports "on" in response to
   our own call (`by_us`), the marker is cleared and the settings stay owed, sent again as
@@ -380,26 +380,26 @@ only the final behaviour is written.
   window passed (the start-while-unavailable line already said so); otherwise a kept
   window that passed during downtime would cut a loose open run. Cost if wrong: a user who
   wants a log for a window missed while Home Assistant was down.
-- **While the schedule owns the timer, its end is the latest end among the windows that are
-  open, started and not suppressed; the realignment (S2) runs at the end of every fold and
-  after every window end.** The timer is the schedule's while `scheduled_by` is set, that
-  is, while nobody has changed it since (S3). At every realignment its end becomes the
-  latest end among the open windows, and `scheduled_by` the interval of that window (a tie
-  keeps the current one); with none open it stops. So an edit, a deletion or a switch is
-  one thing for S2, a window that changes or leaves, and: removing or shortening the
+- **While the schedule owns the timer, its end is the latest end among the windows that
+  are open, started and not suppressed; the realignment (S2) runs at the end of every fold
+  and after every window end.** The timer is the schedule's while `scheduled_by` is set,
+  that is, while nobody has changed it since (S3). At every realignment its end becomes
+  the latest end among the open windows, and `scheduled_by` the interval of that window (a
+  tie keeps the current one); with none open it stops. So an edit, a deletion or a switch
+  is one thing for S2, a window that changes or leaves, and: removing or shortening the
   window that carries the end hands the timer to the latest other open window instead of
   stopping it; extending a started window that does not carry the end past the timer's end
   takes the timer at once, without applying that window's S1 again, so no settings are
   pushed; a window end hands the timer over before the timer's own end can end it, at that
   item's instant, and with no other window open it does nothing there, so a window that
   opens at that very instant extends the timer without an off. A timer someone changed is
-  never realigned, and one with nothing to change gets no effects, so a timer whose end
-  drifted from its window without an edit (possible only after the one-day cap, which the
-  windows respect) is pulled back. This replaced the plan's "a realign to stop does not
-  hand the timer to an overlapping window". Why: §5.5, schedules are declarative ("the
-  target should run during this window"), and §5.4's overlap bullet. Cost if wrong: a
-  schedule-owned run lasts to another open window's end after the user shortened the one
-  they were looking at.
+  never realigned. A realignment with nothing to change gets no effects, so it is
+  idempotent; one that finds the end drifted from its window without an edit (possible
+  only after the one-day cap, which the windows respect) pulls it back. This replaced the
+  plan's "a realign to stop does not hand the timer to an overlapping window". Why: §5.5,
+  schedules are declarative ("the target should run during this window"), and §5.4's
+  overlap bullet. Cost if wrong: a schedule-owned run lasts to another open window's end
+  after the user shortened the one they were looking at.
 - **An edit that moves the active occurrence so it is no longer active creates a new
   occurrence.** S2 stops a scheduled timer now, and the moved window applies S1 at its
   start even after a manual off: S2's "start later if the window moved ahead". Why: an
@@ -420,11 +420,15 @@ only the final behaviour is written.
   the timer, and a timer above zero means "off at zero" in loose mode. Cost if wrong:
   loose users may expect the run to continue.
 - **A window is capped at `MAX_MINUTES`, and an occurrence that the change of the clock
-  swallows is skipped; wall times convert with `fold=0`.** zoneinfo's own rule, no private
-  Home Assistant helpers: 02:30 on the night the clock goes forward happens at 03:30, a
-  time that comes twice is its first, and an interval that lies wholly in the skipped hour
-  does not run that day. Cost if wrong: a 02:30 to 03:15 interval does not run on the
-  spring-forward day.
+  swallows is skipped; wall times convert with `fold=0`.** The spec is silent on a wall
+  time that does not exist. zoneinfo's own rule, no private Home Assistant helpers: a time
+  in the skipped hour happens later by the length of the gap (02:30 on the night the clock
+  goes forward happens at 03:30), and one that comes twice is its first. Both ends convert
+  alike, so 02:10 to 02:50 on that day runs from 03:10 to 03:50 (pinned by
+  `test_window_inside_the_skipped_hour_runs_an_hour_later`). An occurrence is skipped only
+  when the shifted start reaches the end, as 02:30 to 03:15 (start 03:30) and 02:50 to
+  03:10 do. Cost if wrong: a 02:30 to 03:15 interval does not run on the spring-forward
+  day.
 
 ### The controller
 
@@ -460,11 +464,12 @@ only the final behaviour is written.
   and executes the merge's and the observation's effects together; the time-zone and
   Workday listeners are registered at the top of `_handle_started`, under the lock, not
   after the first fold.** One save and one fold, §5.7's order. The plan put the listeners
-  after the first fold (pre-flight finding 14); their handlers need the lock that
-  `_handle_started` holds, so nothing folds before the first observation either way, and
-  a change that arrives while the start-up waits for a slow device or sensor is no longer
-  lost (`test_time_zone_change_during_start_up_is_not_lost`,
-  `test_sensor_that_comes_back_while_the_timer_starts_is_not_missed`). Cost if wrong: none.
+  after the first fold, where a change that arrives during start-up could be missed. Their
+  handlers need the lock that `_handle_started` holds, so nothing folds before the first
+  observation either way, and a change that arrives while the start-up waits for a slow
+  device or sensor is no longer lost (`test_time_zone_change_during_start_up_is_not_lost`,
+  `test_sensor_that_comes_back_while_the_timer_starts_is_not_missed`). Cost if wrong:
+  none.
 - **An unknown Workday answer keeps every window the interval already has, started or not
   (`keep`), and computes nothing new for it.** Unknown is a sensor that is unavailable, a
   call that failed with anything (a `HomeAssistantError`, a time-out, a bug or a changed
@@ -476,8 +481,9 @@ only the final behaviour is written.
   warning. The windows are worked out again on the sensor's next state change or state
   report; Workday writes its state every midnight, so a transient failure is retried
   within a day without polling. A kept future window starts although the sensor is down,
-  since its answer was known. Why: D3, event-driven. Cost if wrong: a window of a sensor
-  that never comes back never starts, and the warning says why.
+  since its answer was known. Why: the sensor is followed by its events, never polled.
+  Cost if wrong: a window of a sensor that never comes back never starts, and the warning
+  says why.
 - **The Workday answer is taken as the sensor gives it, `days_offset` included; the README
   asks for a sensor with an offset of 0.** No reading of another integration's options. A
   sensor with an offset of 1 answers for the day after, and its schedule runs shifted by a
@@ -531,8 +537,8 @@ only the final behaviour is written.
   wrong: none.
 - **The enable flag is `Snapshot.disabled_intervals` in the timer's store, enabled by
   default; the core drops the windows of disabled intervals and the controller does not
-  compute them.** One store, one save path, a toggle never reloads (D2), the invariant has
-  one owner. Cost if wrong: none.
+  compute them.** One store, one save path, the invariant has one owner, and a toggle never
+  reloads the entry because the flag is not entry data. Cost if wrong: none.
 - **Every Timerify entity attaches to its device through `device_entry`: the target's
   device, or the timer's own device got or created once, without a subentry
   (`timer_device`).** In 2026.10.4 an entity of a subentry that brings the shared
@@ -557,17 +563,17 @@ only the final behaviour is written.
   a title the user renamed survives edits.** Subentry titles are plain strings, so a title
   stays in the language of its creation. Cost if wrong: an old title stays in the old
   language after the house language changes; see `docs/followups.md`.
-- **The Workday step appears only when a Workday sensor exists in the house (or is set,
-  in the options); its schema function returns `None` to skip it, and `duration`'s
-  `next_step` is a function too.** §6.2's "three clicks for the common case"; D3's order
-  otherwise kept. A `next_step` sees only the options, so the schema decides. With a
-  string `next_step` the duration form would say "Next" in a house with no sensor, where
-  nothing follows; a function leaves `last_step` unset and the frontend says "Submit",
-  which is also what it says before a Workday form that does follow, exactly as the mode
-  form says before the duration form. The options form refuses to clear the sensor while
-  an interval uses it (`workday_in_use`), and a sensor whose integration is gone stays on
-  offer so that it can be removed. Cost if wrong: a user who adds a Workday sensor later
-  picks it in the options.
+- **The Workday step appears only when a Workday sensor exists in the house (or is set, in
+  the options); its schema function returns `None` to skip it, and `duration`'s
+  `next_step` is a function too.** §6.2's "three clicks for the common case"; the order of
+  the steps otherwise follows §6.2, the Workday sensor last. A `next_step` sees only the
+  options, so the schema decides. With a string `next_step` the duration form would say
+  "Next" in a house with no sensor, where nothing follows; a function leaves `last_step`
+  unset and the frontend says "Submit", which is also what it says before a Workday form
+  that does follow, exactly as the mode form says before the duration form. The options
+  form refuses to clear the sensor while an interval uses it (`workday_in_use`), and a
+  sensor whose integration is gone stays on offer so that it can be removed. Cost if
+  wrong: a user who adds a Workday sensor later picks it in the options.
 - **A renamed Workday sensor is not followed.** The option holds the entity id; after a
   rename `check_date` answers "did not match any entities", the intervals wait with a
   warning, and the listeners sit on the old id. It is in `docs/followups.md` for the

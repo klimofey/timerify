@@ -82,7 +82,7 @@ after it.
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
 | `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
-| `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval runs the timer, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
+| `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 
 ## Settings
 
@@ -237,8 +237,10 @@ an interval removes its switch.
 - **Weekdays**: any set of days of the week.
 - **Working days** and **Non-working days**: follow a **Workday sensor**, a binary sensor of
   Home Assistant's [Workday integration](https://www.home-assistant.io/integrations/workday/),
-  which knows your country's week and public holidays (Israel: Sunday to Thursday, and its
-  holidays). A boiler that runs "on working days at 06:30" skips a holiday on its own.
+  which knows your country's public holidays and the working week you set in it. Its
+  default week is Monday to Friday in every country, so set the days in the sensor's own
+  options (**Days to include**; in Israel, Sunday to Thursday), and Timerify follows. A
+  boiler that runs "on working days at 06:30" skips a holiday on its own.
 
 The Workday sensor belongs to the timer. If your house has one, the last step of adding a
 timer asks for it, and the first interval you add then offers working days from the start.
@@ -278,14 +280,15 @@ clock on the wall, in Home Assistant's time zone:
   is the day it starts on.
 - On the days the clock changes, a window starts and ends at its wall times. In Israel in
   2026, from 23:00 to 07:00 lasts 7 hours on the night the clock goes forward and 9 hours
-  on the night it goes back. A start time that does not exist (02:30 on the night the clock
-  jumps from 02:00 to 03:00) happens at 03:30; an interval that lies wholly in the skipped
-  hour does not run that day; a start time that happens twice (01:30 when the clock goes
-  back) is its first.
+  on the night it goes back. A time that does not exist (02:30 on the night the clock jumps
+  from 02:00 to 03:00) happens an hour later, at 03:30, so 02:10 to 02:50 runs from 03:10 to
+  03:50 that day. When that puts the start at or after the end (02:30 to 03:15, or 02:50 to
+  03:10), the interval does not run that day. A time that happens twice (01:30 when the
+  clock goes back) is its first.
 - A window is never longer than a day, the length of the longest countdown.
 - Changing Home Assistant's time zone moves the windows. (A zone changed in
   `configuration.yaml` and applied with "Reload core configuration" is not noticed until a
-  window ends or the timer is reloaded.)
+  window ends, the Workday sensor reports or the timer is reloaded.)
 
 ### The switch of an interval
 
@@ -293,7 +296,8 @@ Every interval has a `switch` on the timer's device, named *Schedule 06:30–07:
 It is on to begin with.
 
 - Switch it off and the interval is skipped. If its window is open and the schedule is
-  running the timer, the timer stops at once (rule 2 below).
+  running the timer, the timer stops at once, or passes to another open window that wants
+  the target running (rule 2 below).
 - Switch it on while the window is open and the target runs for the rest of the window.
 - The state is stored with the timer and survives restarts. Flipping the switch does not
   reload the timer.
@@ -340,18 +344,22 @@ command: cooling at 24 degrees on the air conditioner, a brightness for a light.
 offers only what the target says it can do.
 
 - The settings go out when the window opens and **Timerify turns the target on for it**: the
-  target is off, or its turn-on is on its way. An air conditioner gets its mode, then its
-  temperature, then its fan mode.
+  target is off, or a turn-off is on its way and the target has not yet answered. An air
+  conditioner gets its mode, then its temperature, then its fan mode.
 - **A target that is already running when a window opens gets no settings**, only the
   extended countdown: someone chose the current ones. That includes a run started by another
-  interval. The same goes for a target that was unavailable when the window opened and is
-  already on when it comes back.
+  interval, and a target that is not on yet but whose turn-on is still wanted (it is on its
+  way, it waits for an unavailable target, or the call failed). The same goes for a target
+  that was unavailable when the window opened and is already on when it comes back.
 - A target that is unavailable at the start keeps the countdown, and is turned on with the
   settings when it is back, if it is off then and the window is still open.
 - A window never replaces the settings of a command that is waiting for the target: the
   command's turn-on is still wanted, and its settings stay.
 - If the turn-on goes through and a settings call fails, the settings are sent again, with
-  the same limits as for a refused turn-on.
+  the same limits as for a refused turn-on, provided the target reports that it is on in
+  response to Timerify's own call. A device that only reports later, when it is polled, has
+  the rest of the settings dropped: Timerify does not push settings onto a target that
+  someone else may have set.
 - Editing an interval while its window is open does not push the new settings onto the
   running target; they are used from the next window.
 

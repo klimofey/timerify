@@ -37,8 +37,10 @@ from custom_components.timerify.domains import (
     actual_state,
     behaviour_for,
     behaviour_for_domain,
+    supported_settings,
     switchable_by_features,
     validate_settings,
+    voice_settings,
 )
 
 from .helpers import AC_ATTRS, AC_ID
@@ -262,6 +264,105 @@ def test_automatic_resends_per_domain(domain: str, expected: int) -> None:
 def test_setting_names_per_domain(domain: str, expected: set[str]) -> None:
     """The settings a domain's entities can be turned on with."""
     assert behaviour_for_domain(domain).setting_names == frozenset(expected)
+
+
+@pytest.mark.parametrize(
+    ("domain", "percent", "mode"),
+    [
+        ("climate", None, "fan_mode"),
+        ("light", "brightness_pct", None),
+        ("fan", "percentage", "preset_mode"),
+        ("humidifier", "humidity", "mode"),
+        ("water_heater", None, "operation_mode"),
+        ("switch", None, None),
+        ("media_player", None, None),
+    ],
+)
+def test_voice_means_one_setting_by_percent_and_one_by_mode(
+    domain: str, percent: str | None, mode: str | None
+) -> None:
+    """A person says "40 percent" or "in eco mode", not the name of a service field:
+    the row of each domain tells which of its settings that is."""
+    row = behaviour_for_domain(domain)
+
+    assert [s.name for s in row.settings if s.voice == "percent"] == (
+        [percent] if percent else []
+    )
+    assert [s.name for s in row.settings if s.voice == "mode"] == (
+        [mode] if mode else []
+    )
+
+
+@pytest.mark.parametrize("domain", SUPPORTED_DOMAINS)
+def test_each_domain_has_at_most_one_percent_and_one_mode_setting(
+    domain: str,
+) -> None:
+    """Two settings that both mean "percent" would make the word ambiguous."""
+    meanings = [s.voice for s in behaviour_for_domain(domain).settings if s.voice]
+
+    assert len(meanings) == len(set(meanings))
+
+
+async def test_voice_settings_are_named_by_the_row_of_the_target(
+    hass: HomeAssistant,
+) -> None:
+    """The same two words mean the setting each target's domain has for them."""
+    assert voice_settings(hass, "light.hall", percent=40, mode=None) == {
+        "brightness_pct": 40
+    }
+    assert voice_settings(hass, "fan.ceiling", percent=40, mode="sleep") == {
+        "percentage": 40,
+        "preset_mode": "sleep",
+    }
+    assert voice_settings(hass, "humidifier.room", percent=55, mode="away") == {
+        "humidity": 55,
+        "mode": "away",
+    }
+    assert voice_settings(hass, AC_ID, percent=None, mode="high") == {
+        "fan_mode": "high"
+    }
+    assert voice_settings(hass, "water_heater.tank", percent=None, mode="eco") == {
+        "operation_mode": "eco"
+    }
+    assert voice_settings(hass, AC_ID, percent=None, mode=None) == {}
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "percent", "mode"),
+    [
+        ("switch.boiler", 40, None),
+        ("switch.boiler", None, "eco"),
+        (AC_ID, 40, None),
+        ("light.hall", None, "eco"),
+        ("water_heater.tank", 40, None),
+    ],
+)
+async def test_a_voice_setting_the_row_does_not_have_is_refused(
+    hass: HomeAssistant, entity_id: str, percent: float | None, mode: str | None
+) -> None:
+    """The boiler at 40 percent has no meaning: the refusal names the target."""
+    hass.states.async_set(entity_id, "off", {"friendly_name": "Boiler"})
+
+    with pytest.raises(ServiceValidationError) as err:
+        voice_settings(hass, entity_id, percent=percent, mode=mode)
+
+    assert err.value.translation_domain == DOMAIN
+    assert err.value.translation_key == "voice_setting_not_supported"
+    assert err.value.translation_placeholders == {"target": "Boiler"}
+
+
+async def test_the_choices_of_a_setting_carry_what_it_means_to_say(
+    hass: HomeAssistant,
+) -> None:
+    """The values a person may say are listed from what the target supports, by the
+    meaning of the setting that has them."""
+    hass.states.async_set(AC_ID, "off", AC_ATTRS)
+
+    choices = {c.name: c for c in supported_settings(hass, AC_ID)}
+
+    assert choices["fan_mode"].voice == "mode"
+    assert choices["hvac_mode"].voice is None
+    assert choices["temperature"].voice is None
 
 
 def features(*flags: IntFlag) -> int:
@@ -577,6 +678,88 @@ async def test_values_at_the_limits_are_accepted(
     assert validate_settings(hass, entity_id, values) == values
 
 
+NUMBER_SETTINGS = [
+    pytest.param("climate.ac", AC_ATTRS, "temperature", id="climate temperature"),
+    pytest.param(
+        "light.hall",
+        {"supported_color_modes": ["brightness"]},
+        "brightness_pct",
+        id="light brightness",
+    ),
+    pytest.param(
+        "fan.ceiling", {"supported_features": SET_SPEED}, "percentage", id="fan speed"
+    ),
+    pytest.param(
+        "humidifier.room",
+        {"min_humidity": 30, "max_humidity": 80},
+        "humidity",
+        id="humidity",
+    ),
+    pytest.param(
+        "water_heater.tank",
+        {
+            "supported_features": features(WaterHeaterEntityFeature.TARGET_TEMPERATURE),
+            "min_temp": 30,
+            "max_temp": 70,
+        },
+        "temperature",
+        id="water heater temperature",
+    ),
+]
+"""Every setting that is a number, on an entity that takes it."""
+
+
+@pytest.mark.parametrize(("entity_id", "attributes", "setting"), NUMBER_SETTINGS)
+@pytest.mark.parametrize("flag", [True, False])
+async def test_number_settings_refuse_booleans(
+    hass: HomeAssistant,
+    entity_id: str,
+    attributes: Mapping[str, Any],
+    setting: str,
+    flag: bool,
+) -> None:
+    """Python counts `true` as 1, which no light, fan or thermostat is turned on with:
+    whoever asks, a service, a voice or an agent, is refused, since this is where every
+    one of them is judged."""
+    hass.states.async_set(entity_id, "off", attributes)
+
+    with pytest.raises(ServiceValidationError) as err:
+        validate_settings(hass, entity_id, {setting: flag})
+
+    assert err.value.translation_key == "setting_out_of_range"
+    # Shown to the person as the word that was said, not as Python spells it.
+    assert err.value.translation_placeholders is not None
+    assert err.value.translation_placeholders["value"] == str(flag).lower()
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "attributes", "setting", "value"),
+    [
+        ("fan.ceiling", {"supported_features": SET_SPEED}, "percentage", 50.0),
+        ("humidifier.room", {"min_humidity": 30, "max_humidity": 80}, "humidity", 55.0),
+        (
+            "light.hall",
+            {"supported_color_modes": ["brightness"]},
+            "brightness_pct",
+            12.5,
+        ),
+        ("climate.ac", AC_ATTRS, "temperature", 24.5),
+    ],
+)
+async def test_a_number_that_is_whole_is_whole_in_any_form(
+    hass: HomeAssistant,
+    entity_id: str,
+    attributes: Mapping[str, Any],
+    setting: str,
+    value: float,
+) -> None:
+    """A voice hears 50 as 50.0; a speed of 50.0 is a speed of 50, and a brightness or a
+    temperature may have a fraction."""
+    hass.states.async_set(entity_id, "off", attributes)
+
+    assert validate_settings(hass, entity_id, {setting: value}) == {setting: value}
+
+
 NO_TEMPERATURE = {
     **AC_ATTRS,
     "supported_features": features(
@@ -619,6 +802,20 @@ NO_TEMPERATURE = {
         ("climate.ac", AC_ATTRS, {"temperature": "24"}, "setting_out_of_range"),
         ("climate.ac", AC_ATTRS, {"temperature": True}, "setting_out_of_range"),
         ("climate.ac", AC_ATTRS, {"fan_mode": 3}, "setting_not_an_option"),
+        # A part of a percent is not a speed or a humidity: the services say whole
+        # numbers, and so does every other way in.
+        (
+            "fan.ceiling",
+            {"supported_features": SET_SPEED},
+            {"percentage": 50.5},
+            "setting_out_of_range",
+        ),
+        (
+            "humidifier.room",
+            {"min_humidity": 30, "max_humidity": 80},
+            {"humidity": 55.5},
+            "setting_out_of_range",
+        ),
         (
             "light.hall",
             {"supported_color_modes": ["brightness"]},

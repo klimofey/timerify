@@ -678,3 +678,461 @@ only the final behaviour is written.
   the REST API, finds its switch by the unique id `{entry_id}_interval_{subentry_id}` and
   checks it sits on the timer's device. Cost if wrong: a Workday-based interval is never
   run against a real container.
+
+## Phase 4: voice
+
+The plan's rulings (`docs/superpowers/plans/2026-10-30-phase-4-voice.md`) and the ones the
+reviews and the owner added, in the form they have now. Where a later ruling replaced an
+earlier one, only the final behaviour is written. Section numbers (§) and rules (R, S) are
+those of the spec.
+
+### What Timerify takes over from core
+
+- **A bare "turn on X" and "turn off X" of a device that has a timer is a Timerify
+  command.** The first plan left these to core and let Timerify observe the change as a
+  manual one; that was reversed because §5 R9 names "voice 'turn on X' routed to Timerify".
+  On is R9 for a device that is off (loose mode: an open run; strict mode: the default
+  duration; a device that already runs keeps its countdown, see the next entry)
+  and off sets the timer to zero and turns the target off, through the controller, as the
+  services do, so an unavailable target keeps its wish (R10) and the answer is Timerify's. The phrasings are
+  core's own name-only ones, so a phrasing with an area, a floor or a kind of device stays
+  with core, and so does every device with no timer. Cost if wrong: a phrasing that core
+  adds in a newer release of its sentences reaches core until Timerify is regenerated (see
+  the next entry).
+- **R9 is for a target that is off: a turn-on without a duration changes nothing about the
+  countdown of a target that is already wanted running (a clarification of R9).** R9 says
+  that a command that turns the target on without a duration runs it without a countdown
+  in loose mode and for the default duration in strict mode. It describes starting a
+  target; it says nothing about one that runs, and read literally it cut a run of two hours
+  to the default duration (strict mode) and took the auto-off away from a run of twenty
+  minutes (loose mode), or erased the end of a schedule window, only because the same
+  words were said twice. Before this phase "turn on the boiler" to a boiler that was on was
+  Home Assistant's no-op, and R4 sets the default duration only while the timer is zero, so
+  the clarification keeps what a user had before and agrees with the spec's goals (one
+  timer as the truth, and manual changes win). So a target that the timer already wants
+  running (`TimerCore.wanted_running`: a countdown that is not over, else the wish that the
+  target has not confirmed yet, else the target last seen on; a target that is away while
+  its countdown runs counts) keeps its countdown, or its run without one, in either mode.
+  R9 applies only to a target that is off, as before. The rule is in one place,
+  `TimerCore.run_open` and its twin for a pending command, and holds for every way of
+  asking without a duration: "turn on the boiler" and the name alone, the tool
+  `timerify__run` without hours and minutes, the service `timerify.run` without minutes,
+  and a command to turn on without minutes when it comes due. The answer is what any run
+  gives: how long is left and when the target turns off, or that it is on without a timer.
+  What the request carries besides a duration is still done: the settings of the tool, the
+  service or the command are set on the running target (P1, a command is a firm promise),
+  and a turn-on that has not reached the target is sent again. The timer itself is not
+  touched, so the schedule that owns a countdown still owns it (S2: editing the interval
+  realigns it) and the request is not a change of the user's (S3). A countdown that has
+  reached its end is over whether or not its alarm was handled yet, so a request that
+  meets it, or a command due in the very instant it ends, starts the run again by R9 and
+  the target is not switched off and on. A command that came due while Home Assistant was
+  down is judged as it would have been live: it finds the countdown that was under way at
+  its time and leaves it. Cost if wrong: a user who wants the default duration again says
+  "for 45 minutes", sets "Run for", or stops the timer first; a pending command without
+  minutes no longer shortens or removes the end of a run that is under way.
+- **The delayed commands of core are taken over for the devices that have a timer,
+  generated from the data that Home Assistant ships.** `scripts/generate_core_commands.py`
+  reads the pinned `home-assistant-intents` and writes `core_commands.yaml` for each
+  language: every shape of core's delayed on and off (all unit combinations, both word
+  orders, "in" or "after", articles, and the English form with the name last) as a sentence
+  for the list of Timerify's targets, and the bare on and off, in both languages. It is
+  committed, because the manual route needs complete files, and a test fails when the file
+  is stale; the generator refuses a block it does not understand, so a release cannot widen
+  or narrow the takeover without notice. `requires_context` is dropped exactly when a
+  block's domain list contains `switch`, which is core's generic on and off in both
+  languages: every target can be switched and delayed, whatever its domain. Cost if wrong:
+  on a newer Home Assistant with new shapes, those reach core until a Timerify release.
+- **The takeover is proved by a structural test, and behaviour is sampled boundedly, so that
+  the voice suite runs in well under a minute.** The proof is that every core shape of every
+  command pair is covered by the generated file; one conversation per pair (optional parts
+  skipped) shows it reaching Timerify, and a device with no timer still reaches core's
+  delayed command. Trying every spoken variant would be 180,544 conversations in English
+  alone. Cost if wrong: a substitution bug that shows only with optional words present is
+  caught only by the samples of the other intents.
+  The bound is held by running the suite in parallel, not by the sampling alone. Measured
+  at the end of the phase, on an 18-core machine: `tests/voice` (597 tests) takes 17 s in
+  parallel and 86 s in one process (`-n 0`), and the whole suite (1687 tests) takes 18 to
+  20 s in parallel and 112 s in one process. Each scenario is a real Home Assistant with
+  the real built-in agent, so a serial run is over the bound that the sampling alone was
+  meant to keep. `pytest-xdist` is therefore in the dev group at the locked version, and
+  `-n auto` is in the pytest options: `uv run pytest` runs in parallel, three full runs in
+  a row passed, and a run of one file stays fast (a file of 48 tests takes about 5 s
+  against 4 s in one process). The per-test timeout of 60 seconds stays. Cost if wrong: a
+  test that shares state with another fails only in parallel; none has in the runs made,
+  and `-n 0` runs the suite as before to tell.
+- **The takeover sentences name the device in a slot of their own, `timerify_target`, which
+  the handlers map back to `name`.** With `name` in the sentence, the built-in agent
+  prefers the custom sentence in its stage for names it does not know and then gives up the
+  fallback that resolves "it" and "them", which lost the follow-ups. With its own name the
+  agent resolves the device as before. The mapping is one function (`named` in
+  `voice/base.py`), run before the slots are validated, and an LLM cannot send the slot
+  because a tool's parameters come from the handler's own schema. Cost if wrong: none.
+- **A follow-up ("turn it off", "turn them off") after a question or a command about a
+  device is answered by core.** It switches the device, and the timer follows by observing
+  the change, but the answer is core's, and for an unavailable target the call fails and no
+  wish is kept (R10 does not apply). Cost if wrong: a user who says "turn it off" to an
+  unavailable device gets core's failure, not a kept wish.
+- **A sentence of Timerify's about a name that is not a device with a timer is answered
+  with core's "not aware of any device".** A custom sentence that takes a list slot wins
+  the stage where unknown names are answered, and the fallback of the gazetteer then gives
+  up on it. Only the wording of an error changes ("what is planned for the fan", for a fan
+  that exists but has no timer), and no successful answer of core is hidden, which was
+  checked phrasing by phrasing. Cost if wrong: a better error of core is lost.
+- **A device that is not a Timerify target but shares its name with one is not reachable
+  through Timerify's phrases, a departure from §6.4.** §6.4 says "Sentences must never match
+  a non-Timerify entity". A sentence matches a name, though, and the list of names is
+  static and cannot tell two entities that carry it apart, so "turn off X" always means the
+  target with the timer, and core's bare and delayed on and off no longer reach the other
+  entity by that name. The same holds for "turn on/off the X schedule" when an exposed
+  entity is called "X schedule": it means the schedule of the timer called X (a second,
+  explicit exception, decided by the owner, to §6.4's "To keep every other entity on core's
+  behaviour"). That entity is reached by other phrasings and the interface; the case of a
+  timer called Boiler next to one called "Boiler schedule" is the same case. Cost if wrong:
+  a user who has an entity with a timer's name, or one called "<timer> schedule", must say
+  it another way.
+- **The English phrasings of the schedule take "of" and "for", and on or off before or
+  after the noun, because a phrasing that is left out is not left alone.** The built-in
+  agent takes "turn off the schedule for the boiler" for a turn off of the boiler, so the
+  near misses that were found are sentences. The set is open ended: a phrasing with a
+  device's name that Timerify does not have, and "turn on" or "turn off" in it, can still be
+  matched by core's gazetteer (English only), which `docs/followups.md` carries. Cost if
+  wrong: the boiler is switched off by a sentence meant for its schedule.
+- **There is no sentence for subtracting time.** §6.4 lists set, add and stop, and setting
+  the countdown to the new length covers shortening. "10 minutes less" has no match.
+  Cost if wrong: none.
+
+### What can be said
+
+- **A duration is whole minutes, a delay may carry seconds, and the controller refuses a
+  duration outside 1 to the day.** A delay is a moment, and a zero delay is refused as a time
+  that is not ahead (`command_in_past`), or "turn off in 0 minutes" would stop at once;
+  "turn off in 90 seconds" shows 2 minutes on the number and ends after 90 seconds. Core
+  silently caps a duration, so "for 30 hours" would run a day without a word: it is refused
+  with the limit instead. Adding keeps the clamp of the first phase (the end is never more
+  than a day ahead) whatever is asked, and says when the countdown really ends, so "add 30
+  hours" gives a day. For the user to hear either, a longer duration has to reach the
+  handler, so the sentences understand hours up to 168 and minutes up to 10080, a week in
+  each, the same in both languages and equal to the longest delay a command takes; a count
+  beyond a week is not understood, and a test pins that bound too. The tools take any count
+  and the controller decides. Cost if wrong: "for 200 hours" is answered as not understood,
+  not with the limit.
+  The shape of the minutes is a matter of cost. A range that allows number words makes
+  hassil build, on the first request in a language, a table of the words of every number in
+  it, and that table grows with the range: measured on hassil 3.12 in a fresh process, hours
+  1..168 cost 0.02 s in Russian and nothing measurable in English; minutes 1..1440 cost
+  0.36 s and 16 MB in Russian and 0.02 s in English; minutes 1..10080 cost 4.7 s and 123 MB
+  in Russian and 0.19 s and 22 MB in English, which made the first Russian request take
+  over 4 s of CPU (4.34 s measured through Assist, against 0.45 s now). So the
+  minutes up to a day (1..1440, as many as a timer can run) and the hours (1..168) are
+  ranges that may be said as words, and the minutes from a day and a minute to a week
+  (1441..10080) are a list of their own, `timerify_long_minutes`, with `words: false`:
+  digits only, no table. It fills the same slot, `minutes`, through the expansion rule
+  `timerify_minutes_count`, so the handler cannot tell the two apart, and both languages
+  have the same shape. A test pins the shape, and another that no range list of Timerify
+  that allows words is larger than a day of minutes (the structure, not the time, which
+  varies by machine). Cost if wrong: "turn on the boiler for two thousand minutes" said
+  in words matches no sentence of Timerify's, and the answer is the built-in agent's
+  "Sorry, I am not aware of any device called boiler for two thousand minutes", which
+  reads the count as part of the name and so says that the boiler does not exist, while
+  "for 2000 minutes" is understood and answered with the limit ("A timer runs for 1 min to
+  24 h.").
+- **"Turn off X in N" decides whether the target is running under the controller's lock,
+  from the desired state: a countdown above zero, else the pending wish, else the target
+  being on.** A running target gets its countdown set to end then, whatever it was (shorter
+  or longer), and a target that is off changes nothing, and the answer says which. The
+  desired state is R10's, and covers a command in flight. Such a command is refused when
+  it is more than a day ahead, running or not. Cost if wrong: none.
+- **A pending command to turn off cannot be planned by voice or by an LLM tool; "turn off
+  in N" sets the countdown, and `timerify.add_command` makes the command.** The outcome of
+  a countdown is the same, and a second kind of pending command would need a sentence to
+  tell them apart. The list of planned commands says them ("turn off at 11:00"), so a
+  voice user can hear one that a service made. Cost if wrong: a user who wants a command
+  to turn off that survives a later "turn on" uses the service.
+- **Commands at a clock time are for an LLM only.** The tool takes `at`, read by the same
+  parser as the service's (`command_time`), with exactly one of a delay and `at`
+  (`command_when`), through the same controller path. The built-in agent's sentences take
+  delays: core has no clock-time shapes to mirror, and §6.4's example is a delay. Cost if
+  wrong: "turn on the boiler at 7:30" has no match (`docs/followups.md`).
+- **Every setting of §5.4 that a target supports can be said, with one word per
+  meaning.** The HVAC mode and the temperature have their own words, and "percent" and
+  "mode" are single slots that each domain row declares the meaning of (brightness,
+  percentage or humidity; fan mode, preset, humidifier mode or operation mode), so the row
+  stays the one description of a domain. The values come from lists that hold only what
+  the targets support: the HVAC words are translated per language, and the other modes are
+  the device's strings, said with a space for an underscore ("eco plus 2" for `eco_plus_2`).
+  The request is checked by the same `validate_settings` as the services, which refuses
+  what the device cannot do, by voice and tool alike. Booleans for a number setting and
+  fractions for a whole one are refused there, where every channel passes (`Coerce` would
+  turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard to
+  say must be said as it is written.
+- **A temperature can be said up to 250, in halves, as words or digits, because the
+  sentences do not know the unit of the device.** A house that counts in Fahrenheit sets
+  a water heater at 110 to 140 degrees, so a range that ended at 100 made "turn on the
+  tank for an hour at 120 degrees" not understood, while an LLM tool, which has no such
+  bound, could set it. The sentences cannot know the unit or the range of each device (a
+  list that holds a range per device is expressible, and would multiply the sentences by
+  the devices), so the range is the widest any device could be given: 250, the bound of
+  the service form's selector too, which is above the boiling point in Fahrenheit. The
+  controller still judges the number against the range the device reports, so 200 degrees
+  said to a heater that takes 100 to 150 is understood and refused with those numbers,
+  and a number past 250 is not understood. The numbers may be said as words: the table of
+  number words that the first request in a language builds is 500 numbers here (1 to 250
+  with the halves), which costs 0.13 s and 15 MB in Russian and 0.01 s and 2 MB in
+  English (hassil 3.12, a fresh process, as for the duration above), against 0.05 s and
+  5 MB before for a range of 1 to 100; the first Russian request that says a temperature
+  went from about 0.38 s to about 0.44 s through Assist. That is small, so the words stay, unlike
+  the week of minutes, which is digits only. The structural test that bounds the words
+  of every range counts the numbers of a range (the halves too) and where it ends.
+  Cost if wrong: a number above 250 is not understood, and a few tenths of a second of
+  the first Russian request in a language.
+- **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
+  bare number after a duration is taken as a temperature, and only for a target that takes
+  one (the next entry scopes it). Cost if wrong: a number that was meant as something else
+  after a duration ("for 1 hour 30", "for 2 hours 120") is a temperature, which a
+  thermostat or a water heater then checks and refuses when it is out of its range, and a
+  device without one does not understand. The temperature is understood up to 250, so
+  "turn on the AC for 2 hours 120" is answered "120 is not a valid Temperature: it must be
+  between 16 and 30." and nothing is switched, while a water heater that counts in
+  Fahrenheit takes the same 120 as its temperature (probed on both).
+- **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
+  on the domain of the name), in blocks of their own.** Before that, any thermostat with an
+  "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which
+  refused it. The managed route always writes the domain of a name; a name listed by hand
+  with no domain gets the sentences that fit every device and nothing more, so the README
+  shows `context: domain` on a hand-listed thermostat or water heater. Said of a device that
+  takes no temperature, "turn on the boiler for 1 hour 30" is not understood, and the
+  answer is the built-in agent's "not aware of any device called boiler", which says that a
+  device that exists is unknown: the mechanism of the entry above on names that are not a
+  device with a timer, where a sentence of Timerify's wins the stage for unknown names.
+  Before the scoping it was a refusal about the setting "Temperature" that also misled.
+  Cost if wrong: that wording; and a user who lists a thermostat by hand without its
+  domain gets no HVAC words.
+- **The list of HVAC words is the union of the modes of every thermostat.** Two air
+  conditioners with different modes, one without "auto": a bare "auto" said of the one that
+  lacks it is understood and refused truthfully, naming the modes that AC has ("fan auto"
+  and "in auto mode" still reach the fan mode). One block of sentences per distinct set of
+  modes would close it and is its own step (`docs/followups.md`). Cost if wrong: that
+  refusal.
+- **Pending commands are cancelled by voice as "all" (the default) or "the next one",
+  which repeats; an LLM may also cancel by id.** A voice cannot say an id. The tool that
+  cancels by id says it cancelled one command, and one by "next" or "all" says that, so the
+  answer is true to what was done. `async_cancel_command` returns what it cancelled. Cost
+  if wrong: none.
+- **The schedule is switched as a whole, or one interval by its title, and the lookup and
+  its refusals live in one place, `controller.async_set_schedule_enabled`.** The voice, the
+  tool and the interval switches share one path (a manual override wins, switching off
+  folds what is due, nothing reloads the entry). The whole schedule is the default; one
+  interval is said by the title it has, and the list of titles is one for the house, not
+  one per timer, so "the Morning schedule of the pump" is understood and refused by the
+  controller when only the boiler has a Morning (a list per timer is expressible, and would
+  multiply the sentences by the timers). Two intervals of one timer with the same title are
+  switched together, since refusing them as ambiguous would make a generated weekday title
+  and weekend title unreachable. The answer counts the intervals that are now as asked,
+  whether or not they already were, because switching is idempotent. Cost if wrong:
+  titles that are said, not generated ones, are what voice can reach (below).
+- **Titles are compared by `schedule.title_key`: the title as the built-in agent hears it,
+  without punctuation and case, every dash a hyphen, the Russian yo a ye, runs of space one
+  space.** So "morning" means `Morning!` and `06:30-07:15, Mon-Sun` means the generated
+  title with en dashes. A title of nothing but punctuation has the key `""`, which matches
+  nothing: the built-in agent does not know such a title either, so an LLM cannot ask for it
+  and it is reached by the whole schedule or its own switch. Cost if wrong: such an
+  interval is not named by an agent.
+- **A refusal for an unknown title lists the titles that can be asked for, bare, each
+  once, joined by semicolons, at most five; the translation chooses the quotes around the
+  asked title.** A placeholder can be put in quotes as a whole but not each element of a
+  joined list, and a generated title contains a comma, so the list is bare and
+  semicolon-separated, and the asked title gets the quotes of its language (straight in
+  English, guillemets in Russian). When more than five could be asked for, the text names
+  the first five and counts the rest (`unknown_interval_and_more`), since it is spoken and
+  read by an agent; when none can be asked for (every title is punctuation), it says so
+  (`no_interval_titles`). Cost if wrong: a title with a semicolon in it reads as two.
+- **A blank `interval` of the LLM tool means the whole schedule.** Core's tool wrapper
+  drops an empty or whitespace argument for every tool before any handler sees it (blank
+  equals absent is core's convention), and the tool's description says that no `interval`
+  means the whole schedule. Refusing a blank would need a subclass of core's wrapper that
+  fights that convention, and `enabled` is required (no default), so a model must say on or
+  off and never toggles. Cost if wrong: a model that passes an empty string switches the
+  whole schedule.
+
+### Answers
+
+- **Success speech is rendered by the built-in agent from response templates in
+  `sentences/<language>/`; handlers set speech slots only, and refusals are spoken by the
+  handler from the `exceptions` of the translations.** Backend translations have no plural
+  rules, the LLM path never renders templates, and `async_set_error` is quiet, so each
+  refusal is a translated text, with a setting named by its translated field name and a
+  time as `HH:MM`, rendered for the language of the request (`async_error_text`). A caller
+  of `intent/handle` that is neither agent gets no success speech. A target that does not
+  match raises core's `MatchFailedError`, matched among the loaded timers' targets only
+  (an empty candidate list would search the whole house), so core's translated answers are
+  the ones heard. Cost if wrong: none.
+- **A request language that Timerify has no texts for gets English, and a regional language
+  gets the texts of its language.** `en-GB` is answered with the English sentences and
+  texts, `ru-RU` with the Russian ones; a language with none, and the language `*` that an
+  MCP client sends, fall back to English, for the text of a refusal as for a
+  template. Cost if wrong: a Ukrainian speaker is told in English.
+- **An answer says what the timer is set to do, not what the device shows.** While a
+  command waits for an unavailable target, or a device has ignored one, or Timerify has
+  given up after its repeats, the answer still gives the wish ("Boiler is on", "Boiler
+  is off"), and the log has the rest. It is the desired state of R10 and spec goal 1, one
+  source of truth for whether the target should run; the words "is on" can be read as the
+  device's state, which is the price. An unavailable target with no timer is answered "off"
+  (`docs/followups.md`). Cost if wrong: a user is told "off" of a device that is still on.
+- **Russian answers start with the name of the target in the nominative, followed by a
+  colon.** A name that the user chose cannot be declined, and a name in a sentence would
+  need a case. Cost if wrong: none.
+- **The macros of the answers (the words for a day, the plurals) are written once, in
+  `sentences/<language>/src/`, and the files that are shipped are generated from them.**
+  The sources are the sentences and one `macros.jinja` per language; `scripts/generate_sentences.py`
+  writes the expanded `timerify.yaml` with a "generated, do not edit" header; a test says
+  the shipped files equal its output and names the command to run, and another renders
+  every response template of every language with representative slots through Home
+  Assistant's own template engine. The manual route keeps working because it copies the
+  expanded files (never `src/`, which Home Assistant would also read, since it loads every
+  folder of `custom_sentences/<language>/`), and the hook that keeps Cyrillic out of the
+  repository allows it under `sentences/<language>/` and its subfolders. The generator also
+  deletes shipped files it no longer produces, and the drift test asserts the set. Cost if
+  wrong: a contributor must run the script, and the failing test says how.
+- **Russian is tested without Cyrillic in the tests: inputs are sampled from the shipped
+  Russian files and the plural forms are proved by classes.** The hook forbids Cyrillic
+  outside the translations and `sentences/ru/`. This proves that the Russian templates
+  parse, reach their handlers and outrank core, and that the three plural forms partition
+  the counts; it does not prove which word goes with which class, nor inflected names. The
+  owner reads the rendered Russian texts of each phase; a swapped "few" and "many" passes
+  the tests. Cost if wrong: a wrong plural noun reaches a user.
+
+### The Voice settings entry and the sentence files
+
+- **The "Voice settings" entry is a second kind of config entry beside the timers.** The
+  user step of the flow is a menu, "Add a timer" and "Voice settings" (the precedent is
+  the group helper); the form of a timer is the step `target`, and the options flow keeps
+  `init` for a timer and goes straight to `voice_settings` for this entry. The kind is the
+  option `kind`, narrowed with `TypeIs`. The menu offers the voice entry only while none
+  exists; an abort with its own reason (`voice_settings_exist`) stays as the defence against
+  two flows racing, because `already_configured` says "This entity already has a timer". The
+  entry holds the option "add voice sentences for the built-in agent" (on at creation) and
+  the languages, a choice of those Timerify ships (English and Russian), the house language
+  when Timerify has it and English otherwise (§6.2). Its title is translated when it is
+  created, so it stays in the language of its creation. Cost if wrong: none.
+- **Timerify writes `custom_sentences/<language>/timerify.yaml` only where there is no file
+  or its own, and its own is a file whose first line is exactly the managed header.** A
+  file of the user at that path is their data (the user's manual change wins, §2): it is
+  left as it is, that language is not written, and the log warns once per load, naming
+  the path. The files are deleted only when they are Timerify's. Cost if wrong: a user
+  whose own file blocks the managed one removes it, as the warning says.
+- **Files are removed when the option is unticked, and when the entry is removed or
+  disabled, and for a language no longer chosen; they stay across a reload and a restart,
+  and are written only when their text changes, then one `conversation.reload` for all
+  languages.** There is no churn at start-up or reload: the first write comes when every
+  timer is there, and a write that finds the text unchanged writes nothing and tells
+  nobody. The listeners attach just before it, so that a timer set up or a target renamed
+  while it runs is not missed (it is written by the write that follows), and they ignore
+  events while the entry is stopping; the debouncer is shut down before the files are
+  removed, or a write could bring them back. The reload is not by
+  language, because a reload by language misses the regional caches of the built-in agent;
+  every cached language is rebuilt. Cost if wrong: none.
+- **The file is rewritten when a timer is set up, unloaded or reloaded, when a target's
+  entity or device changes its name or aliases, and when a schedule interval is added,
+  deleted or renamed; the changes are debounced.** A change is written one cooldown
+  (`VOICE_SYNC_COOLDOWN`, one second) after the first of the changes that come in a row,
+  never twice within a cooldown, so a burst that lasts longer is written more than once;
+  Home Assistant's `Debouncer` does not move its timer for the changes that follow and
+  drops a call that falls due while a write runs, so a write that finds a change came in
+  during it schedules another. The first write happens before set-up returns when Home
+  Assistant is running, and at start otherwise. A new mode that a device
+  reports later (a firmware update) and a changed friendly name of a target that is not in
+  the registry are picked up at the next trigger (`docs/followups.md`). Cost if wrong: such
+  a name or mode is missing from the file until then.
+- **The names are listed as the built-in agent lists them: every alias with the computed
+  name, with punctuation removed, an empty name left out; `in` is escaped only when hassil
+  would read it as a template, `out` is the name as Home Assistant shows it, and
+  `context.domain` is the target's.** What is matched is what Home Assistant matches. A
+  lone backslash is literal in hassil, so a name that differs only in characters the
+  default agent keeps must be said with them. A name that is nothing but punctuation would
+  match anywhere and is left out. Cost if wrong: a name with an odd character is said as it
+  is written.
+- **Before a file is written it is parsed, its references are resolved, and every value
+  that it lists is checked to match as it is said; if any check fails the old file stays and
+  an error is logged.** hassil parses sentences lazily, so building the intents proves
+  nothing, and a file Home Assistant cannot read breaks Assist for the whole language. A
+  title or name that cannot be said (an unescaped template character, a title that would not
+  match as said) therefore refuses the write: a valid but stale file stays until the cause is
+  fixed. Cost if wrong: a file that is stale for as long as the cause lasts.
+- **The manual route is `custom_sentences/<language>/timerify_manual/`, and the managed
+  entry warns when it finds it.** The managed file has the same file name as the copied
+  one, and removing a copy by the entry would leave a half-installed manual set that breaks
+  matching; two sets of sentences confuse the agent. The route is the sentence files of
+  the repository (`timerify.yaml`, `core_commands.yaml`) and a `timerify_names.yaml` of the
+  user's with the lists `timerify_target`, `timerify_interval` and, for the modes of
+  devices, `timerify_mode`. Cost if wrong: none; the owner redoes it after every update and
+  rename, which the README says.
+- **A managed file left behind without Timerify's handlers makes the built-in agent raise
+  on every phrase of it that matches, core's delayed commands included.** No public API
+  catches the unknown intent, so Assist errors on those phrases until the file is removed.
+  The README says to remove the entry before uninstalling Timerify. Cost if wrong: a user
+  who uninstalls first removes the file by hand.
+- **`hassil` is imported directly and listed in the dev group, and the manifest has
+  `after_dependencies: ["conversation", "llm"]`.** The requirements of an after-dependency
+  are installed first, which the sentence checks need. hassfest requires `conversation`,
+  because Timerify imports that component, but removing `llm` still passes: hassfest does
+  not check the imports of the other, so the declaration is harmless and kept, and a test
+  pins it. Cost if wrong: none.
+
+### LLM tools
+
+- **Tools are offered for the Assist API only, while a target is exposed to the assistant
+  that asks; descriptions, titles and the prompt are in English, and the prompt lists the
+  names as a JSON list.** An LLM in another language reads English descriptions, as it does
+  for every core tool, and a tool's text answers are in the language of the request. The
+  tools act only on a target that is exposed to the asking assistant (`async_should_expose`
+  with the assistant), and answer a translated refusal otherwise. The handlers return
+  structured data; the LLM never sees a template. Cost if wrong: none.
+- **The annotations are as core sets them for the same kind of intent.** None reaches
+  outside Home Assistant (`open_world=False`). Telling how long is left and listing the
+  commands only read. Adding time only adds. Stopping and switching a schedule give the same
+  result when repeated (idempotent). Running a timer and planning a command replace the
+  countdown and apply settings, as turning a device on and starting a timer do in core, so
+  they are destructive; cancelling commands is destructive and not idempotent too, since the
+  same call with "next" cancels another command each time (a firm promise). Cost if wrong: a
+  client may ask for confirmation more often.
+
+### Exposure
+
+- **Timerify's own entities are not exposed to Assist by default.** In Home Assistant
+  2026.10.4 the `number` is not in the default domains and the timestamp sensors are not
+  exposed, and the interval switch is an entity of the configuration category
+  (`EntityCategory.CONFIG`), which the default leaves out. The switch configures the
+  timer's schedule, so the category fits: it moves to the configuration section of the
+  device page, leaves the auto-generated dashboards, and is skipped by a service call that
+  targets its device or area. The category changes no unique id and no name. Home Assistant
+  decides once, when it first sees an entity, and keeps the decision, so a switch that it
+  already exposed under 0.3.0 stays exposed after the upgrade (the README says how to take
+  it away; a repair issue is in `docs/followups.md`). A test pins what each entity is.
+  Cost if wrong: an upgraded house exposes its interval switches until the user unexposes
+  them.
+
+### Verification
+
+- **The voice tests run in `tests/voice/` with `hass_tmp_config_dir` and an empty
+  `configuration.yaml`, through the real default agent and the real Assist LLM API, with
+  frozen time and no sleeps.** The tests that write sentence files write them into the
+  temporary configuration folder. The hassil, `home-assistant-intents` and
+  `gazetteer-matcher` versions of the dev group are the ones Home Assistant 2026.10.4
+  requires, and the manifest test pins the declarations. Cost if wrong: a dev dependency to
+  bump with Home Assistant.
+- **A suite-wide timeout of 60 seconds fails a hung test instead of stopping the run.** A
+  test that waits for something that never comes (a debounce, a reload) would otherwise
+  hold the whole local gate. Cost if wrong: a slow machine must raise it.
+- **The five tests of the first three phases that cancelled a command through
+  `async_cancel_command` call `cancel_commands(NOW, [id])` of the core, with their
+  assertions unchanged.** The cancel of one command and of several became one step of the
+  core, so that voice cancels "all" or "the next one" in one stored change. Cost if wrong:
+  none.
+- **The smoke test adds the Voice settings through the menu of the flow and talks to the
+  built-in agent over the REST API.** It checks the answer text and, through the REST API,
+  the state of the target: an input boolean is refused as not exposed, then, once exposed
+  to the `conversation` assistant, "turn on ... for 2 minutes" runs it, "how much time is
+  left" answers 2 minutes, "turn off ... in 1 minute" ends it a minute later, a bare "turn
+  on" runs it for the default 30 minutes and a bare "turn off" stops it. Cost if wrong:
+  Russian and the LLM path are proved by pytest, not in the container.

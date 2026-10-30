@@ -1,0 +1,79 @@
+{#- The macros of Timerify's answers in English, written once, here. The generator
+    (scripts/generate_sentences.py) puts the definition of each macro that an answer calls,
+    and of the macros those call, in front of the answer, since an answer is rendered on
+    its own. A macro is a block from `macro` to `endmacro`, and calls only the macros above
+    it. Everything between the blocks is a comment. -#}
+
+{#- The word for a count: `one` for 1, `other` for any other count. -#}
+{%- macro plural(n, one, other) -%}
+  {%- if n == 1 -%}
+    {{ one }}
+  {%- else -%}
+    {{ other }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- Words the number of dates between today and the day a timer ends on: nothing for today,
+    and a leading space before the words, so that they follow a time. -#}
+{%- macro day(n) -%}
+  {%- if n == 1 -%}
+    {{ " tomorrow" }}
+  {%- elif n == 2 -%}
+    {{ " the day after tomorrow" }}
+  {%- elif n > 2 -%}
+    {{ " in " ~ n ~ " days" }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- Hours and minutes with their units: "1 hour and 30 minutes". Nothing for neither. -#}
+{%- macro duration(hours, minutes) -%}
+  {%- set parts = [] -%}
+  {%- if hours > 0 -%}
+    {%- set parts = parts + [hours ~ " " ~ plural(hours, "hour", "hours")] -%}
+  {%- endif -%}
+  {%- if minutes > 0 -%}
+    {%- set parts = parts + [minutes ~ " " ~ plural(minutes, "minute", "minutes")] -%}
+  {%- endif -%}
+  {{- parts | join(" and ") -}}
+{%- endmacro -%}
+
+{#- Where a timer stands after it was run, extended or stopped, from the slots a handler
+    gives: counting, on without a timer, or off. -#}
+{%- macro timer_now(slots) -%}
+  {%- if slots.state == "counting" -%}
+    {{ slots.target }} runs for {{ duration(slots.left_hours, slots.left_minutes) }}, until {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+  {%- elif slots.state == "open" -%}
+    {{ slots.target }} is on.
+  {%- else -%}
+    {{ slots.target }} is off.
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- What a command for later did, from the slots a handler gives: a command to turn on
+    was kept, the countdown was set to turn off, or there was nothing to turn off. -#}
+{%- macro timer_later(slots) -%}
+  {%- if slots.outcome == "command_added" -%}
+    {{ slots.target }} turns on at {{ slots.at }}{{ day(slots.in_days) }}.
+  {%- elif slots.outcome == "timer_set" -%}
+    {{ slots.target }} turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+  {%- else -%}
+    {{ slots.target }} is already off; nothing changed.
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- A planned command, from the slots a handler gives it: what it does, when, and for how
+    long a command to turn on then runs, if it has a time of its own. What it turns the
+    device on with is not said. -#}
+{%- macro planned_command(command) -%}
+  turn {{ command.action }} at {{ command.at }}{{ day(command.in_days) }}
+  {%- if command.minutes -%}
+    {{ " for " ~ duration(command.minutes // 60, command.minutes % 60) }}
+  {%- endif -%}
+{%- endmacro -%}
+
+{#- The planned commands, in the order they are given, set apart by semicolons. -#}
+{%- macro planned_commands(commands) -%}
+  {%- for command in commands -%}
+    {{ planned_command(command) }}{{ "; " if not loop.last else "" }}
+  {%- endfor -%}
+{%- endmacro -%}

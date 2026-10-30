@@ -4,7 +4,9 @@ import re
 from pathlib import Path
 from typing import Any
 
+import probatio
 import pytest
+from homeassistant.helpers import config_validation as cv
 from homeassistant.util.json import json_loads_object
 from homeassistant.util.yaml import load_yaml
 
@@ -72,3 +74,27 @@ def test_services_are_translated(language: str) -> None:
                 wanted |= {f"{name}.fields.{field_name}.{text}" for text in TEXTS}
 
     assert texts_in(translations_of(language)["services"]).keys() == wanted
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_no_text_contains_markup(language: str) -> None:
+    """Home Assistant takes a text for HTML when it has a tag in it, and hassfest
+    refuses the integration for one. This runs the check that fails it, Home
+    Assistant's own `string_with_no_html`, on every text of every language, so that
+    Docker is not the only place that mistake is found. It is the one check of the
+    several that hassfest makes on the translations, and the hassfest run stays the
+    proof of the rest."""
+    refused: dict[str, str] = {}
+    for path, text in texts_in(translations_of(language)).items():
+        try:
+            cv.string_with_no_html(text)
+        except probatio.Invalid as err:
+            refused[path] = str(err)
+
+    assert refused == {}
+
+
+def test_a_path_with_a_placeholder_in_angle_brackets_is_markup() -> None:
+    """The check sees what once broke hassfest: a path written with `<language>`."""
+    with pytest.raises(probatio.Invalid):
+        cv.string_with_no_html("custom_sentences/<language>/timerify.yaml")

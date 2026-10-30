@@ -9,10 +9,11 @@ off when the countdown ends.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
 
-> **Status:** version 0.3.0, the third phase. The core timer, settings for turning on
-> ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes") and weekly schedules
-> ("working days 06:30 to 07:15") work and are described below. The dashboard card and
-> voice control are not built yet; see [What is not here yet](#what-is-not-here-yet).
+> **Status:** version 0.4.0, the fourth phase. The core timer, settings for turning on
+> ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes"), weekly schedules
+> ("working days 06:30 to 07:15") and voice control through Assist ("turn on the boiler for
+> 10 minutes", "how long is left on the boiler") work and are described below. The
+> dashboard card is not built yet; see [What is not here yet](#what-is-not-here-yet).
 
 ## What it does
 
@@ -159,10 +160,11 @@ with settings if you like) or turn it off. A timer can hold up to 20 of them, ea
   the countdown ending, between now and then leaves the command in place. Only
   `timerify.cancel_command` removes it.
 - **"Turn on for N minutes" at its time is the same as setting "Run for" to N at that
-  time.** Without minutes, a command to turn on runs for the default duration in strict mode
-  and without a countdown in loose mode. A command to turn off turns the target off and
-  stops the countdown. A command to turn on that comes due at the very moment a countdown
-  ends keeps the target on instead of switching it off and on.
+  time.** Without minutes, a command to turn on runs a target that is off for the default
+  duration in strict mode and without a countdown in loose mode; a target that is running
+  keeps its countdown, and the command still sets its settings. A command to turn off
+  turns the target off and stops the countdown. A command to turn on that comes due at the
+  very moment a countdown ends keeps the target on instead of switching it off and on.
 
 Restarts and outages:
 
@@ -300,7 +302,10 @@ It is on to begin with.
 - Switch it off and the interval is skipped. If its window is open and the schedule is
   running the timer, the timer stops at once, or passes to another open window that wants
   the target running (rule 2 below).
-- Switch it on while the window is open and the target runs for the rest of the window.
+- Switch it on while the window is open and the target runs for the rest of the window,
+  unless the timer already ends later (rule 1 below). An interval that is on already is
+  left as it is, so a target that was turned off during its window stays off until the
+  next one (rule 4 below).
 - The state is stored with the timer and survives restarts. Flipping the switch does not
   reload the timer.
 - The name follows edits of the interval after the reload; the entity id keeps the title the
@@ -327,7 +332,9 @@ and you always win. Five rules, in plain words:
 3. **A change of yours ends that.** "Run for", `timerify.add_time`, `timerify.run`,
    stopping the timer and a pending command are yours: after one, editing an interval no
    longer touches the timer, until the next window sets it. A pending command that falls
-   due at the very moment a window opens is carried out after it and wins.
+   due at the very moment a window opens is carried out after it and wins. Turning on,
+   without a duration, a target that already runs changes nothing, so it is not a change
+   of yours.
 4. **A manual off holds until the next window.** If the target is off during a window,
    whoever turned it off (you at the wall, its own app, an automation, "Run for" 0, the end
    of a countdown you started), the window does not turn it back on; the next window does.
@@ -398,9 +405,10 @@ data:
 ```
 
 `timerify.run` turns the target on. With `minutes` (1 to 1440) the countdown is that long;
-without it the target runs for the default duration in strict mode and without a countdown
-in loose mode. Settings go along; a setting the target does not support is refused before
-anything happens.
+without it a target that is off runs for the default duration in strict mode and without a
+countdown in loose mode, and one that is running already keeps its countdown. Settings go
+along, also to a target that keeps its countdown; a setting the target does not support is
+refused before anything happens.
 
 ```yaml
 action: timerify.run
@@ -466,6 +474,287 @@ holds the command: another timer does not know the id and says so
 (`unknown_command`). The id is in the response of `timerify.add_command` and in the
 `commands` attribute of the [Next command sensor](#next-command-sensor).
 
+## Voice and AI
+
+Timerify answers to Assist, Home Assistant's voice assistant, in English and Russian.
+Install Timerify as described under [Installation](#installation) (HACS as a custom
+repository, or by hand) and add your timers. The built-in conversation agent then
+understands a fixed set of sentences, once you give it them under [The Voice settings
+entry](#the-voice-settings-entry); an LLM agent is given tools and chooses its own words.
+Both go the way the services go: a timer changes only through its own countdown, so "turn
+on the boiler for 10 minutes" said aloud and `timerify.run` do the same thing and are
+refused for the same reasons.
+
+### What can be said
+
+A sentence names a device that has a timer, and the device must be exposed to Assist
+(see [Exposure](#exposure)). The examples say "the boiler"; say the name as Home
+Assistant shows it, or one of its aliases. Each sentence has more wordings than the table
+shows: the English "the" is optional, the verbs have synonyms, and a duration is hours,
+minutes or both ("half an hour" and "an hour and a half" as well). The complete
+sentences are the files under `custom_components/timerify/sentences/<language>/`.
+
+| What | English | Russian, transliterated |
+| --- | --- | --- |
+| How long is left | how much time is left on the boiler | skol'ko vremeni ostalos' u taymera Boiler |
+| Run for a time | turn on the boiler for 10 minutes | vklyuchi Boiler na 10 minut |
+| Set the countdown | set the boiler timer to 90 minutes | postav' taymer Boiler na 90 minut |
+| Run with settings | turn on the AC for an hour, cooling, 24 degrees | vklyuchi AC na chas v rezhime okhlazhdenie 24 gradusa |
+| Run at a level | turn on the lamp for 20 minutes at 40 percent | vklyuchi Lamp na 20 minut na 40 protsentov |
+| Add time | add 15 minutes to the boiler | dobav' 15 minut k taymeru Boiler |
+| Stop | stop the boiler timer | ostanovi taymer Boiler |
+| Turn on or off by name | turn on the boiler, turn off the boiler | vklyuchi Boiler, vyklyuchi Boiler |
+| Turn on later | turn on the boiler in 15 minutes for an hour | vklyuchi Boiler cherez 15 minut na chas |
+| Turn off later | turn off the boiler in 20 minutes | vyklyuchi Boiler cherez 20 minut |
+| What is planned | what is planned for the boiler | chto zaplanirovano u taymera Boiler |
+| Cancel what is planned | cancel all planned commands for the boiler | otmeni vse zaplanirovannye komandy u taymera Boiler |
+| Cancel the next one | cancel the next planned command for the boiler | otmeni blizhayshuyu zaplanirovannuyu komandu u taymera Boiler |
+| Switch the schedule | turn off the boiler schedule, turn on the boiler schedule | vyklyuchi raspisanie taymera Boiler, vklyuchi raspisanie taymera Boiler |
+| Switch one interval | turn off the Morning schedule of the boiler | vyklyuchi raspisanie Utro taymera Boiler |
+
+The Russian column is transliterated because this README is English only; the real
+sentences are in `custom_components/timerify/sentences/ru/`. A Russian name is not
+declined, so where a sentence would decline it, the sentences put it after a noun
+("taymera Boiler") and the nominative is natural; and the answers start with the name and
+a colon.
+
+What each does:
+
+- **How long is left** says the time left and when the target turns off, or that it is
+  off, or on without a timer.
+- **Run for a time** is the same as setting "Run for": the countdown is that long, from
+  one minute to 24 hours, and replaces the one that runs. Said longer, as far as a week
+  ("for 30 hours"; minutes beyond a day in digits, "for 2000 minutes"), the sentence is
+  understood and refused with the limit, and nothing is turned on; a count beyond a week
+  is not understood at all. A thermostat, a water heater,
+  a light, a fan or a humidifier takes its settings in the same sentence, in any order:
+  the HVAC mode ("cooling", "heating", "auto", ...), a temperature ("24 degrees", "at
+  22.5", "120 degrees" for a water heater in Fahrenheit; any number up to 250, in digits
+  or words, which the device then accepts or refuses by its own range), a percentage
+  ("at 40 percent"), and a mode of the device ("eco", "high").
+  Only a device that has a setting is understood to be given it, and the request is
+  checked against the device as `timerify.run` checks it: what it cannot do is refused,
+  by voice and by tool alike.
+- **Add time** extends a running countdown, or turns the target on for that long. A
+  countdown never ends more than a day ahead: adding 30 hours (any count up to a week)
+  gives a day, and the answer says when it ends.
+- **Stop** sets the countdown to zero and turns the target off.
+- **Turn on or off by name** is the bare "turn on the boiler" and "turn off the boiler".
+  For a device that has a timer these are Timerify's commands, not Home Assistant's: on
+  turns a device that is off on as the timer's [mode](#modes) says (strict mode: for the
+  default duration; loose mode: on, without a countdown), and leaves a device that is
+  running as it is: its countdown keeps its end, whoever set it, and the answer says how
+  long is left. Off stops the countdown. A target that is unavailable keeps the wish and
+  is switched when it is back. Phrasings with an area, a floor or a kind of device ("turn
+  off the lights in the kitchen") stay with Home Assistant, and so does every device
+  without a timer.
+- **Turn on later** and **turn off later** are Home Assistant's own delayed commands,
+  which Timerify takes over for the devices that have a timer, in every shape Home
+  Assistant has for them in both languages (the delay before or after the command, in
+  hours, minutes and seconds, "in" or "after" in English, and the English form that
+  has the name last, "in 15 minutes boiler"). A command to turn on is kept as a
+  [pending command](#pending-commands): it survives a restart, shows on the Next command
+  sensor and can be cancelled. It may say how long the target then runs and its settings
+  ("turn on the AC in 15 minutes for an hour, cooling, 24 degrees"). A command to turn off
+  sets the countdown of a target that is running, with or without a countdown, to end
+  then, replacing its end; for a target that is off nothing changes, and the answer says
+  so. A delay is at most a week for a command to turn on and a day for one to turn off,
+  and a timer keeps at most 20 pending commands; each is refused with a message when it
+  is too much. By voice the hours, the minutes and the seconds of a delay are each at most
+  100, as in Home Assistant's own sentences, and a longer delay is not understood: use the
+  tool or the service for it. Devices without a timer keep Home Assistant's delayed
+  commands untouched.
+- **What is planned** lists the pending commands, in the order they are due, by the
+  time they run at and for how long. Their settings are not said.
+- **Cancel** takes away all of them (the default) or the next one; saying "the next" again
+  takes the one after. A cancelled command never runs. An id cannot be said, so cancelling
+  one particular command is for an LLM agent or the `timerify.cancel_command` service.
+- **Switch the schedule** switches every interval of the timer's schedule on or off, as
+  its [switches](#the-switch-of-an-interval) do, and has the same effects, on the same
+  conditions (rules 1 to 4 of [how the schedule and your own changes
+  meet](#how-the-schedule-and-your-own-changes-meet)). Switching off while a window runs
+  stops the timer only if the schedule is running it: its end came from that interval and
+  nobody has changed the timer since (otherwise it is yours and stays), or another open
+  window takes it over. Switching on inside a window runs the target for the rest of it,
+  unless the timer already ends later, and an interval that is on already is left as it
+  is, so a target that was turned off during its window stays off until the next one. To
+  switch one interval, say its title ("the Morning schedule of the boiler"): give the
+  intervals titles of your own, because the title an interval is given when it is made
+  ("06:30-07:15, Sun-Thu") cannot be said to the built-in agent. A title that two
+  intervals share switches both. A title that another timer has and this one does not is
+  refused, and the answer names the first five titles this one has.
+
+The answers are in the language of the request: a regional language such as `en-GB` uses
+the sentences of its language, and one Timerify has no texts for is answered in English.
+An answer says what the timer is set to do: while a command waits for an unavailable
+target, or a device has ignored one, the answer still gives the wish, and the log has the
+rest.
+
+A few things work the way Home Assistant does, not Timerify:
+
+- "Turn it off" and "them" after a question or a command about a device are answered by
+  Home Assistant's own commands. They switch the device, and the timer follows, but the
+  answer is Home Assistant's, and a target that is unavailable is not given the wish.
+- A sentence of Timerify's about a name that is not a device with a timer ("what is
+  planned for the fan") is answered with Home Assistant's "not aware of any device".
+- A wording that Timerify does not have and that mentions a device with a timer, with
+  "turn on" or "turn off" in it ("turn off scheduling for the boiler", "turn off the boiler
+  in 2 days"), can still be taken for a plain turn off of the device by Home Assistant,
+  which turns it off at once. Use the wordings above.
+- If two entities have the same name and one of them has a timer, "turn off the boiler"
+  and the other sentences above mean the one with the timer. Likewise, "turn off the
+  boiler schedule" means the schedule of the timer called Boiler even when another exposed
+  entity is called "Boiler schedule"; that entity is reached by other wordings and the
+  interface.
+
+### The Voice settings entry
+
+This is the way to give the built-in agent the sentences, and the one to use unless you
+have a reason not to.
+
+1. Open **Settings > Devices & services > Helpers**, choose **Create helper** and then
+   **Timerify**, and in the menu choose **Voice settings**. (There is one such entry; the
+   menu does not offer it again.)
+2. Tick **Add voice sentences for the built-in agent** (it is ticked to begin with) and
+   pick the **Languages**: English, Russian, or both. The house language is picked for
+   you if Timerify has it, English otherwise.
+
+Timerify then writes `custom_sentences/<language>/timerify.yaml` in your configuration
+folder for each language you picked, with the names of your timers' devices in it, and
+tells the built-in agent to read the sentences again. A name is listed the way Home
+Assistant lists every entity: with its aliases. The file is written again whenever a timer is
+added, removed or reloaded, a target is renamed or gets another alias, or a schedule
+interval is added, deleted or renamed, and only when its text changes. It also holds the
+words for the HVAC modes the devices have, and the modes of fans, humidifiers and the
+like, as the devices name them (with a space for an underscore).
+
+- The file is checked with the parser Home Assistant uses (hassil) before it is written:
+  every sentence, every list and every name, which has to be matched as it is said. A
+  file Home Assistant could not read would break Assist for the whole language, so when a
+  check fails Timerify leaves the old file as it is and logs an error.
+- Timerify writes only where there is no file or its own, which is the one whose first
+  line is `# Managed by Timerify. ...`; a `timerify.yaml` of yours at that path is left
+  as it is, that language is not written, and the log says so once.
+- The files are removed again when you untick the option, disable the entry, remove the
+  entry, or stop picking a language. They stay when Home Assistant restarts or the entry
+  reloads.
+- The sentences need Timerify's handlers: **remove the Voice settings entry (or untick its
+  option) before you uninstall Timerify**. A file that is left behind makes the built-in
+  agent fail on every phrase of it that matches, the delayed commands it took over from
+  Home Assistant included, until you remove the file by hand.
+- Names are listed when a timer is set up or its device changes. A device that changes
+  its own list of modes later (a firmware update) is picked up at the next change, and so
+  is a new friendly name of a target that is not in the entity registry.
+
+### The manual alternative
+
+If you do not want Timerify to write into `custom_sentences`, copy the sentences yourself
+and keep them current. Use **either** this **or** the entry above, never both: the entry
+logs a warning when it finds this copy, and two sets of sentences confuse the agent.
+
+For each language you want (`en`, `ru`):
+
+1. Make the folder `config/custom_sentences/<language>/timerify_manual/`.
+2. Copy into it the files at the top of the folder `sentences/<language>/` of Timerify
+   (in your installation that is `custom_components/timerify/sentences/<language>/`),
+   which are `timerify.yaml` and `core_commands.yaml`, and only those: the folder `src/`
+   beside them holds the sources they are generated from and must not be copied (Home
+   Assistant reads every folder below `custom_sentences/<language>/`).
+3. Add a file of your own, `timerify_names.yaml`, that lists the devices (and, to say an
+   interval by its title, the titles):
+
+```yaml
+language: en
+lists:
+  timerify_target:
+    values:
+      - in: "boiler"
+        out: "Boiler"
+        context:
+          domain: switch
+      - in: "AC"
+        out: "AC"
+        context:
+          domain: climate
+  timerify_interval:
+    values:
+      - in: "Morning"
+        out: "Morning"
+```
+
+   - `in` is the name as it is said, with the punctuation Home Assistant ignores
+     removed; if it has any of the characters `( ) [ ] { } < > | @`, put a backslash
+     before each of them and before every backslash in it, because Home Assistant would
+     read them as a sentence template. `out` is the name as Home Assistant shows it.
+   - Give each name its `context: domain`, the part of the entity id before the dot.
+     Settings are said only of a device that has them: a thermostat's HVAC mode and
+     temperature need `climate`, a water heater's temperature `water_heater`. A name
+     with no domain gets the sentences that fit every device and nothing more.
+   - `timerify_interval` is needed only to switch a schedule interval by its title
+     (the whole schedule needs none). To say the fan mode of a thermostat, the preset of
+     a fan or the mode of a humidifier, list the values under `timerify_mode` the same
+     way: `in` the mode as it is said, an underscore as a space, and `out` the mode as the
+     device names it. The words for the HVAC modes are in `timerify.yaml` already, for
+     every mode, and a mode the device does not have is refused when it is said.
+4. Restart Home Assistant, or call `conversation.reload`.
+
+Do it again after every update of Timerify (the sentences change between versions) and
+after every rename of a device or an interval. A file that is not valid breaks Assist for
+the whole language, which the entry above protects you from by checking before it
+writes; check yours by reading the log after the reload.
+
+### Exposure
+
+Assist can control only what is exposed to it. Home Assistant exposes new entities of some
+kinds by default (among them switches, lights, fans, climate entities, humidifiers and
+water heaters) and not those of others (an input boolean, a group). Open **Settings >
+Voice assistants > Expose** and expose the targets of your timers that are not. A device that
+is not exposed is refused ("Sorry, Boiler is not exposed"), and an LLM agent is told only
+about the exposed ones.
+
+Timerify's own entities, the `number`, the sensors and the interval switches, are not
+exposed by default: the switch of an interval is an entity of the configuration category,
+which Home Assistant leaves out. An interval switch that Home Assistant already decided
+to expose before version 0.4.0 stays exposed; take it away under **Settings > Voice
+assistants > Expose**.
+
+### LLM agents
+
+An LLM agent that uses the Assist API is offered these tools while a device with a timer
+is exposed to its assistant, and the prompt names those devices. A tool takes the device's
+name as its argument and does what the sentence above does, through the same code; a
+refusal comes back as text in the language of the request.
+
+| Tool | What it does |
+| --- | --- |
+| `timerify__time_left` | How long is left, and when the device turns off. |
+| `timerify__run` | Turn on for `hours` and `minutes` (neither: a device that is off runs for the usual time, and one that is running keeps its countdown), with settings. |
+| `timerify__add_time` | Add `hours` and `minutes` to the countdown. |
+| `timerify__stop` | Stop the timer and turn the device off. |
+| `timerify__delayed_command` | Plan to turn on or off (`action`) later, after `delay_hours`, `delay_minutes` and `delay_seconds` or at `at`, a date and time on the house's clock, never both. A turn-on may say how long it then runs (`hours`, `minutes`) and its settings; it may be up to a week ahead, a turn-off up to a day. |
+| `timerify__list_commands` | The planned commands, with the ids that cancel them. |
+| `timerify__cancel_commands` | Cancel `all` or the `next` command, or one by `command_id`. |
+| `timerify__set_schedule` | Switch the schedule, `enabled` true or false, or one interval by its title. |
+
+An agent can plan a command at a clock time, which the built-in agent's sentences
+cannot. An empty `interval` means the whole schedule, as an empty argument is no
+argument to any tool.
+
+### What is not by voice
+
+- **A command at a clock time** ("turn on the boiler at 7:30"): the sentences take a delay
+  only; an LLM agent has `at`.
+- **Taking time off** ("10 minutes less"): set the countdown to the new length instead.
+- **Planning a command to turn off** ("turn off in 20 minutes" sets the countdown). A
+  pending command to turn off is made with `timerify.add_command`.
+- **Cancelling one command by its id**: only an LLM agent or the service has the id.
+- **An interval by the title it is made with**: rename it first.
+- **The settings of a device in Russian** that its device names in Latin ("eco", "high"):
+  they are said as written. The HVAC modes have Russian words.
+- Two thermostats with different HVAC modes: the words are the modes of all of them, so
+  saying a mode only one of them has to the other is refused with the list of the modes
+  it has.
+
 ## Installation
 
 ### With HACS
@@ -486,8 +775,9 @@ Copy the `custom_components/timerify` folder of this repository into the
 Add one timer per entity:
 
 1. Open **Settings > Devices & services > Helpers**, choose **Create helper** and then
-   **Timerify**. (The **Add integration** button on the Integrations tab lists it too, as
-   "Timerify (Helper)".)
+   **Timerify**, and in the menu choose **Add a timer**. (The **Add integration** button
+   on the Integrations tab lists it too, as "Timerify (Helper)". The other item of the
+   menu, **Voice settings**, is described under [Voice and AI](#voice-and-ai).)
 2. Pick the entity, and the mode.
 3. In strict mode, set the default duration.
 4. If your house has a Workday sensor, pick the one this timer follows, or leave it empty;
@@ -502,16 +792,19 @@ Renaming the target, or moving it to another device, is followed: the timer keep
 
 ## What is not here yet
 
-Planned for later versions, none of it available in 0.3.0: a dashboard card, and Assist
-voice control ("turn on the boiler for 10 minutes", "how long is left on the boiler?").
+Planned for later versions, none of it available in 0.4.0: a dashboard card. What cannot
+be said to Assist is listed under [What is not by voice](#what-is-not-by-voice).
 
 ## Verification
 
-What 0.3.0 was checked with before release:
+What 0.4.0 was checked with before release:
 
 - The test suite (`uv run pytest`): every rule above is a scenario, with time moved
   explicitly, among them the days the clock changes, Home Assistant down overnight, a
-  Workday sensor that is away, and the real Workday integration for the Israeli week.
+  Workday sensor that is away, and the real Workday integration for the Israeli week. The
+  voice sentences are said to Home Assistant's real built-in agent, in both languages, and
+  the LLM tools are called through the real Assist API; the sentence files are generated
+  from their sources and checked against the shipped ones.
 - `hassfest`, Home Assistant's own validation of an integration, reports no problems.
 - A smoke test in a real Home Assistant 2026.10.4 container (see below): the timer is
   added through the config flow, "Run for" 2 minutes turns the target on and off on time,
@@ -519,7 +812,12 @@ What 0.3.0 was checked with before release:
   pending command turns a switch that sits on a device on at its time and off a minute
   later, a thermostat run for a minute with a mode and a temperature is set to both and
   switched off at the end, and a schedule interval added through the interval form turns
-  a switch on at its start and off at its end, with the interval's own switch on.
+  a switch on at its start and off at its end, with the interval's own switch on. The
+  Voice settings are added through the config flow and the built-in agent is talked to
+  over the REST API: it refuses a device that is not exposed to Assist, and once the
+  device is exposed, "turn on ... for 2 minutes", "how much time is left", "turn off in 1
+  minute", a bare "turn on" and a bare "turn off" each give the answer the sentence is
+  meant to and leave the switch in the state the REST API reports.
 
 ## Development
 
@@ -533,6 +831,9 @@ uv run ruff check
 uv run ruff format --check
 uv run mypy
 ```
+
+The tests run in parallel, one worker per core (`pytest-xdist`, set in `pyproject.toml`).
+`uv run pytest -n 0` runs them in one process, which a debugger or a plain stack trace needs.
 
 ### hassfest
 
@@ -551,9 +852,11 @@ Home Assistant's demo integration (which sits on a device), and a generic thermo
 checks that a 2 minute countdown turns the first switch on and off, that a schedule
 interval for today's weekday, added through the interval form to begin in a minute or two,
 turns the first switch on at its start and off two minutes later (its switch is on, on the
-timer's device), that a 3 minute countdown survives a restart of the container, that a
-pending command turns the demo switch on at its time and off a minute later, and that the
-thermostat takes the mode and the temperature of a run. It takes about fifteen minutes.
+timer's device), that the built-in agent, given the Voice settings through the config flow
+and talked to over the REST API, runs, shortens and stops the first switch by sentences,
+that a 3 minute countdown survives a restart of the container, that a pending command
+turns the demo switch on at its time and off a minute later, and that the thermostat takes
+the mode and the temperature of a run. It takes about fifteen minutes.
 
 ```sh
 uv run python scripts/smoke/run.py

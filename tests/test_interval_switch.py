@@ -14,12 +14,15 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_fire_time_changed,
+)
 
-from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.const import DOMAIN, MAX_LISTED_INTERVALS
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -39,7 +42,9 @@ from .helpers import (
     open_sunday,
     payload,
     record_writes,
+    reload_held_back,
     restart,
+    retitle_interval,
     saved,
     set_switch,
     state_of,
@@ -52,6 +57,8 @@ MONDAY = SUNDAY + timedelta(days=1)
 
 SWITCH = "switch.boiler_schedule_06_30_07_15_mon_sun"
 """The switch of the interval from 06:30 to 07:15 on every day of the week."""
+EVENING_SWITCH = "switch.boiler_schedule_18_00_19_00_mon_sun"
+"""The switch of the interval from 18:00 to 19:00 on every day of the week."""
 
 
 # --- The switch on the device ------------------------------------------------------
@@ -633,3 +640,540 @@ async def test_flipping_an_interval_outside_its_window_does_not_write_the_number
     await set_switch(hass, SWITCH, True)
 
     assert writes == []
+
+
+# --- The whole schedule at once ------------------------------------------------------
+#
+# What the voice and the tools of an LLM switch: every interval of the timer, or the
+# intervals that carry a title, each as its own switch would switch it.
+
+
+async def titled_schedule(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, setup_target: SetupTarget
+) -> tuple[MockConfigEntry, str, str]:
+    """A timer with the intervals Morning, from 06:30 to 07:15, and Evening, from 18:00
+    to 19:00, on a Sunday at six: the entry and the ids of the two intervals."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    morning = await add_interval(hass, entry, start="06:30", end="07:15")
+    evening = await add_interval(hass, entry, start="18:00", end="19:00")
+    await retitle_interval(hass, entry, morning, "Morning")
+    await retitle_interval(hass, entry, evening, "Evening")
+    return entry, morning, evening
+
+
+def schedule_switches(hass: HomeAssistant) -> tuple[str, str]:
+    """What the switches of the morning and the evening interval of `titled_schedule`
+    show."""
+    return state_of(hass, SWITCH), state_of(hass, EVENING_SWITCH)
+
+
+async def test_the_schedule_is_switched_as_a_whole_without_a_reload(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Both intervals go off and come back on, the titles of the intervals switched
+    are given back in the order of the schedule, the flags are kept in the timer's file
+    and the timer is not reloaded. Switched on again at half past six, with the morning
+    open, the boiler runs for the rest of it."""
+    entry, morning, evening = await titled_schedule(hass, freezer, setup_target)
+    controller = entry.runtime_data
+
+    assert await controller.async_set_schedule_enabled(False) == ("Morning", "Evening")
+
+    assert saved(hass_storage, entry) == payload(disabled_intervals=[morning, evening])
+    assert state_of(hass, SWITCH) == "off"
+    assert entry.runtime_data is controller
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == []
+
+    assert await controller.async_set_schedule_enabled(True) == ("Morning", "Evening")
+
+    assert saved(hass_storage, entry)["disabled_intervals"] == []
+    assert state_of(hass, SWITCH) == "on"
+    assert entry.runtime_data is controller
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+
+async def test_an_interval_is_found_by_its_title_without_case_or_punctuation(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The title is compared as the built-in agent hears it, and the title given back
+    is the interval's own."""
+    entry, _, _ = await titled_schedule(hass, freezer, setup_target)
+
+    assert await entry.runtime_data.async_set_schedule_enabled(
+        False, "  mORNING! "
+    ) == ("Morning",)
+
+    assert schedule_switches(hass) == ("off", "on")
+
+
+async def test_the_titles_given_back_are_those_now_as_asked_whether_or_not_they_were(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Asking for a state the schedule is in already is answered as if it were
+    changed, and changes nothing more."""
+    entry, _, _ = await titled_schedule(hass, freezer, setup_target)
+    controller = entry.runtime_data
+    await controller.async_set_schedule_enabled(False, "Morning")
+
+    assert await controller.async_set_schedule_enabled(False) == ("Morning", "Evening")
+    assert await controller.async_set_schedule_enabled(False) == ("Morning", "Evening")
+
+    assert schedule_switches(hass) == ("off", "off")
+
+
+async def test_intervals_with_one_title_are_switched_together(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    entry, _, evening = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, evening, "morning")
+    night = await add_interval(hass, entry, start="22:00", end="23:00")
+    await retitle_interval(hass, entry, night, "Night")
+
+    assert await entry.runtime_data.async_set_schedule_enabled(False, "Morning") == (
+        "Morning",
+        "morning",
+    )
+
+    assert schedule_switches(hass) == ("off", "off")
+    assert state_of(hass, "switch.boiler_schedule_22_00_23_00_mon_sun") == "on"
+
+
+async def test_an_unknown_title_switches_nothing_and_says_which(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    entry, _, _ = await titled_schedule(hass, freezer, setup_target)
+    stored = copy.deepcopy(saved(hass_storage, entry))
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "unknown_interval"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "Morning; Evening",
+    }
+    assert schedule_switches(hass) == ("on", "on")
+    assert saved(hass_storage, entry) == stored
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        "morning early",
+        "  Morning   EARLY ",
+        "Morning, early!",
+        "MORNING\u00a0early",
+    ],
+)
+async def test_titles_are_compared_without_case_punctuation_and_the_space_between_words(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    asked: str,
+) -> None:
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, morning, "Morning  early")
+
+    titles = await entry.runtime_data.async_set_schedule_enabled(False, asked)
+
+    assert titles == ("Morning  early",)
+    assert schedule_switches(hass) == ("off", "on")
+
+
+@pytest.mark.parametrize(
+    ("title", "asked"),
+    [
+        ("06:30–07:15, Mon–Sun", "06:30-07:15, Mon-Sun"),
+        ("06:30-07:15, Mon-Sun", "06:30–07:15, Mon–Sun"),
+        ("Mon—Sun", "mon-sun"),
+        ("Mon\u2212Sun", "Mon-Sun"),
+    ],
+    ids=["hyphen-for-en-dash", "en-dash-for-hyphen", "em-dash", "minus-sign"],
+)
+async def test_a_hyphen_and_a_dash_are_one_in_a_title(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    title: str,
+    asked: str,
+) -> None:
+    """The title an interval is given when it is made has en dashes; whoever asks for
+    it types what the keyboard has."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, morning, title)
+
+    assert await entry.runtime_data.async_set_schedule_enabled(False, asked) == (title,)
+
+    assert schedule_switches(hass) == ("off", "on")
+
+
+async def test_a_letter_with_and_without_the_diaeresis_is_one_in_a_title(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Russian prints "e" for "yo" (CYRILLIC SMALL LETTER IO) and a title is asked for
+    either way."""
+    io, ie = "\N{CYRILLIC SMALL LETTER IO}", "\N{CYRILLIC SMALL LETTER IE}"
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, morning, f"T{io}st")
+
+    assert await entry.runtime_data.async_set_schedule_enabled(
+        False, f"T{ie.upper()}ST"
+    ) == (f"T{io}st",)
+
+    assert schedule_switches(hass) == ("off", "on")
+
+
+@pytest.mark.parametrize("asked", ["?", " ! ", "...", "\u2013"])
+async def test_a_title_of_punctuation_asks_for_nothing(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    asked: str,
+) -> None:
+    """What is nothing but punctuation says no title, as it says no name to the
+    built-in agent: it is not the interval whose title is nothing but punctuation too,
+    and the answer lists the titles that can be asked for, not that one."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, morning, "?!")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, asked)
+
+    assert raised.value.translation_key == "unknown_interval"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": asked,
+        "intervals": "Evening",
+    }
+    assert schedule_switches(hass) == ("on", "on")
+
+
+async def test_a_schedule_with_no_title_to_ask_for_says_so(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Every interval is titled by punctuation alone, so none can be asked for by
+    title: the answer says that, instead of listing nothing."""
+    entry, morning, evening = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, morning, "?!")
+    await retitle_interval(hass, entry, evening, "...")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "?!")
+
+    assert raised.value.translation_key == "no_interval_titles"
+    assert raised.value.translation_placeholders == {"target": "Boiler"}
+    assert schedule_switches(hass) == ("on", "on")
+
+
+async def test_the_titles_a_refusal_lists_are_bare_and_each_listed_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The refusal gives the titles as they are, apart by semicolons, because the
+    translation of each language frames them in its own quotes and a title may have a
+    comma of its own (the one an interval is given when it is made does); two intervals
+    of a title list it once."""
+    entry, _, evening = await titled_schedule(hass, freezer, setup_target)
+    await retitle_interval(hass, entry, evening, "Morning")
+    await add_interval(hass, entry, start="22:00", end="23:00")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == "unknown_interval"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "Morning; 22:00–23:00, Mon–Sun",
+    }
+
+
+async def test_titles_that_sound_the_same_take_one_place_in_a_refusal(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Titles that differ only in case or punctuation are one title to whoever asks, so
+    they are listed once, as the first of them is written, and take one of the places
+    that the list has: the cap counts what can be asked for, not what is stored."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    titles = ["Morning", "morning!", *(f"Title {number}" for number in range(1, 6))]
+    for number, title in enumerate(titles, start=1):
+        subentry_id = await add_interval(
+            hass, entry, start=f"{number:02d}:00", end=f"{number:02d}:30"
+        )
+        await retitle_interval(hass, entry, subentry_id, title)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == "unknown_interval_and_more"
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "Morning; Title 1; Title 2; Title 3; Title 4",
+        "more": "1",
+    }
+
+
+@pytest.mark.parametrize(
+    ("intervals", "key", "listed", "more"),
+    [
+        pytest.param(
+            MAX_LISTED_INTERVALS, "unknown_interval", MAX_LISTED_INTERVALS, None
+        ),
+        pytest.param(
+            MAX_LISTED_INTERVALS + 1,
+            "unknown_interval_and_more",
+            MAX_LISTED_INTERVALS,
+            "1",
+        ),
+        pytest.param(
+            MAX_LISTED_INTERVALS + 3,
+            "unknown_interval_and_more",
+            MAX_LISTED_INTERVALS,
+            "3",
+        ),
+    ],
+    ids=["all-fit", "one-more", "three-more"],
+)
+async def test_a_long_list_of_titles_is_cut_and_says_how_many_are_left_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    intervals: int,
+    key: str,
+    listed: int,
+    more: str | None,
+) -> None:
+    """A refusal is read aloud and read by an agent, so it names the first titles and
+    counts the rest instead of reciting a whole house of intervals; the count is a
+    placeholder of the message that says it, which only a cut list has."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    for number in range(1, intervals + 1):
+        subentry_id = await add_interval(
+            hass, entry, start=f"{number:02d}:00", end=f"{number:02d}:30"
+        )
+        await retitle_interval(hass, entry, subentry_id, f"Title {number}")
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, "Noon")
+
+    assert raised.value.translation_key == key
+    assert raised.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Noon",
+        "intervals": "; ".join(f"Title {number}" for number in range(1, listed + 1)),
+        **({} if more is None else {"more": more}),
+    }
+
+
+@pytest.mark.parametrize("interval", [None, "Morning"])
+async def test_a_timer_without_intervals_has_no_schedule(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    interval: str | None,
+) -> None:
+    entry = await setup_target()
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await entry.runtime_data.async_set_schedule_enabled(False, interval)
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "no_schedule"
+    assert raised.value.translation_placeholders == {"target": "Boiler"}
+
+
+async def test_switching_overlapping_windows_together_does_not_flicker_the_boiler(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Two windows are open at ten to seven, from half past six to a quarter past
+    seven and from a quarter to seven to a quarter to eight. The whole schedule off
+    turns the boiler off once, not off and on again between the two; on again at five
+    to seven runs it once, to the later end."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await add_interval(hass, entry, start="06:45", end="07:45")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:45"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:45")
+
+    await entry.runtime_data.async_set_schedule_enabled(False)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, SENSOR) == "unknown"
+    await advance_to(hass, freezer, local(SUNDAY, "06:55"))
+
+    await entry.runtime_data.async_set_schedule_enabled(True)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:45")
+    await advance_to(hass, freezer, local(SUNDAY, "07:45"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON, TURN_OFF]
+
+
+async def test_a_schedule_is_not_switched_further_once_the_timer_unloads(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The morning interval is switched off and the boiler is slow to answer the
+    turn-off. The timer is unloaded meanwhile: the call says so and the evening
+    interval is left as it was, since a timer that is gone must not go on writing its
+    file for the one that replaces it."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+    slow = fake_target.hold_next_call()
+    switching = hass.async_create_task(
+        entry.runtime_data.async_set_schedule_enabled(False)
+    )
+    await slow.reached.wait()
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    slow.release.set()
+    with pytest.raises(HomeAssistantError) as raised:
+        await switching
+
+    assert raised.value.translation_key == "timer_unloaded"
+    assert saved(hass_storage, entry)["disabled_intervals"] == [morning]
+
+
+@pytest.mark.parametrize("on", [False, True], ids=["off", "on"])
+async def test_a_schedule_waiting_behind_a_slow_boiler_fails_when_the_timer_unloads(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    on: bool,
+) -> None:
+    """The call waits its turn while the timer is unloaded: nothing is changed and the
+    caller is told, as a flip of a single switch is."""
+    entry, _, _ = await titled_schedule(hass, freezer, setup_target)
+    controller = entry.runtime_data
+    slow = fake_target.hold_next_call()
+    starting = hass.async_create_task(
+        hass.services.async_call(
+            "number", "set_value", {"entity_id": NUMBER, "value": 10}, blocking=True
+        )
+    )
+    await slow.reached.wait()
+    switching = hass.async_create_task(controller.async_set_schedule_enabled(on))
+    await hass.config_entries.async_unload(entry.entry_id)
+    stored = copy.deepcopy(hass_storage[storage_key(entry)])
+
+    slow.release.set()
+    await starting
+    with pytest.raises(HomeAssistantError) as raised:
+        await switching
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "timer_unloaded"
+    assert hass_storage[storage_key(entry)] == stored
+
+
+async def test_a_schedule_asked_for_after_an_interval_is_deleted_is_refused_as_unknown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Deleting an interval reloads the timer, and the reload waits for its turn when
+    another is still going. The call that arrives meanwhile finds the interval gone:
+    asked for by its title it is unknown, and the answer names the one that is left."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, morning)
+
+        with pytest.raises(ServiceValidationError) as refused:
+            await entry.runtime_data.async_set_schedule_enabled(False, "Morning")
+
+    assert refused.value.translation_key == "unknown_interval"
+    assert refused.value.translation_placeholders == {
+        "target": "Boiler",
+        "interval": "Morning",
+        "intervals": "Evening",
+    }
+    await hass.async_block_till_done()
+    assert state_of(hass, EVENING_SWITCH) == "on"
+
+
+async def test_a_schedule_switched_as_a_whole_after_an_interval_is_deleted_has_one_left(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The whole schedule is the intervals that are still there: the evening one. It is
+    still switched off once the timer has reloaded."""
+    entry, morning, _ = await titled_schedule(hass, freezer, setup_target)
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, morning)
+
+        titles = await entry.runtime_data.async_set_schedule_enabled(False)
+
+    assert titles == ("Evening",)
+    await hass.async_block_till_done()
+    assert state_of(hass, EVENING_SWITCH) == "off"
+
+
+async def test_a_schedule_asked_for_after_its_only_interval_is_deleted_is_no_schedule(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, interval)
+
+        with pytest.raises(ServiceValidationError) as refused:
+            await entry.runtime_data.async_set_schedule_enabled(True)
+
+    assert refused.value.translation_key == "no_schedule"

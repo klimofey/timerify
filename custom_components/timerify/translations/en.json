@@ -2,6 +2,14 @@
   "config": {
     "step": {
       "user": {
+        "title": "Add to Timerify",
+        "description": "Add a timer to an entity, or set up the voice sentences for the built-in agent.",
+        "menu_options": {
+          "target": "Add a timer",
+          "voice_settings": "Voice settings"
+        }
+      },
+      "target": {
         "title": "Add a timer",
         "description": "Pick the entity that the timer turns on and off.",
         "data": {
@@ -11,6 +19,14 @@
         "data_description": {
           "target": "The switch, light, fan or other entity to run on a timer.",
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+        }
+      },
+      "voice_settings": {
+        "title": "Voice settings",
+        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the folder of each language you pick under custom_sentences (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
+        "data": {
+          "write_sentence_files": "Add voice sentences for the built-in agent",
+          "languages": "Languages"
         }
       },
       "duration": {
@@ -34,11 +50,13 @@
     "error": {
       "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
       "not_switchable": "This entity does not report on or off, so a timer cannot tell whether it is running. Pick another one; if it is unavailable now, try again when it is back.",
-      "duration_not_whole": "The duration must be a whole number of minutes."
+      "duration_not_whole": "The duration must be a whole number of minutes.",
+      "languages_required": "Pick at least one language."
     },
     "abort": {
       "already_configured": "This entity already has a timer.",
-      "already_in_progress": "A timer for this entity is already being added."
+      "already_in_progress": "A timer for this entity is already being added.",
+      "voice_settings_exist": "The voice settings are already set up. Change them from the Timerify page."
     }
   },
   "options": {
@@ -50,6 +68,14 @@
         },
         "data_description": {
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+        }
+      },
+      "voice_settings": {
+        "title": "Voice settings",
+        "description": "Timerify can write its voice sentences for the built-in agent to a file named timerify.yaml in the folder of each language you pick under custom_sentences (for example custom_sentences/en/timerify.yaml), with the names of your timers' devices in them. Timerify rewrites the files whenever a timer changes, and removes them when you untick the option, or disable or remove this entry. Do not edit them.",
+        "data": {
+          "write_sentence_files": "Add voice sentences for the built-in agent",
+          "languages": "Languages"
         }
       },
       "duration": {
@@ -72,7 +98,8 @@
     },
     "error": {
       "duration_not_whole": "The duration must be a whole number of minutes.",
-      "workday_in_use": "A schedule interval of this timer runs on working days or non-working days, which the Workday sensor tells. Change or delete that interval first, or keep the sensor."
+      "workday_in_use": "A schedule interval of this timer runs on working days or non-working days, which the Workday sensor tells. Change or delete that interval first, or keep the sensor.",
+      "languages_required": "Pick at least one language."
     }
   },
   "config_subentries": {
@@ -220,6 +247,12 @@
         "workdays": "Working days",
         "non_workdays": "Non-working days"
       }
+    },
+    "voice_language": {
+      "options": {
+        "en": "English",
+        "ru": "Russian"
+      }
     }
   },
   "entity": {
@@ -260,11 +293,11 @@
     },
     "run": {
       "name": "Run",
-      "description": "Turns the entity on, for the minutes given or else for the default duration in strict mode and without a countdown in loose mode, with the settings given if the entity supports them.",
+      "description": "Turns the entity on, for the minutes given. Without minutes, an entity that is off runs for the default duration in strict mode and without a countdown in loose mode, and one that is already running keeps its countdown. The settings given are applied if the entity supports them.",
       "fields": {
         "minutes": {
           "name": "Minutes",
-          "description": "How long to run, in whole minutes, up to a day. Without it the entity runs for the default duration in strict mode and without a countdown in loose mode."
+          "description": "How long to run, in whole minutes, up to a day. Without it an entity that is off runs for the default duration in strict mode and without a countdown in loose mode, and one that is already running keeps its countdown."
         },
         "hvac_mode": {
           "name": "HVAC mode",
@@ -402,8 +435,20 @@
     "setting_not_an_option": {
       "message": "{value} is not a valid {setting}: it must be one of {options}."
     },
+    "duration_out_of_range": {
+      "message": "A timer runs for 1 min to {max_hours} h."
+    },
+    "no_time_to_add": {
+      "message": "Say how much time to add."
+    },
+    "voice_setting_not_supported": {
+      "message": "{target} cannot be turned on with that setting."
+    },
     "delay_or_at": {
       "message": "Give the command either a delay or a time, not both and not neither."
+    },
+    "invalid_command_time": {
+      "message": "That is not a time Timerify can understand."
     },
     "off_takes_no_duration_or_settings": {
       "message": "A command to turn off takes no minutes and no settings."
@@ -419,6 +464,18 @@
     },
     "unknown_command": {
       "message": "This timer has no pending command with the id {command_id}. Cancel a command through the timer that holds it."
+    },
+    "no_schedule": {
+      "message": "{target} has no schedule. Add an interval to its timer first."
+    },
+    "unknown_interval": {
+      "message": "{target} has no schedule interval called \"{interval}\". Its intervals: {intervals}."
+    },
+    "unknown_interval_and_more": {
+      "message": "{target} has no schedule interval called \"{interval}\". Its first intervals: {intervals}; and {more} more."
+    },
+    "no_interval_titles": {
+      "message": "{target} has no schedule interval that can be asked for by title. Give its intervals titles with letters or digits first."
     },
     "timer_unloaded": {
       "message": "This timer was unloaded while the call waited, so nothing was changed. Try again once the timer is loaded."

@@ -9,7 +9,7 @@ the next event is looked at.
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
@@ -50,6 +50,8 @@ from .const import (
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
+    MAX_LISTED_INTERVALS,
+    MAX_MINUTES,
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
@@ -73,7 +75,7 @@ from .core import (
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
-from .schedule import Interval, weekday_window, workday_window
+from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
 
@@ -95,6 +97,77 @@ def _local_time(moment: datetime) -> str:
     """`moment` the way the user reads the clock: Home Assistant's time zone, with its
     offset."""
     return dt_util.as_local(moment).isoformat(sep=" ", timespec="seconds")
+
+
+def duration_out_of_range() -> ServiceValidationError:
+    """The refusal of a timer that would run for no time or for more than a day."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="duration_out_of_range",
+        translation_placeholders={"max_hours": str(MAX_MINUTES // 60)},
+    )
+
+
+def command_too_far() -> ServiceValidationError:
+    """The refusal of a command set more than `MAX_COMMAND_AHEAD` ahead."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="command_too_far",
+        translation_placeholders={"days": str(MAX_COMMAND_AHEAD.days)},
+    )
+
+
+def command_when(delay: timedelta | None, at: datetime | None) -> datetime | timedelta:
+    """When a command is due, as exactly one of a delay from now and a moment is given.
+
+    Raises ServiceValidationError (`delay_or_at`) for both and for neither.
+    """
+    if delay is not None and at is None:
+        return delay
+    if at is not None and delay is None:
+        return at
+    raise ServiceValidationError(
+        translation_domain=DOMAIN, translation_key="delay_or_at"
+    )
+
+
+def _refuse_a_run_of_off(
+    minutes: int | None, settings: Mapping[str, Any] | None
+) -> None:
+    """Raise ServiceValidationError (`off_takes_no_duration_or_settings`) for a command
+    to turn off that is given minutes to run or settings to run with."""
+    if minutes is not None or settings:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="off_takes_no_duration_or_settings",
+        )
+
+
+def _due(
+    now: datetime,
+    when: datetime | timedelta,
+    ahead: timedelta,
+    too_far: Callable[[], ServiceValidationError],
+) -> datetime:
+    """The moment a command that gets its turn at `now` is due: `when`, or `when` from
+    now.
+
+    Raises ServiceValidationError (`command_in_past`) for a moment that is not ahead,
+    and the error `too_far` makes for one more than `ahead` ahead. A delay is compared
+    with `ahead` before it is added to `now`: one of centuries is no date at all.
+    """
+    if isinstance(when, timedelta) and when > ahead:
+        raise too_far()
+    at = now + when if isinstance(when, timedelta) else when
+    if at <= now:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="command_in_past",
+            translation_placeholders={"at": _local_time(at)},
+        )
+    if at > now + ahead:
+        raise too_far()
+    return at
 
 
 def _unloaded_error() -> HomeAssistantError:
@@ -120,9 +193,10 @@ class TargetController:
     """Runs the timer of one target entity.
 
     Every command (`async_set_minutes`, `async_add_minutes`, `async_run`,
-    `async_add_command`, `async_cancel_command`, `async_set_interval_enabled`) waits
-    for its turn and raises HomeAssistantError (`timer_unloaded`) if the timer was
-    unloaded meanwhile.
+    `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
+    `async_cancel_commands`, `async_set_interval_enabled`,
+    `async_set_schedule_enabled`) waits for its turn and raises HomeAssistantError
+    (`timer_unloaded`) if the timer was unloaded meanwhile.
     """
 
     def __init__(
@@ -197,6 +271,11 @@ class TargetController:
         """The timer's current state."""
         return self._core.snapshot
 
+    def wanted_running(self, now: datetime) -> bool:
+        """Whether the target is wanted running as of `now`, by the one judgement that
+        every answer and every decision shares (`TimerCore.wanted_running`)."""
+        return self._core.wanted_running(now)
+
     async def async_start(self) -> None:
         """Follow the target; once Home Assistant is running, take stock of it."""
         self._entry.async_on_unload(self._stop)
@@ -208,24 +287,43 @@ class TargetController:
         self._entry.async_on_unload(async_at_started(self._hass, self._handle_started))
 
     async def async_set_minutes(self, minutes: int) -> None:
-        """Count down `minutes` from now; zero stops the timer."""
+        """Count down `minutes` from now; zero stops the timer.
+
+        Raises ServiceValidationError (`duration_out_of_range`), before anything runs,
+        for fewer than 0 minutes or more than a day.
+        """
+        if not 0 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         await self._command(
             lambda now: self._core.set_duration(now, timedelta(minutes=minutes))
         )
 
     async def async_add_minutes(self, minutes: int) -> None:
-        """Move the end of the countdown by `minutes`, which may be negative."""
-        await self._command(lambda now: self._core.add(now, timedelta(minutes=minutes)))
+        """Move the end of the countdown by `minutes`, which may be negative.
+
+        The end is never more than a day ahead: adding past it runs for a day, and
+        taking off as much as a day leaves nothing, whoever asks and however much. The
+        count is bounded before it becomes a time, as a delay is (`_due`): a day either
+        way is all that can change the end, and a count of centuries is no time.
+        """
+        bounded = max(-MAX_MINUTES, min(minutes, MAX_MINUTES))
+        await self._command(lambda now: self._core.add(now, timedelta(minutes=bounded)))
 
     async def async_run(
         self, minutes: int | None = None, settings: Mapping[str, Any] | None = None
     ) -> None:
-        """Switch the target on for `minutes`, or without a duration (the default one
-        in strict mode), with `settings` if there are any.
+        """Switch the target on for `minutes`, or without a duration, with `settings` if
+        there are any.
 
-        Raises ServiceValidationError, before anything runs, for settings that the
-        target cannot take.
+        Without a duration, a target that is off runs for the default one in strict
+        mode and without a countdown in loose mode (R9); one that is wanted running
+        keeps its countdown (`TimerCore.run_open`).
+
+        Raises ServiceValidationError, before anything runs, for `minutes` outside 1 to
+        a day (`duration_out_of_range`) and for settings that the target cannot take.
         """
+        if minutes is not None and not 1 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         if minutes is None:
             await self._command(lambda now: self._core.run_open(now, owed))
@@ -250,32 +348,20 @@ class TargetController:
         `settings` what it turns the target on with; an "off" takes neither.
 
         Raises ServiceValidationError, before anything is kept, for an "off" with
-        either, for settings that the target cannot take, for a time that is not
-        ahead or is more than `MAX_COMMAND_AHEAD` ahead, and when the timer already
-        keeps `MAX_COMMANDS`.
+        either, for `minutes` outside 1 to a day (`duration_out_of_range`), for settings
+        that the target cannot take, for a time that is not ahead or is more than
+        `MAX_COMMAND_AHEAD` ahead (`command_too_far`, whatever the delay is), and when
+        the timer already keeps `MAX_COMMANDS`.
         """
-        if action == "off" and (minutes is not None or settings):
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="off_takes_no_duration_or_settings",
-            )
+        if action == "off":
+            _refuse_a_run_of_off(minutes, settings)
+        if minutes is not None and not 1 <= minutes <= MAX_MINUTES:
+            raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         command_id = uuid4().hex
 
         def add(now: datetime) -> list[Effect]:
-            at = now + when if isinstance(when, timedelta) else when
-            if at <= now:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="command_in_past",
-                    translation_placeholders={"at": _local_time(at)},
-                )
-            if at > now + MAX_COMMAND_AHEAD:
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="command_too_far",
-                    translation_placeholders={"days": str(MAX_COMMAND_AHEAD.days)},
-                )
+            at = _due(now, when, MAX_COMMAND_AHEAD, command_too_far)
             if len(self.snapshot.commands) >= MAX_COMMANDS:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
@@ -292,23 +378,88 @@ class TargetController:
         await self._command(add)
         return command_id
 
-    async def async_cancel_command(self, command_id: str) -> None:
-        """Forget the pending command with that id.
+    async def async_turn_off_in(
+        self,
+        when: datetime | timedelta,
+        minutes: int | None = None,
+        settings: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Have the target turned off at `when`, a moment or how long from now, and say
+        whether it was: set the countdown to end then if the target is wanted running,
+        change nothing if it is not.
 
-        Raises ServiceValidationError when this timer keeps no such command.
+        Whether it is wanted running is judged when the call gets its turn, from the
+        desired state (see `TimerCore.wanted_running`), so a turn-on or a turn-off that
+        the target has not confirmed yet counts, and a target that is away while its
+        timer counts is running (R10). The countdown is set as by hand: whatever time
+        was left is replaced, shorter or longer.
+
+        Raises ServiceValidationError, before anything runs, for `minutes` or `settings`
+        (an "off" has neither: `off_takes_no_duration_or_settings`), and when the call
+        gets its turn, for a moment that is not ahead (`command_in_past`, which a zero
+        delay is) or is more than a day ahead (`duration_out_of_range`, whatever the
+        delay is), whether or not the target is running.
         """
+        _refuse_a_run_of_off(minutes, settings)
+        running = False
+
+        def turn_off_at(now: datetime) -> list[Effect]:
+            nonlocal running
+            at = _due(now, when, timedelta(minutes=MAX_MINUTES), duration_out_of_range)
+            running = self._core.wanted_running(now)
+            if not running:
+                return []
+            return self._core.set_duration(now, at - now)
+
+        await self._command(turn_off_at)
+        return running
+
+    async def async_cancel_command(self, command_id: str) -> Command:
+        """Forget the pending command with that id and return it.
+
+        Raises ServiceValidationError (`unknown_command`) when this timer keeps no such
+        command.
+        """
+        cancelled: tuple[Command, ...] = ()
 
         def cancel(now: datetime) -> list[Effect]:
+            nonlocal cancelled
             try:
-                return self._core.cancel_command(now, command_id)
+                cancelled, effects = self._core.cancel_commands(now, [command_id])
             except KeyError as err:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="unknown_command",
                     translation_placeholders={"command_id": command_id},
                 ) from err
+            return effects
 
         await self._command(cancel)
+        return cancelled[0]
+
+    async def async_cancel_commands(
+        self, which: Literal["next", "all"]
+    ) -> tuple[Command, ...]:
+        """Forget the pending command that is due first, or every one, and return what
+        was forgotten, in the order the commands are due; nothing when none is pending.
+
+        Which commands there are is judged when the call gets its turn, so a command
+        that was added while it waited is cancelled with the rest. Of commands that are
+        due together the first to be added is the first.
+        """
+        cancelled: tuple[Command, ...] = ()
+
+        def cancel(now: datetime) -> list[Effect]:
+            nonlocal cancelled
+            pending = self.snapshot.commands
+            chosen = pending[:1] if which == "next" else pending
+            cancelled, effects = self._core.cancel_commands(
+                now, [command.id for command in chosen]
+            )
+            return effects
+
+        await self._command(cancel)
+        return cancelled
 
     async def async_set_interval_enabled(self, interval_id: str, enabled: bool) -> None:
         """Switch a schedule interval on or off.
@@ -325,19 +476,118 @@ class TargetController:
         """
         async with self._lock:
             self._raise_if_unloaded()
-            now = dt_util.utcnow()
-            if enabled:
-                if interval_id not in self.snapshot.disabled_intervals:
-                    return
-                effects = self._core.set_interval_enabled(now, interval_id, True)
-                if not await self._async_refresh_windows_locked(effects):
-                    raise _unloaded_error()
-            else:
-                effects = self._core.set_interval_enabled(now, interval_id, False)
-                # The tick folds what fell due while this call waited for its turn. A
-                # window that it finds over is replaced like any other (the interval
-                # that was switched off is not: its window left with the flag).
-                await self._fold_due(now, effects)
+            await self._async_set_interval_enabled_locked(interval_id, enabled)
+
+    async def async_set_schedule_enabled(
+        self, enabled: bool, interval: str | None = None
+    ) -> tuple[str, ...]:
+        """Switch the whole schedule on or off, or the intervals that carry the title
+        `interval` (compared as `title_key` compares), and return the titles of the
+        intervals that are now as asked, in the order of the schedule, whether or not
+        they were already.
+
+        Each interval is switched as its own switch switches it
+        (`async_set_interval_enabled`), one after the other under one hold of the lock,
+        so that no other command comes between them. The intervals are those the entry
+        has: one that was deleted is no interval, even before the timer has reloaded
+        and let go of it.
+
+        Raises ServiceValidationError, before anything is switched, when the timer has
+        no interval (`no_schedule`) and when none has the title (`unknown_interval`,
+        which lists the titles that can be asked for, and says how many it leaves out
+        when it is long; `no_interval_titles` when there is none, every title being
+        nothing but punctuation). A timer that is unloaded part-way says so
+        (`timer_unloaded`); the intervals switched until then stay switched.
+        """
+        async with self._lock:
+            self._raise_if_unloaded()
+            every_title = {
+                interval_id: subentry.title
+                for interval_id in self._intervals
+                if (subentry := self._entry.subentries.get(interval_id)) is not None
+            }
+            if not every_title:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="no_schedule",
+                    translation_placeholders={
+                        "target": target_name(self._hass, self.target_entity_id)
+                    },
+                )
+            titles = every_title
+            if interval is not None:
+                wanted = title_key(interval)
+                titles = {
+                    interval_id: title
+                    for interval_id, title in every_title.items()
+                    if wanted and title_key(title) == wanted
+                }
+                if not titles:
+                    raise self._unknown_interval(interval, every_title.values())
+            for interval_id in titles:
+                self._raise_if_unloaded()
+                await self._async_set_interval_enabled_locked(interval_id, enabled)
+            return tuple(titles.values())
+
+    def _unknown_interval(
+        self, asked: str, titles: Iterable[str]
+    ) -> ServiceValidationError:
+        """The refusal of a title that no interval has. It lists the titles that can be
+        asked for, so that the one who asked can ask again: those that are not nothing
+        but punctuation, each once (titles that `title_key` makes one are one, and the
+        first of them is written), the first `MAX_LISTED_INTERVALS` of them and the
+        number of the others.
+
+        The titles go into the message bare, apart by semicolons (a title may have a
+        comma, as the one an interval is made with does): the quotes around them are
+        for the translation of each language to choose.
+        """
+        target = target_name(self._hass, self.target_entity_id)
+        first_of_each: dict[str, str] = {}
+        for title in titles:
+            if key := title_key(title):
+                first_of_each.setdefault(key, title)
+        askable = list(first_of_each.values())
+        if not askable:
+            return ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="no_interval_titles",
+                translation_placeholders={"target": target},
+            )
+        listed = askable[:MAX_LISTED_INTERVALS]
+        placeholders = {
+            "target": target,
+            "interval": asked,
+            "intervals": "; ".join(listed),
+        }
+        key = "unknown_interval"
+        if len(listed) < len(askable):
+            key = "unknown_interval_and_more"
+            placeholders["more"] = str(len(askable) - len(listed))
+        return ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key=key,
+            translation_placeholders=placeholders,
+        )
+
+    async def _async_set_interval_enabled_locked(
+        self, interval_id: str, enabled: bool
+    ) -> None:
+        """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
+        the caller holds the lock and has seen that the timer is not unloaded."""
+        now = dt_util.utcnow()
+        if enabled:
+            if interval_id not in self.snapshot.disabled_intervals:
+                return
+            effects = self._core.set_interval_enabled(now, interval_id, True)
+            if not await self._async_refresh_windows_locked(effects):
+                raise _unloaded_error()
+        else:
+            effects = self._core.set_interval_enabled(now, interval_id, False)
+            # The tick folds what fell due while this call waited for its turn. A
+            # window that it finds over is replaced like any other (the interval that
+            # was switched off is not: its window left with the flag).
+            await self._fold_due(now, effects)
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -432,10 +682,13 @@ class TargetController:
         if left_out != self._left_out.get(interval.id, frozenset()):
             if left_out:
                 self._left_out[interval.id] = left_out
+                # An interval deleted since the timer was loaded is named by its id:
+                # its title went with it, and the reload that follows lets it go.
+                subentry = self._entry.subentries.get(interval.id)
                 _LOGGER.warning(
                     "The schedule interval %s of %s asks for settings that the target"
                     " cannot take now (%s); it is turned on without them",
-                    self._entry.subentries[interval.id].title,
+                    interval.id if subentry is None else subentry.title,
                     self.target_entity_id,
                     ", ".join(sorted(left_out)),
                 )

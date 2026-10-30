@@ -5,7 +5,7 @@ A domain that is not in the table is switched through the generic `FALLBACK` row
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import IntFlag
 from typing import Any, Final, Literal
 
@@ -55,6 +55,16 @@ from .target import target_name
 type Actual = Literal["on", "off", "unavailable"]
 """What an entity is doing; "unavailable" covers missing, unavailable and unknown."""
 
+type SettingKind = Literal["number", "text"]
+"""What a setting is made of: a number between bounds, or one of the strings that the
+entity lists."""
+
+type VoiceMeaning = Literal["percent", "mode"]
+"""What a person means by a setting without naming it: "at 40 percent" is the brightness
+of a light, the speed of a fan or the humidity of a humidifier, and "in eco mode" is the
+fan mode of a thermostat, the preset of a fan, the mode of a humidifier or the operation
+mode of a water heater."""
+
 
 @dataclass(frozen=True)
 class TargetCall:
@@ -100,10 +110,15 @@ class SettingChoice:
     options: tuple[str, ...] = ()
     low: float | None = None
     high: float | None = None
+    voice: VoiceMeaning | None = None
+    """What a person means by saying the setting without its name, if anything."""
 
 
 def _text(value: Any) -> str:
-    """A value as the user reads it: 16 for 16.0."""
+    """A value as the user reads it: 16 for 16.0, and `true` and `false` as the words
+    they are, not as Python spells them."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
     if isinstance(value, float) and value.is_integer():
         return str(int(value))
     return str(value)
@@ -123,6 +138,9 @@ class _Between:
 
     low: float | str
     high: float | str
+    whole: bool = False
+    """Whether a part of a unit is no value: a fan runs at 50 percent or at 51, never at
+    50.5. A number that is whole counts, in whatever form it comes (50.0)."""
 
     def known(self, capabilities: _Capabilities) -> bool:
         """Whether the entity says where its range begins and ends."""
@@ -143,7 +161,11 @@ class _Between:
         high = _bound(capabilities, self.high)
         # A boolean is a number to Python, not to the user.
         is_number = isinstance(value, int | float) and not isinstance(value, bool)
-        if not (is_number and low <= value <= high):
+        if not (
+            is_number
+            and low <= value <= high
+            and (not self.whole or float(value).is_integer())
+        ):
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
                 translation_key="setting_out_of_range",
@@ -230,6 +252,9 @@ class _Setting:
     turns_on: bool = False
     """Whether `service` also turns the entity on, so that a turn-on needs no call of
     its own when the setting is given."""
+    voice: VoiceMeaning | None = None
+    """What a person means by "percent" or "mode" when the entity has this setting; at
+    most one setting of a row for each (see `voice_settings`)."""
 
     def supported(self, capabilities: _Capabilities) -> bool:
         """Whether the entity can take the setting: it has what the setting needs and
@@ -238,7 +263,7 @@ class _Setting:
 
     def choice(self, capabilities: _Capabilities) -> SettingChoice:
         """The values the entity accepts for the setting; only for a supported one."""
-        return self.rule.choice(capabilities, self.name)
+        return replace(self.rule.choice(capabilities, self.name), voice=self.voice)
 
 
 @dataclass(frozen=True)
@@ -362,19 +387,31 @@ _CLIMATE_SETTINGS: Final = (
         _OneOf(ClimateEntityCapabilityAttribute.FAN_MODES),
         requires=_has(ClimateEntityFeature.FAN_MODE),
         service=("climate", "set_fan_mode"),
+        voice="mode",
     ),
 )
 
 _LIGHT_SETTINGS: Final = (
-    _Setting("brightness_pct", _Between(1, 100), requires=_has_brightness),
+    _Setting(
+        "brightness_pct",
+        _Between(1, 100),
+        requires=_has_brightness,
+        voice="percent",
+    ),
 )
 
 _FAN_SETTINGS: Final = (
-    _Setting("percentage", _Between(1, 100), requires=_has(FanEntityFeature.SET_SPEED)),
+    _Setting(
+        "percentage",
+        _Between(1, 100, whole=True),
+        requires=_has(FanEntityFeature.SET_SPEED),
+        voice="percent",
+    ),
     _Setting(
         "preset_mode",
         _OneOf(FanEntityCapabilityAttribute.PRESET_MODES),
         requires=_has(FanEntityFeature.PRESET_MODE),
+        voice="mode",
     ),
 )
 
@@ -384,14 +421,17 @@ _HUMIDIFIER_SETTINGS: Final = (
         _Between(
             HumidifierEntityCapabilityAttribute.MIN_HUMIDITY,
             HumidifierEntityCapabilityAttribute.MAX_HUMIDITY,
+            whole=True,
         ),
         service=("humidifier", "set_humidity"),
+        voice="percent",
     ),
     _Setting(
         "mode",
         _OneOf(HumidifierEntityCapabilityAttribute.AVAILABLE_MODES),
         requires=_has(HumidifierEntityFeature.MODES),
         service=("humidifier", "set_mode"),
+        voice="mode",
     ),
 )
 
@@ -413,6 +453,7 @@ _WATER_HEATER_SETTINGS: Final = (
         ),
         requires=_has(WaterHeaterEntityFeature.OPERATION_MODE),
         service=("water_heater", "set_operation_mode"),
+        voice="mode",
     ),
 )
 
@@ -464,6 +505,26 @@ _BEHAVIOURS: Final[Mapping[str, DomainBehaviour]] = {
 }
 
 SUPPORTED_DOMAINS: Final[tuple[str, ...]] = tuple(_BEHAVIOURS)
+
+
+def _setting_kinds() -> Mapping[str, SettingKind]:
+    """What each setting of the table is made of. A setting is the same kind in every
+    row that has it: a service field has one type."""
+    kinds: dict[str, SettingKind] = {}
+    for row in _BEHAVIOURS.values():
+        for setting in row.settings:
+            kind: SettingKind = (
+                "number" if isinstance(setting.rule, _Between) else "text"
+            )
+            if kinds.setdefault(setting.name, kind) != kind:
+                raise ValueError(f"The setting {setting.name} is a number and a text")
+    return kinds
+
+
+SETTING_KINDS: Final = _setting_kinds()
+"""Every setting an entity can be turned on with, by name: a number between bounds, or
+one of the strings the entity lists. What the slots of a sentence and of a tool are
+typed by."""
 
 
 def behaviour_for_domain(domain: str) -> DomainBehaviour:
@@ -564,3 +625,38 @@ def validate_settings(
             )
         spec.rule.check(capabilities, name, value)
     return freeze_settings(values)
+
+
+def voice_settings(
+    hass: HomeAssistant,
+    entity_id: str,
+    *,
+    percent: float | None,
+    mode: str | None,
+) -> dict[str, Any]:
+    """The settings a person means by "percent" and "mode", named as the row of the
+    entity's domain names them: the brightness of a light, the speed of a fan, the
+    humidity of a humidifier; the fan mode of a thermostat, the preset of a fan, the
+    mode of a humidifier, the operation mode of a water heater. A meaning that is not
+    asked for is left out.
+
+    Only the row is judged. Whether the entity supports the setting, and takes the
+    value, is for `validate_settings`, as for any other setting.
+
+    Raises ServiceValidationError (`voice_setting_not_supported`) when the row has no
+    setting for a meaning that was asked for: a boiler at 40 percent.
+    """
+    row = behaviour_for(entity_id)
+    named: dict[str, Any] = {}
+    for meaning, value in (("percent", percent), ("mode", mode)):
+        if value is None:
+            continue
+        setting = next((s for s in row.settings if s.voice == meaning), None)
+        if setting is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="voice_setting_not_supported",
+                translation_placeholders={"target": target_name(hass, entity_id)},
+            )
+        named[setting.name] = value
+    return named

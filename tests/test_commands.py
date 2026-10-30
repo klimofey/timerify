@@ -8,7 +8,7 @@ look at them on the "Next command" sensor.
 import logging
 import re
 from datetime import timedelta
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
@@ -18,6 +18,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import CONF_TARGET, DOMAIN, MAX_COMMANDS
+from custom_components.timerify.controller import command_when
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
@@ -27,6 +28,7 @@ from .helpers import (
     AC_NUMBER,
     NEXT,
     NUMBER,
+    START,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
@@ -613,6 +615,124 @@ async def test_cancel_through_another_timer_is_rejected(
     assert fake_climate.calls == []
 
 
+async def test_cancelling_a_command_gives_it_back(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The controller says which command it cancelled, with everything the command
+    held, and leaves the others."""
+    entry = await setup_target(
+        stored=payload(
+            commands=[
+                command_json(at(10), minutes=30, settings={}, id="early"),
+                command_json(at(20), "off", id="late"),
+            ]
+        )
+    )
+
+    cancelled = await entry.runtime_data.async_cancel_command("late")
+
+    assert (cancelled.id, cancelled.action, cancelled.at) == (
+        "late",
+        "off",
+        START + timedelta(minutes=20),
+    )
+    assert [c["id"] for c in listed(hass, NEXT)] == ["early"]
+
+
+@pytest.mark.parametrize(
+    ("which", "cancelled", "left"),
+    [
+        pytest.param("next", ["first"], ["second", "third"], id="the-next"),
+        pytest.param("all", ["first", "second", "third"], [], id="all"),
+    ],
+)
+async def test_cancelling_the_next_or_all_commands(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    which: Literal["next", "all"],
+    cancelled: list[str],
+    left: list[str],
+) -> None:
+    """The command that is due first, or every one, goes in one step; what goes is
+    given back in the order the commands are due, and the sensor and the file follow."""
+    entry = await setup_target(
+        stored=payload(
+            commands=[
+                command_json(at(10), id="first"),
+                command_json(at(20), "off", id="second"),
+                command_json(at(20), id="third"),
+            ]
+        )
+    )
+
+    gone = await entry.runtime_data.async_cancel_commands(which)
+
+    assert [c.id for c in gone] == cancelled
+    assert [c["id"] for c in listed(hass, NEXT)] == left
+    assert [c["id"] for c in saved(hass_storage, entry)["commands"]] == left
+
+
+async def test_cancelling_the_next_of_two_commands_due_together_takes_the_first_added(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Commands due at the same moment run in the order they were added, so the one
+    added first is the next one, and the other is next after it."""
+    entry = await setup_target()
+    controller = entry.runtime_data
+    first = (await add_command(hass, NUMBER, action="on", delay=10, minutes=30))[NUMBER]
+    second = (await add_command(hass, NUMBER, action="on", delay=10, minutes=60))[
+        NUMBER
+    ]
+    await add_command(hass, NUMBER, action="off", delay=20)
+
+    (gone,) = await controller.async_cancel_commands("next")
+    (then,) = await controller.async_cancel_commands("next")
+
+    assert gone.id == first["command_id"]
+    assert then.id == second["command_id"]
+    assert [c["action"] for c in listed(hass, NEXT)] == ["off"]
+
+
+@pytest.mark.parametrize("which", ["next", "all"])
+async def test_cancelling_commands_when_none_is_pending_changes_nothing(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    which: Literal["next", "all"],
+) -> None:
+    entry = await setup_target()
+    writes = record_writes(hass, NEXT)
+
+    gone = await entry.runtime_data.async_cancel_commands(which)
+
+    assert gone == ()
+    assert writes == []
+    assert fake_target.calls == []
+
+
+async def test_cancelled_commands_run_no_more_and_the_countdown_goes_on(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Cancelling every command leaves the alarm of the countdown as it was: the timer
+    that runs still ends at its time, and a command that was cancelled does not turn
+    the target on again then."""
+    entry = await setup_target()
+    await set_number(hass, NUMBER, 30)
+    await add_command(hass, NUMBER, action="on", delay=10, minutes=60)
+    await add_command(hass, NUMBER, action="on", delay=20, minutes=60)
+
+    await entry.runtime_data.async_cancel_commands("all")
+    await advance(hass, freezer, minutes=30)
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, NUMBER) == "0"
+
+
 async def test_off_command_turns_target_off_on_time(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -728,6 +848,55 @@ async def test_invalid_commands_are_rejected(
     assert state_of(hass, NEXT) == "unknown"
     assert storage_key(entry) not in hass_storage
     await advance(hass, freezer, hours=1)
+    assert fake_target.calls == []
+
+
+def test_a_command_is_due_after_a_delay_or_at_a_time() -> None:
+    """Exactly one of the two says when; a delay of nothing is still a delay, and the
+    controller refuses it as a time that is not ahead."""
+    delay = timedelta(minutes=5)
+    moment = START + delay
+
+    assert command_when(delay, None) == delay
+    assert command_when(timedelta(0), None) == timedelta(0)
+    assert command_when(None, moment) == moment
+    for both_or_neither in ((delay, moment), (None, None), (timedelta(0), moment)):
+        with pytest.raises(ServiceValidationError) as raised:
+            command_when(*both_or_neither)
+        assert raised.value.translation_key == "delay_or_at"
+
+
+@pytest.mark.parametrize(
+    "delay",
+    [
+        timedelta(days=7, seconds=1),
+        timedelta(days=4 * 10**6),
+        timedelta.max,
+    ],
+    ids=["a_second_over_the_week", "centuries", "the_longest_delay_there_is"],
+)
+@pytest.mark.parametrize("action", ["on", "off"])
+async def test_a_delay_too_long_to_be_a_date_is_refused_not_added_to_now(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    action: str,
+    delay: timedelta,
+) -> None:
+    """The controller is the one path that every caller, a service, a voice command or
+    a tool, takes, so a delay they cannot all bound is refused here with a reason,
+    before it is added to the time now: it would not be a date."""
+    entry = await setup_target()
+    controller = entry.runtime_data
+
+    with pytest.raises(ServiceValidationError) as raised_command:
+        await controller.async_add_command(action, delay, None, None)
+    with pytest.raises(ServiceValidationError) as raised_turn_off:
+        await controller.async_turn_off_in(delay)
+
+    assert raised_command.value.translation_key == "command_too_far"
+    assert raised_turn_off.value.translation_key == "duration_out_of_range"
+    assert state_of(hass, NEXT) == "unknown"
     assert fake_target.calls == []
 
 

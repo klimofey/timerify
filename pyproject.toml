@@ -1,6 +1,6 @@
 [project]
 name = "timerify"
-version = "0.3.0"
+version = "0.4.0"
 description = "Timers for any Home Assistant entity"
 readme = "README.md"
 license = "MIT"
@@ -8,10 +8,15 @@ requires-python = ">=3.14.2"
 
 [dependency-groups]
 dev = [
+    "gazetteer-matcher==1.1.0",
+    "hassil==3.12.1",
     "holidays==0.106",
+    "home-assistant-intents==2026.10.6",
     "mypy>=2.4.1",
     "pytest-homeassistant-custom-component==0.13.375",
+    "pytest-xdist==3.8.0",
     "ruff>=0.14",
+    "types-pyyaml>=6.0",
 ]
 
 [tool.uv]
@@ -19,7 +24,11 @@ package = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# The suite runs in parallel, one worker per core; `-n 0` runs it in one process.
+addopts = "-n auto"
 testpaths = ["tests"]
+# A hung test fails instead of stopping the run.
+timeout = 60
 
 [tool.ruff]
 target-version = "py314"
@@ -34,3 +43,7 @@ allowed-confusables = ["–"]
 python_version = "3.14"
 strict = true
 files = ["custom_components", "scripts"]
+# A script imports the integration as `custom_components.timerify`, the name the tests
+# know it by, so a module is named from the project root, not from its own directory.
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR"

@@ -16,7 +16,13 @@ user would see:
 4. A schedule interval for today's weekday, added to the first timer through the
    interval flow to begin in a minute or two and run for two minutes: its switch is on,
    and the first switch turns on at the start and off at the end.
-5. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
+5. Voice: the Voice settings are added through the menu of the config flow, and the
+   built-in agent is talked to over the REST API about the first switch. Asked how long
+   is left on it, the agent refuses (an input boolean is not exposed to Assist by
+   default); once it is exposed, "turn on ... for 2 minutes" runs it and the agent
+   says how long is left, "turn off ... in 1 minute" ends it a minute later, a bare
+   "turn on ..." runs it for the default 30 minutes and a bare "turn off ..." stops it.
+6. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
    carries on and the switch turns off at the end it had before the restart.
 
 Everything is observed over the WebSocket API by subscribing to state changes.
@@ -54,6 +60,8 @@ DEMO_SWITCH = "switch.decorative_lights"
 THERMOSTAT = "climate.smoke_thermostat"
 """A generic thermostat that configuration.yaml declares, over template entities."""
 THERMOSTAT_TEMPERATURE = 23
+SWITCH_NAME = "Smoke boiler"
+"""How Assist calls the first switch: its name as configuration.yaml gives it."""
 DOMAIN = "timerify"
 KEEP_MINUTES = 60
 
@@ -66,6 +74,8 @@ WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 """The names the interval form gives the days of the week, Monday first."""
 INTERVAL_LENGTH = timedelta(minutes=2)
 """How long the schedule interval runs the first switch."""
+DEFAULT_DURATION_MINUTES = 30
+"""The default duration the smoke test gives every timer it adds."""
 START_SLACK = timedelta(seconds=5)
 """How far the end of a countdown may be from `minutes` after the switch turned on."""
 EXPIRY_SLACK = timedelta(seconds=5)
@@ -124,6 +134,16 @@ def heating_to(temperature: float) -> Matcher:
 def is_known(state: State | None) -> bool:
     """Match a state that carries a value."""
     return state is not None and state["state"] not in ("unavailable", "unknown")
+
+
+def ends_near(moment: datetime) -> Matcher:
+    """Match the "Ends at" sensor when it names a time within `START_SLACK` of
+    `moment`."""
+    return lambda state: (
+        state is not None
+        and is_known(state)
+        and abs(timestamp(state["state"]) - moment) <= START_SLACK
+    )
 
 
 def timestamp(value: str) -> datetime:
@@ -423,9 +443,18 @@ async def add_timer(
     flow = await request_json(
         session, "POST", flow_path, access_token, json={"handler": DOMAIN}
     )
+    if flow["type"] != "menu" or "target" not in flow["menu_options"]:
+        raise SmokeFailure(f"The flow should offer to add a timer, but gave {flow}")
+    flow = await request_json(
+        session,
+        "POST",
+        f"{flow_path}/{flow['flow_id']}",
+        access_token,
+        json={"next_step_id": "target"},
+    )
     for step_id, user_input in (
-        ("user", {"target": target, "mode": "strict"}),
-        ("duration", {"default_duration": 30}),
+        ("target", {"target": target, "mode": "strict"}),
+        ("duration", {"default_duration": DEFAULT_DURATION_MINUTES}),
     ):
         if flow["type"] != "form" or flow["step_id"] != step_id:
             raise SmokeFailure(f"The flow should ask for {step_id!r}, but gave {flow}")
@@ -784,6 +813,196 @@ async def scenario_schedule(
         say(f"  {row['entity_id']} still on: the interval waits for next week")
 
 
+@dataclass(frozen=True)
+class Answer:
+    """What the built-in agent answered to a sentence."""
+
+    response_type: str
+    """`action_done`, `query_answer` or `error`."""
+    code: str | None
+    """The error code of an `error`, else None."""
+    speech: str
+
+
+async def add_voice_settings(session: aiohttp.ClientSession, access_token: str) -> None:
+    """Add the Voice settings the way the integrations page does: choose them in the
+    menu of the flow and submit the form, with the sentences written in English."""
+    flow_path = "/api/config/config_entries/flow"
+    flow = await request_json(
+        session, "POST", flow_path, access_token, json={"handler": DOMAIN}
+    )
+    if flow["type"] != "menu" or "voice_settings" not in flow["menu_options"]:
+        raise SmokeFailure(f"The flow should offer the voice settings, but gave {flow}")
+    flow = await request_json(
+        session,
+        "POST",
+        f"{flow_path}/{flow['flow_id']}",
+        access_token,
+        json={"next_step_id": "voice_settings"},
+    )
+    if flow["type"] != "form" or flow["step_id"] != "voice_settings":
+        raise SmokeFailure(f"The flow should ask for the voice settings, got {flow}")
+    flow = await request_json(
+        session,
+        "POST",
+        f"{flow_path}/{flow['flow_id']}",
+        access_token,
+        json={"write_sentence_files": True, "languages": ["en"]},
+    )
+    if flow["type"] != "create_entry":
+        raise SmokeFailure(f"The flow should create the voice settings, got {flow}")
+
+
+async def converse(
+    session: aiohttp.ClientSession, access_token: str, text: str
+) -> Answer:
+    """Say `text` to the built-in agent in English, over the REST API, and log what it
+    answered."""
+    result = await request_json(
+        session,
+        "POST",
+        "/api/conversation/process",
+        access_token,
+        json={"text": text, "language": "en"},
+    )
+    response = result["response"]
+    answer = Answer(
+        response["response_type"],
+        response["data"].get("code"),
+        response["speech"]["plain"]["speech"],
+    )
+    say(f"  {text!r} -> {answer.response_type}: {answer.speech!r}")
+    return answer
+
+
+def expect_answer(
+    answer: Answer,
+    response_type: str,
+    *,
+    speech_starts: str | None = None,
+    code: str | None = None,
+) -> None:
+    """Check the type of an answer, its error code, and how its speech begins."""
+    if answer.response_type != response_type:
+        raise SmokeFailure(
+            f"Expected a {response_type} answer, got {answer.response_type}: "
+            f"{answer.speech!r}"
+        )
+    if answer.code != code:
+        raise SmokeFailure(f"Expected the error code {code}, got {answer.code}")
+    if speech_starts is not None and not answer.speech.startswith(speech_starts):
+        raise SmokeFailure(
+            f"Expected the answer to begin {speech_starts!r}, got {answer.speech!r}"
+        )
+
+
+async def expect_rest_state(
+    session: aiohttp.ClientSession, access_token: str, entity_id: str, expected: str
+) -> None:
+    """Check what the REST API says the state of `entity_id` is, right now."""
+    state = await request_json(session, "GET", f"/api/states/{entity_id}", access_token)
+    if state["state"] != expected:
+        raise SmokeFailure(
+            f"{entity_id}: expected {expected} over the REST API, "
+            f"it is {state['state']}"
+        )
+
+
+def wall_clock(moment: datetime, zone: ZoneInfo) -> str:
+    """The time of day in `zone`, as an answer says it."""
+    return f"{moment.astimezone(zone):%H:%M}"
+
+
+async def scenario_voice(
+    session: aiohttp.ClientSession, refresh_token: str, timer: Timer
+) -> None:
+    say(f"Talk to the built-in agent about {timer.target}")
+    access_token = await new_access_token(session, refresh_token)
+    await add_voice_settings(session, access_token)
+    say("  voice settings added")
+    async with open_socket(session, refresh_token) as socket:
+        zone = ZoneInfo((await socket.call("get_config"))["time_zone"])
+
+        # An input boolean is not exposed to Assist unless the owner says so, and the
+        # sentences list the name whatever Assist may see, so the agent refuses.
+        answer = await converse(
+            session, access_token, f"how much time is left on {SWITCH_NAME.lower()}"
+        )
+        expect_answer(answer, "error", code="no_valid_targets")
+        await socket.call(
+            "homeassistant/expose_entity",
+            assistants=["conversation"],
+            entity_ids=[timer.target],
+            should_expose=True,
+        )
+        say(f"  {timer.target} exposed to Assist")
+
+        answer = await converse(
+            session, access_token, f"turn on {SWITCH_NAME.lower()} for 2 minutes"
+        )
+        _, end = await expect_started(socket, timer, 2)
+        expect_answer(
+            answer,
+            "action_done",
+            speech_starts=(
+                f"{SWITCH_NAME} runs for 2 minutes, until {wall_clock(end, zone)}"
+            ),
+        )
+        await expect_rest_state(session, access_token, timer.target, "on")
+
+        answer = await converse(
+            session, access_token, f"how much time is left on {SWITCH_NAME.lower()}"
+        )
+        expect_answer(
+            answer,
+            "query_answer",
+            speech_starts=f"2 minutes left on {SWITCH_NAME}",
+        )
+
+        asked = datetime.now(UTC)
+        answer = await converse(
+            session, access_token, f"turn off {SWITCH_NAME.lower()} in 1 minute"
+        )
+        shortened = await socket.wait_for_state(
+            timer.ends_at,
+            ends_near(asked + timedelta(minutes=1)),
+            "a minute from now",
+            CALL_TIMEOUT,
+        )
+        end = timestamp(shortened["state"])
+        expect_answer(
+            answer,
+            "action_done",
+            speech_starts=f"{SWITCH_NAME} turns off at {wall_clock(end, zone)}",
+        )
+        await expect_rest_state(session, access_token, timer.target, "on")
+        await expect_off_at(socket, timer, end)
+        await expect_rest_state(session, access_token, timer.target, "off")
+
+        answer = await converse(session, access_token, f"turn on {SWITCH_NAME.lower()}")
+        _, end = await expect_started(socket, timer, DEFAULT_DURATION_MINUTES)
+        expect_answer(
+            answer,
+            "action_done",
+            speech_starts=(
+                f"{SWITCH_NAME} runs for {DEFAULT_DURATION_MINUTES} minutes, "
+                f"until {wall_clock(end, zone)}"
+            ),
+        )
+        await expect_rest_state(session, access_token, timer.target, "on")
+
+        answer = await converse(
+            session, access_token, f"turn off {SWITCH_NAME.lower()}"
+        )
+        expect_answer(answer, "action_done", speech_starts=f"{SWITCH_NAME} is off.")
+        await expect_rest_state(session, access_token, timer.target, "off")
+        await socket.wait_for_state(timer.run_for, has_minutes(0), "0", CALL_TIMEOUT)
+        await socket.wait_for_state(
+            timer.ends_at, has_state("unknown"), "unknown", CALL_TIMEOUT
+        )
+        say(f"  {timer.target} stopped by voice")
+
+
 async def scenario_restart(
     session: aiohttp.ClientSession, refresh_token: str, timer: Timer
 ) -> None:
@@ -832,6 +1051,7 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
     await scenario_command(session, refresh_token)
     await scenario_settings(session, refresh_token)
     await scenario_schedule(session, refresh_token, timer)
+    await scenario_voice(session, refresh_token, timer)
     await scenario_restart(session, refresh_token, timer)
     if keep:
         await leave_running(session, refresh_token, timer)

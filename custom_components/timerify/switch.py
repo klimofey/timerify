@@ -4,6 +4,7 @@ from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.config_entries import ConfigSubentry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -34,10 +35,16 @@ class IntervalSwitch(TimerifyEntity, SwitchEntity):
 
     The flag lives in the timer's file, not in the entry, so flipping the switch
     reloads nothing. The switch is written only when its own flag changes.
+
+    It configures the timer, so it is a configuration entity: it sits in the device's
+    configuration section, and Assist does not know it by default, as it would a switch
+    of the house. A timer is driven by voice through its target.
     """
 
     entity_description = SwitchEntityDescription(
-        key="interval", translation_key="interval"
+        key="interval",
+        translation_key="interval",
+        entity_category=EntityCategory.CONFIG,
     )
 
     def __init__(

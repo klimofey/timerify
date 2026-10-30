@@ -1,7 +1,8 @@
 """Helpers shared by the scenario tests: the entities, the calls and the clock."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo
@@ -168,6 +169,17 @@ async def add_interval(
     return subentry_id
 
 
+async def retitle_interval(
+    hass: HomeAssistant, entry: ConfigEntry, subentry_id: str, title: str
+) -> None:
+    """Give an interval another title, as the rename on the entry's page does. The
+    timer reloads, as it does for any edit of its entry."""
+    hass.config_entries.async_update_subentry(
+        entry, entry.subentries[subentry_id], title=title
+    )
+    await hass.async_block_till_done()
+
+
 async def edit_interval(
     hass: HomeAssistant, entry: ConfigEntry, subentry_id: str, **fields: Any
 ) -> SubentryFlowResult:
@@ -184,6 +196,16 @@ async def edit_interval(
     )
     await hass.async_block_till_done()
     return result
+
+
+@asynccontextmanager
+async def reload_held_back(entry: ConfigEntry) -> AsyncIterator[None]:
+    """Hold the reload of `entry` back while the block runs: a change of the entry
+    schedules it as usual, and it waits for its turn, as it does behind another reload
+    or setup that is still going, then runs when the block ends. Until then the timer
+    that is loaded is the one that was, with the entry already changed."""
+    async with entry.setup_lock:
+        yield
 
 
 async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:

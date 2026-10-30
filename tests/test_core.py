@@ -266,15 +266,89 @@ def test_run_open_loose_turns_on_without_countdown() -> None:
     assert c.snapshot.end is None
 
 
-def test_run_open_loose_drops_a_running_countdown() -> None:
-    """An open-ended run replaces a countdown instead of keeping its end."""
-    c = core("loose", "on")
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_run_open_keeps_a_running_countdown(mode: Mode) -> None:
+    """R9 starts a target that is off. A target the timer already wants running is
+    left as it is, in either mode: the countdown keeps its end, and nothing is sent."""
+    c = core(mode, "on")
+    c.set_duration(NOW, minutes(120))
+
+    fx = c.run_open(NOW + minutes(10))
+
+    assert fx == []
+    assert c.snapshot.end == NOW + minutes(120)
+
+
+def test_run_open_loose_keeps_a_run_without_a_countdown() -> None:
+    """A target that runs without a countdown is wanted running: nothing changes."""
+    c = core("loose", "off")
+    c.run_open(NOW)
+    c.observe(NOW + minutes(1), "on", by_us=True)
+
+    fx = c.run_open(NOW + minutes(10))
+
+    assert fx == []
+    assert c.snapshot.end is None
+
+
+def test_run_open_leaves_the_schedule_in_charge_of_its_countdown() -> None:
+    """A run that changes nothing is not a change of the timer (S3): the interval whose
+    window end the timer carries still owns it, and an edit of it still realigns."""
+    c = core("strict", "on")
+    c.set_windows(NOW, [window("x", -30, 180)], configured={"x"})
+    c.tick(NOW)
+
+    fx = c.run_open(NOW + minutes(10))
+    c.set_windows(NOW + minutes(10), [window("x", -30, 60)], configured={"x"})
+    c.tick(NOW + minutes(10))
+
+    assert fx == []
+    assert c.snapshot.end == NOW + minutes(60)
+    assert c.snapshot.scheduled_by == "x"
+
+
+def test_run_open_waits_with_a_wish_that_has_not_reached_the_target() -> None:
+    """A turn-on that did not go through is wanted, so a bare turn-on sends it again
+    and leaves the countdown where it was."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(30))
+    c.call_failed(NOW)
+
+    fx = c.run_open(NOW + minutes(5))
+
+    assert fx == [TurnOn()]
+    assert c.snapshot.end == NOW + minutes(30)
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_run_open_after_the_countdown_ran_out_starts_it_again(mode: Mode) -> None:
+    """A countdown that ran out is over, whether or not its alarm was handled yet: a
+    command that gets its turn first meets a target that is about to be turned off,
+    which is R9's."""
+    c = core(mode, "on")
     c.set_duration(NOW, minutes(10))
 
-    fx = c.run_open(NOW)
+    fx = c.run_open(NOW + minutes(11))
 
-    assert fx == [Disarm(), Changed()]
-    assert c.snapshot.end is None
+    if mode == "strict":
+        assert fx == [Arm(NOW + minutes(56)), Changed()]
+        assert c.snapshot.end == NOW + minutes(56)
+    else:
+        assert fx == [Disarm(), Changed()]
+        assert c.snapshot.end is None
+    assert c.tick(NOW + minutes(11)) == []
+
+
+def test_run_open_with_settings_on_a_running_countdown_sets_only_the_settings() -> None:
+    """The settings of a bare turn-on still go to a target that runs (P1); its
+    countdown is not what they are for."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(120))
+
+    fx = c.run_open(NOW + minutes(10), COOL24)
+
+    assert fx == [ApplySettings(COOL24), Changed()]
+    assert c.snapshot.end == NOW + minutes(120)
 
 
 def test_tick_at_end_turns_off() -> None:
@@ -975,7 +1049,7 @@ def test_loose_open_run_with_settings_on_running_target_applies_them() -> None:
 
     fx = c.run_open(NOW, COOL24)
 
-    assert fx == [Disarm(), ApplySettings(COOL24), Changed()]
+    assert fx == [ApplySettings(COOL24), Changed()]
 
 
 def test_strict_open_run_carries_settings_with_the_default_duration() -> None:
@@ -1333,7 +1407,7 @@ def test_wakeup_is_earliest_of_end_and_commands() -> None:
     assert added == [Arm(NOW + minutes(15)), Changed()]
     assert next_wakeup(c.snapshot) == NOW + minutes(15)
 
-    cancelled = c.cancel_command(NOW, "c1")
+    _, cancelled = c.cancel_commands(NOW, ["c1"])
 
     assert cancelled == [Arm(NOW + minutes(45)), Changed()]
     assert next_wakeup(c.snapshot) == NOW + minutes(45)
@@ -1400,7 +1474,7 @@ def test_cancel_unknown_command_raises() -> None:
     before = c.snapshot
 
     with pytest.raises(KeyError):
-        c.cancel_command(NOW, "unknown")
+        c.cancel_commands(NOW, ["unknown"])
 
     assert c.snapshot == before
 
@@ -1410,7 +1484,7 @@ def test_cancel_last_command_on_idle_timer_disarms() -> None:
     c = core("strict", "off")
     c.add_command(NOW, cmd(10))
 
-    fx = c.cancel_command(NOW, "c1")
+    _, fx = c.cancel_commands(NOW, ["c1"])
 
     assert fx == [Disarm(), Changed()]
     assert c.snapshot.commands == ()
@@ -1422,10 +1496,73 @@ def test_cancelling_one_command_keeps_the_others() -> None:
     c.add_command(NOW, cmd(10, id="c1"))
     c.add_command(NOW, cmd(20, id="c2"))
 
-    fx = c.cancel_command(NOW, "c1")
+    gone, fx = c.cancel_commands(NOW, ["c1"])
 
+    assert gone == (cmd(10, id="c1"),)
     assert fx == [Arm(NOW + minutes(20)), Changed()]
     assert c.snapshot.commands == (cmd(20, id="c2"),)
+
+
+def test_cancelling_several_commands_is_one_change_with_one_set_of_effects() -> None:
+    """Every command asked for goes in one step, and the effects are those of the
+    timer that is left, once: nothing is carried out for a state that was passed on
+    the way. What goes is given back in the order the commands were due."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    for number in (30, 10, 20, 40):
+        c.add_command(NOW, cmd(number, id=f"c{number}"))
+
+    gone, fx = c.cancel_commands(NOW, ["c30", "c10", "c20"])
+
+    assert [command.id for command in gone] == ["c10", "c20", "c30"]
+    assert fx == [Arm(NOW + minutes(40)), Changed()]
+    assert [command.id for command in c.snapshot.commands] == ["c40"]
+
+
+def test_cancelling_all_commands_leaves_the_end_of_the_countdown_as_the_alarm() -> None:
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    c.add_command(NOW, cmd(10, id="c1"))
+    c.add_command(NOW, cmd(20, id="c2"))
+
+    gone, fx = c.cancel_commands(NOW, ["c1", "c2"])
+
+    assert len(gone) == 2
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.commands == ()
+
+
+def test_cancelling_no_command_changes_nothing() -> None:
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10))
+    before = c.snapshot
+
+    gone, fx = c.cancel_commands(NOW, [])
+
+    assert (gone, fx) == ((), [])
+    assert c.snapshot == before
+
+
+def test_cancelling_commands_with_one_unknown_cancels_none() -> None:
+    """The step is all or nothing: an id that is not there refuses the whole of it."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10, id="c1"))
+    c.add_command(NOW, cmd(20, id="c2"))
+    before = c.snapshot
+
+    with pytest.raises(KeyError, match="unknown"):
+        c.cancel_commands(NOW, ["c1", "unknown"])
+
+    assert c.snapshot == before
+
+
+def test_cancelling_the_same_id_twice_cancels_it_once() -> None:
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10, id="c1"))
+
+    gone, _ = c.cancel_commands(NOW, ["c1", "c1"])
+
+    assert [command.id for command in gone] == ["c1"]
 
 
 def test_stopping_the_timer_keeps_the_commands() -> None:
@@ -1505,13 +1642,71 @@ def test_command_without_minutes_loose_runs_open() -> None:
     assert c.snapshot.pending == "on"
 
 
-def test_loose_open_run_drops_a_running_countdown() -> None:
-    """As an open-ended run by hand does, the command replaces the countdown."""
-    c = holding("loose", "on", cmd(10), end=NOW + minutes(30))
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_command_without_minutes_keeps_a_running_countdown(mode: Mode) -> None:
+    """As a bare turn-on by hand does, the command leaves a target that is wanted
+    running as it is: the default duration or the open run is for a target that is
+    off."""
+    c = holding(mode, "on", cmd(10), end=NOW + minutes(120))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(120)), Changed()]
+    assert c.snapshot.end == NOW + minutes(120)
+    assert c.snapshot.commands == ()
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_command_without_minutes_still_sets_its_settings_on_a_running_target(
+    mode: Mode,
+) -> None:
+    """P1: the command is a firm promise, and what it turns the target on with is
+    set although its countdown is not."""
+    c = holding(
+        mode,
+        "on",
+        cmd(10, settings=COOL24),
+        end=NOW + minutes(120),
+    )
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(120)), ApplySettings(COOL24), Changed()]
+    assert c.snapshot.end == NOW + minutes(120)
+
+
+def test_command_without_minutes_keeps_a_loose_run_without_a_countdown() -> None:
+    c = holding("loose", "on", cmd(10))
 
     fx = c.tick(NOW + minutes(10))
 
     assert fx == [Disarm(), Changed()]
+    assert c.snapshot.end is None
+    assert c.snapshot.pending is None
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_command_without_minutes_at_the_end_runs_the_target_again(mode: Mode) -> None:
+    """The countdown reaches zero at the instant the command is due: as the end goes
+    after a command on a tie, the command finds a target that is about to be off, and
+    turns it on as R9 says, so it is never switched off and on."""
+    c = holding(mode, "on", cmd(10), end=NOW + minutes(10))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert TurnOff() not in fx
+    assert c.snapshot.end == (NOW + minutes(55) if mode == "strict" else None)
+
+
+def test_command_without_minutes_keeps_the_countdown_it_found_when_it_was_due() -> None:
+    """A command that was due while Home Assistant was down is folded as if it ran
+    then: the countdown that was under way at its time is kept, and goes on to end
+    when it did."""
+    c = holding("strict", "on", cmd(-30), end=NOW - minutes(10))
+
+    fx = c.tick(NOW)
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
     assert c.snapshot.end is None
 
 
@@ -1834,7 +2029,7 @@ NAIVE = datetime(2026, 1, 5, 7, 0)
             lambda c: c.set_interval_enabled(NAIVE, "x", False), id="set-interval"
         ),
         pytest.param(lambda c: c.add_command(NAIVE, cmd(10)), id="add-command"),
-        pytest.param(lambda c: c.cancel_command(NAIVE, "c1"), id="cancel-command"),
+        pytest.param(lambda c: c.cancel_commands(NAIVE, ["c1"]), id="cancel-commands"),
         pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
         pytest.param(lambda c: c.call_failed(NAIVE), id="call-failed"),
         pytest.param(lambda c: c.settings_applied(NAIVE), id="settings-applied"),
@@ -2928,10 +3123,6 @@ def _at_now(change: Callable[[TimerCore], object]) -> Callable[[TimerCore], date
             "strict", _at_now(lambda c: c.add(NOW, minutes(-10))), id="add-minus"
         ),
         pytest.param("strict", _at_now(lambda c: c.stop(NOW)), id="stop"),
-        pytest.param(
-            "strict", _at_now(lambda c: c.run_open(NOW)), id="run-open-strict"
-        ),
-        pytest.param("loose", _at_now(lambda c: c.run_open(NOW)), id="run-open-loose"),
         pytest.param("strict", _due_on_command, id="due-on-command"),
         pytest.param("strict", _due_off_command, id="due-off-command"),
         pytest.param(
@@ -2946,7 +3137,9 @@ def test_every_other_change_ends_realignment(
     mode: Mode, change: Callable[[TimerCore], datetime]
 ) -> None:
     """S3: once anyone but the schedule changes the timer (a command that is due is
-    the same as setting it by hand, P3), editing the interval no longer touches it."""
+    the same as setting it by hand, P3), editing the interval no longer touches it. A
+    run without a duration of a target that is running changes nothing, so it is not
+    here: `test_run_open_leaves_the_schedule_in_charge_of_its_countdown`."""
     c = core(mode, "on")
     c.set_windows(NOW, [window("x", 0, 60)], configured={"x"})
     c.tick(NOW)
@@ -3819,3 +4012,52 @@ def test_a_report_of_a_call_the_core_never_made_asks_for_nothing() -> None:
 
     assert c.observe(NOW, "off", by_us=True) == [Changed()]
     assert c.snapshot == Snapshot(end=NOW + minutes(20), last_actual="off")
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "wanted"),
+    [
+        (Snapshot(last_actual="off"), False),
+        (Snapshot(), False),
+        (Snapshot(end=NOW + minutes(10), last_actual="on"), True),
+        (Snapshot(end=NOW + minutes(10), last_actual="unavailable"), True),
+        (Snapshot(last_actual="on"), True),
+        (Snapshot(pending="on", last_actual="off"), True),
+        (Snapshot(pending="on", last_actual="unavailable"), True),
+        (Snapshot(pending="off", last_actual="on"), False),
+        (Snapshot(last_actual="unavailable"), False),
+    ],
+    ids=[
+        "idle",
+        "never_seen",
+        "counting",
+        "counting_while_unavailable",
+        "on_without_a_timer",
+        "turn_on_in_flight",
+        "turn_on_waiting_for_the_target",
+        "turn_off_in_flight",
+        "unavailable_without_a_wish",
+    ],
+)
+def test_the_target_is_wanted_running_by_the_desired_state(
+    snapshot: Snapshot, wanted: bool
+) -> None:
+    """A countdown means running, also while the target is away (R10). Without one the
+    wish the target has not confirmed yet decides, and only then what it was last seen
+    doing: a turn-on in flight is a run, a turn-off in flight is not."""
+    assert TimerCore("strict", minutes(45), snapshot).wanted_running(NOW) is wanted
+
+
+def test_a_countdown_that_ran_out_is_not_wanted_running() -> None:
+    """The end is the instant the countdown reaches zero, folded or not yet."""
+    snapshot = Snapshot(end=NOW + minutes(10), last_actual="on")
+    c = TimerCore("strict", minutes(45), snapshot)
+
+    assert c.wanted_running(NOW + minutes(10) - timedelta(seconds=1))
+    assert not c.wanted_running(NOW + minutes(10))
+    assert not c.wanted_running(NOW + minutes(11))
+
+
+def test_wanted_running_refuses_a_naive_time() -> None:
+    with pytest.raises(ValueError, match="now must be timezone-aware"):
+        core("strict", "on").wanted_running(NAIVE)

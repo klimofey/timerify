@@ -2,8 +2,9 @@
 
 from collections.abc import Mapping
 from datetime import timedelta
+from pathlib import Path
 from types import MappingProxyType
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
 DOMAIN: Final = "timerify"
 
@@ -49,6 +50,10 @@ MAX_COMMAND_AHEAD: Final = timedelta(days=7)
 MAX_DELAY_MINUTES: Final = 10080
 """The longest delay of a pending command: a week, in minutes."""
 
+MAX_LISTED_INTERVALS: Final = 5
+"""How many interval titles a refusal names when it tells which ones can be asked for:
+it is spoken and read by an agent, and the rest are counted, not recited."""
+
 SERVICE_CALL_TIMEOUT: Final = timedelta(seconds=30)
 """How long a turn_on or turn_off call may take before it counts as failed."""
 
@@ -57,6 +62,61 @@ MAX_AUTOMATIC_RESENDS: Final = 3
 merely repeat the target's state, before the timer stops asking until the state
 changes or a command wants the wish again. Without a bound, a device that refuses a
 command and answers it with a report of its old state would be commanded for ever."""
+
+VOICE_LANGUAGES: Final = ("en", "ru")
+"""The languages Timerify ships sentences for: a directory of `sentences/` each."""
+SENTENCES_DIR: Final = Path(__file__).parent / "sentences"
+"""The sentence sources for the built-in agent, a directory per language."""
+LIST_TARGET: Final = "timerify_target"
+"""The list of the sentence sources that holds the names of the targets of the timers,
+which the sentences use as the slot `name`."""
+LIST_HVAC_MODE: Final = "timerify_hvac_mode"
+"""The list of the sentence sources that holds the words for an HVAC mode, which the
+sentences use as the slot `hvac_mode`. The sources say every mode in words; the files
+Timerify writes keep the modes the targets support."""
+LIST_MODE: Final = "timerify_mode"
+"""The list that holds the modes of the targets as their devices name them, which the
+sentences use as the slot `mode`. Empty in the sources: only the files Timerify writes
+know the devices."""
+LIST_INTERVAL: Final = "timerify_interval"
+"""The list that holds the titles of the schedule intervals of the timers, which the
+sentences use as the slot `interval`. Empty in the sources: only the files Timerify
+writes know the intervals."""
+MANUAL_SENTENCES_DIR: Final = "timerify_manual"
+"""The directory of `custom_sentences/<language>/` that the sentence files are copied
+into by hand. The managed file has a name of its own beside it, and the two are never
+meant to be there together."""
+
+CONF_KIND: Final = "kind"
+"""Option that tells what an entry is: absent for a timer, `KIND_VOICE_SETTINGS` for the
+entry that writes the sentence files."""
+KIND_VOICE_SETTINGS: Final = "voice_settings"
+CONF_WRITE_SENTENCES: Final = "write_sentence_files"
+"""Option of the voice settings: whether Timerify writes the sentence files for the
+built-in agent."""
+CONF_LANGUAGES: Final = "languages"
+"""Option of the voice settings: the languages the sentence files are written in, a
+subset of `VOICE_LANGUAGES`."""
+VOICE_UNIQUE_ID: Final = "voice_settings"
+"""The unique id of the voice settings entry, of which there is at most one."""
+VOICE_SYNC_COOLDOWN: Final = 1.0
+"""How long, in seconds, a change of the timers or of the names of their targets waits
+before the sentence files are written, counted from the first of the changes that come
+in a row, and the least time between two writings."""
+SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
+"""Sent when a timer is set up or unloaded, so that the names of the targets are listed
+again."""
+MANAGED_HEADER: Final = (
+    "# Managed by Timerify. Do not edit:"
+    " this file is rewritten whenever a timer changes."
+)
+"""The first line of every sentence file Timerify writes."""
+
+
+def is_voice_options(options: Mapping[str, Any]) -> bool:
+    """Whether the options are those of the voice settings, not of a timer."""
+    return options.get(CONF_KIND) == KIND_VOICE_SETTINGS
+
 
 Mode = Literal["strict", "loose"]
 """How a target is bound: strict runs only while the timer counts down, loose may

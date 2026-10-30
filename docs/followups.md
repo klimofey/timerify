@@ -15,14 +15,14 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   rename and update the option). Found in the review of the Workday task of phase 3 and
   split off; the README states the limit. Take it before the first public release, since the
   repository is built as a product. `custom_components/timerify/__init__.py:56-76`
-  (`_follow_target`, the pattern), `custom_components/timerify/controller.py:159` (the
-  option) and `:540-552` (`_follow_workday_sensor`, which subscribes to the id).
+  (`_follow_target`, the pattern), `custom_components/timerify/controller.py:162` (the
+  option) and `:581-593` (`_follow_workday_sensor`, which subscribes to the id).
 
 ## Later
 
 - **A deleted target gives no sign.** `er.async_resolve_entity_id` returns the id even when the
   entity is gone from the registry, so a timer whose target was deleted still loads and drives
-  nothing, with no message. `custom_components/timerify/controller.py:136-140`. It needs a
+  nothing, with no message. `custom_components/timerify/controller.py:139-143`. It needs a
   repairs issue; the spec is silent and no spec-defined behaviour changes, so it waits for a
   later phase.
 - **A device that answers each refused call with `unknown` and then its old state is re-sent
@@ -31,12 +31,12 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   total limit would close it. The same holds for a device that answers each correction of
   a contradicting report of its own call (the entry "A report of our own call that
   contradicts the timer" in `RULINGS.md`) with the opposite state, each time as an answer
-  to our call: every change is answered once. `custom_components/timerify/core.py:514-517`
-  (the reset in `observe`) and `:814-827` (`_resend`).
+  to our call: every change is answered once. `custom_components/timerify/core.py:524-527`
+  (the reset in `observe`) and `:838-851` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
-  `custom_components/timerify/controller.py:719-738` (`_log_gave_up`) and
-  `custom_components/timerify/core.py:250-275` (`_Allowance`).
+  `custom_components/timerify/controller.py:760-779` (`_log_gave_up`) and
+  `custom_components/timerify/core.py:251-276` (`_Allowance`).
 - **`type Actual` has no runtime arguments.** `typing.get_args(Actual)` is `()` because the alias
   is a PEP 695 `type`; use `Actual.__value__` if the values are ever enumerated (for example
   to validate stored data). `custom_components/timerify/domains.py:55`. Do it when needed.
@@ -59,10 +59,10 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `_handle_started` takes care to avoid. The fix is one policy for the whole controller:
   until `_handle_started` has run, a command records its change and saves it, arms nothing
   and leaves the folding to `_handle_started`. A guard on the interval switch alone would
-  be a special case, so it waits for the policy. `custom_components/timerify/controller.py:193-201`
-  (`async_start`), `:306-334` (`async_set_interval_enabled`), `:346-355` (`_command`) and
-  `:506-538` (`_handle_started`), and `custom_components/timerify/core.py:154-165`
-  (`next_wakeup`).
+  be a special case, so it waits for the policy.
+  `custom_components/timerify/controller.py:200-208` (`async_start`), `:313-340`
+  (`async_set_interval_enabled`), `:353-362` (`_command`) and `:547-579`
+  (`_handle_started`), and `custom_components/timerify/core.py:154-165` (`next_wakeup`).
 - **The R10 lines are not written by the folds of start-up and of a report of the target.**
   `_fold_due` (the alarm, the refresh of the windows and the switching off of an interval)
   says what came due while the target is unavailable: the countdown that ended, the command
@@ -70,8 +70,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   through `_execute_fold` alone and say nothing, so a window or command that came due
   during downtime, found at start-up with the target unavailable, is applied when it is
   back without a line in the log. The phase-2 lines have the same gap. It changes no
-  behaviour. `custom_components/timerify/controller.py:575-583` (`_fold_due`), `:602-647`
-  (`_log_due_while_unavailable`), `:506-538` (`_handle_started`) and `:557-567`
+  behaviour. `custom_components/timerify/controller.py:616-624` (`_fold_due`), `:643-688`
+  (`_log_due_while_unavailable`), `:547-579` (`_handle_started`) and `:598-608`
   (`_handle_state_change`).
 - **A time zone changed in YAML is not noticed.** Changing the zone in the settings fires
   `EVENT_CORE_CONFIG_UPDATE`, which the controller listens to, but `configuration.yaml`
@@ -79,8 +79,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (`async_process_ha_core_config`) without that event. The windows keep the old zone until
   a window ends, the Workday sensor reports or the timer reloads. It needs a signal that
   Home Assistant does not fire for this path; look for one before working around it.
-  `custom_components/timerify/controller.py:500-504` (`_handle_core_config_update`) and
-  `:506-538` (where it is subscribed).
+  `custom_components/timerify/controller.py:541-545` (`_handle_core_config_update`) and
+  `:547-579` (where it is subscribed).
 - **An old generated title stays in the old language.** An edit renames an interval only if
   its title is still the one generated from its old data in the current language; after the
   house language changes the old title no longer matches and is kept as if the user had
@@ -96,8 +96,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   interval, a window that is suppressed but has not started, and so on), which means a
   defect, and the entry stays failed with a reason in words (`stored_timer_invalid`). The
   only way out is to delete the timer and add it again, which loses its commands and the
-  flags of its intervals. A repairs issue with a "reset the stored timer" fix would do. `custom_components/timerify/store.py:60-84`
-  (`_validated`) and `:164-188` (`async_load`).
+  flags of its intervals. A repairs issue with a "reset the stored timer" fix would do.
+  `custom_components/timerify/store.py:65-89` (`_validated`) and `:169-189` (`async_load`).
 - **A pending command keeps the settings it was made with.** The settings of an interval's
   window are checked again when the window is worked out, and the ones the target no longer
   takes are left out (`RULINGS.md`), but a command is checked only when it is made.
@@ -105,8 +105,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   when it comes due, and the log says so at every attempt. The fix is the same filter
   where the calls are made (`_execute`), which covers the owed settings of every origin;
   it is not a phase 3 regression, so it waits.
-  `custom_components/timerify/controller.py:259` (`async_add_command`, the check) and
-  `:724-737` (`_execute`, where the calls are made).
+  `custom_components/timerify/controller.py:262` (`async_add_command`, the check) and
+  `:708-725` (`_execute`, where the calls are made).
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.
@@ -117,7 +117,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `controller.async_set_minutes` or `async_run` instead of the user's path, a `number.set_value`
   or `timerify.run` call in a task, as the newer slow-call test in `tests/test_entities.py:287` does.
   Instances: `tests/test_entities.py:250`, `:252`, `:274`, `:276`, `:459`, `:571`,
-  `tests/test_restart.py:505`, `:686`, `:711` and `tests/test_settings.py:316`.
+  `tests/test_restart.py:554`, `:735`, `:760` and `tests/test_settings.py:316`.
 
 ## Accepted
 

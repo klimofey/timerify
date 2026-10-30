@@ -2382,6 +2382,8 @@ def test_restored_turn_on_only_settings_skip_a_running_target() -> None:
 
 
 def test_restored_turn_on_only_settings_go_with_the_turn_on_of_an_off_target() -> None:
+    """The same restart finds the AC off: the wish goes out with the settings, which
+    stay turn-on-only until the turn-on lands."""
     c = TimerCore(
         "strict",
         minutes(45),
@@ -2686,6 +2688,32 @@ def test_hand_over_at_a_window_end_is_judged_as_of_that_instant() -> None:
     assert c.snapshot.owed_settings == NO_SETTINGS
 
 
+def test_a_hand_over_found_after_downtime_turns_a_target_that_is_off_back_on() -> None:
+    """a's window ended at 08:00 while c, extended since, was open until 09:00; Home
+    Assistant is back at 08:40 and finds the boiler off. The hand over is what is due:
+    the timer goes on to c's end and the boiler is turned on, not read as someone
+    switching it off (R3)."""
+    c = TimerCore(
+        "strict",
+        minutes(45),
+        Snapshot(
+            end=NOW + minutes(60),
+            scheduled_by="a",
+            windows=(
+                window("a", 0, 60, started=True),
+                window("c", 30, 120, started=True),
+            ),
+        ),
+    )
+
+    fx = c.observe(NOW + minutes(100), "off", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(120)), TurnOn(), Changed()]
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(120), "c")
+    assert c.snapshot.pending == "on"
+    assert not any(w.suppressed for w in c.snapshot.windows)
+
+
 def test_the_carriers_window_end_with_no_other_window_open_turns_the_target_off() -> (
     None
 ):
@@ -2718,6 +2746,28 @@ def test_window_starting_as_the_carrier_ends_extends_without_flap_or_settings() 
     assert fx == [Arm(NOW + minutes(75)), Changed()]
     assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(75), "b")
     assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_a_window_opening_at_a_hand_over_owes_its_settings_to_an_away_ac() -> None:
+    """a ends at 07:30 as b opens, while the AC is away. Nothing is known to run, so
+    b's settings are owed to the turn-on that waits for the AC, as a window that opens
+    on its own would owe them. (Were b taken for open before its start is folded, the
+    hand over would give it the timer without ever owing its settings.)"""
+    c = following(
+        "strict",
+        "unavailable",
+        window("a", 0, 30, started=True),
+        window("b", 30, 75, HEAT22),
+        end=NOW + minutes(30),
+    )
+
+    c.tick(NOW + minutes(30))
+
+    assert (c.snapshot.end, c.snapshot.scheduled_by) == (NOW + minutes(75), "b")
+    assert c.snapshot.owed_settings == HEAT22
+    assert c.snapshot.owed_turn_on_only
+    back = c.observe(NOW + minutes(31), "off", by_us=False)
+    assert back == [TurnOn(HEAT22), Changed()]
 
 
 def test_shortening_the_carrier_to_where_the_other_ends_keeps_it_the_carrier() -> None:

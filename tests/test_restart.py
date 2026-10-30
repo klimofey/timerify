@@ -233,17 +233,11 @@ async def test_version_1_store_is_migrated(
     assert state_of(hass, NUMBER) == "30"
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
-    assert saved(hass_storage, entry)["commands"] == []
-    assert saved(hass_storage, entry)["owed_turn_on_only"] is False
-    assert saved(hass_storage, entry)["scheduled_by"] is None
-    assert saved(hass_storage, entry)["windows"] == []
 
     await set_number(hass, NUMBER, 45)
 
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
-    assert saved(hass_storage, entry) == payload(
-        end=at(45), owed_settings={}, commands=[]
-    )
+    assert saved(hass_storage, entry) == payload(end=at(45))
 
 
 async def test_version_2_store_is_migrated(

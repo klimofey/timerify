@@ -541,7 +541,7 @@ class TimerCore:
         if pending is not None and self._unsent:
             if pending == actual:
                 self._settle()
-                if by_us:
+                if by_us and actual == "on":
                     # Our own call switched the target on, but the list did not get
                     # through: the settings that did not follow are no longer
                     # turn-on-only, and are sent again on their own.
@@ -578,6 +578,12 @@ class TimerCore:
         leaves the timer as it would have if it had been carried out when it fell due,
         but the target is asked once, for the last wish: a turn-on and an off that
         were due together switch nothing.
+
+        The realignment is not only the last step. The end of a window realigns the
+        timer as of that instant too, but only to hand it to a window that is still
+        open, never to stop it: the end of the timer that follows decides, and a window
+        that opens just then extends it without an off. The last step, as of `now`, may
+        stop the timer.
 
         Returns the effects, and whether the timer was moved: by the end, an executed
         command, a window that set it or the realignment. A window that left it alone,

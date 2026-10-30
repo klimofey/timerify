@@ -3673,6 +3673,127 @@ def test_a_contradicting_report_is_answered_a_limited_number_of_times() -> None:
     assert c.snapshot.pending == "on"
 
 
+def calls_in(effects: list[Effect]) -> list[Effect]:
+    """The service calls among `effects`."""
+    return [e for e in effects if isinstance(e, TurnOn | TurnOff | ApplySettings)]
+
+
+def flips_credited_to_our_calls(
+    c: TimerCore, first: Literal["on", "off"], rounds: int = 20
+) -> list[Effect]:
+    """The service calls that `c` sends while the target changes `rounds` times in each
+    direction, every change carrying the context of a call of ours: what a device that
+    undoes commands by itself does, or a switch pressed on the wall within the seconds
+    in which Home Assistant credits the writes of the entity to the last call."""
+    other: Literal["on", "off"] = "off" if first == "on" else "on"
+    sent: list[Effect] = []
+    for step in range(rounds):
+        at = NOW + timedelta(seconds=2 * step)
+        sent += calls_in(c.observe(at, first, by_us=True))
+        sent += calls_in(c.observe(at + timedelta(seconds=1), other, by_us=True))
+    return sent
+
+
+def test_a_device_that_undoes_a_command_by_itself_is_not_commanded_again() -> None:
+    """The call was sent for the wish and its answer arrived, so every later change that
+    is credited to our call is the device's own, or a user's within the seconds of
+    attribution: the wish is not sent again at each one."""
+    c = core("strict", "off")
+    assert calls_in(c.set_duration(NOW, minutes(30))) == [TurnOn()]
+
+    sent = flips_credited_to_our_calls(c, "on")
+
+    assert sent == []
+    assert c.snapshot.end == NOW + minutes(30)
+    assert c.snapshot.pending is None
+
+
+def test_a_wall_switch_pressed_just_after_a_sent_turn_on_is_not_turned_back_on() -> (
+    None
+):
+    """The press carries the context of our call, which Home Assistant keeps crediting
+    the entity's writes to for five seconds. Answering it would override the user, and
+    again at every press."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(30))
+    assert c.observe(NOW + timedelta(seconds=1), "on", by_us=True) == [Changed()]
+
+    pressed = c.observe(NOW + timedelta(seconds=3), "off", by_us=True)
+    pressed_again = c.observe(NOW + timedelta(seconds=5), "on", by_us=True)
+    pressed_off = c.observe(NOW + timedelta(seconds=7), "off", by_us=True)
+
+    assert pressed == [Changed()]
+    assert calls_in(pressed_again) == []
+    assert pressed_off == [Changed()]
+
+
+@pytest.mark.parametrize("first", ["on", "off"])
+def test_a_wish_settled_without_a_call_is_corrected_once_to_the_turn_on(
+    first: Literal["on", "off"],
+) -> None:
+    """The first contradicting answer of our own call is corrected (I1); the changes
+    that follow are credited to the correction and left alone, whichever way they go."""
+    c = stopped_behind_a_slow_device("strict")
+    c.set_duration(NOW, minutes(30))
+    assert c.observe(NOW + minutes(1), "off", by_us=True) == [TurnOn(), Changed()]
+
+    sent = flips_credited_to_our_calls(c, first)
+
+    assert sent == []
+
+
+@pytest.mark.parametrize("first", ["on", "off"])
+def test_a_wish_settled_without_a_call_is_corrected_once_to_the_turn_off(
+    first: Literal["on", "off"],
+) -> None:
+    """The same for the correction of a late start: the stop asked for nothing, as the
+    target read off, the answer of the start is corrected once and then left alone."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(30))
+    c.call_failed(NOW)
+    c.stop(NOW)
+    assert c.observe(NOW + minutes(1), "on", by_us=True) == [TurnOff(), Changed()]
+
+    sent = flips_credited_to_our_calls(c, first)
+
+    assert sent == []
+
+
+def test_each_wish_settled_without_a_call_is_corrected_once() -> None:
+    """The permission belongs to the wish: when the user stops and starts the target
+    again behind a slow device, the answer that contradicts the new wish is corrected
+    too."""
+    c = stopped_behind_a_slow_device("strict")
+    c.set_duration(NOW, minutes(30))
+    assert c.observe(NOW + minutes(1), "off", by_us=True) == [TurnOn(), Changed()]
+    c.observe(NOW + minutes(2), "on", by_us=True)
+    assert c.stop(NOW + minutes(3)) == [Disarm(), TurnOff(), Changed()]
+    c.call_failed(NOW + minutes(3))
+    c.set_duration(NOW + minutes(3), minutes(30))
+
+    again = c.observe(NOW + minutes(4), "off", by_us=True)
+
+    assert again == [TurnOn(), Changed()]
+
+
+def test_a_new_wish_ends_the_permission_to_correct_the_one_before() -> None:
+    """The stop was settled with nothing sent, because the target read off. The target
+    then went away, and a start waits for it. The answer of the first start, when the
+    target is back, is the wish being met: it is not corrected to the old stop."""
+    c = core("strict", "off")
+    c.set_duration(NOW, minutes(30))
+    c.call_failed(NOW)
+    c.stop(NOW)
+    c.observe(NOW + minutes(1), "unavailable", by_us=False)
+    c.set_duration(NOW + minutes(2), minutes(30))
+    c.observe(NOW + minutes(3), "on", by_us=True)
+    assert c.snapshot.pending is None
+
+    later = c.observe(NOW + minutes(4), "on", by_us=True)
+
+    assert calls_in(later) == []
+
+
 def test_a_late_report_after_someone_else_switched_the_target_asks_for_nothing() -> (
     None
 ):

@@ -158,6 +158,8 @@ class FakeTarget:
     _echoes: int = 0
     _reporting_late: bool = False
     _late: list[tuple[Obey, ServiceCall]] = field(default_factory=list)
+    _reverting: int = 0
+    _last_context: Context | None = None
     _held: HeldCall | None = None
 
     def _is_timerify_entity(self, entity_id: str) -> bool:
@@ -229,6 +231,23 @@ class FakeTarget:
         after the call returned. The change then carries the context of the call."""
         self._reporting_late = True
 
+    def revert_next_calls(self, count: int) -> None:
+        """Make the device undo each of the next `count` service calls by itself, as a
+        relay with an auto-off time of a few seconds or a plug that trips on overload
+        does: it obeys, and at once shows the state it was in. Both changes carry the
+        context of the call, because Home Assistant credits the writes of an entity to
+        the last call it took for five seconds."""
+        self._reverting = count
+
+    async def set_state_credited_to_last_call(self, value: str) -> None:
+        """Change the state from outside within the five seconds in which Home
+        Assistant credits the writes of the entity to the last call it took, as a
+        switch pressed on the wall just after a command is: the change carries the
+        context of that call."""
+        assert self._last_context is not None, "the entity has taken no call yet"
+        self.write(value, context=self._last_context)
+        await self.hass.async_block_till_done()
+
     async def report_late(self) -> None:
         """The device reports what the calls it took did, in the order it took them,
         and everything that follows settles."""
@@ -270,6 +289,7 @@ class FakeTarget:
         hold it, fail it, report late, ignore it or obey."""
         self.calls.append((service, entity_id))
         self.call_data.append((service, data))
+        self._last_context = call.context
         if self._held is not None:
             held, self._held = self._held, None
             held.reached.set()
@@ -287,6 +307,12 @@ class FakeTarget:
             if self._echoing and self._echoes < ECHO_LIMIT:
                 self._echoes += 1
                 self.write(self.state, context=call.context, echoes=self._echoes)
+            return
+        if self._reverting:
+            self._reverting -= 1
+            before = self.state
+            obey(self, call)
+            self.write(before, context=call.context)
             return
         obey(self, call)
 

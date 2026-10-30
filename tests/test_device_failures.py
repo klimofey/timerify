@@ -360,6 +360,62 @@ async def test_open_run_and_at_once_stop_leave_a_loose_boiler_off(
     assert state_of(hass, TARGET_ID) == "off"
 
 
+async def test_boiler_that_switches_itself_back_after_a_command_is_not_commanded_again(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A relay with an auto-off time of a few seconds takes the turn-on and shows it
+    off again before Home Assistant stops crediting its writes to the call: both changes
+    are reported as answers to our own call. The call was sent for the wish, and the
+    wish was answered, so Timerify does not command the boiler at every revert."""
+    await setup_target(mode="strict")
+    fake_target.revert_next_calls(20)
+
+    await set_number(hass, NUMBER, 30)
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert state_of(hass, NUMBER) == "30"
+
+
+async def test_late_correction_for_a_boiler_that_switches_itself_back_is_sent_once(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user stops the boiler and starts it again before the cloud has shown it off.
+    The late "off" is corrected with one turn-on; the boiler, which switches itself back
+    after a command, shows off once more as an answer to that call, and is left as it
+    is: a wish is corrected once."""
+    await setup_target(mode="strict")
+    await set_number(hass, NUMBER, 30)
+    fake_target.report_next_call_late()
+    await set_number(hass, NUMBER, 0)
+    await set_number(hass, NUMBER, 30)
+    fake_target.revert_next_calls(20)
+
+    await fake_target.report_late()
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_wall_switch_pressed_just_after_a_turn_on_is_not_overridden(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A switch pressed on the wall within the five seconds in which Home Assistant
+    credits the entity's writes to the last call carries the context of Timerify's
+    turn-on, so it looks like an answer to it. The boiler is not turned back on, not
+    after the first press and not after the next."""
+    await setup_target(mode="strict")
+    await set_number(hass, NUMBER, 30)
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_target.set_state_credited_to_last_call("off")
+    await fake_target.set_state_credited_to_last_call("on")
+    await fake_target.set_state_credited_to_last_call("off")
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 async def test_boiler_that_goes_on_refusing_late_is_asked_a_limited_number_of_times(
     hass: HomeAssistant,
     fake_target: FakeTarget,

@@ -69,35 +69,50 @@ not repeated beside its successor.
   again on a state change or a command. Cost if wrong: an ignoring media player is retried
   only then.
 - **A report of our own call that contradicts the timer, with no wish pending, is a wish
-  that has not landed, and the core asks for the state it wished again.** A call that
-  the device accepted but does not show yet counts as not delivered (above), so a newer
-  wish for the state the target still shows is settled with nothing sent. The older call
-  then lands, and its report, which carries our context, leaves the target the opposite
-  of the timer: an interval switched off and on again within the report lag of a cloud
-  device, "Run for 0" and at once "Run for 30", a start and at once a stop. R6 says our
-  own report is not "someone else"; without this rule it was also not "us", and nothing
-  corrected the target until some other change came. The core now keeps in memory what it
-  last asked of the target (`_wished`, set by every wish, whether or not anything had to
-  be sent; never stored, since only the core that made a call can be answered by it).
-  A report by one of our calls that shows the other state, while no wish is pending, makes
-  that state the pending wish again and sends it. The report is a change of the target's
-  state, so it is always answered; if the new call does not land either, the wish is an
-  ordinary unsent one, and the reports that follow are answered within the limit of
-  `automatic_resends`, so a device that refuses cannot loop. The memory covers a loose
-  timer at zero too: the user's last word (run without a countdown, stop) is what is
-  wished, since a loose target may run with the timer at zero but not against the last
-  thing the user asked. Someone else's change ends the memory (manual wins, R8): a late
-  report after it asks for nothing. Why: §5.1, one timer as the single source of truth.
-  Cost if wrong: a device that changes by itself and has the change attributed to our
-  context within its report window (Home Assistant attributes it for five seconds after
-  a call) is commanded once per change, and a cycle of such changes is not bounded by the
-  limit, as the entry in `docs/followups.md` about a device that answers a refused call
-  with `unknown` says; the settings that a window owes only with a turn-on were dropped
-  when the window started again on a target that still read on, so the correcting
-  turn-on is plain, and a device that remembers its last mode runs in it. Tests:
+  that has not landed, and the core asks for the state it wished again, once for each
+  wish that was settled without a call.** A call that the device accepted but does not
+  show yet counts as not delivered (above), so a newer wish for the state the target
+  still shows is settled with nothing sent. The older call then lands, and its report,
+  which carries our context, leaves the target the opposite of the timer: an interval
+  switched off and on again within the report lag of a cloud device, "Run for 0" and at
+  once "Run for 30", a start and at once a stop. R6 says our own report is not "someone
+  else"; without this rule it was also not "us", and nothing corrected the target until
+  some other change came. The core now keeps in memory a permission to correct
+  (`_correction`, never stored, since only the core that made a call can be answered by
+  it). A wish that is settled with nothing sent, because the target already shows it,
+  gives the permission for that state. A call sent for any wish takes it away, so does a
+  new wish, and so does a change by someone else (manual wins, R8). A report by one of
+  our calls that shows the other state, while the permission stands, uses it up: the
+  state becomes the pending wish again and is sent. The report is a change of the
+  target's state, so it is always answered; if the new call does not land either, the
+  wish is an ordinary unsent one, and the reports that follow are answered within the
+  limit of `automatic_resends`, so a device that refuses cannot loop. The permission
+  covers a loose timer at zero too: the user's last word (run without a countdown, stop)
+  is what is wished, since a loose target may run with the timer at zero but not
+  against the last thing the user asked. Why: §5.1, one timer as the single source of
+  truth. Why once: Home Assistant credits every write of an entity to the context of
+  the last call it took, for five seconds (`CONTEXT_RECENT_TIME_SECONDS`), and every
+  correction is a new call that renews it. A correction for every change credited to us
+  would command a device that undoes a command by itself within that time (a relay with
+  an auto-off time, a plug that trips on overload, a cloud climate that reverts a
+  command) at every revert, for ever, and would turn a wall switch back on when it was
+  pressed within five seconds of a call, again at every press. Cost if wrong: a change
+  credited to a call that was sent for the wish, which is not the answer to an older
+  call, is not answered, so a device that undoes a command by itself stays as it undid
+  it, and a switch pressed on the wall after a sent call is not overridden, with the
+  timer going on as if the target ran (R6, as before this rule); one pressed while a
+  wish settled without a call still holds the permission is turned back on, once. Two
+  older calls still on their way (a second flip inside the same report lag) can leave
+  the answer of the second uncorrected. The settings that a window owes only with a
+  turn-on were dropped when the window started again on a target that still read on, so
+  the correcting turn-on is plain, and a device that remembers its last mode runs in
+  it. Tests:
   `test_run_for_zero_and_at_once_run_for_thirty_leaves_the_boiler_running`,
   `test_start_and_at_once_stop_leave_a_strict_boiler_off`,
-  `test_flipping_the_interval_off_and_on_behind_a_late_boiler_leaves_it_on`.
+  `test_flipping_the_interval_off_and_on_behind_a_late_boiler_leaves_it_on`, for the
+  bound `test_boiler_that_switches_itself_back_after_a_command_is_not_commanded_again`,
+  `test_late_correction_for_a_boiler_that_switches_itself_back_is_sent_once` and
+  `test_wall_switch_pressed_just_after_a_turn_on_is_not_overridden`.
 - **A service call that takes longer than 30 seconds counts as failed**
   (`SERVICE_CALL_TIMEOUT`), each call of a list on its own. Home Assistant service calls
   have no timeout of their own, and a hung device would otherwise freeze its timer. Cost if
@@ -145,9 +160,11 @@ not repeated beside its successor.
   before it ends or lasts more than a day (the rule of `checked_window`, the one the core
   applies to every window it is given). The set-up fails with a `ConfigEntryError`
   (`stored_timer_invalid`), whose translated reason says what is wrong and tells the
-  user to remove the timer and add it again, not with a bare `ValueError`. Only the
-  timer's own code writes the file, so such a file means a defect, and it should show when
-  the timer loads, not as a target switched for reasons nobody can follow. Versions 2 and
+  user to remove the timer and add it again, not with a bare `ValueError`. The reason
+  is the English text of the error, also in the Russian message: it is for the bug
+  report of a defect, not for the user. Only the timer's own code writes the file, so
+  such a file means a defect, and it should show when the timer loads, not as a target
+  switched for reasons nobody can follow. Versions 2 and
   3 were never released before their keys were complete, so they need no further steps.
   Cost if wrong: a version 2 or 3 file written by a development build from between the
   changes lacks a key and fails to load; that exists on developer machines only.

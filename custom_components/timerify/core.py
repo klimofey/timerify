@@ -306,11 +306,15 @@ class TimerCore:
         self._settings_unsent = False
         """The owed settings have not reached the target, as `_unsent` says of the
         wish. Only true while settings are owed; never persisted either."""
-        self._wished: Literal["on", "off"] | None = None
-        """What the timer last asked of the target, whether or not anything had to be
-        sent: the state its own calls are to leave the target in. None until the core
-        asks, and again once someone else changes the target. Never persisted, because
-        only the core that made a call can be answered by it."""
+        self._correction: Literal["on", "off"] | None = None
+        """The state that a late report of our own call may be corrected to, once. Set
+        when the last wish was settled with nothing sent, because the target already
+        showed it: a call of ours that the target had not shown yet can still land and
+        leave the target the opposite. Any call sent for a wish clears it, so a wish is
+        corrected at most once, and so does a change by someone else. It is never set
+        while a wish is pending: every wish that is sent or waits starts by clearing
+        it. Never persisted, because only the core that made a call can be answered
+        by it."""
         self._wish_allowance = _Allowance(automatic_resends)
         """Re-sends of the pending wish by reports. Only meaningful while a wish is
         pending: every command that wants one starts it from zero, and so does a
@@ -515,8 +519,11 @@ class TimerCore:
         `by_us` says the change came from a service call the core asked for. Such an
         answer may be late: a newer wish can have been settled by the state the target
         showed before the call landed, and the answer then leaves the target the
-        opposite of what the timer wants. With no wish pending, the core asks for the
-        state it wished again.
+        opposite of what the timer wants. The core corrects that once for the wish.
+        Any later change of the target that is credited to a call of ours is not
+        answered: a device that undoes a command by itself, or a switch pressed on the
+        wall within the seconds in which Home Assistant credits the entity's writes to
+        the last call, would otherwise be commanded again at every change.
         """
         now = _utc(now)
         previous = self._snapshot.last_actual
@@ -552,12 +559,8 @@ class TimerCore:
         elif by_us:
             if pending == actual:
                 self._settle()
-            elif (
-                pending is None
-                and (wished := self._wished) is not None
-                and wished != actual
-            ):
-                effects += self._ask_again(wished)
+            elif (correction := self._correction) is not None and correction != actual:
+                effects += self._ask_again(correction)
         elif not repeated and not caught_up:
             # What was due has just decided what the target is to do; it outranks
             # what someone else did to the target.
@@ -739,7 +742,8 @@ class TimerCore:
     ) -> list[Effect]:
         """Someone else switched the target: the timer follows (R3 to R5)."""
         self._settle()
-        self._wished = None  # what our own calls said no longer decides: manual wins
+        # What our own calls said no longer decides: manual wins.
+        self._correction = None
         if actual == "off":
             self._clear_settings()  # a target that is off runs with nothing
             self._suppress_windows()
@@ -806,12 +810,15 @@ class TimerCore:
         way, gets them alone, unless they may only go with a turn-on.
         """
         state = self._snapshot
-        self._wished = target
+        self._correction = None  # a new wish ends the permission given by the last
         in_flight = state.pending is not None and not self._unsent
         if in_flight and state.pending == target:
             return self._settings_for_running_target(settings)
         if not in_flight and state.last_actual == target:
             self._settle()
+            # Nothing is sent, but an older call of ours may still land and show the
+            # opposite (see `_correction`).
+            self._correction = target
             return self._settings_for_running_target(settings)
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
         self._wish_allowance.reset()  # a command always sends, whatever reports did
@@ -830,6 +837,7 @@ class TimerCore:
 
     def _send(self, target: Literal["on", "off"]) -> list[Effect]:
         self._unsent = False
+        self._correction = None  # a call is on its way: it is what reports answer
         if target == "off":
             return [TurnOff()]
         self._settings_unsent = False  # a turn-on takes the owed settings along
@@ -850,18 +858,19 @@ class TimerCore:
                     return []
         return self._send(wish)
 
-    def _ask_again(self, wished: Literal["on", "off"]) -> list[Effect]:
+    def _ask_again(self, correction: Literal["on", "off"]) -> list[Effect]:
         """Make the wished state the pending wish again, and send it. An answer to a
         call of ours shows the opposite and nothing was pending, because the wish was
         settled by the state the target had before that call landed.
 
-        The answer is a change of the target's state, never a repeat of it, so it is
-        always answered. If the new call does not land either, the wish is pending like
-        any other that did not reach the target, and the reports that follow are
-        answered within the limit for reports that repeat the state.
+        Sending uses up the permission (`_correction`), so this is the one correction
+        of the wish. The answer is a change of the target's state, never a repeat of
+        it, so it is always answered. If the new call does not land either, the wish is
+        pending like any other that did not reach the target, and the reports that
+        follow are answered within the limit for reports that repeat the state.
         """
-        self._snapshot = replace(self._snapshot, pending=wished)
-        return self._send(wished)
+        self._snapshot = replace(self._snapshot, pending=correction)
+        return self._send(correction)
 
     def _owe(self, settings: Settings, *, turn_on_only: bool = False) -> None:
         """Make `settings`, if there are any, the ones the target has yet to take, and

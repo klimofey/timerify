@@ -28,11 +28,11 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
 - **A device that answers each refused call with `unknown` and then its old state is re-sent
   without end.** Each cycle is a real state change, which resets the allowance of automatic
   re-sends by design. Not a regression (phase 1 before the cap behaved the same). A per-wish
-  total limit would close it. The same holds for a device that answers each correction of
-  a contradicting report of its own call (the entry "A report of our own call that
-  contradicts the timer" in `RULINGS.md`) with the opposite state, each time as an answer
-  to our call: every change is answered once. `custom_components/timerify/core.py:524-527`
-  (the reset in `observe`) and `:838-851` (`_resend`).
+  total limit would close it. A contradicting report of our own call is not part of it:
+  it is corrected once for each wish that was settled without a call (the entry "A report
+  of our own call that contradicts the timer" in `RULINGS.md`), and a correction that
+  does not land is an ordinary unsent wish. `custom_components/timerify/core.py:531-534`
+  (the reset in `observe`) and `:846-859` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
   `custom_components/timerify/controller.py:760-779` (`_log_gave_up`) and
@@ -107,6 +107,28 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   it is not a phase 3 regression, so it waits.
   `custom_components/timerify/controller.py:262` (`async_add_command`, the check) and
   `:708-725` (`_execute`, where the calls are made).
+- **The settings of an interval are checked when its window is worked out, not when the
+  call is made.** A target that reports no capabilities for a moment (some cloud climates
+  while they connect) gets a window built without its settings, and keeps it until the
+  next refresh, which for a weekday interval is the window's end; the warning says so
+  once. Checking in `_execute`, where the calls are made, would close it, and it is the
+  same filter as for the pending commands above, so the two go together.
+  `custom_components/timerify/controller.py:415-446` (`_with_settings_the_target_takes`).
+- **The reason in the Russian `stored_timer_invalid` message is English.** `{reason}` is
+  the text of the `ValueError` of the store, which is for the bug report of a defect
+  (`RULINGS.md`), so it is not translated. Translating it would mean a key for each of
+  the checks of `_validated` and of `checked_window`, which is not worth it for a message
+  that a file written by Timerify alone cannot cause.
+  `custom_components/timerify/store.py:169-189` (`async_load`) and
+  `custom_components/timerify/translations/ru.json:390-392`.
+- **The store does not check the offset of the stored end and of the time of a command.**
+  A window is read through `checked_window`, which refuses a time with no offset; the
+  end of the countdown and the `at` of a command are read as they are, so a naive one
+  from a hand-edited file raises in the first fold instead of when the timer loads.
+  Only a hand-edited file can hold one, because the store writes UTC. The fix is one
+  helper in the store that reads a time and refuses a naive one, used by the three.
+  `custom_components/timerify/store.py:27-34` (`_command_from_json`) and `:192-206`
+  (`_read`, the end).
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.

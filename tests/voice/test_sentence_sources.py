@@ -22,7 +22,8 @@ from custom_components.timerify.voice.base import TimerifyIntentHandler
 from custom_components.timerify.voice.sentences import load_sources
 
 from ..conftest import FakeTarget, SetupTarget
-from .helpers import samples
+from . import helpers
+from .helpers import every_text, samples
 
 PREFIX = "timerify_"
 INTENDED_SLOT_VALUES: dict[str, tuple[type, tuple[Any, ...]]] = {
@@ -168,3 +169,59 @@ async def test_handlers_are_registered_once_per_intent(
     )
     assert registered == sorted(handler.intent_type for handler in HANDLER_TYPES)
     assert "is being overwritten" not in caplog.text
+
+
+ADD_TIME_NUMBERS = {"timerify_hours": 1, "timerify_minutes": 1}
+"""The numbers with which the sentences that add time can be said."""
+
+
+def test_every_text_has_every_alternative_and_every_word_of_a_list() -> None:
+    """The sentences of an intent are expanded in full: each of the three phrases of
+    the list of duration words, each article, and the sentence once."""
+    texts = [
+        text
+        for text, _ in every_text("en", "TimerifyAddTime", numbers=ADD_TIME_NUMBERS)
+    ]
+
+    assert len(texts) == len(set(texts))
+    for phrase in ("an hour", "half an hour", "an hour and a half"):
+        for article in ("the ", "my ", "our ", ""):
+            assert f"add {phrase} to {article}Boiler" in texts
+
+
+def test_every_text_says_what_a_block_fixes() -> None:
+    fixed = {
+        text: slots
+        for text, slots in every_text("en", "TimerifyCancelCommands")
+        if "next" in text
+    }
+
+    assert fixed
+    assert all(slots == {"which": "next"} for slots in fixed.values())
+
+
+def test_every_text_does_not_leave_out_what_it_cannot_say() -> None:
+    """A list of numbers it is not given, and a list of words with nothing in it, are
+    refused: a smaller set of texts would pass for the whole one."""
+    with pytest.raises(AssertionError, match="timerify_hours: give its number"):
+        every_text("en", "TimerifyAddTime")
+    with pytest.raises(AssertionError, match="timerify_mode, which has none"):
+        every_text(
+            "en",
+            "TimerifyRun",
+            numbers={
+                "timerify_hours": 1,
+                "timerify_minutes": 1,
+                "timerify_percent": 1,
+                "timerify_temperature": 1,
+            },
+        )
+
+
+def test_every_text_refuses_an_intent_it_cannot_expand_in_full(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(helpers, "EVERY_TEXT_LIMIT", 5)
+
+    with pytest.raises(AssertionError, match="too many texts"):
+        every_text("en", "TimerifyListCommands")

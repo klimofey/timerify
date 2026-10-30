@@ -205,7 +205,8 @@ class ListCommandsHandler(TimerifyIntentHandler):
 class CancelCommandsHandler(TimerifyIntentHandler):
     """Cancel the planned commands of the boiler: every one, or the next, or one by its
     id (an LLM has the ids; a voice cannot say one). A cancelled command never runs
-    (P2). Cancelling again changes nothing more."""
+    (P2). It is destructive and not idempotent: the same call for "the next" cancels
+    another command each time, and a command is a promise."""
 
     intent_type = "TimerifyCancelCommands"
     tool_name = "timerify__cancel_commands"
@@ -215,10 +216,9 @@ class CancelCommandsHandler(TimerifyIntentHandler):
         " never run. 'which' is 'all' to cancel every planned command or 'next' to"
         " cancel only the one that is due first; it defaults to 'all'. 'command_id'"
         " cancels the one command with that id instead, as the list of planned commands"
-        " gives it, and then 'which' is not used. 'name' is the name of the device, as"
-        " the prompt lists it."
+        " gives it, and then 'which' is not used. Asking for 'next' again cancels the"
+        " command after it. 'name' is the name of the device, as the prompt lists it."
     )
-    idempotent = True
     slot_schema: ClassVar[dict[Any, Any]] = {
         probatio.Required("name"): cv.string,
         probatio.Optional("which"): probatio.In(["next", "all"]),

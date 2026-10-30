@@ -12,12 +12,13 @@ from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from functools import cache
+from itertools import islice
 from pathlib import Path
 from typing import Any, Final
 
 import yaml
 from freezegun.api import FrozenDateTimeFactory
-from hassil.expression import Sentence
+from hassil.expression import RuleReference, Sentence
 from hassil.intents import Intents, RangeSlotList, SlotList, TextSlotList
 from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
@@ -43,7 +44,7 @@ from custom_components.timerify.const import (
     SENTENCES_DIR,
     VOICE_LANGUAGES,
 )
-from custom_components.timerify.voice.sentences import read_back
+from custom_components.timerify.voice.sentences import read_back, references
 from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 
 from ..conftest import FakeTarget, SetupTarget
@@ -628,26 +629,87 @@ def samples(
     return found
 
 
+EVERY_TEXT_LIMIT: Final = 2000
+"""The most texts `every_text` returns, so that an intent with a long list of values is
+refused where a bounded sample (`samples`) is meant."""
+
+
+def _lists_said(sentence: Sentence, rules: Mapping[str, Sentence]) -> set[str]:
+    """The names of the lists a sentence says a value of, through the rules it uses and
+    the rules those use."""
+    names: set[str] = set()
+    used: set[str] = set()
+    pending = [sentence]
+    while pending:
+        for reference in references(pending.pop().expression):
+            if isinstance(reference, RuleReference):
+                if reference.rule_name not in used:
+                    used.add(reference.rule_name)
+                    pending.append(rules[reference.rule_name])
+            elif not (reference.is_inline_range or reference.is_capture):
+                names.add(reference.list_name)
+    return names
+
+
 def every_text(
-    language: str, intent_type: str, *, name: str = "Boiler"
+    language: str,
+    intent_type: str,
+    *,
+    name: str = "Boiler",
+    numbers: Mapping[str, int] | None = None,
 ) -> list[tuple[str, Mapping[str, Any]]]:
     """Every text the shipped sentences of the intent can be said as, each with the
-    slots its data block fixes, for an intent whose sentences take no number: the
-    target is `name`, and the optional parts are said and left out, every alternative
-    in turn. For the intents with a few alternatives this is exhaustive and still a
-    couple of hundred texts at most; `samples` is the bounded sampler for the rest."""
+    slots its data block fixes.
+
+    Every alternative of every sentence is taken in turn, optional parts said and left
+    out, and every value of every list of words: the sentences of the intent are
+    expanded in full. The target is the one `name`, and a list of numbers has the one
+    number `numbers` gives it by the name of the list. Nothing is left out quietly: a
+    list that a sentence says a value of and that has none (a list of numbers that
+    `numbers` does not name, a list of words with no values) is an error, and so is an
+    intent that expands to more than `EVERY_TEXT_LIMIT` texts, for which `samples` is
+    the bounded sampler.
+    """
     intents = _intents_of(language)
     found: list[tuple[str, Mapping[str, Any]]] = []
     for data in intents.intents[intent_type].data:
-        slot_lists = _one_value(
-            {**intents.slot_lists, **data.slot_lists}, [name], {}, {}, ()
-        )
+        slot_lists = {**intents.slot_lists, **data.slot_lists}
         rules = {**intents.expansion_rules, **data.expansion_rules}
+        said = {
+            list_name
+            for sentence in data.sentences
+            for list_name in _lists_said(sentence, rules)
+        }
+        for list_name in sorted(said):
+            slot_list = slot_lists[list_name]
+            if list_name == LIST_TARGET:
+                slot_lists[list_name] = TextSlotList.from_strings(
+                    [name], name=list_name
+                )
+            elif isinstance(slot_list, RangeSlotList):
+                given = (numbers or {}).get(list_name)
+                assert given is not None, (
+                    f"{intent_type} says a value of {list_name}: give its number"
+                )
+                slot_lists[list_name] = TextSlotList.from_strings(
+                    [str(given)], name=list_name
+                )
+            else:
+                assert isinstance(slot_list, TextSlotList)
+                assert slot_list.values, (
+                    f"{intent_type} says a value of {list_name}, which has none"
+                )
         for sentence in data.sentences:
-            for sampled in sample_sentence(
-                sentence, dict(slot_lists), dict(rules), language=language
-            ):
-                found.append((sampled.strip(), dict(data.slots)))
+            found.extend(
+                (text.strip(), dict(data.slots))
+                for text in islice(
+                    sample_sentence(
+                        sentence, slot_lists, dict(rules), language=language
+                    ),
+                    EVERY_TEXT_LIMIT + 1,
+                )
+            )
+    assert len(found) <= EVERY_TEXT_LIMIT, f"{intent_type} expands to too many texts"
     return found
 
 

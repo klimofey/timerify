@@ -394,14 +394,29 @@ class TimerCore:
         self._snapshot = replace(self._snapshot, commands=tuple(commands))
         return [self._wakeup()]
 
-    @_reports_change
-    def cancel_command(self, now: datetime, command_id: str) -> list[Effect]:
-        """Forget the command with that id; `KeyError` when there is none."""
+    def cancel_commands(
+        self, now: datetime, command_ids: Iterable[str]
+    ) -> tuple[tuple[Command, ...], list[Effect]]:
+        """Forget the commands with those ids in one step, and return them, in the order
+        they were due, with the effects of the change: those of the timer that is left,
+        carried out once.
+
+        `KeyError` for an id that is not there, and nothing changes: a step is all or
+        nothing. No ids is a step that changes nothing.
+        """
         _utc(now)  # unused, but every command rejects a naive time alike
-        commands = self._snapshot.commands
-        kept = tuple(c for c in commands if c.id != command_id)
-        if len(kept) == len(commands):
-            raise KeyError(command_id)
+        wanted = frozenset(command_ids)
+        gone = tuple(c for c in self._snapshot.commands if c.id in wanted)
+        if unknown := wanted - {c.id for c in gone}:
+            raise KeyError(min(unknown))
+        return gone, self._forget(wanted)
+
+    @_reports_change
+    def _forget(self, command_ids: AbstractSet[str]) -> list[Effect]:
+        """Take the commands with those ids, all of them there, out of the snapshot."""
+        if not command_ids:
+            return []
+        kept = tuple(c for c in self._snapshot.commands if c.id not in command_ids)
         self._snapshot = replace(self._snapshot, commands=kept)
         return [self._wakeup()]
 

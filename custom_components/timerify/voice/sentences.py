@@ -291,12 +291,12 @@ def render(built: Mapping[str, Any]) -> str:
     return f"{MANAGED_HEADER}\n{dump_sentences(built)}"
 
 
-def _references(expression: Expression) -> Iterator[ListReference | RuleReference]:
+def references(expression: Expression) -> Iterator[ListReference | RuleReference]:
     """The lists and rules an expression refers to, at any depth."""
     if isinstance(expression, ListReference | RuleReference):
         yield expression
     for item in getattr(expression, "items", ()):
-        yield from _references(item)
+        yield from references(item)
 
 
 def _check_references(intents: Intents, own_intents: Sequence[Intent]) -> None:
@@ -310,7 +310,7 @@ def _check_references(intents: Intents, own_intents: Sequence[Intent]) -> None:
     def check(
         sentence: Sentence, lists: Mapping[str, Any], rules: Mapping[str, Any]
     ) -> None:
-        for reference in _references(sentence.expression):
+        for reference in references(sentence.expression):
             if isinstance(reference, ListReference):
                 if (
                     reference.list_name not in lists

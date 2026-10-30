@@ -1333,7 +1333,7 @@ def test_wakeup_is_earliest_of_end_and_commands() -> None:
     assert added == [Arm(NOW + minutes(15)), Changed()]
     assert next_wakeup(c.snapshot) == NOW + minutes(15)
 
-    cancelled = c.cancel_command(NOW, "c1")
+    _, cancelled = c.cancel_commands(NOW, ["c1"])
 
     assert cancelled == [Arm(NOW + minutes(45)), Changed()]
     assert next_wakeup(c.snapshot) == NOW + minutes(45)
@@ -1400,7 +1400,7 @@ def test_cancel_unknown_command_raises() -> None:
     before = c.snapshot
 
     with pytest.raises(KeyError):
-        c.cancel_command(NOW, "unknown")
+        c.cancel_commands(NOW, ["unknown"])
 
     assert c.snapshot == before
 
@@ -1410,7 +1410,7 @@ def test_cancel_last_command_on_idle_timer_disarms() -> None:
     c = core("strict", "off")
     c.add_command(NOW, cmd(10))
 
-    fx = c.cancel_command(NOW, "c1")
+    _, fx = c.cancel_commands(NOW, ["c1"])
 
     assert fx == [Disarm(), Changed()]
     assert c.snapshot.commands == ()
@@ -1422,10 +1422,73 @@ def test_cancelling_one_command_keeps_the_others() -> None:
     c.add_command(NOW, cmd(10, id="c1"))
     c.add_command(NOW, cmd(20, id="c2"))
 
-    fx = c.cancel_command(NOW, "c1")
+    gone, fx = c.cancel_commands(NOW, ["c1"])
 
+    assert gone == (cmd(10, id="c1"),)
     assert fx == [Arm(NOW + minutes(20)), Changed()]
     assert c.snapshot.commands == (cmd(20, id="c2"),)
+
+
+def test_cancelling_several_commands_is_one_change_with_one_set_of_effects() -> None:
+    """Every command asked for goes in one step, and the effects are those of the
+    timer that is left, once: nothing is carried out for a state that was passed on
+    the way. What goes is given back in the order the commands were due."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    for number in (30, 10, 20, 40):
+        c.add_command(NOW, cmd(number, id=f"c{number}"))
+
+    gone, fx = c.cancel_commands(NOW, ["c30", "c10", "c20"])
+
+    assert [command.id for command in gone] == ["c10", "c20", "c30"]
+    assert fx == [Arm(NOW + minutes(40)), Changed()]
+    assert [command.id for command in c.snapshot.commands] == ["c40"]
+
+
+def test_cancelling_all_commands_leaves_the_end_of_the_countdown_as_the_alarm() -> None:
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(45))
+    c.add_command(NOW, cmd(10, id="c1"))
+    c.add_command(NOW, cmd(20, id="c2"))
+
+    gone, fx = c.cancel_commands(NOW, ["c1", "c2"])
+
+    assert len(gone) == 2
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.commands == ()
+
+
+def test_cancelling_no_command_changes_nothing() -> None:
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10))
+    before = c.snapshot
+
+    gone, fx = c.cancel_commands(NOW, [])
+
+    assert (gone, fx) == ((), [])
+    assert c.snapshot == before
+
+
+def test_cancelling_commands_with_one_unknown_cancels_none() -> None:
+    """The step is all or nothing: an id that is not there refuses the whole of it."""
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10, id="c1"))
+    c.add_command(NOW, cmd(20, id="c2"))
+    before = c.snapshot
+
+    with pytest.raises(KeyError, match="unknown"):
+        c.cancel_commands(NOW, ["c1", "unknown"])
+
+    assert c.snapshot == before
+
+
+def test_cancelling_the_same_id_twice_cancels_it_once() -> None:
+    c = core("strict", "off")
+    c.add_command(NOW, cmd(10, id="c1"))
+
+    gone, _ = c.cancel_commands(NOW, ["c1", "c1"])
+
+    assert [command.id for command in gone] == ["c1"]
 
 
 def test_stopping_the_timer_keeps_the_commands() -> None:
@@ -1834,7 +1897,7 @@ NAIVE = datetime(2026, 1, 5, 7, 0)
             lambda c: c.set_interval_enabled(NAIVE, "x", False), id="set-interval"
         ),
         pytest.param(lambda c: c.add_command(NAIVE, cmd(10)), id="add-command"),
-        pytest.param(lambda c: c.cancel_command(NAIVE, "c1"), id="cancel-command"),
+        pytest.param(lambda c: c.cancel_commands(NAIVE, ["c1"]), id="cancel-commands"),
         pytest.param(lambda c: c.observe(NAIVE, "on", by_us=False), id="observe"),
         pytest.param(lambda c: c.call_failed(NAIVE), id="call-failed"),
         pytest.param(lambda c: c.settings_applied(NAIVE), id="settings-applied"),

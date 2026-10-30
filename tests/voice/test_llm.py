@@ -47,15 +47,17 @@ ANNOTATIONS = {
     "timerify__stop": CONTROL,
     "timerify__delayed_command": REPEATS,
     "timerify__list_commands": READ_ONLY,
-    "timerify__cancel_commands": CONTROL,
+    "timerify__cancel_commands": REPEATS,
     "timerify__set_schedule": CONTROL,
 }
 """How each tool behaves, annotated as core annotates the intent tools of its kind
 (`homeassistant/components/intent/llm.py`). A query only reads. Adding time only adds.
-Stopping a timer, cancelling commands and switching a schedule give the same result when
-repeated. Running a timer and planning a command replace the countdown and apply
-settings, as turning a device on and starting a timer do in core, so they are
-destructive and act again when repeated. None reaches outside Home Assistant."""
+Stopping a timer and switching a schedule give the same result when repeated. Running
+a timer and planning a command replace the countdown and apply settings, as turning a
+device on and starting a timer do in core, so they are destructive and act again when
+repeated; so is cancelling commands, since the same call with "next" cancels another
+command each time it is made (a firm promise, P1), where core's cancel tools name the
+one timer they cancel. None reaches outside Home Assistant."""
 EVERY_HANDLER = pytest.mark.parametrize(
     "handler", HANDLER_TYPES, ids=lambda handler: handler.tool_name
 )

@@ -406,24 +406,22 @@ class TargetController:
         Raises ServiceValidationError (`unknown_command`) when this timer keeps no such
         command.
         """
-        cancelled: Command
+        cancelled: tuple[Command, ...] = ()
 
         def cancel(now: datetime) -> list[Effect]:
             nonlocal cancelled
-            found = next(
-                (c for c in self.snapshot.commands if c.id == command_id), None
-            )
-            if found is None:
+            try:
+                cancelled, effects = self._core.cancel_commands(now, [command_id])
+            except KeyError as err:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="unknown_command",
                     translation_placeholders={"command_id": command_id},
-                )
-            cancelled = found
-            return self._core.cancel_command(now, command_id)
+                ) from err
+            return effects
 
         await self._command(cancel)
-        return cancelled
+        return cancelled[0]
 
     async def async_cancel_commands(
         self, which: Literal["next", "all"]
@@ -432,19 +430,18 @@ class TargetController:
         was forgotten, in the order the commands are due; nothing when none is pending.
 
         Which commands there are is judged when the call gets its turn, so a command
-        that was added while it waited is cancelled with the rest.
+        that was added while it waited is cancelled with the rest. Of commands that are
+        due together the first to be added is the first.
         """
         cancelled: tuple[Command, ...] = ()
 
         def cancel(now: datetime) -> list[Effect]:
             nonlocal cancelled
             pending = self.snapshot.commands
-            cancelled = pending[:1] if which == "next" else pending
-            effects: list[Effect] = []
-            for command in cancelled:
-                # Every cancel re-arms for the timer it leaves and reports the change,
-                # so the effects of the last one are the ones to carry out.
-                effects = self._core.cancel_command(now, command.id)
+            chosen = pending[:1] if which == "next" else pending
+            cancelled, effects = self._core.cancel_commands(
+                now, [command.id for command in chosen]
+            )
             return effects
 
         await self._command(cancel)

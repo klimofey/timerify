@@ -674,6 +674,27 @@ async def test_cancelling_the_next_or_all_commands(
     assert [c["id"] for c in saved(hass_storage, entry)["commands"]] == left
 
 
+async def test_cancelling_the_next_of_two_commands_due_together_takes_the_first_added(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Commands due at the same moment run in the order they were added, so the one
+    added first is the next one, and the other is next after it."""
+    entry = await setup_target()
+    controller = entry.runtime_data
+    first = (await add_command(hass, NUMBER, action="on", delay=10, minutes=30))[NUMBER]
+    second = (await add_command(hass, NUMBER, action="on", delay=10, minutes=60))[
+        NUMBER
+    ]
+    await add_command(hass, NUMBER, action="off", delay=20)
+
+    (gone,) = await controller.async_cancel_commands("next")
+    (then,) = await controller.async_cancel_commands("next")
+
+    assert gone.id == first["command_id"]
+    assert then.id == second["command_id"]
+    assert [c["action"] for c in listed(hass, NEXT)] == ["off"]
+
+
 @pytest.mark.parametrize("which", ["next", "all"])
 async def test_cancelling_commands_when_none_is_pending_changes_nothing(
     hass: HomeAssistant,

@@ -9,6 +9,7 @@ never does.
 """
 
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime
 from typing import Any
 
 import pytest
@@ -27,7 +28,9 @@ from ..helpers import (
     TURN_ON,
     add_command,
     advance,
+    advance_to,
     call_service,
+    local,
     state_of,
 )
 from .helpers import (
@@ -232,6 +235,69 @@ async def test_days_ahead_are_counted_by_the_plural_rules(
     assert len(set(forms)) == len(forms), forms
 
 
+FALL_BACK_EVE = local(date(2026, 10, 24), "09:00")
+"""The morning before the night the clocks of Jerusalem go back: a full day later the
+wall clock shows an hour earlier."""
+SPRING_FORWARD_EVE = local(date(2026, 3, 26), "23:30")
+"""Half an hour before the night they go forward: a full day later the wall clock shows
+00:30 two dates on, since that day has 23 hours."""
+
+
+@pytest.mark.parametrize(
+    ("now", "hours", "said"),
+    [
+        pytest.param(
+            FALL_BACK_EVE, 24, "turn on at 08:00 tomorrow", id="fall-back-tomorrow"
+        ),
+        pytest.param(
+            FALL_BACK_EVE,
+            48,
+            "turn on at 08:00 the day after tomorrow",
+            id="fall-back-day-after",
+        ),
+        pytest.param(
+            SPRING_FORWARD_EVE,
+            24,
+            "turn on at 00:30 the day after tomorrow",
+            id="spring-forward",
+        ),
+    ],
+)
+async def test_a_planned_command_is_said_on_the_clock_of_its_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    boiler: MockConfigEntry,
+    now: datetime,
+    hours: int,
+    said: str,
+) -> None:
+    """A command is a moment, and the answer says it as the wall clock of the house
+    will read then: a day after the clocks go back it is an hour earlier on the clock,
+    and a day after they go forward it is the next date but one."""
+    await advance_to(hass, freezer, now)
+    await add_command(hass, NUMBER, action="on", delay=hours * 60)
+
+    response = await converse(hass, "what is planned for the boiler")
+
+    assert speech(response) == f"Boiler has 1 planned command: {said}."
+
+
+async def test_a_planned_command_is_said_in_the_new_time_zone_once_it_changes(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """Moving the house to another time zone moves the clock the answer reads, and the
+    date: a command that falls just after midnight in Jerusalem is the evening of the
+    same day in New York."""
+    await add_command(hass, NUMBER, action="on", delay=15 * 60 + 30)
+    before = await converse(hass, "what is planned for the boiler")
+
+    await hass.config.async_set_time_zone("America/New_York")
+    after = await converse(hass, "what is planned for the boiler")
+
+    assert speech(before) == "Boiler has 1 planned command: turn on at 00:30 tomorrow."
+    assert speech(after) == "Boiler has 1 planned command: turn on at 17:30."
+
+
 async def test_commands_are_listed_in_the_order_they_are_due(
     hass: HomeAssistant, boiler: MockConfigEntry
 ) -> None:
@@ -315,6 +381,57 @@ async def test_cancel_the_next_planned_command(
         ), text
         assert [c["action"] for c in commands_of(hass)] == ["off"], text
         await Planner(hass).plan(0)
+
+
+async def test_cancelling_the_next_again_cancels_the_one_after_it(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """The same words said twice cancel two commands, each the one that is due then:
+    "cancel the next one" is not a request that can be repeated harmlessly."""
+    await converse(hass, PLAN_ON_BARE)
+    await converse(hass, "turn on the boiler in 30 minutes")
+    await converse(hass, "turn on the boiler in 45 minutes")
+    cancel_next = CANCEL_NEXT_TEXTS[0]
+
+    first = await converse(hass, cancel_next)
+    second = await converse(hass, cancel_next)
+
+    assert speech(first) == (
+        "Cancelled the next planned command for Boiler: turn on at 09:15."
+    )
+    assert speech(second) == (
+        "Cancelled the next planned command for Boiler: turn on at 09:30."
+    )
+    assert speech(await converse(hass, LIST_TEXTS[0])) == (
+        "Boiler has 1 planned command: turn on at 09:45."
+    )
+
+
+async def test_next_of_two_commands_due_together_is_the_one_planned_first(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """Two commands due at the same moment are told apart by the answer, which names
+    what it cancelled: the one that was planned first goes, then the other."""
+    await converse(hass, PLAN_ON)
+    await add_command(hass, NUMBER, action="on", delay=15, minutes=30)
+    await add_command(hass, NUMBER, action="off", delay=120)
+    cancel_next = CANCEL_NEXT_TEXTS[0]
+
+    first = await converse(hass, cancel_next)
+    listed = await converse(hass, LIST_TEXTS[0])
+    second = await converse(hass, cancel_next)
+
+    assert speech(first) == (
+        "Cancelled the next planned command for Boiler: turn on at 09:15 for 1 hour."
+    )
+    assert speech(listed) == (
+        "Boiler has 2 planned commands: turn on at 09:15 for 30 minutes;"
+        " turn off at 11:00."
+    )
+    assert speech(second) == (
+        "Cancelled the next planned command for Boiler:"
+        " turn on at 09:15 for 30 minutes."
+    )
 
 
 async def test_cancelling_the_only_command_says_so_in_the_singular(
@@ -655,6 +772,38 @@ async def test_llm_cancels_the_next_or_all(
 
     assert cancelled["speech_slots"]["which"] == which
     assert [c["action"] for c in commands_of(hass)] == left
+
+
+async def test_llm_calling_cancel_next_twice_cancels_two_commands(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """The same call with the same arguments does more the second time when it asks for
+    "next", so the tool is not idempotent; with "all" the second call has nothing left
+    to cancel."""
+    api = await assist_api(hass)
+    for delay in (15, 30, 45):
+        await add_command(hass, NUMBER, action="on", delay=delay)
+
+    first = await call_tool(
+        api, "timerify__cancel_commands", {"name": "Boiler", "which": "next"}
+    )
+    second = await call_tool(
+        api, "timerify__cancel_commands", {"name": "Boiler", "which": "next"}
+    )
+
+    assert [c["at"] for c in first["speech_slots"]["commands"]] == ["09:15"]
+    assert [c["at"] for c in second["speech_slots"]["commands"]] == ["09:30"]
+    assert [c["at"] for c in commands_of(hass)] == ["2026-01-05T07:45:00+00:00"]
+
+    everything = await call_tool(
+        api, "timerify__cancel_commands", {"name": "Boiler", "which": "all"}
+    )
+    again = await call_tool(
+        api, "timerify__cancel_commands", {"name": "Boiler", "which": "all"}
+    )
+
+    assert everything["speech_slots"]["cancelled"] == 1
+    assert again["speech_slots"]["cancelled"] == 0
 
 
 async def test_llm_cancels_nothing_when_nothing_is_planned(

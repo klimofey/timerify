@@ -807,11 +807,19 @@ below. The round tile has no chip, and it can be long-pressed; see
   ring.
 - A countdown that began before Timerify was updated to 0.5.0 has no recorded beginning: its
   fill stays full until the countdown ends or is set again.
-- A timer whose number is unavailable shows that, and its presets, plus, minus, Stop and
+- A timer whose number is unavailable shows that, and its chip, presets, plus, minus, Stop and
   cancel buttons are off (see [The pop-up](#the-pop-up)). If the
   entity of the card does not exist, or is not the "Run for" number of a Timerify timer, the card
   says so and names it, and finds its timer again by itself when the entity is back. After you
   rename the number, point the card at its new entity id.
+- The card never goes quiet when it cannot work. A user who may not see the timer is told so
+  (see [Permissions](#permissions)). The card needs the timer's two sensors, **Ends at** and
+  **Next command**, and tells you when you have disabled one of them. With **Ends at**
+  disabled, the card shows only a warning that names the sensor and says to enable it, since
+  without it the card has no countdown to show; with **Next command** disabled, the card works
+  and the pop-up says in the place of the pending commands that they are hidden, naming the
+  sensor. Enable the sensor in its entity settings: Home Assistant reloads the timer about half
+  a minute later, and the card returns by itself.
 - A countdown carries on across a restart of Home Assistant or a lost connection, to the same
   end, and the card asks for its timer again when the connection returns.
 - In a dashboard with sections the pill starts 6 columns wide and one row high and can be made
@@ -883,14 +891,16 @@ the dimmed page behind it close it. From top to bottom it holds:
   intervals is not done here; use the timer's page. An interval whose switch is unavailable is
   shown as that and cannot be pressed.
 - **Pending commands**, when there are some: each as "On at 7:30 AM for 1 hr" or "Off at Tue
-  7:00 AM", with its settings ("Cool, 24 °C") and a × button that cancels it.
+  7:00 AM", with its settings ("Cool, 24 °C") and a × button that cancels it. If the **Next
+  command** sensor is disabled, one line stands here instead and says that the commands are
+  hidden because of it.
 - **Settings**, a link to the timer's page among the integration's. Only administrators see it.
   It opens in the same tab and closes the pop-up; Ctrl, Cmd or Shift with the click open it in
   a new tab or window, and the pop-up stays.
 
 A timer that is unavailable has nothing to act on: its presets, plus, minus, Stop and the cancel
-buttons are off. When Home Assistant refuses an action, it shows its own error message and the
-pop-up stays open.
+buttons are off, and so is the pill's chip. When Home Assistant refuses an action, it shows its
+own error message and the pop-up stays open.
 
 Times follow your profile: its language, its 12 or 24 hour clock and its time zone, the server's
 or the browser's. A time on the same day is shown as a time, within the next six days with the
@@ -945,8 +955,9 @@ The card and its pop-up work for every user who may see and control the timer's 
 administrators or not. A user who is not an administrator sees everything but the Settings link:
 that page is for administrators only. Timerify's websocket command is open to every user and
 tells a user only what the user may read: a user who may not read the number, the target or
-the two sensors of the timer gets no answer, and the card shows the timer as unavailable; an
-interval whose switch the user may not read is left out of the pop-up.
+the two sensors of the timer gets no answer, and the card shows, in place of the timer, the
+warning "You are not allowed to see the timer", followed by the entity id of its number, in the
+user's language; an interval whose switch the user may not read is left out of the pop-up.
 
 The card's module is served to everyone, because the browser loads it before anyone has logged
 in.

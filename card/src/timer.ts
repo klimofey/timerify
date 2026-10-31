@@ -8,10 +8,13 @@ export type TimerLookup =
   | { status: "pending" }
   | { status: "found"; info: TimerInfo }
   | { status: "not_found" }
+  | { status: "unauthorized" }
   | { status: "failed" };
 
 /** The error code Home Assistant's websocket answers when the number is no timer's. */
 const NOT_FOUND = "not_found";
+/** The one it answers when the user may not read what the answer would tell. */
+const UNAUTHORIZED = "unauthorized";
 
 /** Asks Timerify which timer the "Run for" number `entityId` belongs to. */
 export async function lookupTimer(hass: HomeAssistant, entityId: string): Promise<TimerLookup> {
@@ -19,10 +22,17 @@ export async function lookupTimer(hass: HomeAssistant, entityId: string): Promis
     const info = await hass.callWS<TimerInfo>({ type: "timerify/timer", entity_id: entityId });
     return { status: "found", info };
   } catch (error) {
-    const rejected = typeof error === "object" && error !== null && "code" in error;
-    return { status: rejected && error.code === NOT_FOUND ? "not_found" : "failed" };
+    const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
+    if (code === NOT_FOUND) {
+      return { status: "not_found" };
+    }
+    return { status: code === UNAUTHORIZED ? "unauthorized" : "failed" };
   }
 }
+
+/** Whether a sensor of the timer is disabled in the registry, so that it has no state. */
+export const isDisabled = (info: TimerInfo, sensor: string): boolean =>
+  info.disabled_sensors.includes(sensor);
 
 /** Whether an entity has a value: it exists, and is neither unavailable nor unknown. */
 export const hasValue = (entity: HassEntity | undefined): boolean =>
@@ -121,7 +131,12 @@ export function watchedEntities(entityId: string, info: TimerInfo | undefined): 
     : [entityId];
 }
 
-/** What the words, the times and the look of the card are made of, besides entities. */
+/**
+ * What the words, the times and the look of the card are made of, besides entities. The
+ * formatters are here because the frontend recomputes them, after the language or the
+ * registry changes, in an update of `hass` that changes nothing else: the last update of
+ * such a change is a formatter alone, and the card would stay one step behind without it.
+ */
 const SHARED_KEYS = [
   "locale",
   "language",
@@ -130,6 +145,9 @@ const SHARED_KEYS = [
   "user",
   "connected",
   "entities",
+  "formatEntityName",
+  "formatEntityState",
+  "formatEntityAttributeValue",
 ] as const;
 
 /**

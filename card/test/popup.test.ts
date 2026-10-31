@@ -612,6 +612,52 @@ describe("the pending commands", () => {
     expect(rowsOf(root)).toEqual(["Off at Tue 07:00"]);
   });
 
+  describe("when the Next command sensor is disabled", () => {
+    const withoutNextCommand = (language?: Language) =>
+      fakeHass({
+        timers: [boilerTimer({ disabled_sensors: [NEXT_COMMAND] })],
+        timeFormat: "24",
+        language,
+      });
+
+    it("says that the commands are hidden, and which sensor to enable", async () => {
+      const { root } = await opened(withoutNextCommand());
+
+      expect([...root.querySelectorAll(".commands")].map(textIn)).toEqual([
+        english.card_commands_disabled.replace("{sensor}", NEXT_COMMAND),
+      ]);
+      expect(english.card_commands_disabled).toContain("Next command");
+      expect(root.querySelector(".commands button")).toBeNull();
+    });
+
+    it("says it in the user's language", async () => {
+      const { root } = await opened(withoutNextCommand("ru"));
+
+      expect(textIn(root.querySelector(".commands"))).toBe(
+        russian.card_commands_disabled.replace("{sensor}", NEXT_COMMAND),
+      );
+    });
+
+    it("leaves the rest of the pop-up to work", async () => {
+      const hass = withoutNextCommand();
+      const { card, root } = await opened(hass);
+
+      expect(isDisabled(control(root, "45 min"))).toBe(false);
+      control(root, "45 min").click();
+      await settle(card);
+      expect(hass.calls).toHaveLength(1);
+    });
+
+    it("is not said while the sensor is enabled, with commands or without", async () => {
+      const without = await opened(boilerHass());
+      expect(without.root.textContent).not.toContain(NEXT_COMMAND);
+      document.body.replaceChildren();
+
+      const withCommand = await opened(boilerHass({ commands: [TURN_ON] }));
+      expect(withCommand.root.textContent).not.toContain(NEXT_COMMAND);
+    });
+  });
+
   it("shows no section for a sensor that has no list", async () => {
     const hass = boilerHass().state(NEXT_COMMAND, "unavailable");
     const { root } = await opened(hass);

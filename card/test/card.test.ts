@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
 import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import type { HassEntity } from "../src/hass";
 import type { TimerifyCard } from "../src/timerify-card";
 import {
   AC,
@@ -193,14 +194,107 @@ describe("what it shows while it has no timer", () => {
     expect(warningOf(card)).toBeNull();
   });
 
-  it("shows no warning when it is refused", async () => {
+  it("tells a user who may not see the timer so, and does not show it as unavailable", async () => {
+    // The frontend sends a user no state of an entity the user may not read.
+    const hass = fakeHass({ states: { [NUMBER]: null } });
+    hass.answerWith("unauthorized");
+
+    const card = await mountCard(hass);
+
+    expect(warningOf(card)?.textContent?.trim()).toBe(
+      english.card_not_allowed.replace("{entity}", NUMBER),
+    );
+    expect(card.shadowRoot?.querySelector("timerify-card-popup")).toBeNull();
+    expect(card.shadowRoot?.querySelector(".status")).toBeNull();
+  });
+
+  it("tells it in the user's language", async () => {
+    const hass = fakeHass({ language: "ru", states: { [NUMBER]: null } });
+    hass.answerWith("unauthorized");
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(russian.card_not_allowed.replace("{entity}", NUMBER));
+  });
+
+  it("recovers when the user is given the permission", async () => {
     const hass = fakeHass();
     hass.answerWith("unauthorized");
+    const card = await mountCard(hass);
+    expect(warningOf(card)).not.toBeNull();
+
+    hass.answerNormally();
+    card.hass = hass.with({ entities: { ...hass.entities } });
+    await card.updateComplete;
+
+    expect(warningOf(card)).toBeNull();
+    expect(nameOf(card)).toBe("Boiler");
+  });
+
+  it("says nothing of a failure it cannot name, which may be a start", async () => {
+    const hass = fakeHass();
+    hass.answerWith("unknown_command");
 
     const card = await mountCard(hass);
 
     expect(warningOf(card)).toBeNull();
     expect(textOf(card)).toBe("Boiler Run for");
+  });
+});
+
+describe("a sensor it cannot work without is disabled", () => {
+  const withoutEndsAt = () => boilerTimer({ disabled_sensors: [ENDS_AT] });
+
+  it("says which sensor to enable, instead of staying dead and silent", async () => {
+    const card = await mountCard(fakeHass({ timers: [withoutEndsAt()] }));
+
+    expect(warningOf(card)?.textContent?.trim()).toBe(
+      english.card_ends_at_disabled.replace("{sensor}", ENDS_AT),
+    );
+    expect(english.card_ends_at_disabled).toContain("Ends at");
+    expect(english.card_ends_at_disabled.toLowerCase()).toContain("enable");
+    expect(card.shadowRoot?.querySelector("timerify-card-popup")).toBeNull();
+  });
+
+  it("says it in the user's language", async () => {
+    const card = await mountCard(fakeHass({ language: "ru", timers: [withoutEndsAt()] }));
+
+    expect(textOf(card)).toBe(russian.card_ends_at_disabled.replace("{sensor}", ENDS_AT));
+  });
+
+  it("shows the timer again when the sensor is enabled", async () => {
+    const timer = withoutEndsAt();
+    const hass = fakeHass({ timers: [timer] });
+    const card = await mountCard(hass);
+    expect(warningOf(card)).not.toBeNull();
+
+    timer.info.disabled_sensors = [];
+    card.hass = hass.with({
+      entities: { ...hass.entities },
+      states: { [ENDS_AT]: { state: "unknown", attributes: { started_at: null } } },
+    });
+    await card.updateComplete;
+
+    expect(warningOf(card)).toBeNull();
+    expect(textOf(card)).toBe("Boiler off");
+  });
+
+  it("does not blame a sensor that is enabled and has no state yet", async () => {
+    // A timer that is starting: nothing is known of the sensor yet, and the registry says
+    // it is enabled. The card waits quietly, as it always did.
+    const hass = fakeHass({ states: { [ENDS_AT]: null } });
+
+    const card = await mountCard(hass);
+
+    expect(warningOf(card)).toBeNull();
+    expect(nameOf(card)).toBe("Boiler");
+  });
+
+  it("does not blame the Next command sensor on the card, which works without it", async () => {
+    const card = await mountCard(fakeHass({ timers: [boilerTimer({ disabled_sensors: [NEXT_COMMAND] })] }));
+
+    expect(warningOf(card)).toBeNull();
+    expect(nameOf(card)).toBe("Boiler");
   });
 });
 
@@ -307,6 +401,110 @@ describe("rendering only when something it shows has changed", () => {
     for (const own of [NUMBER, ENDS_AT, NEXT_COMMAND, BOILER, EVENING]) {
       expect(await rendersForChangeOf(card, hass, own), own).toBe(1);
     }
+  });
+});
+
+describe("redrawing when the frontend brings new words", () => {
+  /** A formatter that speaks the other language, as the frontend's does after it changed. */
+  const spoken = (language: string) => ({
+    formatEntityName: (entity: HassEntity) =>
+      `${language} ${entity.attributes.friendly_name ?? entity.entity_id}`,
+    formatEntityState: (entity: HassEntity, state?: string) =>
+      `${language} ${state ?? entity.state}`,
+    formatEntityAttributeValue: (entity: HassEntity, attribute: string, value?: unknown) =>
+      `${language} ${value ?? entity.attributes[attribute]}`,
+  });
+
+  const textOfPopup = (card: TimerifyCard) =>
+    (popupOf(card).shadowRoot?.querySelector("dialog")?.textContent ?? "").replace(/\s+/g, " ");
+
+  /** A card with its pop-up open, on a timer that has an interval with no state and a command. */
+  async function mountWithPopup() {
+    const timer = boilerTimer({ intervals: [EVENING_INTERVAL] });
+    delete timer.states[EVENING];
+    const hass = fakeHass({ timers: [timer], timeFormat: "24" }).state(NEXT_COMMAND, "2026-01-05T08:00:00Z", {
+      commands: [
+        { id: "c1", at: "2026-01-05T08:00:00Z", action: "on", minutes: null, settings: { temperature: 24 } },
+      ],
+    });
+    const card = await mountCard(hass);
+    popupOf(card).open();
+    await popupOf(card).updateComplete;
+    return { hass, card };
+  }
+
+  it("renders the card and the open pop-up for a new state formatter alone", async () => {
+    const { hass, card } = await mountWithPopup();
+    expect(textOf(card)).toBe("Boiler off");
+    expect(textOfPopup(card)).toContain("unavailable");
+    const [cardBefore, popupBefore] = [renders(card), renders(popupOf(card))];
+
+    card.hass = hass.with({ formatters: { formatEntityState: spoken("ru").formatEntityState } });
+    await card.updateComplete;
+
+    expect(renders(card)).toBe(cardBefore + 1);
+    expect(renders(popupOf(card))).toBe(popupBefore + 1);
+    expect(textOf(card)).toBe("Boiler ru off");
+    expect(textOfPopup(card)).toContain("ru unavailable");
+  });
+
+  it("renders the card and the open pop-up for a new name formatter alone", async () => {
+    const { hass, card } = await mountWithPopup();
+    expect(nameOf(card)).toBe("Boiler");
+    expect(popupOf(card).shadowRoot?.querySelector("h2")?.textContent).toBe("Boiler");
+
+    card.hass = hass.with({ formatters: { formatEntityName: spoken("ru").formatEntityName } });
+    await card.updateComplete;
+
+    expect(nameOf(card)).toBe("ru Boiler");
+    expect(popupOf(card).shadowRoot?.querySelector("h2")?.textContent).toBe("ru Boiler");
+  });
+
+  it("renders the open pop-up for a new attribute formatter alone", async () => {
+    const { hass, card } = await mountWithPopup();
+    expect(textOfPopup(card)).toContain("24 °C");
+
+    card.hass = hass.with({
+      formatters: { formatEntityAttributeValue: spoken("ru").formatEntityAttributeValue },
+    });
+    await card.updateComplete;
+
+    expect(textOfPopup(card)).toContain("ru 24");
+  });
+
+  it("does not render again when the formatters are the same functions", async () => {
+    const { hass, card } = await mountWithPopup();
+    const [cardBefore, popupBefore] = [renders(card), renders(popupOf(card))];
+
+    card.hass = hass.state("light.kitchen", "on");
+    await card.updateComplete;
+
+    expect(renders(card)).toBe(cardBefore);
+    expect(renders(popupOf(card))).toBe(popupBefore);
+  });
+
+  it("is in the new language when the user changes it on an open dashboard", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass);
+    expect(textOf(card)).toBe(`Boiler 45:00 ${english.card_until.replace("{time}", "09:45")}`);
+
+    // What the frontend does, in the order it does it: the language and the locale first,
+    // then the card's strings as a new `localize`, and last the formatters it recomputed
+    // from them, in an update that changes nothing else.
+    const language = hass.with({ language: "ru" });
+    card.hass = language;
+    await card.updateComplete;
+    const withStrings = language.with({ localize: localizeFor("ru") });
+    card.hass = withStrings;
+    await card.updateComplete;
+    card.hass = withStrings.with({ formatters: spoken("ru") });
+    await card.updateComplete;
+
+    expect(textOf(card)).toBe(`ru Boiler 45:00 ${russian.card_until.replace("{time}", "9:45")}`);
+    popupOf(card).open();
+    await popupOf(card).updateComplete;
+    expect(textOfPopup(card)).toContain(russian.card_close);
+    expect(textOfPopup(card)).toContain("ru Boiler");
   });
 });
 

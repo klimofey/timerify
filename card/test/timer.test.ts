@@ -181,10 +181,17 @@ describe("asking Timerify for a timer", () => {
     const hass = fakeHass({ timers: [] });
     await expect(lookupTimer(hass, NUMBER)).resolves.toEqual({ status: "not_found" });
 
-    for (const code of ["unknown_command", "unauthorized", "home_assistant_error"]) {
+    for (const code of ["unknown_command", "home_assistant_error"]) {
       hass.answerWith(code);
       await expect(lookupTimer(hass, NUMBER)).resolves.toEqual({ status: "failed" });
     }
+  });
+
+  it("tells a user who may not read the timer from a failure", async () => {
+    const hass = fakeHass();
+    hass.answerWith("unauthorized");
+
+    await expect(lookupTimer(hass, NUMBER)).resolves.toEqual({ status: "unauthorized" });
   });
 
   it("calls a lost connection a failure, not a missing timer", async () => {

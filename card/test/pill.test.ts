@@ -296,6 +296,35 @@ describe("the quick chip", () => {
     expect(dialogOf(card)?.open).toBe(false);
   });
 
+  it("is off while the timer is unavailable, as the pop-up's buttons are", async () => {
+    const hass = fakeHass().state(NUMBER, "unavailable");
+    const card = await mountCard(hass, { entity: NUMBER, chip: 15 });
+    expect(chipOf(card).disabled).toBe(true);
+
+    chipOf(card).click();
+    await card.updateComplete;
+    expect(hass.calls).toEqual([]);
+
+    card.hass = hass.state(NUMBER, "0");
+    await card.updateComplete;
+    expect(chipOf(card).disabled).toBe(false);
+  });
+
+  it("is off while the card does not know its timer yet", async () => {
+    const hass = fakeHass();
+    hass.holdAnswers();
+    const card = document.createElement("timerify-card") as TimerifyCard;
+    card.setConfig({ entity: NUMBER, chip: 15 });
+    card.hass = hass;
+    document.body.append(card);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(chipOf(card).disabled).toBe(true);
+
+    hass.answerNext();
+    await card.updateComplete;
+    expect(chipOf(card).disabled).toBe(false);
+  });
+
   it("pressing the chip opens nothing", async () => {
     const hass = counting(45);
     const card = await mountCard(hass, { entity: NUMBER, chip: 15 });

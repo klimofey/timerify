@@ -15,6 +15,7 @@ import { renderRound, roundStyles } from "./round";
 import { lastLoaded, loadStrings, onStringsLoaded, t } from "./strings";
 import {
   hasValue,
+  isDisabled,
   lookupTimer,
   mattersToRender,
   timerView,
@@ -223,9 +224,20 @@ export class TimerifyCard extends LitElement {
     }
   }
 
-  /** What the user is told when the card has no timer to show, if anything. */
+  /**
+   * What the user is told when the card has no timer to show, if anything. The card never
+   * goes dead without saying why: a timer the user may not see, and a timer that lacks a
+   * sensor the card cannot work without, are told. Only a timer that is starting is quiet.
+   */
   #warning(hass: HomeAssistant, config: CardConfig): string | undefined {
-    if (this._lookup.status !== "not_found") {
+    const lookup = this._lookup;
+    if (lookup.status === "unauthorized") {
+      return t(hass, "card_not_allowed", { entity: config.entity });
+    }
+    if (lookup.status === "found" && isDisabled(lookup.info, lookup.info.ends_at)) {
+      return t(hass, "card_ends_at_disabled", { sensor: lookup.info.ends_at });
+    }
+    if (lookup.status !== "not_found") {
       return undefined;
     }
     const number = hass.states[config.entity];

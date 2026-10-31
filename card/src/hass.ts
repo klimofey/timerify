@@ -82,4 +82,9 @@ export interface TimerInfo {
    */
   intervals: IntervalInfo[];
   target_on: OnRule;
+  /**
+   * The ids of the two sensors that are disabled in the registry. A disabled entity has no
+   * state, which looks like one that has not started yet, so only this tells them apart.
+   */
+  disabled_sensors: string[];
 }

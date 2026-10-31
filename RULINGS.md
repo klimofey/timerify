@@ -1206,8 +1206,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
 
 - **The card is configured with the timer's "Run for" number, and Timerify tells it the rest
   through a websocket command, `timerify/timer {entity_id}`.** The answer holds the entry id,
-  the target, the mode, the default duration, the entity ids of "Ends at" and "Next command"
-  and each interval's switch with its title. The number is the one handle that names exactly one
+  the target, the mode, the default duration, the entity ids of "Ends at" and "Next command",
+  the list of those two that are disabled in the registry (`disabled_sensors`) and each
+  interval's switch with its title. The number is the one handle that names exactly one
   timer: the display registry the frontend keeps carries neither the config entry nor the unique
   id of an entity, and two timers can share a device. The answer is configuration, read from
   the entity registry and the entry and never from the running timer, and it is given for any
@@ -1219,9 +1220,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   so that a user who may not read an entity cannot tell by the answer whether it is a timer's;
   then the target, "Ends at" and "Next command", and it refuses the whole answer when any of
   them is unreadable; the interval switches the user may not read are left out. This is what
-  core's commands about entities do. Cost if wrong: a user restricted by custom permissions
-  gets a card that cannot find its timer, and the error is logged as it is for core's own
-  commands.
+  core's commands about entities do. The card reads the refusal (`unauthorized`) as its own
+  state and says so: see "The card never goes quiet" below. Cost if wrong: a user restricted by
+  custom permissions gets a card that cannot show its timer, and the error is logged as it is
+  for core's own commands.
 - **`timerify/timer` also returns `target_on`, the target's on-rule from `domains.py` as data
   (`OnRule` replaces `DomainBehaviour.is_on`), and `default_duration` is null in loose mode;
   there is no `runtime` key until the runtime counter exists.** The card must say "on without a
@@ -1231,10 +1233,12 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
 - **The lookup is asked again on a new configured entity, a new `hass.entities` (an interval
   added or deleted shows up there), the connection coming back and the number's state becoming
   available. A `not_found` shows a warning only while the number is missing or has a value,
-  never while it is `unavailable`; any other failure shows the card as unavailable until the
-  next trigger.** An unavailable number may be a timer that is still starting, and a warning
-  would flash at every restart; the card asks again when the number has a value. Cost if wrong:
-  none.
+  never while it is `unavailable`; a refusal (`unauthorized`) shows its own warning; any other
+  failure (a lost connection, an error code the card does not know) shows the card as
+  unavailable until the next trigger and says nothing.** An unavailable number may be a timer
+  that is still starting, and a warning would flash at every restart or every dropped
+  connection; the card asks again when the number has a value. Cost if wrong: a failure that is
+  not one of the two named stays silent until the card asks again.
 
 ### What the card shows
 
@@ -1276,8 +1280,13 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   update that does not carry a new `hass` passes; the pop-up renders its content only while it
   is open, applies the same filter, and gets a fresh view from each card render so that its time
   ticks.** The setter runs on every state change of the home, and strings arrive as a new
-  `localize` alone. Cost if wrong: a field of `hass` that the card starts to read and is not in
-  the filter shows stale until something else changes.
+  `localize` alone. The filter holds the three formatters (`formatEntityName`,
+  `formatEntityState`, `formatEntityAttributeValue`) too: the frontend recomputes them in a
+  separate update after a change of language or of the registry, so the update that carries the
+  new language can reach the card with the old formatters and the card, having drawn its
+  states in the old language, would keep them until a state changed. Cost if wrong: a field of
+  `hass` that the card starts to read and is not in the filter shows stale until something else
+  changes.
 - **`ha-card`, `ha-icon` (`.icon`) and `ha-state-icon` (`.stateObj` only) are the only
   frontend elements the card renders, and nothing waits for their definition.** The icon logic
   of every domain and the theme's card frame exist nowhere else, and they are defined when a
@@ -1286,9 +1295,26 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   expected. Cost if wrong: if one of them is renamed, the card loses its frame or its icon, not
   its function.
 - **A timer that is unavailable has nothing to act on: its presets, plus, minus, Stop, each
-  cancel button and the round tile's long press do nothing, and the buttons are disabled.**
-  Home Assistant leaves an unavailable entity out of a service call without a word, and a press
-  would seem to do nothing. Cost if wrong: none.
+  cancel button, the pill's chip and the round tile's long press do nothing, and the buttons
+  and the chip are disabled.** Home Assistant leaves an unavailable entity out of a service
+  call without a word, and a press would seem to do nothing. Cost if wrong: none.
+- **The card never goes quiet when it cannot work: a missing Ends at, a hidden Next command and
+  a refused user each say so in words.** With **Ends at** disabled the card shows, in its body
+  and in the style of its other warnings (a `role="alert"`), the translated line that names the
+  sensor and tells the user to enable it, because without it there is no countdown to draw. With
+  **Next command** disabled the card works, and the pop-up puts one translated line naming the
+  sensor in the place of the pending commands, because an empty list would claim that nothing is
+  pending. A user the server refuses gets the line "You are not allowed to see the timer" with
+  the entity id of the number. A lookup that fails otherwise (a lost connection) stays silent:
+  see "Finding the timer". Why: a card that draws an idle timer, or nothing, with no word is
+  taken for a broken card, and these three are the states where the cause is known and the
+  remedy is the user's. The card learns that a sensor is disabled from the server
+  (`disabled_sensors` in the `timerify/timer` answer, read from the registry's `disabled_by`,
+  whoever disabled it) and never from a missing state: a sensor that is enabled but not loaded
+  yet has a restored `unavailable` state, and one that has no state at all may as well be
+  hidden or deleted, so a missing state is not proof of a disabled sensor. Cost if wrong:
+  a sensor disabled by a mechanism that leaves `disabled_by` empty shows the old silent
+  behaviour; and the answer has one more key that the card must keep in step.
 - **A pending command whose action is neither on nor off is left out of the pop-up, as a row
   with no id or no time is.** The card shows the rows it can read, and one it cannot read must
   not hide the others. Cost if wrong: a command of a kind added later is not listed until the
@@ -1450,7 +1476,14 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   restored whole (the numbers 0, the commands cancelled and the fixture command added again,
   the interval switch on; the interval sits 12 hours from the run), and each test creates its
   own starting point. Tests get 60 s and assertions 10 s, the restart test 300 s and 120 s for
-  the countdown to return. Users act with long-lived tokens written by `up`; a Russian test
+  the countdown to return. The restart test proves that the frontend has reconnected from its
+  own `connection-status` events (disconnected, then connected again), never from a pause.
+  The fixture has three timers: two with Ends at enabled (one strict, one loose) and a third,
+  on its own dashboard view, whose Ends at is disabled from the start. The disabled sensor is
+  a fixture of its own, not a test that enables one: Home Assistant reloads the entry 30
+  seconds after a change to the registry entry of an entity that stays enabled (a disable
+  reloads nothing), which would restart a timer in the middle of a later test. Users act with long-lived tokens
+  written by `up`; a Russian test
   uses a browser context with `locale: "ru-RU"`; the user who is not an administrator is made
   over the websocket API in the `system-users` group. `localhost` is used because the service
   worker registers only there or on https. The container runs on the real clock and a restart

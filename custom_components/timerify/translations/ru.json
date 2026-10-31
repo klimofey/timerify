@@ -492,6 +492,8 @@
   "common": {
     "card_entity_not_found": "Объект не найден: {entity}",
     "card_not_a_timer": "{entity} — не число «Включить на» таймера Timerify",
+    "card_not_allowed": "У вас нет прав видеть таймер {entity}",
+    "card_ends_at_disabled": "Датчик «Выключится в» этого таймера, {sensor}, отключён. Включите его, чтобы карточка работала",
     "card_error_entity": "Выберите число «Включить на» таймера",
     "card_error_layout": "Вид карточки: pill или round",
     "card_error_presets": "Готовые значения — целые минуты от 1 до 1440",
@@ -503,6 +505,7 @@
     "card_stop": "Остановить",
     "card_schedule": "Расписание",
     "card_commands": "Ожидающие команды",
+    "card_commands_disabled": "Ожидающие команды скрыты: датчик «Следующая команда», {sensor}, отключён",
     "card_command_on": "Включить: {time}",
     "card_command_on_for": "Включить: {time}, на {duration}",
     "card_command_off": "Выключить: {time}",

@@ -134,6 +134,7 @@ def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
         "next_command": NEXT,
         "intervals": [],
         "target_on": {"match": "is", "states": ["on"]},
+        "disabled_sensors": [],
         **different,
     }
 
@@ -163,6 +164,7 @@ async def test_card_finds_the_timer_of_its_number(
         "next_command": "sensor.boiler_next_command",
         "intervals": [],
         "target_on": {"match": "is", "states": ["on"]},
+        "disabled_sensors": [],
     }
 
 
@@ -588,6 +590,98 @@ async def test_missing_sibling_is_not_found(
 
 
 # --- A timer that changes -----------------------------------------------------------
+
+
+async def test_sensor_that_is_disabled_is_told(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A disabled entity has no state, which looks like an entity that has not started
+    yet. The registry tells them apart, so the answer names the sensors the user has
+    disabled, and the card says which one it misses instead of staying silent."""
+    entry = await setup_target()
+    registry = er.async_get(hass)
+    assert (await found(client, NUMBER))["disabled_sensors"] == []
+
+    registry.async_update_entity(SENSOR, disabled_by=er.RegistryEntryDisabler.USER)
+    await hass.async_block_till_done()
+    assert await found(client, NUMBER) == told_about(entry, disabled_sensors=[SENSOR])
+
+    registry.async_update_entity(NEXT, disabled_by=er.RegistryEntryDisabler.USER)
+    await hass.async_block_till_done()
+    assert await found(client, NUMBER) == told_about(
+        entry, disabled_sensors=[SENSOR, NEXT]
+    )
+
+    registry.async_update_entity(SENSOR, disabled_by=None)
+    await hass.async_block_till_done()
+    assert await found(client, NUMBER) == told_about(entry, disabled_sensors=[NEXT])
+
+
+@pytest.mark.parametrize(
+    "disabled_by",
+    [
+        er.RegistryEntryDisabler.USER,
+        er.RegistryEntryDisabler.INTEGRATION,
+        er.RegistryEntryDisabler.CONFIG_ENTRY,
+        er.RegistryEntryDisabler.DEVICE,
+    ],
+)
+async def test_sensor_is_disabled_whoever_disabled_it(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    disabled_by: er.RegistryEntryDisabler,
+) -> None:
+    """The user, the integration, the entry and the device can each disable an entity,
+    and the sensor has no state for the card whichever did."""
+    await setup_target()
+    er.async_get(hass).async_update_entity(NEXT, disabled_by=disabled_by)
+    await hass.async_block_till_done()
+
+    assert (await found(client, NUMBER))["disabled_sensors"] == [NEXT]
+
+
+async def test_sensor_that_is_hidden_is_not_disabled(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A hidden entity keeps its state and the card reads it, so it is not told."""
+    await setup_target()
+    er.async_get(hass).async_update_entity(SENSOR, hidden_by=er.RegistryEntryHider.USER)
+    await hass.async_block_till_done()
+
+    assert (await found(client, NUMBER))["disabled_sensors"] == []
+
+
+async def test_disabled_sensor_is_told_while_the_timer_is_not_loaded(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The answer is configuration: a timer that is not loaded says the same of its
+    sensors as one that runs. A sensor that is enabled is not told as disabled however
+    little state it has (Home Assistant restores it as unavailable); one that is
+    disabled has none at all."""
+    entry = await setup_target()
+    er.async_get(hass).async_update_entity(
+        NEXT, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    await hass.async_block_till_done()
+    await hass.config_entries.async_unload(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.NOT_LOADED
+    enabled = hass.states.get(SENSOR)
+    assert enabled is not None
+    assert enabled.state == "unavailable"
+    assert hass.states.get(NEXT) is None
+    assert await found(client, NUMBER) == told_about(entry, disabled_sensors=[NEXT])
 
 
 async def test_renamed_number_is_found_under_its_new_id(

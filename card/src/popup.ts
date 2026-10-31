@@ -16,7 +16,7 @@ import type { CardConfig } from "./config";
 import { formatClock, formatMinutes, formatRemaining, settingText } from "./format";
 import type { HassEntity, HomeAssistant, IntervalInfo, TimerInfo } from "./hass";
 import { t } from "./strings";
-import { mattersToRender, watchedEntities, type TimerView } from "./timer";
+import { isDisabled, mattersToRender, watchedEntities, type TimerView } from "./timer";
 
 /** A command that waits for its time, as the "Next command" sensor lists it. */
 interface PendingCommand {
@@ -245,9 +245,13 @@ export class TimerifyCardPopup extends LitElement {
       flex-direction: column;
       min-width: 0;
     }
-    .settings {
+    .settings,
+    .note {
       color: var(--secondary-text-color);
       font-size: var(--ha-font-size-s, 12px);
+    }
+    .note {
+      margin: 0;
     }
     button.cancel {
       flex: none;
@@ -515,6 +519,15 @@ export class TimerifyCardPopup extends LitElement {
   /** The commands that wait for their time, each with a button that cancels it. */
   #commands(now: number) {
     const { hass, config, info, view } = this;
+    // Without its sensor the card cannot list the commands, and says so: a list that is
+    // missing would look like a timer with nothing pending.
+    if (isDisabled(info, info.next_command)) {
+      return html`
+        <section class="commands">
+          <p class="note">${t(hass, "card_commands_disabled", { sensor: info.next_command })}</p>
+        </section>
+      `;
+    }
     const commands = pendingCommands(hass.states[info.next_command]);
     if (commands.length === 0) {
       return nothing;

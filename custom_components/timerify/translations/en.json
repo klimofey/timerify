@@ -492,6 +492,8 @@
   "common": {
     "card_entity_not_found": "Entity not found: {entity}",
     "card_not_a_timer": "{entity} is not the Run for number of a Timerify timer",
+    "card_not_allowed": "You are not allowed to see the timer {entity}",
+    "card_ends_at_disabled": "The Ends at sensor of this timer, {sensor}, is disabled. Enable it for the card to work",
     "card_error_entity": "Choose the Run for number of a timer",
     "card_error_layout": "The layout is pill or round",
     "card_error_presets": "Presets are whole minutes from 1 to 1440",
@@ -503,6 +505,7 @@
     "card_stop": "Stop",
     "card_schedule": "Schedule",
     "card_commands": "Pending commands",
+    "card_commands_disabled": "Pending commands are hidden: the Next command sensor, {sensor}, is disabled",
     "card_command_on": "On at {time}",
     "card_command_on_for": "On at {time} for {duration}",
     "card_command_off": "Off at {time}",

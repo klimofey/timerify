@@ -16,7 +16,8 @@ import type { TimerView } from "./timer";
  * empty layer under the content, as in Home Assistant's tile card: a button, pressed through
  * `binding`, that opens the pop-up, named by the name and the state it covers. The content
  * above lets presses through to it, except the chip, a button of its own beside the body:
- * `chip` is called when it is pressed, and the body never hears of it.
+ * `chip` is called when it is pressed, and the body never hears of it. A timer that is
+ * unavailable has nothing to add time to, and the chip is off.
  */
 export function renderPill(
   view: TimerView,
@@ -58,6 +59,7 @@ export function renderPill(
                 aria-label=${t(hass, "card_add_time", {
                   duration: formatMinutes(hass, config.chip),
                 })}
+                ?disabled=${view.state === "unavailable"}
                 @click=${chip}
               >
                 +${formatMinutes(hass, config.chip)}
@@ -126,6 +128,10 @@ export const pillStyles = css`
     font-size: var(--ha-font-size-m, 14px);
     cursor: pointer;
     pointer-events: auto;
+  }
+  .chip:disabled {
+    color: var(--disabled-text-color);
+    cursor: default;
   }
   .chip:focus-visible {
     outline: 2px solid var(--primary-color);

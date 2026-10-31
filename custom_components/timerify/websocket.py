@@ -15,6 +15,11 @@ The command only reads and is open to every user, not only to admins, but it tel
 user only what the user may read, as the commands of Home Assistant that are about
 entities do: it refuses a user who may not read the number it is asked about, the target
 or one of the two sensors, and leaves out the interval switches the user may not read.
+
+It also says which of the two sensors are disabled. A disabled entity has no state,
+which looks like an entity that has not started yet, and only the registry tells them
+apart; the card cannot work without either sensor, and tells the user which one it
+misses instead of staying silent.
 """
 
 from typing import Any, Final, Literal, TypedDict
@@ -85,6 +90,10 @@ class TimerInfo(TypedDict):
     """The intervals in the order they were added; one with no switch in the registry
     is left out."""
     target_on: OnRuleInfo
+    disabled_sensors: list[str]
+    """The entity ids of the two sensors that are disabled in the registry; none when
+    both are enabled. A disabled sensor has no state, so the card cannot tell it from
+    one that has not started yet without this."""
 
 
 @callback
@@ -169,10 +178,13 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
         default_duration=(
             default_duration_minutes(entry.options) if mode == "strict" else None
         ),
-        ends_at=ends_at,
-        next_command=next_command,
+        ends_at=ends_at.entity_id,
+        next_command=next_command.entity_id,
         intervals=_intervals(registry, entry),
         target_on=OnRuleInfo(match=on_rule.match, states=sorted(on_rule.states)),
+        disabled_sensors=[
+            sensor.entity_id for sensor in (ends_at, next_command) if sensor.disabled
+        ],
     )
 
 
@@ -193,17 +205,17 @@ def _entry_of_number(
 
 def _sensor(
     registry: er.EntityRegistry, entry: ConfigEntry, number: str, key: str
-) -> str:
-    """The entity id of the sensor of the timer that has the key `key`, which every
+) -> er.RegistryEntry:
+    """The registry entry of the sensor of the timer that has the key `key`, which every
     timer that was set up has.
 
     Raises `_TimerNotFound` when the registry has none; `number` is the timer's, for
     the message.
     """
-    sensor = registry.async_get_entity_id(
+    entity_id = registry.async_get_entity_id(
         Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, key)
     )
-    if sensor is None:
+    if entity_id is None or (sensor := registry.async_get(entity_id)) is None:
         raise _TimerNotFound(
             f"The Timerify timer of {number} has no {key} sensor in the entity registry"
         )

@@ -47,6 +47,25 @@ export function localizeFor(language: Language): Localize {
 /** A frontend that has not loaded the card's strings: it translates nothing. */
 const translatesNothing: Localize = () => "";
 
+/**
+ * The formatters of a frontend that has not recomputed them: the same functions from one
+ * `hass` to the next, as in the real one, which replaces them only when the language or the
+ * registry changes.
+ */
+type Formatters = Pick<
+  HomeAssistant,
+  "formatEntityName" | "formatEntityState" | "formatEntityAttributeValue"
+>;
+
+const defaultFormatters: Formatters = {
+  formatEntityName: (entity) => entity.attributes.friendly_name ?? entity.entity_id,
+  formatEntityState: (entity, state) => state ?? entity.state,
+  formatEntityAttributeValue(entity, attribute, value) {
+    const shown = `${value ?? entity.attributes[attribute]}`;
+    return attribute === "temperature" ? `${shown} °C` : shown;
+  },
+};
+
 export interface FakeState {
   state: string;
   attributes?: Record<string, unknown>;
@@ -83,10 +102,17 @@ function timerOf(number: string, name: string, info: TimerInfo, target: FakeStat
       attributes: { friendly_name: `${name} Schedule ${interval.title}` },
     };
   }
+  // A sensor that is disabled in the registry has no state at all.
+  for (const sensor of info.disabled_sensors) {
+    delete states[sensor];
+  }
   return { number, info, states };
 }
 
-/** A strict timer on `switch.boiler` ("Boiler", off), 45 minutes by default, no intervals. */
+/**
+ * A strict timer on `switch.boiler` ("Boiler", off), 45 minutes by default, no intervals,
+ * both sensors enabled.
+ */
 export function boilerTimer(overrides: Partial<TimerInfo> = {}): FakeTimer {
   const info: TimerInfo = {
     entry_id: "boiler_entry",
@@ -97,6 +123,7 @@ export function boilerTimer(overrides: Partial<TimerInfo> = {}): FakeTimer {
     next_command: NEXT_COMMAND,
     intervals: [],
     target_on: { match: "is", states: ["on"] },
+    disabled_sensors: [],
     ...overrides,
   };
   return timerOf(NUMBER, "Boiler", info, {
@@ -116,6 +143,7 @@ export function acTimer(): FakeTimer {
     next_command: AC_NEXT_COMMAND,
     intervals: [],
     target_on: { match: "is_not", states: ["off"] },
+    disabled_sensors: [],
   };
   return timerOf(AC_NUMBER, "AC", info, {
     state: "off",
@@ -141,6 +169,8 @@ export interface Changes {
   connected?: boolean;
   entities?: Record<string, RegistryEntry>;
   localize?: Localize;
+  /** Formatters to replace, as the frontend does when it has recomputed them. */
+  formatters?: Partial<Formatters>;
   /** A state to set; `null` removes it, as when an entity is deleted or unavailable to the registry. */
   states?: Record<string, FakeState | null>;
 }
@@ -228,8 +258,13 @@ function registryOf(timers: FakeTimer[]): Record<string, RegistryEntry> {
       device_id,
     });
     entries[number] = own(number, "run_for");
-    entries[info.ends_at] = own(info.ends_at, "ends_at");
-    entries[info.next_command] = own(info.next_command, "next_command");
+    // The display registry the frontend keeps leaves out the entities that are disabled.
+    if (!info.disabled_sensors.includes(info.ends_at)) {
+      entries[info.ends_at] = own(info.ends_at, "ends_at");
+    }
+    if (!info.disabled_sensors.includes(info.next_command)) {
+      entries[info.next_command] = own(info.next_command, "next_command");
+    }
     for (const { entity_id } of info.intervals) {
       entries[entity_id] = own(entity_id, "interval");
     }
@@ -248,6 +283,7 @@ interface Parts {
   locale: HomeAssistant["locale"];
   config: HomeAssistant["config"];
   user: NonNullable<HomeAssistant["user"]>;
+  formatters: Formatters;
 }
 
 function lookupError(code: string): { code: string; message: string } {
@@ -307,12 +343,7 @@ function build(world: World, parts: Parts): FakeHass {
       return structuredClone(timer.info) as T;
     },
 
-    formatEntityName: (entity) => entity.attributes.friendly_name ?? entity.entity_id,
-    formatEntityState: (entity, state) => state ?? entity.state,
-    formatEntityAttributeValue(entity, attribute, value) {
-      const shown = `${value ?? entity.attributes[attribute]}`;
-      return attribute === "temperature" ? `${shown} °C` : shown;
-    },
+    ...parts.formatters,
 
     rejectNext(error) {
       world.callRejection = { error };
@@ -333,10 +364,11 @@ function build(world: World, parts: Parts): FakeHass {
       world.held?.shift()?.();
     },
     with(changes) {
-      const { states, ...rest } = changes;
+      const { states, formatters, ...rest } = changes;
       return build(world, {
         ...parts,
         ...rest,
+        formatters: { ...parts.formatters, ...formatters },
         locale: changes.language
           ? { ...parts.locale, language: changes.language }
           : parts.locale,
@@ -371,6 +403,7 @@ export function fakeHass(options: FakeHassOptions = {}): FakeHass {
     },
     config: { time_zone: options.timeZone ?? "Asia/Jerusalem" },
     user: { is_admin: options.isAdmin ?? true },
+    formatters: defaultFormatters,
   });
 }
 

@@ -14,8 +14,11 @@ import type { HassWs } from "./ws";
 
 const MINUTE = 60_000;
 const SCREENSHOTS = join(REPO_ROOT, "docs", "screenshots");
-/** Space around the cards in the picture, in pixels. */
-const MARGIN = 12;
+/**
+ * Space around the cards in the picture, in pixels. The page's toolbar ends about nine pixels
+ * above the first card, so a margin that is any larger shows the edge of it.
+ */
+const MARGIN = 6;
 
 // Twice the pixels, so that the picture stays sharp on a high-resolution screen.
 test.use({ colorScheme: "light", deviceScaleFactor: 2 });

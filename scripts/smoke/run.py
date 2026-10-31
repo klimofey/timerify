@@ -6,24 +6,28 @@ through its HTTP API, adds Timerify timers through the config flow for the entit
 configuration.yaml declares or the demo integration provides, and then checks what a
 user would see:
 
-1. "Run for" 2 minutes on a switch that sits on no device (an input_boolean): the switch
+1. The dashboard card: the page Home Assistant serves to the browser loads the card's
+   module, at the address that carries the version of the bundle in this checkout; that
+   address serves the bundle byte for byte; and the card's websocket command tells the
+   first timer's entry and entities.
+2. "Run for" 2 minutes on a switch that sits on no device (an input_boolean): the switch
    turns on, and turns off when the countdown ends.
-2. A pending command on the switch of the demo integration, which sits on a device: the
+3. A pending command on the switch of the demo integration, which sits on a device: the
    timer's entities sit on that device, and a command to turn on in 1 minute for
    1 minute turns the switch on at its time, clears the "Next command" sensor, and
    turns the switch off one minute later.
-3. "Run for" 1 minute with a mode and a temperature on a generic thermostat: it is set
+4. "Run for" 1 minute with a mode and a temperature on a generic thermostat: it is set
    to heat and 23 degrees, and turned off when the countdown ends.
-4. A schedule interval for today's weekday, added to the first timer through the
+5. A schedule interval for today's weekday, added to the first timer through the
    interval flow to begin in a minute or two and run for two minutes: its switch is on,
    and the first switch turns on at the start and off at the end.
-5. Voice: the Voice settings are added through the menu of the config flow, and the
+6. Voice: the Voice settings are added through the menu of the config flow, and the
    built-in agent is talked to over the REST API about the first switch. Asked how long
    is left on it, the agent refuses (an input boolean is not exposed to Assist by
    default); once it is exposed, "turn on ... for 2 minutes" runs it and the agent
    says how long is left, "turn off ... in 1 minute" ends it a minute later, a bare
    "turn on ..." runs it for the default 30 minutes and a bare "turn off ..." stops it.
-6. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
+7. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
    carries on and the switch turns off at the end it had before the restart.
 
 Everything is observed over the WebSocket API by subscribing to state changes.
@@ -35,6 +39,7 @@ Everything is observed over the WebSocket API by subscribing to state changes.
 
 import argparse
 import asyncio
+import hashlib
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -66,6 +71,7 @@ from scripts.harness.hass import (
     new_access_token,
     onboard,
     open_socket,
+    request_bytes,
     request_json,
     say,
     timestamp,
@@ -83,6 +89,17 @@ THERMOSTAT_TEMPERATURE = 23
 SWITCH_NAME = "Smoke boiler"
 """How Assist calls the first switch: its name as configuration.yaml gives it."""
 KEEP_MINUTES = 60
+CARD_BUNDLE = (
+    Path(__file__).parents[2]
+    / "custom_components"
+    / "timerify"
+    / "frontend"
+    / "timerify-card.js"
+)
+"""The card's module as this checkout builds it, which the container has mounted."""
+CARD_URL = "/timerify_frontend/timerify-card.js"
+CARD_VERSION_LENGTH = 16
+"""The hexadecimal digits of the bundle's SHA-256 that the address carries."""
 
 TURN_ON_TIMEOUT = 15.0
 COMMAND_DELAY = timedelta(minutes=1)
@@ -175,6 +192,33 @@ async def expect_off_at(socket: Socket, timer: Timer, end: datetime) -> None:
         timer.ends_at, has_state("unknown"), "unknown", CALL_TIMEOUT
     )
     say(f"  {timer.target} off {(stopped - end).total_seconds():+.1f}s from the end")
+
+
+async def scenario_card(
+    session: aiohttp.ClientSession, refresh_token: str, timer: Timer
+) -> None:
+    say("The dashboard card: loaded by the page, served as built, told its timer")
+    bundle = CARD_BUNDLE.read_bytes()
+    version = hashlib.sha256(bundle).hexdigest()[:CARD_VERSION_LENGTH]
+    module = f"{CARD_URL}?v={version}"
+    page = (await request_bytes(session, INSTANCE, "GET", "/")).decode()
+    if f'import("{module}")' not in page:
+        raise SmokeFailure(f"The page of Home Assistant should load {module}")
+    say(f"  the page loads {module}")
+    if await request_bytes(session, INSTANCE, "GET", module) != bundle:
+        raise SmokeFailure(f"{module} should serve the bundle of this checkout")
+    say(f"  {module} serves the {len(bundle)} bytes of the bundle")
+    async with open_socket(session, INSTANCE, refresh_token) as socket:
+        told = await socket.call("timerify/timer", entity_id=timer.run_for)
+    expected = {
+        "entry_id": timer.entry_id,
+        "target": timer.target,
+        "ends_at": timer.ends_at,
+        "next_command": timer.next_command,
+    }
+    if (given := {key: told.get(key) for key in expected}) != expected:
+        raise SmokeFailure(f"The card should be told {expected}, got {given}")
+    say(f"  the card is told the timer of {timer.target}")
 
 
 async def scenario_expiry(
@@ -582,6 +626,7 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
             SWITCH,
         )
     say(f"Added a timer for {SWITCH}")
+    await scenario_card(session, refresh_token, timer)
     await scenario_expiry(session, refresh_token, timer)
     await scenario_command(session, refresh_token)
     await scenario_settings(session, refresh_token)

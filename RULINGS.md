@@ -1136,3 +1136,362 @@ those of the spec.
   left" answers 2 minutes, "turn off ... in 1 minute" ends it a minute later, a bare "turn
   on" runs it for the default 30 minutes and a bare "turn off" stops it. Cost if wrong:
   Russian and the LLM path are proved by pytest, not in the container.
+
+## Phase 5: card
+
+The decisions of the dashboard card's phase (`docs/superpowers/plans/2026-10-30-phase-5-card.md`),
+in the form they have now. Where a later decision replaced an earlier one, only the final
+behaviour is written. Section numbers (§) and rules (R, S) are those of the spec.
+
+### Delivery and registration
+
+- **The card is served by the integration and loaded on every dashboard through
+  `frontend.add_extra_js_url`, once, in `async_setup`; no Lovelace resource is created.**
+  The module sits in `custom_components/timerify/frontend/` and is served with
+  `async_register_static_paths` (a second registration of the same path raises, which is why
+  it belongs to the integration and not to a timer). Its address carries
+  `?v=<the first 16 hex digits of the file's SHA-256>`, computed in an executor job, so a new
+  bundle is fetched at once. `manifest.json` has `http` among the `dependencies` and `frontend`
+  among the `after_dependencies`, and the call is made only when `"frontend"` is among the
+  loaded components, so a Home Assistant without a frontend still starts. A Lovelace resource
+  would be storage-only and admin-only, would conflict with dashboards in YAML mode, which keep
+  their resources in YAML, and the user would have to add it. Cost if wrong: a module loaded
+  this way meets the known first-load issue on 2026.10 (the last entry of this section), which
+  a Lovelace resource does not.
+- **The registration is proved in two places: pytest checks the static path and the headless
+  case, and the smoke test and the end-to-end tests check what only a real frontend shows.**
+  The frontend cannot be set up in pytest without the `home-assistant-frontend` package and a
+  dozen components, so that package is not a dev dependency; the test that the call is made once,
+  with the right address, across two timers and a reload, patches `add_extra_js_url` and
+  declares the `frontend` component. Whether the index page really loads the module is checked
+  in the container. Cost if wrong: a regression of `add_extra_js_url` alone is seen by the smoke
+  test (about fifteen minutes) and not by pytest.
+- **The bundle is committed, and the build is deterministic and checked.** HACS downloads the
+  repository, and a zip release would need a release workflow, which stays disabled with
+  GitHub Actions. esbuild builds the bundle (one dependency; Lit is used without decorators,
+  with `static properties` and `static styles`) and `tsc --noEmit` checks the types, with
+  TypeScript 6.0.3, which is what the frontend builds with. `npm --prefix card run build:check`
+  rebuilds in memory and fails when the committed file differs, and it is part of the gate.
+  Cost if wrong: whoever changes the card rebuilds and commits the bundle with it, and the
+  bundle cannot be reviewed; the TypeScript can.
+- **The card's sources live in `card/`, a self-contained npm project (its own `package.json`,
+  lockfile and configuration), and its checks run as `npm --prefix card ...`.** This keeps Node
+  tooling out of the Python root and out of the integration folder that HACS downloads. Cost if
+  wrong: one more directory to know.
+- **The bundle is minified, with legal comments kept at the end and no source map; it is served
+  at `/timerify_frontend/timerify-card.js` with `cache_headers=True`; `.gitattributes` marks it
+  `-text -diff linguist-generated=true`.** Every dashboard loads it when it opens, and Lit's BSD
+  licence notice has to travel with it; `/timerify` is kept free for a later sidebar page;
+  converting line endings would break the byte check, and a one-line file would flood every
+  diff. Cost if wrong: an error in the browser points into the minified file, and a reader
+  reads the TypeScript.
+- **The module defines `timerify-card` and adds itself to `window.customCards` inside one "not
+  defined yet" guard, and the entry is added to the array, which is never replaced.** The
+  frontend reuses the array, and a second copy of the module (a resource a user added by hand
+  beside the one Timerify loads) must neither throw nor list the card twice. Cost if wrong: the
+  copy that runs first defines the element, so an old copy added by hand wins over the bundled
+  one.
+- **After installing or updating, the browser must be refreshed once, and the README says so.**
+  The frontend reads the list of modules when the page loads. Cost if wrong: a user who does
+  not refresh sees the old card, or none.
+- **Every npm package is pinned to an exact version at least two weeks old on 2026-10-30, with
+  the lockfile committed and `npm ci` the only install: lit 3.3.3 (the frontend's), esbuild
+  0.28.2, typescript 6.0.3 (the frontend's), vitest 5.0.5, happy-dom 21.0.3, @playwright/test
+  1.64.1 and @types/node 26.6.5, on Node 26.** The same rule holds for every package, checked
+  with `npm view`. Cost if wrong: a bump is a reviewed change of the lockfile; happy-dom 21.0.4,
+  which fixes an advisory in a package that only runs the tests, becomes two weeks old on
+  2026-11-03 and is due before 1.0.0.
+
+### Finding the timer
+
+- **The card is configured with the timer's "Run for" number, and Timerify tells it the rest
+  through a websocket command, `timerify/timer {entity_id}`.** The answer holds the entry id,
+  the target, the mode, the default duration, the entity ids of "Ends at" and "Next command"
+  and each interval's switch with its title. The number is the one handle that names exactly one
+  timer: the display registry the frontend keeps carries neither the config entry nor the unique
+  id of an entity, and two timers can share a device. The answer is configuration, read from
+  the entity registry and the entry and never from the running timer, and it is given for any
+  Timerify timer entry whatever its state, so a lookup that meets an entry that is still starting
+  (at every start and every reload) is answered. Cost if wrong: one more command to keep in step
+  with the card.
+- **The command is read-only and open to every user, and it tells a user only what the user
+  may read.** It checks the permission to read the number first, before anything is looked up,
+  so that a user who may not read an entity cannot tell by the answer whether it is a timer's;
+  then the target, "Ends at" and "Next command", and it refuses the whole answer when any of
+  them is unreadable; the interval switches the user may not read are left out. This is what
+  core's commands about entities do. Cost if wrong: a user restricted by custom permissions
+  gets a card that cannot find its timer, and the error is logged as it is for core's own
+  commands.
+- **`timerify/timer` also returns `target_on`, the target's on-rule from `domains.py` as data
+  (`OnRule` replaces `DomainBehaviour.is_on`), and `default_duration` is null in loose mode;
+  there is no `runtime` key until the runtime counter exists.** The card must say "on without a
+  countdown" and decide what a long press does exactly as Timerify judges the target, without a
+  copy of the domain table in the browser (§2). Cost if wrong: none; the key is added with the
+  sensor.
+- **The lookup is asked again on a new configured entity, a new `hass.entities` (an interval
+  added or deleted shows up there), the connection coming back and the number's state becoming
+  available. A `not_found` shows a warning only while the number is missing or has a value,
+  never while it is `unavailable`; any other failure shows the card as unavailable until the
+  next trigger.** An unavailable number may be a timer that is still starting, and a warning
+  would flash at every restart; the card asks again when the number has a value. Cost if wrong:
+  none.
+
+### What the card shows
+
+- **"Ends at" carries `started_at`, the moment the current countdown began, and it is stored
+  with the timer.** §6.3 asks for a fill that shows progress, which needs the length of the
+  countdown. A restart keeps it. Cost if wrong: an attribute to keep in step with the card.
+- **`started_at` is written only by `_set_end(end, *, began, by=None)`:** the time of the set,
+  of R4 or of a strict bare run; a command's own time; a window's start, also when the window
+  extends a manual countdown (S1), which makes the fill full again; and, for adding time,
+  subtracting it and the realignment of S2, the kept beginning, `_kept_beginning(at)`, which is
+  `min(kept, at)` for the instant the writer works at (a bare run of a target that already runs
+  writes nothing). It is null otherwise. A file of the previous format migrates to null, so a
+  countdown that runs during the update shows a full fill until it is set again. A beginning at
+  or after the end, or without an end, is a corrupt file. The fill must be right after a late
+  fold or a restart (P3, §5.7); a clock that steps back must never make the stored file
+  unreadable; an update must not invent a beginning; and a window over a manual countdown
+  restarts the fill. Cost if wrong: a countdown that runs during an update has no progress until
+  it is set again.
+- **The fill is the share of the countdown that is left, full at the start and empty at the
+  end, clamped to 0..1; the time left is `M:SS` or `H:MM:SS`, rounded up, like the "Run for"
+  number (§6.1).** Home Assistant's own timer card rounds down. An open run is full, an idle
+  timer is empty, and a countdown with no known beginning is full. The format agrees with the
+  number on the device page and needs no plural in any language. Cost if wrong: none.
+- **The card counts down on a one second interval that runs only while a timer has an end ahead
+  and the card is on the page, with the browser's clock against the end time of "Ends at", and
+  it writes no state.** Home Assistant's timer card does the same, with no offset to the
+  server's clock. The time left never goes below 0:00 and the fill stays between empty and full
+  when the browser's clock runs ahead or behind; the end time shown is the server's; every
+  action goes to the server. Cost if wrong: a device with a wrong clock shows a time left that
+  is wrong by as much; a server offset is in `docs/followups.md`.
+- **Clock times: the same local day shows the time, the next six days the short weekday and the
+  time, later ones the date and the time.** They honour `locale.time_zone` (`server` is
+  `hass.config.time_zone`) and `time_format` (`12`, `24`, `system`, which is the browser's
+  locale, and `language`, which is the user's language). Minutes are whole, so `number_format`
+  changes nothing but grouping, which is off. A timer ends at most a day ahead and a command at
+  most seven. Cost if wrong: none.
+- **A new `hass` renders the card only when one of its own entities' state objects, the locale,
+  the language, `localize`, `config`, the user, the connection or the registry changed; any
+  update that does not carry a new `hass` passes; the pop-up renders its content only while it
+  is open, applies the same filter, and gets a fresh view from each card render so that its time
+  ticks.** The setter runs on every state change of the home, and strings arrive as a new
+  `localize` alone. Cost if wrong: a field of `hass` that the card starts to read and is not in
+  the filter shows stale until something else changes.
+- **`ha-card`, `ha-icon` (`.icon`) and `ha-state-icon` (`.stateObj` only) are the only
+  frontend elements the card renders, and nothing waits for their definition.** The icon logic
+  of every domain and the theme's card frame exist nowhere else, and they are defined when a
+  card connects. `ha-state-icon` reads the formatters and the entities from the frontend's Lit
+  contexts, so outside `<home-assistant>` (in the unit tests) it shows no icon, which is
+  expected. Cost if wrong: if one of them is renamed, the card loses its frame or its icon, not
+  its function.
+- **A timer that is unavailable has nothing to act on: its presets, plus, minus, Stop, each
+  cancel button and the round tile's long press do nothing, and the buttons are disabled.**
+  Home Assistant leaves an unavailable entity out of a service call without a word, and a press
+  would seem to do nothing. Cost if wrong: none.
+- **A pending command whose action is neither on nor off is left out of the pop-up, as a row
+  with no id or no time is.** The card shows the rows it can read, and one it cannot read must
+  not hide the others. Cost if wrong: a command of a kind added later is not listed until the
+  card knows it.
+- **The Russian rows of pending commands put a colon between the verb and the time, with no
+  preposition before it: "Turn off: Tue 07:00", in Russian words.** The time may begin with a
+  weekday ("Tue 07:00"), and a Russian preposition before a clock time depends on the word that
+  follows ("at 7:00", but "on Tuesday"), which a template cannot choose for a formatted time. The
+  colon is right for every form the time takes. The Cyrillic stays in `ru.json`. Cost if wrong:
+  the rows read as terse labels, not as sentences.
+
+### What the card does
+
+- **The card acts only through Timerify's services and entities: `number.set_value` on "Run
+  for" (a preset; 0 stops), `timerify.add_time` (plus, minus, the chip), `timerify.run` with no
+  data (the long press), `timerify.cancel_command` and `switch.turn_on` or `switch.turn_off`
+  (the intervals), each with `target: {entity_id}` and with `notifyOnError` left on.** It reads
+  only the states of the entities that `timerify/timer` names and the target's, and
+  `hass.entities` for the picker's stub. It adds no state writes and nothing counts down on the
+  server (§2). Cost if wrong: none; whatever the card does can be done by an automation.
+- **A tap opens the pop-up in both layouts, and a hold on the round layout runs the timer with
+  no duration through `timerify.run`, or stops it while it runs; the pill has no hold.**
+  `timerify.run` with no duration is R9: in strict mode the default duration, in loose mode an
+  open run, and a target that already runs keeps its countdown. A running timer, with or without
+  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none.
+- **A tap is the `click` event of the card's body (a mouse, a finger, the keyboard and assistive
+  technology all produce it); a hold is added on top of it.** The hold fires on release after
+  at least 500 ms, as Home Assistant's own handler does, and swallows the click that follows
+  it. Enter (on `keydown`, with `preventDefault`) and Space (on `keyup`, with `preventDefault`
+  on `keydown`) call the same handler, since a body that is not a native button gets no click
+  from the keyboard. A cancelled or moved-off pointer aborts the press, the context menu is
+  suppressed while a hold is pending, and `data-held` on the card, which makes the ring pulse,
+  says that letting go will act. The pill has no hold: with a mouse a long press there is a
+  tap, and on touch it does nothing. Cost if wrong: a user may expect a long press on the pill
+  to act; there is none for keyboard users either, who start and stop through the pop-up.
+- **The body is an empty layer that covers the whole card, border included, under the content,
+  as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
+  `aria-labelledby` the name and the status text, and the fill.** The content row above it has
+  `pointer-events: none`, so a press anywhere on the card reaches the body; the chip is a
+  sibling of the body, not inside it, and has `pointer-events: auto`. A button inside an element
+  with `role="button"` is presentational, so assistive technology would not see the chip; as a
+  sibling, its presses also never reach the body, so a chip press never opens the pop-up. Cost
+  if wrong: a theme with an unusual card border or radius may leave the layer a pixel off the
+  card's edge.
+- **Only the primary pointer starts a hold, and with a mouse only the main button. A click is
+  swallowed only if it comes before the next `pointerdown`: Android sends no click after a long
+  press, and a click that never came must not eat the next real tap.** Enter calls
+  `preventDefault` on `keydown`: the press opens a dialog that takes the focus, and without it
+  the browser would go on to press the button the focus has moved to. The card of each layout
+  has `user-select: none` and `-webkit-touch-callout: none`, so that a long touch brings up
+  neither a text selection nor the browser's callout, and the body has
+  `-webkit-tap-highlight-color: transparent`. The rules are on the card and not on the empty
+  body, because the text is in the content. Cost if wrong: the text on the card cannot be
+  selected; the pop-up's can.
+- **The chip's accessible name is "Add {duration}", with the duration written by `formatMinutes`
+  as the chip shows it, so the spoken name contains the visible label (WCAG 2.5.3, "Label in
+  Name"); the pop-up's plus and minus use the same strings, "Add {duration}" and "Take off
+  {duration}".** Cost if wrong: none.
+- **Plus and minus step 5 minutes, which is not configurable; minus is offered only while a
+  countdown runs; the chip is ignored by the round layout.** §6.3 lists no step field, and a
+  user who wants another step uses a preset. Cost if wrong: a user who wants a step of 10
+  minutes adds a preset or a chip.
+
+### The pop-up
+
+- **The pop-up is the card's own native `<dialog>` in its shadow DOM, opened with
+  `showModal()`.** The platform traps the focus, closes it on Escape and makes the page behind
+  inert, and the card needs no frontend internals (`show-dialog` and `ha-dialog` are internal
+  and unversioned). The end-to-end tests prove it in a real Home Assistant: the dialog is modal
+  above the application, the page behind it takes no input and Escape closes it and gives the
+  focus back to the card. Cost if wrong: it does not look exactly like Home Assistant's own
+  dialogs, and takes the theme only through CSS variables.
+- **The pop-up closes on Escape, on its close button and on a click on the backdrop, which is a
+  press that begins and ends on the dialog itself; the browser's Back is not intercepted; a
+  refused action is reported by Home Assistant's own toast and the pop-up stays open.** The
+  dialog has no padding of its own, so a click on the backdrop has the dialog as its target, and
+  so does the click that ends a text selection dragged from the content to the backdrop, which
+  must not close it. Chromium on Android closes a modal dialog on Back by itself (unverified in
+  the companion apps), and on iOS Back leaves the view: no history handling that Home
+  Assistant's internals own. A refused action is reported by `notifyOnError`, a popover in the
+  top layer above the dialog, and the card catches the rejection. Cost if wrong: Back may leave
+  the view instead of closing the pop-up in the companion apps.
+- **The settings link is shown only to an administrator, and it is a plain same-origin `<a
+  href>` to `/config/integrations/integration/timerify#config_entry=<entry_id>`, whose click
+  handler only closes the pop-up.** A user who is not an administrator cannot open the page, so
+  the link is hidden, not disabled. Home Assistant's own window click listener follows the link,
+  with the history entry its back arrow needs, so the card never calls `pushState`. A Ctrl, Cmd
+  or Shift click is the browser's and the pop-up stays; an Alt click is Home Assistant's and
+  the pop-up closes. Cost if wrong: a change of that listener in the frontend breaks the link;
+  the page is still reachable by hand.
+
+### Strings and language
+
+- **The card's words live in `translations/<language>.json` under the top-level `common` key,
+  which hassfest accepts, as flat slugs with the prefix `card_`, and are loaded at run time with
+  `hass.loadBackendTranslation("common", "timerify")`.** Entity names and states come from the
+  existing entity translations through `hass.formatEntityName` and `hass.formatEntityState`.
+  Cyrillic stays in `ru.json`. Custom integrations have no `strings.json`; `en.json` is the
+  source. Cost if wrong: a language without a file shows English.
+- **The card's strings are typed by the keys of `en.json` `common`, and that English is built
+  into the bundle and used only before any card has loaded strings.** Config errors, the
+  picker's description and the editor's labels use `lastLoaded()`, the last `hass` whose
+  strings arrived, since `setConfig` and `getConfigForm` run without `hass`; everything else
+  uses the card's own `hass.localize`. A misspelt key fails `tsc`, a stale bundle fails
+  `build:check`, and a page whose first card is invalid shows that error in English. Cost if
+  wrong: the editor's words come from the last strings a card loaded (a follow-up).
+
+### The editor and the picker
+
+- **The editor is Home Assistant's own form, from `getConfigForm`, the documented way for a
+  custom card.** The fields are `entity` (an entity selector filtered to Timerify's `number`
+  entities), `layout` (`pill` or `round`), `name` and `icon`, `presets` (a multiple `select`
+  with custom values, the defaults as options) and `chip` (a number). A card added from the
+  picker is written with `layout: pill` and the five default presets, so the editor shows them;
+  `getStubConfig` picks the first Timerify timer, by entity id. Cost if wrong: a change of the
+  frontend's form components changes the editor, and the end-to-end tests that find them by role
+  catch it.
+- **Presets default to 15, 30, 45, 60 and 120 minutes. An empty list stands for the defaults, in
+  the editor and in YAML, and digit strings are accepted as well as numbers.** Taking the last
+  chip away in the editor writes `[]`, and it must not throw the user out of the form; the
+  editor's `select` writes strings. A user who adds one preset must not lose the others
+  unseen. Cost if wrong: a YAML `presets: []` also means the defaults.
+- **The editor's `assertConfig` checks only the shape of a config, as Home Assistant's own cards
+  with a form do, and `setConfig` keeps the value rules.** A wrong type (presets that are not a
+  list, a layout that is not text) sends the editor to YAML; a value of the right kind that the
+  card cannot use (a preset of 0, a chip of 1441, a layout "square") keeps the user in the form
+  while the preview shows the card's own message. Cost if wrong: a typed 0 shows an error card
+  in the preview and not in the form.
+- **A list of numbers that is written by hand shows in the editor as bare chips ("15" and not
+  "15 min") and its drop-down offers the defaults again; picking one adds a duplicate, which
+  the card removes.** The label lookup of the frontend's select is a strict `option.value ===
+  item` and the options are strings; the schema cannot change it. The README tells users to
+  write the presets as text. Cost if wrong: the form shows both "15" and "15 min".
+- **The editor cannot preselect the layout of a hand-written card that has none, because the
+  frontend does not apply the defaults of a card's form (checked in frontend 20260930.5).** A
+  card from the picker carries `layout: "pill"`. Cost if wrong: the form shows no layout
+  selected for such a card, which is a pill.
+
+### Verification and tooling
+
+- **The end-to-end tests and the smoke test share one harness, `scripts/harness/hass.py`,
+  parameterised by project, port and configuration directory; the end-to-end tests use it
+  through `python -m scripts.e2e.hass up|restart|down`, which Playwright's global setup and
+  teardown call from the repository root.** There is one onboarding and compose path. The
+  smoke test (port 18123) and the end-to-end tests (18124) can run side by side. The smoke
+  command became `uv run python -m scripts.smoke.run`. Cost if wrong: the smoke test's command
+  changed.
+- **The end-to-end tests (Node, `@playwright/test`, Chromium) run serially against one container
+  at `http://localhost:18124`, in New York time.** They cover both layouts, the pop-up's
+  actions, the long press, the editor and the picker, a user who is not an administrator,
+  Russian, and a restart of Home Assistant in the middle of a countdown that the card sees
+  through. Each test logs in through the real login page, waits until the frontend's service
+  worker serves the page and loads it once more before acting. Before each test the fixture is
+  restored whole (the numbers 0, the commands cancelled and the fixture command added again,
+  the interval switch on; the interval sits 12 hours from the run), and each test creates its
+  own starting point. Tests get 60 s and assertions 10 s, the restart test 300 s and 120 s for
+  the countdown to return. Users act with long-lived tokens written by `up`; a Russian test
+  uses a browser context with `locale: "ru-RU"`; the user who is not an administrator is made
+  over the websocket API in the `system-users` group. `localhost` is used because the service
+  worker registers only there or on https. The container runs on the real clock and a restart
+  takes tens of seconds, and the frontend picks the browser's language for a user who chose
+  none. Cost if wrong: a failing run is slower to report, and a host whose Docker clock has
+  drifted fails the tests that compare the browser's clock with the server's.
+- **Unit and component tests run in vitest with happy-dom, with fake timers, one `fakeHass()`
+  and one `mountCard()` helper, and `TZ=America/New_York`; Russian strings are read from
+  `ru.json` at run time and never spelled in a test.** The tests are scenarios (a restart while
+  the card is open, a renamed number, a clock that runs ahead, two timers on one device,
+  Russian). Cost if wrong: happy-dom is not a browser, so the end-to-end tests carry what needs
+  real layout and real events.
+- **The pictures of the README are taken by a separate Playwright project, `npm --prefix card
+  run screenshots`, with the browser's clock fixed 15 minutes into a 45 minute countdown, and
+  they are committed, not made by every end-to-end run.** A countdown changes every second, so
+  a run that wrote them would leave the tree dirty. The fixed clock fixes the time left and
+  the fill; the end time on the pill is the server's real one, so a rerun changes the pictures
+  and they are refreshed by hand, and looked at, when the card's look changes. No server data
+  is faked for a picture. Cost if wrong: a picture may show an old look until someone refreshes
+  it.
+- **The gate from this phase on is the Python four (`pytest`, `ruff check`, `ruff format
+  --check`, `mypy`), `npm --prefix card ci`, `build:check`, `typecheck`, `test` and `e2e`, and
+  hassfest, run locally on the final tree.** Cost if wrong: a longer gate, which needs Docker.
+- **The smoke test checks the delivery of the card first, before any countdown.** The index
+  page `/` must contain `import("/timerify_frontend/timerify-card.js?v=<16 hex digits of the
+  SHA-256 of the bundle in the checkout>")`, a GET of that address must return the bytes of
+  `custom_components/timerify/frontend/timerify-card.js`, and `timerify/timer` for the first
+  timer must answer its entry and entities. The hash is computed in the script and not by the
+  integration's own function, so a regression of that function is caught. Cost if wrong:
+  the smoke test is a few seconds longer.
+
+### Known issue
+
+- **On Home Assistant 2026.10.x the card can be missing from the first page load that the
+  frontend's service worker serves; it is documented, not worked around, and the registration
+  above is kept.** On a first visit, after the site data was cleared and after a frontend
+  update, a module added with `add_extra_js_url` can run before the application installs its
+  scoped custom element registry, and then loses its definition: the dashboard shows "Custom
+  element doesn't exist: timerify-card" until the page is loaded again
+  ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890),
+  fixed by frontend PR #54444 in frontend 20261028, Home Assistant 2026.11.0). Every card that an
+  integration loads this way meets it, and Lovelace resources do not. No fix on 2026.10 uses only
+  the public APIs. The README tells users to refresh once more, and
+  `card/e2e/first-load.spec.ts` records the behaviour as an expected failure that Playwright
+  reports when the problem goes away. That expected failure rests on a race the card's module
+  wins against the application's bundle on the machine it was written on, so a machine on which
+  the application wins can see it pass on 2026.10 as well (`docs/followups.md`). Raising the
+  minimum Home Assistant to 2026.11 would remove the problem, and is a question for 1.0.0.
+  Cost if wrong: a user's first load in a fresh browser shows an error card until a refresh.

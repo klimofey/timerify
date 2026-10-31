@@ -10,6 +10,7 @@ and ports run side by side.
 
 import asyncio
 import contextlib
+import json
 import os
 from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
@@ -155,6 +156,28 @@ def say(message: str) -> None:
     print(message, flush=True)
 
 
+async def request_bytes(
+    session: aiohttp.ClientSession,
+    instance: Instance,
+    method: str,
+    path: str,
+    access_token: str | None = None,
+    **options: Any,
+) -> bytes:
+    """Call Home Assistant's HTTP API and return the body it answers with, as it is."""
+    headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
+    async with session.request(
+        method, f"{instance.base_url}{path}", headers=headers, **options
+    ) as response:
+        body = await response.read()
+        if response.status >= 400:
+            raise HarnessFailure(
+                f"{method} {path} answered {response.status}: "
+                f"{body.decode(errors='replace')}"
+            )
+        return body
+
+
 async def request_json(
     session: aiohttp.ClientSession,
     instance: Instance,
@@ -164,14 +187,9 @@ async def request_json(
     **options: Any,
 ) -> Any:
     """Call Home Assistant's HTTP API and return the JSON it answers with."""
-    headers = {"Authorization": f"Bearer {access_token}"} if access_token else {}
-    async with session.request(
-        method, f"{instance.base_url}{path}", headers=headers, **options
-    ) as response:
-        body = await response.text()
-        if response.status >= 400:
-            raise HarnessFailure(f"{method} {path} answered {response.status}: {body}")
-        return await response.json(content_type=None)
+    body = await request_bytes(session, instance, method, path, access_token, **options)
+    # An answer with no body is no value, as aiohttp reads it.
+    return json.loads(body) if body.strip() else None
 
 
 async def wait_until_up(session: aiohttp.ClientSession, instance: Instance) -> None:

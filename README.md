@@ -9,11 +9,12 @@ off when the countdown ends.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
 
-> **Status:** version 0.4.0, the fourth phase. The core timer, settings for turning on
+> **Status:** version 0.5.0, the fifth phase. The core timer, settings for turning on
 > ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes"), weekly schedules
-> ("working days 06:30 to 07:15") and voice control through Assist ("turn on the boiler for
-> 10 minutes", "how long is left on the boiler") work and are described below. The
-> dashboard card is not built yet; see [What is not here yet](#what-is-not-here-yet).
+> ("working days 06:30 to 07:15"), voice control through Assist ("turn on the boiler for
+> 10 minutes", "how long is left on the boiler") and a dashboard card work and are described
+> below. The runtime counter is not built yet; see
+> [What is not here yet](#what-is-not-here-yet).
 
 ## What it does
 
@@ -44,6 +45,8 @@ schedule interval's window):
 - A countdown is whole minutes, up to one day.
 - A weekly schedule starts the countdown on its own at set times of the day; see
   [Schedules](#schedules).
+- A card on a dashboard shows the countdown, and its pop-up runs, extends and stops the timer;
+  see [Dashboard card](#dashboard-card).
 
 ### Targets
 
@@ -81,7 +84,7 @@ after it.
 | Entity | What it shows |
 | --- | --- |
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
-| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. |
+| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs, or when the countdown began before version 0.5.0); the card's fill is drawn from it. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
 | `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 
@@ -755,6 +758,201 @@ argument to any tool.
   saying a mode only one of them has to the other is refused with the list of the modes
   it has.
 
+## Dashboard card
+
+Timerify brings a card for one timer, `custom:timerify-card`. It shows the countdown at a
+glance, and a tap opens a pop-up where you run the timer for a set time, add or take off
+minutes, stop it, switch the intervals of its schedule and cancel pending commands. It has two
+layouts and a visual editor.
+
+### Installation
+
+There is nothing to add. Timerify serves the card and tells Home Assistant to load it on every
+dashboard, so there is no resource to create under **Dashboards**, and dashboards in YAML mode
+have it too. Home Assistant reads the list of modules to load when a page loads, so **refresh
+the browser once after installing or updating Timerify**.
+
+**Known issue on Home Assistant 2026.10.x.** On the first load of Home Assistant in a browser
+that has not cached its frontend yet (a first visit, after the site data was cleared, and the
+first load after the frontend was updated), a card that an integration loads can be missing:
+the dashboard shows "Configuration error" and "Custom element doesn't exist: timerify-card".
+Refresh the page once more and the card is there. This is a fault of Home Assistant's frontend
+([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890)) that
+every such card meets, and the frontend that Home Assistant 2026.11 ships fixes it. Timerify does
+not work around it.
+
+### The two layouts
+
+The **pill** is a card one row high. Its fill grows from the left and shows the share of the
+countdown that is left: full when the countdown starts, empty when it ends. On it are the icon
+of the target, its name, and the time left with the moment the countdown ends; when nothing
+counts, the state of the target stands in their place. An optional chip, "+15 min" in the
+picture, adds time without opening the pop-up.
+
+![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](docs/screenshots/card-pill.png)
+
+The **round** tile is made to sit several in a row. A ring shows the same share; the time left
+is in its centre while the countdown runs, and the icon of the target otherwise. The name is
+below. The round tile has no chip, and it can be long-pressed; see
+[The long press of the round tile](#the-long-press-of-the-round-tile).
+
+![The round layout: a ring two thirds full around 30:00, beside a timer that is off](docs/screenshots/card-round.png)
+
+- The name and the icon are the target's. The icon follows the target's state, as it does on any
+  card. Both can be set in the card's configuration.
+- A countdown that runs on without an end (loose mode, a target that is on with no countdown)
+  shows a full fill and a full ring, with the state of the target in words. An idle timer shows
+  an empty fill and an empty ring.
+- A countdown that began before Timerify was updated to 0.5.0 has no recorded beginning: its
+  fill stays full until the countdown ends or is set again.
+- A timer whose number is unavailable shows that, and the pop-up's buttons are off. If the
+  entity of the card does not exist, or is not the "Run for" number of a Timerify timer, the card
+  says so and names it, and finds its timer again by itself when the entity is back. After you
+  rename the number, point the card at its new entity id.
+- A countdown carries on across a restart of Home Assistant or a lost connection, to the same
+  end, and the card asks for its timer again when the connection returns.
+- In a dashboard with sections the pill starts 6 columns wide and one row high and can be made
+  as narrow as 3 columns; the round tile starts 3 columns wide and 2 rows high and can be made
+  2 columns wide or 3 rows high.
+
+### Add the card
+
+Edit a dashboard, choose **Add card** and find **Timerify** among the cards. The picker shows
+the first timer you have, and the editor opens with the form below. Or write the card in YAML.
+Every option is shown here with its default:
+
+```yaml
+type: custom:timerify-card
+entity: number.boiler_run_for   # required: the "Run for" number of the timer
+layout: pill                    # pill (the default) or round
+name: Boiler                    # default: the name of the target
+icon: mdi:water-boiler          # default: the icon of the target, which follows its state
+presets: [15, 30, 45, 60, 120]  # the default: minutes the pop-up offers
+chip: 15                        # no chip by default: the pill's "+15 min" chip
+```
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `entity` | none, required | The "Run for" `number` of a timer. The card finds the rest of the timer from it, never by device, so two timers on one device are told apart. |
+| `layout` | `pill` | `pill` or `round`. |
+| `name` | the target's name | Overrides the name. |
+| `icon` | the target's icon | An icon such as `mdi:water-boiler`, which does not follow the state. |
+| `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. |
+| `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
+
+An option the card does not know is ignored. A value it cannot use is shown as a message on the
+card that says what is wrong.
+
+The visual editor has a field for each option. It offers only the "Run for" numbers of Timerify
+timers, and a card added from the picker is written with `layout: pill` and the five default
+presets, so you see them. A few things about the editor:
+
+- It writes presets as text (`"15"`). Write them as text in YAML too if you edit the card in the
+  form afterwards: a list of numbers (`[15, 30]`) is shown in the form as bare chips ("15", not
+  "15 min"), and its drop-down offers the defaults again even when they are in the list;
+  picking one adds a second copy, which the card ignores.
+- Taking the last preset away leaves the list empty, which means the defaults.
+- A value the form accepts but the card cannot use, such as a preset of 0, stays in the form
+  while the preview shows the card's message. Only a value of the wrong kind (presets that are
+  not a list) sends the editor to YAML.
+- A card written by hand without `layout` is a pill, but the form does not preselect it:
+  Home Assistant's editor does not apply the defaults of a form.
+- The words of the editor are in the language of the last card the page loaded, and in English
+  before any card has.
+
+### The pop-up
+
+A tap anywhere on the card opens it, the border included, except on the chip, which has its own
+job. The card is a button for the keyboard and assistive technology too: focus it with Tab and
+press Enter or Space. The pop-up is a modal dialog; Escape, the **Close** button and a click on
+the dimmed page behind it close it. From top to bottom it holds:
+
+- **The time left**, and when it ends, while a countdown runs.
+- **The presets**: pressing one runs the timer for that long, as setting "Run for" does, and
+  restarts a countdown that runs.
+- **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown
+  runs. Adding time to a timer that is idle starts it, as `timerify.add_time` does. Stop turns
+  the target off and ends the countdown, with or without one.
+- **Schedule**, when the timer has intervals: a switch for each, named by its title, which
+  turns the interval's [switch](#the-switch-of-an-interval) on and off. Creating and editing
+  intervals is not done here; use the timer's page. An interval whose switch is unavailable is
+  shown as that and cannot be pressed.
+- **Pending commands**, when there are some: each as "On at 7:30 AM for 1 hr" or "Off at Tue
+  7:00 AM", with its settings ("Cool, 24 °C") and a × button that cancels it.
+- **Settings**, a link to the timer's page among the integration's. Only administrators see it.
+  It opens in the same tab and closes the pop-up; Ctrl, Cmd or Shift with the click open it in
+  a new tab or window, and the pop-up stays.
+
+A timer that is unavailable has nothing to act on: its presets, plus, minus, Stop and the cancel
+buttons are off. When Home Assistant refuses an action, it shows its own error message and the
+pop-up stays open.
+
+Times follow your profile: its language, its 12 or 24 hour clock and its time zone, the server's
+or the browser's. A time on the same day is shown as a time, within the next six days with the
+short weekday, and further ahead with the date. Durations such as "1 hr 30 min" are written
+for your language.
+
+### The long press of the round tile
+
+Hold the round tile for half a second: the ring starts to pulse, which means that letting go
+will act.
+
+- A timer that is idle runs, as `timerify.run` with no duration does. In strict mode the target
+  runs for the default duration; in loose mode it turns on with no countdown.
+- A timer that runs, with or without a countdown, stops.
+- A timer that is unavailable does nothing.
+
+Letting go early is an ordinary tap, and moving off the tile before letting go cancels the
+press. The pill has no long press: with a mouse a long press on it is a tap, and with a finger
+it does nothing. Keyboard users start and stop through the pop-up.
+
+### What the card does
+
+The card keeps no timer of its own. Everything it shows is read from the states of the timer's
+entities, and everything it does is a call to a service or an entity of Timerify's:
+
+| The card shows | Read from |
+| --- | --- |
+| The countdown and the fill | `sensor` Ends at and its `started_at` attribute, which says when the countdown began |
+| The state of the target, the name and the icon | The target's state |
+| The intervals | The interval switches |
+| The pending commands | The `commands` attribute of `sensor` Next command |
+
+| The card does | By |
+| --- | --- |
+| Runs for a preset, stops | `number.set_value` on "Run for" (0 stops) |
+| Adds or takes off time, the chip | `timerify.add_time` |
+| The long press on an idle timer | `timerify.run` with no duration |
+| Cancels a command | `timerify.cancel_command` |
+| Switches an interval | `switch.turn_on` and `switch.turn_off` on its switch |
+
+To tell which entities belong to its timer, the card asks Timerify through a websocket command,
+`timerify/timer`, which answers from the entry and the registry alone, so it gets an answer even
+while the timer is starting. Nothing counts down on the server for the card. The card counts
+once a second, only while a countdown runs and the card is on the page, with the browser's clock
+against the end time that the server reports. A clock that is wrong therefore changes the time
+left, never below 0:00, and the fill stays between empty and full; the end time shown, such as
+"until 4:42 PM", is the server's, and what you press always goes to the server.
+
+### Permissions
+
+The card and its pop-up work for every user who may see and control the timer's entities,
+administrators or not. A user who is not an administrator sees everything but the Settings link:
+that page is for administrators only. Timerify's websocket command is open to every user and
+tells a user only what the user may read: a user who may not read the number, the target or
+the two sensors of the timer gets no answer, and the card shows the timer as unavailable; an
+interval whose switch the user may not read is left out of the pop-up.
+
+The card's module is served to everyone, because the browser loads it before anyone has logged
+in.
+
+### Languages
+
+The card's own words, its buttons and messages, are in English and Russian, in the language of
+your profile; for any other language they are in English. Times, durations and numbers are
+written by the browser for your language, so they are right in every language. The names and
+states of entities are Home Assistant's.
+
 ## Installation
 
 ### With HACS
@@ -763,7 +961,8 @@ argument to any tool.
 2. Add `https://github.com/klimofey/timerify` with the type **Integration**.
 3. Find Timerify in HACS, download it, and restart Home Assistant.
 
-Home Assistant 2026.10.4 or newer is required.
+Home Assistant 2026.10.4 or newer is required. The dashboard card comes with Timerify; refresh
+the browser once after installing or updating, see [Dashboard card](#dashboard-card).
 
 ### By hand
 
@@ -792,21 +991,36 @@ Renaming the target, or moving it to another device, is followed: the timer keep
 
 ## What is not here yet
 
-Planned for later versions, none of it available in 0.4.0: a dashboard card. What cannot
-be said to Assist is listed under [What is not by voice](#what-is-not-by-voice).
+Planned for later versions, none of it available in 0.5.0: a runtime counter, a sensor
+that adds up how long the target was on. What cannot be said to Assist is listed under
+[What is not by voice](#what-is-not-by-voice), and what the card leaves to the timer's page
+(creating and editing schedule intervals) under [The pop-up](#the-pop-up).
 
 ## Verification
 
-What 0.4.0 was checked with before release:
+What 0.5.0 was checked with before release:
 
 - The test suite (`uv run pytest`): every rule above is a scenario, with time moved
   explicitly, among them the days the clock changes, Home Assistant down overnight, a
   Workday sensor that is away, and the real Workday integration for the Israeli week. The
   voice sentences are said to Home Assistant's real built-in agent, in both languages, and
   the LLM tools are called through the real Assist API; the sentence files are generated
-  from their sources and checked against the shipped ones.
+  from their sources and checked against the shipped ones. The beginning of a countdown
+  (`started_at`) is checked in every path that sets an end, across restarts, and the card's
+  websocket command for a user who may and one who may not read the timer's entities.
+- The card's own tests (`npm --prefix card test`): both layouts, the pop-up, the long press, the
+  editor and the picker, in English and Russian, with a stand-in for Home Assistant's frontend
+  object and time moved explicitly.
+- End-to-end tests of the card (`npm --prefix card run e2e`) in a real Home Assistant 2026.10.4
+  container with a real browser: both layouts, the pop-up's actions, the long press, the editor
+  and the picker, a user who is not an administrator, Russian, and a restart of Home Assistant
+  in the middle of a countdown. One test records the known issue on 2026.10 as an expected
+  failure.
 - `hassfest`, Home Assistant's own validation of an integration, reports no problems.
-- A smoke test in a real Home Assistant 2026.10.4 container (see below): the timer is
+- A smoke test in a real Home Assistant 2026.10.4 container (see below): the page that Home
+  Assistant serves loads the card's module at the address that carries the version of the
+  bundle, that address serves the bundle byte for byte, and the card's websocket command
+  tells the first timer's entities; the timer is
   added through the config flow, "Run for" 2 minutes turns the target on and off on time,
   and a 3 minute countdown survives a restart of the container and still ends on time. A
   pending command turns a switch that sits on a device on at its time and off a minute
@@ -835,6 +1049,39 @@ uv run mypy
 The tests run in parallel, one worker per core (`pytest-xdist`, set in `pyproject.toml`).
 `uv run pytest -n 0` runs them in one process, which a debugger or a plain stack trace needs.
 
+### The card
+
+The card is TypeScript ([Lit](https://lit.dev/)) in `card/`, a self-contained npm project that
+needs Node 26. esbuild bundles it into one file,
+`custom_components/timerify/frontend/timerify-card.js`. That file is committed, because HACS
+downloads the repository and there is no release build. The build is deterministic, and
+`build:check` rebuilds the bundle in memory and fails when the committed file differs, so a
+change of the sources and the bundle it makes go together. The words of the card are the
+`card_*` keys under `common` in `custom_components/timerify/translations/`, and the English
+ones are built into the bundle.
+
+```sh
+npm --prefix card ci                                # the exact locked packages
+npm --prefix card exec playwright install chromium  # once, for the end-to-end tests
+npm --prefix card run build                         # rebuild the committed bundle
+npm --prefix card run build:check                   # fail if the committed bundle is stale
+npm --prefix card run typecheck
+npm --prefix card test                              # unit and component tests: vitest, happy-dom
+npm --prefix card run e2e                           # end-to-end tests, in Docker
+npm --prefix card run screenshots                   # the two pictures of this README
+```
+
+The end-to-end tests need Docker with Compose. They start a throwaway Home Assistant 2026.10.4
+through the same harness as the smoke test (`scripts/harness/hass.py`), at
+`http://localhost:18124`, log in through the real login page in a real Chromium, run one after
+the other in New York time (so that a test can tell the browser's clock from the server's) and
+remove the container. The smoke test uses port 18123, so the two can run side by side.
+
+The pictures are not part of that run, because a countdown changes every second: the
+`screenshots` project fixes the browser's clock 15 minutes into a 45 minute countdown, which
+fixes the time left and the fill. The end time on the pill is the server's real one, so a rerun
+changes the pictures; refresh them by hand, and look at them, when the card's look changes.
+
 ### hassfest
 
 ```sh
@@ -849,7 +1096,9 @@ Needs Docker with Compose. It starts a throwaway Home Assistant 2026.10.4 with t
 checkout mounted, onboards it through its HTTP API, and adds timers for the entities that
 `scripts/harness/configuration.yaml` declares: a switch that sits on no device, the switch of
 Home Assistant's demo integration (which sits on a device), and a generic thermostat. It
-checks that a 2 minute countdown turns the first switch on and off, that a schedule
+checks that the page Home Assistant serves loads the card's module and serves its bundle
+unchanged, that the card's websocket command knows the first timer, that a 2 minute
+countdown turns the first switch on and off, that a schedule
 interval for today's weekday, added through the interval form to begin in a minute or two,
 turns the first switch on at its start and off two minutes later (its switch is on, on the
 timer's device), that the built-in agent, given the Voice settings through the config flow

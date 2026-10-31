@@ -1,6 +1,6 @@
 # Follow-ups
 
-Open items that the finished phases did not fix, with where they are as of the end of phase 4.
+Open items that the finished phases did not fix, with where they are as of the end of phase 5.
 Each line says what is wrong, why it is not fixed yet, and which phase should take it.
 Decisions that were made on purpose are in `RULINGS.md`, not here.
 
@@ -33,15 +33,45 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `pyproject.toml` (`:16`) and the image in `scripts/harness/compose.yaml` (`:8`) move
   together. When the harness runs 2026.11,
   `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:29`) and the
-  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:152`). The expected failure
+  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:157`). The expected failure
   rests on a race the card's module wins against the app's bundle (8 of 8 runs here): on a
   machine where the app's bundle wins, the test can pass unexpectedly on 2026.10 too, and that
   does not mean the frontend fix has arrived.
   `custom_components/timerify/card.py:51` (the registration). Investigation:
   `docs/research/2026-10-31-card-first-load.md`.
+- **Bump `happy-dom` from 21.0.3 to 21.0.4.** `npm ci` reports an advisory (GHSA-834v-8h66-3h79,
+  an incomplete fix for CVE-2026-33943) against 21.0.3, which 21.0.4 fixes. The package only
+  runs the card's tests and is not in the bundle, and every pin must be at least two weeks old
+  (`RULINGS.md`, phase 5): 21.0.4 was published on 2026-10-20, so it can be pinned on or after
+  2026-11-03. It is a reviewed change of `card/package.json` and `card/package-lock.json`, to be
+  made before 1.0.0.
 
 ## Later
 
+- **The card's countdown uses the browser's clock, with no offset to the server's.** The time
+  left is the server's end time minus `Date.now()`, so a device whose clock is wrong shows a time
+  left that is wrong by as much (never below 0:00; the end time shown is the server's). Home
+  Assistant's own timer card does the same. A correction would need a reading of the server's
+  clock, for example a websocket command that returns it, and it waits until a user needs it,
+  since every other card shows the same error. `card/src/timer.ts:68` (`timerView`, which
+  takes `now`) and `card/src/timerify-card.ts:258` (`Date.now()`).
+- **`timerify/timer` gains `runtime` when the runtime counter exists (phase 6).** The answer
+  names the entities the card reads, and the counter's sensor is not one of them yet; the
+  card does not show it. The key, the card's `TimerInfo` and the card's watched entities move
+  together. `custom_components/timerify/websocket.py:70-87` (`TimerInfo`),
+  `card/src/hass.ts:70-85` (`TimerInfo`) and `card/src/timer.ts:112` (`watchedEntities`).
+- **The editor's labels come from the last strings a card loaded.** The names of the layouts,
+  the labels of the preset options and the helper under them are in the language of
+  `lastLoaded()`, because the form that Home Assistant builds is given no way to translate them
+  and `getConfigForm` runs without `hass`. In a session where the editor opens before any card
+  has loaded its strings they are in English. The field labels use the frontend's own
+  `localize` and are not affected. A frontend that translates a form's option labels itself
+  would make `speaking()` unnecessary. `card/src/editor.ts:66-68` (`speaking`).
+- **`card/src/popup.ts` is about 590 lines, about 190 of them the styles.** It is one element
+  with one job and is left whole while it does not grow. If it grows, move the styles out
+  first, then the parser of the commands the "Next command" sensor lists, and give the
+  schedule and the commands their own elements last. `card/src/popup.ts:79` (`styles`), `:35`
+  (`pendingCommands`) and `:516` (`#commands`).
 - **A deleted target gives no sign.** `er.async_resolve_entity_id` returns the id even when the
   entity is gone from the registry, so a timer whose target was deleted still loads and drives
   nothing, with no message. `custom_components/timerify/controller.py:213-217`. It needs a

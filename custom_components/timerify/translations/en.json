@@ -499,6 +499,15 @@
     "card_close": "Close",
     "card_until": "until {time}",
     "card_add_time": "Add {duration}",
+    "card_subtract_time": "Take off {duration}",
+    "card_stop": "Stop",
+    "card_schedule": "Schedule",
+    "card_commands": "Pending commands",
+    "card_command_on": "On at {time}",
+    "card_command_on_for": "On at {time} for {duration}",
+    "card_command_off": "Off at {time}",
+    "card_cancel_command": "Cancel",
+    "card_settings": "Settings",
     "card_picker_description": "The countdown, presets and schedule of a Timerify timer"
   }
 }

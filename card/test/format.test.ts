@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatClock, formatMinutes, formatRemaining } from "../src/format";
-import { START, fakeHass } from "./fake-hass";
+import { formatClock, formatMinutes, formatRemaining, settingText } from "../src/format";
+import { AC, START, acTimer, fakeHass, type FakeHass } from "./fake-hass";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -125,5 +125,64 @@ describe("a length of time in minutes", () => {
     expect(formatMinutes(hass, 90)).toBe(`${hours(1)} ${minutes(30)}`);
     // Not a word of the English file, which the card never glues to a number.
     expect(formatMinutes(hass, 90)).not.toMatch(/\b(min|hr)\b/);
+  });
+});
+
+describe("a setting of a pending command", () => {
+  /** Home Assistant's formatters, told apart by what they say, over the AC (climate.ac). */
+  function formattingHass(language: "en" | "ru" = "en"): FakeHass {
+    const hass = fakeHass({ language, timers: [acTimer()] });
+    hass.formatEntityState = (entity, state) => `state of ${entity.entity_id}: ${state}`;
+    hass.formatEntityAttributeValue = (entity, attribute, value) =>
+      `${attribute} of ${entity.entity_id}: ${value}`;
+    return hass;
+  }
+  const settingOf = (hass: FakeHass, key: string, value: unknown) =>
+    settingText(hass, hass.states[AC], key, value);
+
+  it("names a mode as the target names its states", () => {
+    const hass = formattingHass();
+
+    expect(settingOf(hass, "hvac_mode", "cool")).toBe("state of climate.ac: cool");
+  });
+
+  it("writes a percentage as the user's language writes percentages", () => {
+    for (const language of ["en", "ru"] as const) {
+      const hass = formattingHass(language);
+      const percent = new Intl.NumberFormat(language, { style: "percent" });
+
+      for (const key of ["brightness_pct", "percentage", "humidity"]) {
+        expect(settingOf(hass, key, 80), `${key} in ${language}`).toBe(percent.format(0.8));
+      }
+    }
+    expect(settingOf(formattingHass(), "brightness_pct", 80)).toBe("80%");
+  });
+
+  it("keeps the fraction of a brightness that was not a whole number", () => {
+    expect(settingOf(formattingHass(), "brightness_pct", 37.5)).toBe("37.5%");
+  });
+
+  it("leaves every other setting to Home Assistant's way of writing the attribute", () => {
+    const hass = formattingHass();
+
+    for (const [key, value] of [
+      ["temperature", 24],
+      ["fan_mode", "auto"],
+      ["preset_mode", "sleep"],
+      ["mode", "away"],
+      ["operation_mode", "eco"],
+    ] as const) {
+      expect(settingOf(hass, key, value), key).toBe(`${key} of climate.ac: ${value}`);
+    }
+  });
+
+  it("says the value as it is when the target has no state to write it with", () => {
+    const hass = formattingHass();
+
+    expect(settingText(hass, undefined, "hvac_mode", "cool")).toBe("cool");
+    expect(settingText(hass, undefined, "temperature", 24)).toBe("24");
+    expect(settingText(hass, undefined, "humidity", 55)).toBe(
+      new Intl.NumberFormat("en", { style: "percent" }).format(0.55),
+    );
   });
 });

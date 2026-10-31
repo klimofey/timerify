@@ -90,6 +90,12 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
 }
 
 /**
+ * How long the frontend may take to start on a page, in milliseconds: to get its service
+ * worker in control, which is the slowest step, and to take its launch screen away.
+ */
+const STARTUP_WAIT = 40_000;
+
+/**
  * Gets the frontend's service worker in control, and returns when the frontend has started on
  * the page the worker serves. A page of ours can then be reloaded for good.
  *
@@ -107,7 +113,10 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
  * first-load.spec.ts.
  *
  * So: wait for the load the worker serves (a reload of our own would race the frontend's),
- * and for the frontend to have started on it.
+ * and for the frontend to have started on it. The frontend reloads when the worker takes
+ * control, which is after the worker has precached the frontend: under two seconds on a quiet
+ * machine, and measured at twenty on a busy one, so the wait is long, and never ends in a
+ * reload of ours.
  */
 async function primeServiceWorker(page: Page): Promise<void> {
   const servedByWorker = () =>
@@ -120,7 +129,7 @@ async function primeServiceWorker(page: Page): Promise<void> {
     .poll(
       // The frontend's own reload can destroy the page this asks: that is "not yet".
       () => servedByWorker().catch(() => false),
-      { message: "the service worker should serve the page" },
+      { message: "the service worker should serve the page", timeout: STARTUP_WAIT },
     )
     .toBe(true);
   await expect(page.locator("ha-sidebar")).toBeVisible();
@@ -142,6 +151,10 @@ function dashboardOpener(state: E2EState): OpenDashboard {
     }
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("timerify-card ha-card").first()).toBeVisible();
+    // The frontend's launch screen covers the whole page until it has faded out, and a press
+    // made before that lands on it, not on the card: Playwright's own click waits for what it
+    // presses to be reachable, a press at a point of the page (`press.ts`) does not.
+    await expect(page.locator("#ha-launch-screen")).toHaveCount(0, { timeout: STARTUP_WAIT });
   };
 }
 

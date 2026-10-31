@@ -499,6 +499,15 @@
     "card_close": "Закрыть",
     "card_until": "до {time}",
     "card_add_time": "Добавить {duration}",
+    "card_subtract_time": "Убавить {duration}",
+    "card_stop": "Остановить",
+    "card_schedule": "Расписание",
+    "card_commands": "Ожидающие команды",
+    "card_command_on": "Включить в {time}",
+    "card_command_on_for": "Включить в {time} на {duration}",
+    "card_command_off": "Выключить в {time}",
+    "card_cancel_command": "Отменить",
+    "card_settings": "Настройки",
     "card_picker_description": "Обратный отсчёт, готовые значения и расписание таймера Timerify"
   }
 }

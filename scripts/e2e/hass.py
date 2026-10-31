@@ -122,6 +122,21 @@ def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
                 ],
             },
             {
+                # The pop-up of both timers: the strict one has the interval, the loose
+                # one the pending command, and both have the default presets.
+                "title": "Pop-up",
+                "path": "popup",
+                "cards": [
+                    {
+                        "type": "vertical-stack",
+                        "cards": [
+                            timerify_card(strict, layout="pill"),
+                            timerify_card(loose, layout="pill"),
+                        ],
+                    }
+                ],
+            },
+            {
                 # What the screenshots of the documentation show: both timers in one
                 # stack, so that they are cut from the page as one picture.
                 "title": "Screenshots",

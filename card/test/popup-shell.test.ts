@@ -14,6 +14,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** A pointer event as a browser makes it for a mouse that is the primary pointer. */
+const pointer = (type: "pointerdown" | "pointerup" | "pointercancel") =>
+  new PointerEvent(type, {
+    bubbles: true,
+    composed: true,
+    cancelable: true,
+    isPrimary: true,
+    pointerId: 1,
+    pointerType: "mouse",
+  });
+
+/**
+ * A press that goes down on `from` and up on `to`, and the click the browser sends after it:
+ * to the nearest element that holds both (a press from the content to the backdrop is a click
+ * on the dialog, which holds the content).
+ */
+function press(from: Element, to: Element, clicked: Element) {
+  from.dispatchEvent(pointer("pointerdown"));
+  to.dispatchEvent(pointer("pointerup"));
+  clicked.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+}
+
 const dialogOf = (card: TimerifyCard) => {
   const dialog = popupOf(card).shadowRoot?.querySelector("dialog");
   if (!dialog) {
@@ -46,7 +68,7 @@ describe("the pop-up of the card", () => {
     expect(focusedInCard()).toBe(bodyOf(card));
 
     await opened(card);
-    dialogOf(card).click();
+    press(dialogOf(card), dialogOf(card), dialogOf(card));
     expect(dialogOf(card).open).toBe(false);
     expect(focusedInCard()).toBe(bodyOf(card));
 
@@ -54,6 +76,67 @@ describe("the pop-up of the card", () => {
     popup.shadowRoot?.querySelector<HTMLElement>(".wrapper")?.click();
     expect(dialogOf(card).open).toBe(true);
     expect(popup.opened).toBe(true);
+  });
+
+  describe("a click on the backdrop", () => {
+    const wrapperOf = (card: TimerifyCard) =>
+      popupOf(card).shadowRoot?.querySelector(".wrapper") as HTMLElement;
+
+    it("closes it only when the press began on the backdrop too", async () => {
+      const card = await mountCard(fakeHass());
+      await opened(card);
+
+      // A text selection that is dragged out of the content and let go over the backdrop is
+      // a click on the dialog, since it holds both ends. It is no click on the backdrop.
+      press(wrapperOf(card), dialogOf(card), dialogOf(card));
+
+      expect(dialogOf(card).open).toBe(true);
+      expect(popupOf(card).opened).toBe(true);
+    });
+
+    it("closes it only when the press ended on the backdrop too", async () => {
+      const card = await mountCard(fakeHass());
+      await opened(card);
+
+      press(dialogOf(card), wrapperOf(card), dialogOf(card));
+
+      expect(dialogOf(card).open).toBe(true);
+    });
+
+    it("is not made by a press that began on the title", async () => {
+      const card = await mountCard(fakeHass());
+      await opened(card);
+      const title = popupOf(card).shadowRoot?.querySelector("h2") as HTMLElement;
+
+      press(title, dialogOf(card), dialogOf(card));
+
+      expect(dialogOf(card).open).toBe(true);
+    });
+
+    it("needs a press of its own every time", async () => {
+      const card = await mountCard(fakeHass());
+      await opened(card);
+      press(dialogOf(card), dialogOf(card), dialogOf(card));
+      expect(dialogOf(card).open).toBe(false);
+
+      // Opened again, a click on the dialog that no press led to, as assistive technology
+      // may send, leaves it open.
+      await opened(card);
+      dialogOf(card).dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+
+      expect(dialogOf(card).open).toBe(true);
+    });
+
+    it("forgets a press that was cancelled", async () => {
+      const card = await mountCard(fakeHass());
+      await opened(card);
+
+      dialogOf(card).dispatchEvent(pointer("pointerdown"));
+      dialogOf(card).dispatchEvent(pointer("pointercancel"));
+      dialogOf(card).dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+
+      expect(dialogOf(card).open).toBe(true);
+    });
   });
 
   it("can be opened again after it was closed", async () => {

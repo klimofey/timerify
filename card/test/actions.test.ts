@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { addMinutes, runWithoutDuration, setMinutes } from "../src/actions";
+import {
+  STEP_MINUTES,
+  addMinutes,
+  cancelCommand,
+  runWithoutDuration,
+  setIntervalEnabled,
+  setMinutes,
+} from "../src/actions";
 import { NUMBER, fakeHass } from "./fake-hass";
 
 const target = { entity_id: NUMBER };
@@ -39,6 +46,33 @@ describe("what the card asks Timerify to do", () => {
     expect(Object.keys(hass.calls[0]?.data ?? { none: true })).toEqual([]);
   });
 
+  it("switches an interval of the schedule on and off through its own switch", async () => {
+    const hass = fakeHass();
+    const interval = "switch.boiler_schedule_06_30_07_15_mon_sun";
+
+    await setIntervalEnabled(hass, interval, false);
+    await setIntervalEnabled(hass, interval, true);
+
+    expect(hass.calls).toEqual([
+      { domain: "switch", service: "turn_off", data: {}, target: { entity_id: interval } },
+      { domain: "switch", service: "turn_on", data: {}, target: { entity_id: interval } },
+    ]);
+  });
+
+  it("cancels a pending command through the timer that owns it", async () => {
+    const hass = fakeHass();
+
+    await cancelCommand(hass, NUMBER, "c1");
+
+    expect(hass.calls).toEqual([
+      { domain: "timerify", service: "cancel_command", data: { command_id: "c1" }, target },
+    ]);
+  });
+
+  it("steps the countdown by five minutes", () => {
+    expect(STEP_MINUTES).toBe(5);
+  });
+
   it("leaves Home Assistant to tell the user when it refuses", async () => {
     const hass = fakeHass();
     hass.rejectNext(new Error("The timer refused"));
@@ -50,7 +84,11 @@ describe("what the card asks Timerify to do", () => {
     await expect(addMinutes(hass, NUMBER, 5)).resolves.toBeUndefined();
     hass.rejectNext(new Error("The timer refused"));
     await expect(runWithoutDuration(hass, NUMBER)).resolves.toBeUndefined();
-    expect(hass.calls).toHaveLength(3);
+    hass.rejectNext(new Error("The switch refused"));
+    await expect(setIntervalEnabled(hass, "switch.interval", true)).resolves.toBeUndefined();
+    hass.rejectNext(new Error("The timer refused"));
+    await expect(cancelCommand(hass, NUMBER, "c1")).resolves.toBeUndefined();
+    expect(hass.calls).toHaveLength(5);
   });
 
   it("lets the service notify on error, as it does by default", async () => {

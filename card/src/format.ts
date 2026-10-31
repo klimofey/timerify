@@ -1,6 +1,6 @@
 // Times and lengths of time, written the way the user's Home Assistant writes them: in the
 // language of the user's profile, in the clock and the time zone the profile chooses.
-import type { HomeAssistant } from "./hass";
+import type { HassEntity, HomeAssistant } from "./hass";
 
 type Locale = Pick<HomeAssistant, "locale">;
 
@@ -89,4 +89,35 @@ export function formatMinutes(hass: Locale, minutes: number): string {
     parts.push(unit(rest, "minute"));
   }
   return parts.join(" ");
+}
+
+/** The settings that are a share of something, given as a number from 0 to 100. */
+const PERCENT_SETTINGS = new Set(["brightness_pct", "percentage", "humidity"]);
+
+/**
+ * One setting of a pending command, as the user reads it. Home Assistant knows how to say
+ * the rest: a thermostat's mode in the words of its states, a temperature with its unit, a
+ * fan's or humidifier's mode in the words the integration gives it. Only a share of
+ * something is written here, as the user's language writes percentages. A target that has no
+ * state has nothing to say them with, and the value is told as it is.
+ */
+export function settingText(
+  hass: HomeAssistant,
+  target: HassEntity | undefined,
+  key: string,
+  value: unknown,
+): string {
+  if (PERCENT_SETTINGS.has(key) && typeof value === "number") {
+    return new Intl.NumberFormat(hass.locale.language, {
+      style: "percent",
+      // A brightness may be given to a tenth of a percent.
+      maximumFractionDigits: 1,
+    }).format(value / 100);
+  }
+  if (target === undefined) {
+    return String(value);
+  }
+  return key === "hvac_mode"
+    ? hass.formatEntityState(target, String(value))
+    : hass.formatEntityAttributeValue(target, key, value);
 }

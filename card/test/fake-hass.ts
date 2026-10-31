@@ -373,3 +373,17 @@ export function fakeHass(options: FakeHassOptions = {}): FakeHass {
     user: { is_admin: options.isAdmin ?? true },
   });
 }
+
+const MINUTE = 60_000;
+
+/**
+ * The boiler counting `minutes` from `began`, on a 24-hour clock unless the options say
+ * otherwise: Ends at holds the end, and says when the countdown began.
+ */
+export function counting(minutes: number, options: FakeHassOptions = {}, began = START): FakeHass {
+  return fakeHass({ timeFormat: "24", ...options }).state(
+    ENDS_AT,
+    new Date(began + minutes * MINUTE).toISOString(),
+    { started_at: new Date(began).toISOString() },
+  );
+}

@@ -7,9 +7,8 @@ import {
   ENDS_AT,
   NUMBER,
   START,
+  counting,
   fakeHass,
-  type FakeHass,
-  type FakeHassOptions,
 } from "./fake-hass";
 import { bodyOf, mountCard, popupOf, textOf } from "./mount";
 
@@ -32,15 +31,6 @@ const addTime = (minutes: number) => ({
   data: { minutes },
   target: { entity_id: NUMBER },
 });
-
-/** The boiler counting `minutes` from `began` (24-hour clock, Jerusalem time unless said). */
-function counting(minutes: number, options: FakeHassOptions = {}, began = START): FakeHass {
-  return fakeHass({ timeFormat: "24", ...options }).state(
-    ENDS_AT,
-    new Date(began + minutes * MINUTE).toISOString(),
-    { started_at: new Date(began).toISOString() },
-  );
-}
 
 const fillOf = (card: TimerifyCard) =>
   card.shadowRoot?.querySelector<HTMLElement>(".fill")?.style.width;

@@ -2,13 +2,14 @@
 // Everything it shows is read from the states of the timer's entities; everything it does
 // goes through Timerify's own services.
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
-import { addMinutes } from "./actions";
+import { addMinutes, runWithoutDuration, setMinutes } from "./actions";
 import { parseConfig, type CardConfig } from "./config";
 import { CountdownController } from "./countdown";
 import type { HomeAssistant } from "./hass";
-import { pillStyles, renderPill } from "./pill";
+import { commonStyles, pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
 import { PressController } from "./press";
+import { renderRound, roundStyles } from "./round";
 import { lastLoaded, loadStrings, onStringsLoaded, t } from "./strings";
 import {
   hasValue,
@@ -37,7 +38,9 @@ export class TimerifyCard extends LitElement {
   };
 
   static override styles = [
+    commonStyles,
     pillStyles,
+    roundStyles,
     css`
       :host {
         display: block;
@@ -60,8 +63,13 @@ export class TimerifyCard extends LitElement {
   readonly #pending = new Set<Promise<unknown>>();
   #lookingUp = false;
   #askAgain = false;
-  readonly #press = new PressController(this, { tap: () => this.#popup?.open() });
-  readonly #binding = this.#press.binding();
+  /** The pill is pressed with a tap alone: a long press on it is a tap with a mouse, or nothing. */
+  readonly #pillBinding = new PressController(this, { tap: () => this.#popup?.open() }).binding();
+  /** The round card also acts on a long press. */
+  readonly #roundBinding = new PressController(this, {
+    tap: () => this.#popup?.open(),
+    hold: () => this.#holdOnTimer(),
+  }).binding();
   /** The pill's chip: adds its minutes to the timer, whatever the card's clock says. */
   readonly #addChipMinutes = (): void => {
     const { _config: config, hass } = this;
@@ -191,6 +199,24 @@ export class TimerifyCard extends LitElement {
     return this.renderRoot.querySelector("timerify-card-popup");
   }
 
+  /**
+   * What a long press on the round card does: stops the timer when it runs, with a countdown
+   * or without; starts it, with no duration, when it is idle. A timer that is unavailable has
+   * nothing to act on.
+   */
+  #holdOnTimer(): void {
+    const { _config: config, hass } = this;
+    const state = this.#view?.state;
+    if (config === undefined || hass === undefined) {
+      return;
+    }
+    if (state === "counting" || state === "open") {
+      void setMinutes(hass, config.entity, 0);
+    } else if (state === "idle") {
+      void runWithoutDuration(hass, config.entity);
+    }
+  }
+
   /** What the user is told when the card has no timer to show, if anything. */
   #warning(hass: HomeAssistant, config: CardConfig): string | undefined {
     if (this._lookup.status !== "not_found") {
@@ -227,7 +253,9 @@ export class TimerifyCard extends LitElement {
     const view = timerView(hass, config, this._lookup, now);
     this.#view = view;
     return html`
-      ${renderPill(view, config, hass, this.#binding, this.#addChipMinutes, now)}
+      ${config.layout === "round"
+        ? renderRound(view, config, hass, this.#roundBinding, now)
+        : renderPill(view, config, hass, this.#pillBinding, this.#addChipMinutes, now)}
       ${this._lookup.status === "found"
         ? html`
             <timerify-card-popup

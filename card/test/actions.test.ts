@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMinutes, setMinutes } from "../src/actions";
+import { addMinutes, runWithoutDuration, setMinutes } from "../src/actions";
 import { NUMBER, fakeHass } from "./fake-hass";
 
 const target = { entity_id: NUMBER };
@@ -29,6 +29,16 @@ describe("what the card asks Timerify to do", () => {
     ]);
   });
 
+  it("runs the timer with no duration at all, and leaves it to Timerify to choose", async () => {
+    const hass = fakeHass();
+
+    await runWithoutDuration(hass, NUMBER);
+
+    // Nothing in the data: not even a missing duration, which the service would refuse.
+    expect(hass.calls).toEqual([{ domain: "timerify", service: "run", data: {}, target }]);
+    expect(Object.keys(hass.calls[0]?.data ?? { none: true })).toEqual([]);
+  });
+
   it("leaves Home Assistant to tell the user when it refuses", async () => {
     const hass = fakeHass();
     hass.rejectNext(new Error("The timer refused"));
@@ -38,7 +48,9 @@ describe("what the card asks Timerify to do", () => {
     await expect(setMinutes(hass, NUMBER, 45)).resolves.toBeUndefined();
     hass.rejectNext(new Error("The timer refused"));
     await expect(addMinutes(hass, NUMBER, 5)).resolves.toBeUndefined();
-    expect(hass.calls).toHaveLength(2);
+    hass.rejectNext(new Error("The timer refused"));
+    await expect(runWithoutDuration(hass, NUMBER)).resolves.toBeUndefined();
+    expect(hass.calls).toHaveLength(3);
   });
 
   it("lets the service notify on error, as it does by default", async () => {

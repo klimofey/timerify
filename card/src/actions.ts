@@ -31,3 +31,12 @@ export function setMinutes(hass: HomeAssistant, runFor: string, minutes: number)
 export function addMinutes(hass: HomeAssistant, runFor: string, minutes: number): Promise<void> {
   return callOnTimer(hass, "timerify", "add_time", { minutes }, runFor);
 }
+
+/**
+ * Runs the timer with no duration, which Timerify answers as it does a bare `timerify.run`:
+ * a strict timer runs for its default duration, a loose one turns its target on with no
+ * countdown, and a target that already runs keeps the countdown it has.
+ */
+export function runWithoutDuration(hass: HomeAssistant, runFor: string): Promise<void> {
+  return callOnTimer(hass, "timerify", "run", {}, runFor);
+}

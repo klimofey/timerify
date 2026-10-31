@@ -1,10 +1,12 @@
 // The pill in a real Home Assistant: it counts down a timer that was started somewhere else,
-// opens its pop-up from a tap anywhere on it but the chip, adds the chip's minutes without
-// opening the pop-up, and carries on to the same end when Home Assistant restarts.
+// opens its pop-up from a tap anywhere on it (its border too) but the chip, adds the chip's
+// minutes without opening the pop-up, and carries on to the same end when Home Assistant
+// restarts.
 // View "pill": one pill card on the strict timer, with a chip of 15.
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
+import { tapBorder } from "./press";
 import { hassWs } from "./ws";
 
 const NAME = "Smoke boiler";
@@ -89,6 +91,10 @@ test.describe("the pill in Home Assistant", () => {
       await page.keyboard.press("Escape");
       await expect(dialog).toBeHidden();
     }
+  });
+
+  test("opens the pop-up from a tap on the border of the card", async ({ page }) => {
+    await tapBorder(page, page.locator("timerify-card"));
   });
 
   test("adds the chip's minutes", async ({ page, state, ws }) => {

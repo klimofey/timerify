@@ -107,6 +107,21 @@ def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
                 ],
             },
             {
+                # Both timers as round cards side by side: what the tests of the long
+                # press and the picture of the round layout in the documentation show.
+                "title": "Round",
+                "path": "round",
+                "cards": [
+                    {
+                        "type": "horizontal-stack",
+                        "cards": [
+                            timerify_card(strict, layout="round"),
+                            timerify_card(loose, layout="round"),
+                        ],
+                    }
+                ],
+            },
+            {
                 # What the screenshots of the documentation show: both timers in one
                 # stack, so that they are cut from the page as one picture.
                 "title": "Screenshots",

@@ -35,7 +35,16 @@ function stateText(view: TimerView, config: CardConfig, hass: HomeAssistant): st
   return hass.formatEntityState(number ?? unavailable, "unavailable");
 }
 
-function renderStatus(view: TimerView, config: CardConfig, hass: HomeAssistant, now: number) {
+/**
+ * What the card says of the timer's state: the time left and when it ends while counting,
+ * else the state of the target (or that the timer is unavailable).
+ */
+export function renderStatus(
+  view: TimerView,
+  config: CardConfig,
+  hass: HomeAssistant,
+  now: number,
+) {
   if (view.state !== "counting" || view.endsAt === undefined) {
     return stateText(view, config, hass);
   }
@@ -103,21 +112,63 @@ export function renderPill(
   `;
 }
 
+/**
+ * What the layouts share. The body is the layer that is pressed: it covers the whole card,
+ * border included, under the content, and the content lets presses through to it, as in Home
+ * Assistant's tile card. The radius is the layout's own, `--timerify-radius` on `ha-card`.
+ */
+export const commonStyles = css`
+  .body {
+    position: absolute;
+    inset: 0;
+    /* Inset reaches the padding box; the card's border is part of what a press hits. */
+    margin: calc(-1 * var(--ha-card-border-width, 1px));
+    border-radius: var(--timerify-radius);
+    cursor: pointer;
+    /* A long touch must bring up neither a selection nor the browser's callout. */
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .body:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+  }
+  .content {
+    position: relative;
+    box-sizing: border-box;
+    height: 100%;
+    /* A press anywhere on the card reaches the body underneath, except on a control. */
+    pointer-events: none;
+  }
+  .icon {
+    color: var(--state-icon-color, var(--secondary-text-color));
+  }
+  .counting .icon,
+  .open .icon {
+    color: var(--state-active-color, var(--primary-color));
+  }
+  .unavailable .icon {
+    color: var(--state-unavailable-color, var(--disabled-text-color));
+  }
+  .name {
+    overflow: hidden;
+    color: var(--primary-text-color);
+    font-size: var(--ha-font-size-m, 14px);
+    font-weight: var(--ha-font-weight-medium, 500);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .remaining {
+    font-variant-numeric: tabular-nums;
+  }
+`;
+
 export const pillStyles = css`
   ha-card.pill {
     --timerify-radius: 28px;
     height: 56px;
     border-radius: var(--timerify-radius);
-  }
-  .body {
-    position: absolute;
-    inset: 0;
-    border-radius: var(--timerify-radius);
-    cursor: pointer;
-  }
-  .body:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
   }
   .fill-clip {
     position: absolute;
@@ -131,57 +182,33 @@ export const pillStyles = css`
     background: var(--state-active-color, var(--primary-color));
     opacity: 0.3;
   }
-  .content {
-    position: relative;
+  .pill .content {
     display: flex;
     align-items: center;
     gap: 12px;
-    box-sizing: border-box;
-    height: 100%;
     padding: 0 12px 0 8px;
-    /* A press anywhere on the card reaches the body underneath, except on the chip. */
-    pointer-events: none;
   }
-  .icon {
+  .pill .icon {
     display: flex;
     flex: none;
     align-items: center;
     justify-content: center;
     width: 40px;
     height: 40px;
-    color: var(--state-icon-color, var(--secondary-text-color));
   }
-  .counting .icon,
-  .open .icon {
-    color: var(--state-active-color, var(--primary-color));
-  }
-  .unavailable .icon {
-    color: var(--state-unavailable-color, var(--disabled-text-color));
-  }
-  .text {
+  .pill .text {
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
     min-width: 0;
   }
-  .name {
-    overflow: hidden;
-    color: var(--primary-text-color);
-    font-size: var(--ha-font-size-m, 14px);
-    font-weight: var(--ha-font-weight-medium, 500);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .status {
+  .pill .status {
     display: flex;
     gap: 6px;
     overflow: hidden;
     color: var(--secondary-text-color);
     font-size: var(--ha-font-size-s, 12px);
     white-space: nowrap;
-  }
-  .remaining {
-    font-variant-numeric: tabular-nums;
   }
   .chip {
     flex: none;

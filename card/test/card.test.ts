@@ -354,6 +354,30 @@ describe("its body", () => {
     expect(body.getAttribute("role")).toBe("button");
     expect(body.tabIndex).toBe(0);
   });
+
+  it("covers the card's border too, however wide the theme draws it", async () => {
+    for (const layout of ["pill", "round"]) {
+      const card = await mountCard(fakeHass(), { entity: NUMBER, layout });
+      card.style.setProperty("--ha-card-border-width", "3px");
+
+      // As Home Assistant's tile card does: the body reaches the card's padding box, so it
+      // is pulled out over the border by its width.
+      const { marginTop, marginRight, marginBottom, marginLeft } = getComputedStyle(bodyOf(card));
+      for (const side of [marginTop, marginRight, marginBottom, marginLeft]) {
+        expect(side, layout).toBe("calc(-1 * 3px)");
+      }
+      card.remove();
+    }
+  });
+
+  it("cannot be selected by a long touch", async () => {
+    for (const layout of ["pill", "round"]) {
+      const card = await mountCard(fakeHass(), { entity: NUMBER, layout });
+
+      expect(getComputedStyle(bodyOf(card)).userSelect, layout).toBe("none");
+      card.remove();
+    }
+  });
 });
 
 describe("its size", () => {

@@ -2,17 +2,22 @@
 // Everything it shows is read from the states of the timer's entities; everything it does
 // goes through Timerify's own services.
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
+import { addMinutes } from "./actions";
 import { parseConfig, type CardConfig } from "./config";
-import type { HassEntity, HomeAssistant } from "./hass";
-import { PressController } from "./press";
+import { CountdownController } from "./countdown";
+import type { HomeAssistant } from "./hass";
+import { pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
+import { PressController } from "./press";
 import { lastLoaded, loadStrings, onStringsLoaded, t } from "./strings";
 import {
+  hasValue,
   lookupTimer,
   mattersToRender,
   timerView,
   watchedEntities,
   type TimerLookup,
+  type TimerView,
 } from "./timer";
 
 const TAG = "timerify-card";
@@ -21,10 +26,6 @@ const GRID_OPTIONS = {
   pill: { columns: 6, rows: 1, min_columns: 3, min_rows: 1, max_rows: 1 },
   round: { columns: 3, rows: 2, min_columns: 2, min_rows: 2, max_rows: 3 },
 } as const;
-
-/** Whether an entity has a value: it exists, and is neither unavailable nor unknown. */
-const hasValue = (entity: HassEntity | undefined): boolean =>
-  entity !== undefined && entity.state !== "unavailable" && entity.state !== "unknown";
 
 export class TimerifyCard extends LitElement {
   static override properties = {
@@ -35,41 +36,21 @@ export class TimerifyCard extends LitElement {
     _lookup: { state: true },
   };
 
-  static override styles = css`
-    :host {
-      display: block;
-    }
-    ha-card {
-      height: 100%;
-    }
-    .body {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      box-sizing: border-box;
-      height: 100%;
-      min-height: 56px;
-      padding: 8px 16px;
-      border-radius: inherit;
-      cursor: pointer;
-    }
-    .body:focus-visible {
-      outline: 2px solid var(--primary-color);
-      outline-offset: 2px;
-    }
-    .name {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .warning {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 16px;
-      color: var(--warning-color);
-    }
-  `;
+  static override styles = [
+    pillStyles,
+    css`
+      :host {
+        display: block;
+      }
+      .warning {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px;
+        color: var(--warning-color);
+      }
+    `,
+  ];
 
   declare _config: CardConfig | undefined;
   declare _lookup: TimerLookup;
@@ -81,10 +62,20 @@ export class TimerifyCard extends LitElement {
   #askAgain = false;
   readonly #press = new PressController(this, { tap: () => this.#popup?.open() });
   readonly #binding = this.#press.binding();
+  /** The pill's chip: adds its minutes to the timer, whatever the card's clock says. */
+  readonly #addChipMinutes = (): void => {
+    const { _config: config, hass } = this;
+    if (config?.chip !== undefined && hass !== undefined) {
+      void addMinutes(hass, config.entity, config.chip);
+    }
+  };
+  /** What the last render showed of the timer: the countdown ticks while it has an end ahead. */
+  #view: TimerView | undefined;
 
   constructor() {
     super();
     this._lookup = { status: "pending" };
+    new CountdownController(this, () => this.#view?.endsAt);
   }
 
   get hass(): HomeAssistant | undefined {
@@ -222,6 +213,7 @@ export class TimerifyCard extends LitElement {
     }
     const warning = this.#warning(hass, config);
     if (warning) {
+      this.#view = undefined;
       return html`
         <ha-card>
           <div class="warning" role="alert">
@@ -232,25 +224,9 @@ export class TimerifyCard extends LitElement {
       `;
     }
     const view = timerView(hass, config, this._lookup, Date.now());
-    const icon =
-      "stateObj" in view.icon
-        ? html`<ha-state-icon .stateObj=${view.icon.stateObj}></ha-state-icon>`
-        : html`<ha-icon .icon=${view.icon.icon}></ha-icon>`;
+    this.#view = view;
     return html`
-      <ha-card>
-        <div
-          class="body"
-          role="button"
-          tabindex="0"
-          aria-haspopup="dialog"
-          @click=${this.#binding.click}
-          @keydown=${this.#binding.keydown}
-          @keyup=${this.#binding.keyup}
-        >
-          ${icon}
-          <span class="name">${view.name}</span>
-        </div>
-      </ha-card>
+      ${renderPill(view, config, hass, this.#binding, this.#addChipMinutes)}
       ${this._lookup.status === "found"
         ? html`
             <timerify-card-popup

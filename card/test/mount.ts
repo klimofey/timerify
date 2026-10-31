@@ -39,6 +39,11 @@ export function bodyOf(card: TimerifyCard): HTMLElement {
   return body;
 }
 
+/** The name the card shows, apart from whatever else it says. */
+export function nameOf(card: TimerifyCard): string {
+  return card.shadowRoot?.querySelector(".name")?.textContent?.trim() ?? "";
+}
+
 /** The words on the card itself, as a person reads them (the pop-up's are its own). */
 export function textOf(card: TimerifyCard): string {
   const copy = document.createElement("div");

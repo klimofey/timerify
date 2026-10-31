@@ -495,7 +495,10 @@
     "card_error_entity": "Выберите число «Включить на» таймера",
     "card_error_layout": "Вид карточки: pill или round",
     "card_error_presets": "Готовые значения — целые минуты от 1 до 1440",
+    "card_error_chip": "Быстрая кнопка — целые минуты от 1 до 1440",
     "card_close": "Закрыть",
+    "card_until": "до {time}",
+    "card_add_minutes": "Добавить {minutes} мин",
     "card_picker_description": "Обратный отсчёт, готовые значения и расписание таймера Timerify"
   }
 }

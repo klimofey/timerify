@@ -80,7 +80,16 @@ VIEWER = Account("viewer", "viewer-test-password")
 """A user who is not an administrator: a member of the group `system-users`."""
 
 
-def dashboard_config(strict: Timer) -> dict[str, Any]:
+QUICK_CHIP_MINUTES = 15
+"""The minutes of the chip on the pill of the strict timer."""
+
+
+def timerify_card(timer: Timer, **options: Any) -> dict[str, Any]:
+    """A card of the timer, as a user writes it into a dashboard."""
+    return {"type": "custom:timerify-card", "entity": timer.run_for, **options}
+
+
+def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
     """The views of the dashboard, one for each file of tests. Each task that adds a
     file of tests adds its view here."""
     return {
@@ -88,11 +97,29 @@ def dashboard_config(strict: Timer) -> dict[str, Any]:
             {
                 "title": "Dialog",
                 "path": "dialog",
+                "cards": [timerify_card(strict, layout="pill")],
+            },
+            {
+                "title": "Pill",
+                "path": "pill",
+                "cards": [
+                    timerify_card(strict, layout="pill", chip=QUICK_CHIP_MINUTES)
+                ],
+            },
+            {
+                # What the screenshots of the documentation show: both timers in one
+                # stack, so that they are cut from the page as one picture.
+                "title": "Screenshots",
+                "path": "screenshots",
                 "cards": [
                     {
-                        "type": "custom:timerify-card",
-                        "entity": strict.run_for,
-                        "layout": "pill",
+                        "type": "vertical-stack",
+                        "cards": [
+                            timerify_card(
+                                strict, layout="pill", chip=QUICK_CHIP_MINUTES
+                            ),
+                            timerify_card(loose, layout="pill"),
+                        ],
                     }
                 ],
             },
@@ -204,7 +231,7 @@ async def build_fixture(
         )
 
         say("Making the dashboard")
-        dashboard = dashboard_config(strict)
+        dashboard = dashboard_config(strict, loose)
         await socket.call(
             "lovelace/dashboards/create",
             url_path=DASHBOARD,

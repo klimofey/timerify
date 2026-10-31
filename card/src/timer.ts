@@ -24,6 +24,10 @@ export async function lookupTimer(hass: HomeAssistant, entityId: string): Promis
   }
 }
 
+/** Whether an entity has a value: it exists, and is neither unavailable nor unknown. */
+export const hasValue = (entity: HassEntity | undefined): boolean =>
+  entity !== undefined && entity.state !== "unavailable" && entity.state !== "unknown";
+
 /** Whether the target runs, by the rule Timerify counts it by; a state that is none does not. */
 export function targetRunning(
   target: HassEntity | undefined,

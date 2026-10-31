@@ -13,6 +13,8 @@ export interface CardConfig {
   icon?: string;
   /** The durations the pop-up offers, in minutes. */
   presets: number[];
+  /** The minutes the pill's chip adds; the round layout has no chip. */
+  chip?: number;
 }
 
 /** A config the card cannot work with; the message is for the user, in the loaded language. */
@@ -22,13 +24,16 @@ export class ConfigError extends Error {
   }
 }
 
-/** The minutes a preset stands for: a whole number from 1 to 1440, given as a number or as digits. */
-function minutesOf(preset: unknown): number | undefined {
+/**
+ * The minutes a preset or the chip stands for: a whole number from 1 to 1440, given as a
+ * number or as digits.
+ */
+function minutesOf(given: unknown): number | undefined {
   const minutes =
-    typeof preset === "number"
-      ? preset
-      : typeof preset === "string" && /^\d+$/.test(preset)
-        ? Number(preset)
+    typeof given === "number"
+      ? given
+      : typeof given === "string" && /^\d+$/.test(given)
+        ? Number(given)
         : undefined;
   const valid =
     minutes !== undefined && Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_MINUTES;
@@ -53,6 +58,17 @@ function parsePresets(raw: unknown): number[] {
   return [...presets];
 }
 
+function parseChip(raw: unknown): number | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const minutes = minutesOf(raw);
+  if (minutes === undefined) {
+    throw new ConfigError("card_error_chip");
+  }
+  return minutes;
+}
+
 /** Checks the config Home Assistant hands to `setConfig`; keys the card does not know are left out. */
 export function parseConfig(raw: unknown): CardConfig {
   const given = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
@@ -63,11 +79,13 @@ export function parseConfig(raw: unknown): CardConfig {
   if (layout !== "pill" && layout !== "round") {
     throw new ConfigError("card_error_layout");
   }
+  const chip = parseChip(given.chip);
   return {
     entity,
     layout,
     ...(typeof name === "string" && name !== "" && { name }),
     ...(typeof icon === "string" && icon !== "" && { icon }),
     presets: parsePresets(given.presets),
+    ...(chip !== undefined && { chip }),
   };
 }

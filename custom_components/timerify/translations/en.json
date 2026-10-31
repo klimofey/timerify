@@ -495,7 +495,10 @@
     "card_error_entity": "Choose the Run for number of a timer",
     "card_error_layout": "The layout is pill or round",
     "card_error_presets": "Presets are whole minutes from 1 to 1440",
+    "card_error_chip": "The quick chip is whole minutes from 1 to 1440",
     "card_close": "Close",
+    "card_until": "until {time}",
+    "card_add_minutes": "Add {minutes} min",
     "card_picker_description": "The countdown, presets and schedule of a Timerify timer"
   }
 }

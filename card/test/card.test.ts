@@ -18,7 +18,7 @@ import {
   localizeFor,
   type FakeHass,
 } from "./fake-hass";
-import { bodyOf, mountCard, popupOf, renders, textOf } from "./mount";
+import { bodyOf, mountCard, nameOf, popupOf, renders, textOf } from "./mount";
 
 // Another card of the page that registered itself before this one's module was loaded.
 const earlierCards = vi.hoisted(() => {
@@ -71,7 +71,7 @@ describe("finding its timer", () => {
     await card.updateComplete;
 
     expect(lookups(hass).map(({ entity_id }) => entity_id)).toEqual([NUMBER, AC_NUMBER]);
-    expect(textOf(card)).toBe("AC");
+    expect(nameOf(card)).toBe("AC");
   });
 
   it("does not ask again when only its looks change", async () => {
@@ -82,7 +82,7 @@ describe("finding its timer", () => {
     await card.updateComplete;
 
     expect(lookups(hass)).toHaveLength(1);
-    expect(textOf(card)).toBe("Water heater");
+    expect(nameOf(card)).toBe("Water heater");
   });
 
   it("asks one question at a time, and shows the answer to the newest", async () => {
@@ -103,7 +103,7 @@ describe("finding its timer", () => {
 
     hass.answerNext();
     await card.updateComplete;
-    expect(textOf(card)).toBe("AC");
+    expect(nameOf(card)).toBe("AC");
   });
 
   it("asks again when the connection returns", async () => {
@@ -159,7 +159,7 @@ describe("what it shows while it has no timer", () => {
     await card.updateComplete;
 
     expect(lookups(hass)).toHaveLength(2);
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
     expect(warningOf(card)).toBeNull();
   });
 
@@ -174,7 +174,7 @@ describe("what it shows while it has no timer", () => {
     await card.updateComplete;
 
     expect(lookups(hass)).toHaveLength(2);
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
   });
 
   it("asks again when the timer comes back after a restart", async () => {
@@ -188,7 +188,7 @@ describe("what it shows while it has no timer", () => {
     await card.updateComplete;
 
     expect(lookups(hass)).toHaveLength(2);
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
     expect(warningOf(card)).toBeNull();
   });
 
@@ -209,7 +209,7 @@ describe("what it shows of its timer", () => {
 
     const card = await mountCard(hass);
 
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
     const icon = card.shadowRoot?.querySelector("ha-state-icon") as { stateObj?: unknown };
     expect(icon.stateObj).toBe(hass.states[BOILER]);
   });
@@ -221,7 +221,7 @@ describe("what it shows of its timer", () => {
       icon: "mdi:water-boiler",
     });
 
-    expect(textOf(card)).toBe("Water heater");
+    expect(nameOf(card)).toBe("Water heater");
     expect(card.shadowRoot?.querySelector("ha-state-icon")).toBeNull();
     const icon = card.shadowRoot?.querySelector("ha-icon") as { icon?: string };
     expect(icon.icon).toBe("mdi:water-boiler");
@@ -233,11 +233,11 @@ describe("what it shows of its timer", () => {
     const hass = fakeHass({ timers: [timer] });
 
     const card = await mountCard(hass);
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
 
     card.hass = hass.state(EVENING, "on");
     await card.updateComplete;
-    expect(textOf(card)).toBe("Boiler");
+    expect(nameOf(card)).toBe("Boiler");
   });
 
   it("speaks Russian as soon as its strings arrive", async () => {

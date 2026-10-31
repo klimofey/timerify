@@ -67,6 +67,24 @@ describe("the config of the card", () => {
     expect(parseConfig({ entity: NUMBER, presets: [60, 5, 30] }).presets).toEqual([60, 5, 30]);
   });
 
+  it("has no quick chip unless it is given", () => {
+    expect(parseConfig({ entity: NUMBER })).not.toHaveProperty("chip");
+    expect(parseConfig({ entity: NUMBER, chip: undefined })).not.toHaveProperty("chip");
+  });
+
+  it("takes a quick chip of whole minutes, as the visual editor writes it", () => {
+    expect(parseConfig({ entity: NUMBER, chip: 15 }).chip).toBe(15);
+    expect(parseConfig({ entity: NUMBER, chip: "15" }).chip).toBe(15);
+    expect(parseConfig({ entity: NUMBER, chip: 1 }).chip).toBe(1);
+    expect(parseConfig({ entity: NUMBER, chip: 1440 }).chip).toBe(1440);
+  });
+
+  it("refuses a quick chip that is not whole minutes from 1 to 1440", () => {
+    for (const chip of [0, -5, 1441, 1.5, "1.5", "x", "", null, [15], true]) {
+      expect(refusal({ entity: NUMBER, chip }).key, JSON.stringify(chip)).toBe("card_error_chip");
+    }
+  });
+
   it("ignores what Home Assistant adds to a card", () => {
     const raw = {
       type: "custom:timerify-card",
@@ -101,5 +119,11 @@ describe("the errors of a card on a page that is not in English", () => {
     expect(() => second.setConfig({ entity: NUMBER, presets: [0] })).toThrow(
       russian.card_error_presets,
     );
+  });
+
+  it("words the error of a quick chip in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, chip: 1441 }).message).toBe(russian.card_error_chip);
   });
 });

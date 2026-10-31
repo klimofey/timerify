@@ -3,7 +3,8 @@ import { lastLoaded, t, type StringKey } from "./strings";
 
 export const DEFAULT_PRESETS = [15, 30, 45, 60, 120] as const;
 
-const MAX_MINUTES = 1440;
+/** The most minutes a preset or the chip can stand for: a day. */
+export const MAX_MINUTES = 1440;
 
 export interface CardConfig {
   /** The "Run for" number of the timer. */
@@ -11,7 +12,7 @@ export interface CardConfig {
   layout: "pill" | "round";
   name?: string;
   icon?: string;
-  /** The durations the pop-up offers, in minutes. */
+  /** The durations the pop-up offers, in minutes: the defaults when the config gives none. */
   presets: number[];
   /** The minutes the pill's chip adds; the round layout has no chip. */
   chip?: number;
@@ -41,10 +42,12 @@ function minutesOf(given: unknown): number | undefined {
 }
 
 function parsePresets(raw: unknown): number[] {
-  if (raw === undefined) {
+  // No list, and a list with nothing left in it (what the visual editor writes when the last
+  // preset is taken away), both leave it to the defaults.
+  if (raw === undefined || (Array.isArray(raw) && raw.length === 0)) {
     return [...DEFAULT_PRESETS];
   }
-  if (!Array.isArray(raw) || raw.length === 0) {
+  if (!Array.isArray(raw)) {
     throw new ConfigError("card_error_presets");
   }
   const presets = new Set<number>();

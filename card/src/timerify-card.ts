@@ -5,6 +5,7 @@ import { LitElement, css, html, nothing, type PropertyValues } from "lit";
 import { addMinutes, runWithoutDuration, setMinutes } from "./actions";
 import { parseConfig, type CardConfig } from "./config";
 import { CountdownController } from "./countdown";
+import { getConfigForm, getStubConfig } from "./editor";
 import type { HomeAssistant } from "./hass";
 import { commonStyles } from "./layout";
 import { pillStyles, renderPill } from "./pill";
@@ -55,6 +56,10 @@ export class TimerifyCard extends LitElement {
       }
     `,
   ];
+
+  /** The visual editor's form and the config of a card the user has just picked. */
+  static getConfigForm = getConfigForm;
+  static getStubConfig = getStubConfig;
 
   declare _config: CardConfig | undefined;
   declare _lookup: TimerLookup;

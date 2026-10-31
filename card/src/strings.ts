@@ -13,6 +13,11 @@ const CATEGORY = "common";
 const INTEGRATION = "timerify";
 const KEY_PREFIX = `component.${INTEGRATION}.${CATEGORY}.`;
 
+/** The name by which the frontend's `localize` knows the string `key`. */
+export function localizeName(key: StringKey): string {
+  return KEY_PREFIX + key;
+}
+
 function fill(text: string, blanks: Blanks | undefined): string {
   return text.replace(/\{(\w+)\}/g, (blank, name: string) => String(blanks?.[name] ?? blank));
 }
@@ -27,7 +32,7 @@ export function t(
   key: StringKey,
   blanks?: Blanks,
 ): string {
-  return hass?.localize(KEY_PREFIX + key, blanks) || fill(common[key], blanks);
+  return hass?.localize(localizeName(key), blanks) || fill(common[key], blanks);
 }
 
 let language: string | undefined;

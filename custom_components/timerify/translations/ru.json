@@ -508,6 +508,15 @@
     "card_command_off": "Выключить: {time}",
     "card_cancel_command": "Отменить",
     "card_settings": "Настройки",
-    "card_picker_description": "Обратный отсчёт, готовые значения и расписание таймера Timerify"
+    "card_picker_description": "Обратный отсчёт, готовые значения и расписание таймера Timerify",
+    "card_editor_entity": "Таймер",
+    "card_editor_layout": "Вид",
+    "card_editor_layout_pill": "Капсула",
+    "card_editor_layout_round": "Круг",
+    "card_editor_name": "Название",
+    "card_editor_icon": "Значок",
+    "card_editor_presets": "Готовые значения (минуты)",
+    "card_editor_presets_helper": "Если оставить пустым: {presets}",
+    "card_editor_chip": "Быстрая кнопка (минуты, только капсула)"
   }
 }

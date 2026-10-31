@@ -18,6 +18,11 @@ export interface OpenDashboardOptions {
    * there, whether or not the card is on it. True by default.
    */
   reload?: boolean;
+  /**
+   * Whether the view has no card of Timerify yet, because the test adds one: the page is then
+   * handed over once the card's element is defined, not once a card is shown. False by default.
+   */
+  emptyView?: boolean;
 }
 
 /** Logs in at the login page, as a user does, and shows the view of the fixture's dashboard. */
@@ -136,7 +141,7 @@ async function primeServiceWorker(page: Page): Promise<void> {
 }
 
 function dashboardOpener(state: E2EState): OpenDashboard {
-  return async (page, view, { user = "admin", reload = true } = {}) => {
+  return async (page, view, { user = "admin", reload = true, emptyView = false } = {}) => {
     const account = state.users[user];
     const path = `/${state.dashboard}/${view}`;
     await page.goto(path);
@@ -150,7 +155,15 @@ function dashboardOpener(state: E2EState): OpenDashboard {
       return;
     }
     await page.reload({ waitUntil: "load" });
-    await expect(page.locator("timerify-card ha-card").first()).toBeVisible();
+    if (emptyView) {
+      await expect
+        .poll(() => page.evaluate(() => customElements.get("timerify-card") !== undefined), {
+          message: "the card's element should be defined",
+        })
+        .toBe(true);
+    } else {
+      await expect(page.locator("timerify-card ha-card").first()).toBeVisible();
+    }
     // The frontend's launch screen covers the whole page until it has faded out, and a press
     // made before that lands on it, not on the card: Playwright's own click waits for what it
     // presses to be reachable, a press at a point of the page (`press.ts`) does not.

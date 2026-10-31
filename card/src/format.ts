@@ -2,7 +2,7 @@
 // language of the user's profile, in the clock and the time zone the profile chooses.
 import type { HassEntity, HomeAssistant } from "./hass";
 
-type Locale = Pick<HomeAssistant, "locale">;
+type Locale = { locale: Pick<HomeAssistant["locale"], "language"> };
 
 const pad = (value: number): string => String(value).padStart(2, "0");
 

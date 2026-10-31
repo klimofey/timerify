@@ -508,6 +508,15 @@
     "card_command_off": "Off at {time}",
     "card_cancel_command": "Cancel",
     "card_settings": "Settings",
-    "card_picker_description": "The countdown, presets and schedule of a Timerify timer"
+    "card_picker_description": "The countdown, presets and schedule of a Timerify timer",
+    "card_editor_entity": "Timer",
+    "card_editor_layout": "Layout",
+    "card_editor_layout_pill": "Pill",
+    "card_editor_layout_round": "Round",
+    "card_editor_name": "Name",
+    "card_editor_icon": "Icon",
+    "card_editor_presets": "Duration presets (minutes)",
+    "card_editor_presets_helper": "Leave empty for {presets}",
+    "card_editor_chip": "Quick add chip (minutes, pill only)"
   }
 }

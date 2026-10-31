@@ -137,6 +137,13 @@ def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
                 ],
             },
             {
+                # Empty: the editor tests add a card to it from the card picker, and the
+                # reset that every test starts with saves the dashboard as it was.
+                "title": "Editor",
+                "path": "editor",
+                "cards": [],
+            },
+            {
                 # What the screenshots of the documentation show: both timers in one
                 # stack, so that they are cut from the page as one picture.
                 "title": "Screenshots",

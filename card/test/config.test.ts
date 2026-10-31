@@ -51,12 +51,18 @@ describe("the config of the card", () => {
   });
 
   it("refuses presets that are not whole minutes from 1 to 1440", () => {
-    for (const presets of [[], [0], [1.5], ["x"], ["1.5"], [1441], [15, 0], 15, "15"]) {
+    for (const presets of [[0], [1.5], ["x"], ["1.5"], [1441], [15, 0], 15, "15"]) {
       expect(refusal({ entity: NUMBER, presets }).key, JSON.stringify(presets)).toBe(
         "card_error_presets",
       );
     }
     expect(parseConfig({ entity: NUMBER, presets: [1, 1440] }).presets).toEqual([1, 1440]);
+  });
+
+  it("offers the default presets when none are left", () => {
+    // The visual editor writes this when the user takes the last preset away, and tells the
+    // user that an empty list stands for the defaults.
+    expect(parseConfig({ entity: NUMBER, presets: [] }).presets).toEqual([...DEFAULT_PRESETS]);
   });
 
   it("takes presets as the visual editor writes them", () => {

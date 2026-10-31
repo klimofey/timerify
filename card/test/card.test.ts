@@ -348,19 +348,6 @@ describe("its body", () => {
     expect(dialogOf(card)?.open).toBe(true);
   });
 
-  it("ignores a press that comes from a button inside it", async () => {
-    const { card, popup, body } = await opening();
-    const button = document.createElement("button");
-    body.append(button);
-
-    button.click();
-    button.dispatchEvent(key("keydown", "Enter"));
-    button.dispatchEvent(key("keyup", " "));
-    await popup.updateComplete;
-
-    expect(dialogOf(card)?.open).toBe(false);
-  });
-
   it("can be reached with the keyboard", async () => {
     const { body } = await opening();
 

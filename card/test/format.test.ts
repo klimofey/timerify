@@ -126,10 +126,4 @@ describe("a length of time in minutes", () => {
     // Not a word of the English file, which the card never glues to a number.
     expect(formatMinutes(hass, 90)).not.toMatch(/\b(min|hr)\b/);
   });
-
-  it("writes minutes without grouping", () => {
-    // The longest a timer runs: a day. Nothing of it is written with a group separator.
-    expect(formatMinutes(fakeHass(), 1440)).toBe(units("en", "hour")(24));
-    expect(formatMinutes(fakeHass({ language: "ru" }), 1440)).toBe(units("ru", "hour")(24));
-  });
 });

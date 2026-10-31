@@ -2,8 +2,10 @@
 // changes with every second, so these run on their own (`npm --prefix card run screenshots`)
 // with the browser's clock fixed 15 minutes after the countdown began, which makes the card
 // show the same time left and the same fill every time. The end time it shows is the
-// server's, which is the time the run began plus 45 minutes. Run them when the card's look
-// changes, look at the pictures, and commit them.
+// server's, which is the time the run began plus 45 minutes, so a rerun changes the picture
+// by that: do not run these to check anything. Run them when the card's look changes, look at
+// the pictures (time left 30:00, the fill two thirds, every icon and state drawn), and commit
+// them.
 import { join } from "node:path";
 import { REPO_ROOT } from "./constants";
 import { expect, test } from "./fixtures";
@@ -27,7 +29,15 @@ test("pill", async ({ page, openDashboard, state, ws }) => {
 
   const cards = page.locator("timerify-card");
   await expect(cards).toHaveCount(2);
-  await expect(cards.first().getByText("30:00", { exact: true })).toBeVisible();
+  const [counting, idle] = [cards.nth(0), cards.nth(1)];
+  // Take the picture when it is complete: what each card says (the countdown on the one,
+  // the state of its target on the other) and, for each, the icon, which the frontend
+  // draws a moment after the card.
+  await expect(counting.getByText("30:00", { exact: true })).toBeVisible();
+  await expect(idle.getByText("Off", { exact: true })).toBeVisible();
+  for (const card of [counting, idle]) {
+    await expect(card.locator(".icon svg path[d]").first()).toBeAttached();
+  }
   const boxes = await Promise.all((await cards.all()).map((card) => card.boundingBox()));
   const found = boxes.filter((box) => box !== null);
   expect(found).toHaveLength(2);

@@ -1,7 +1,8 @@
 // How a person presses the card. One rule serves every layout: a tap is the `click` event of
 // the card's body, which a mouse, a finger, a keyboard and assistive technology all produce.
 // A body that is not a native button gets no `click` from the keyboard, so Enter and Space call
-// the same handler. A `<button>` inside the body, such as the "+N" chip, is not part of the body.
+// the same handler. A control beside the body, such as the "+N" chip, is not part of it, so
+// its presses never get here.
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 
 export interface PressActions {
@@ -13,19 +14,6 @@ export interface PressBinding {
   click(event: MouseEvent): void;
   keydown(event: KeyboardEvent): void;
   keyup(event: KeyboardEvent): void;
-}
-
-/** Whether the event came from a `<button>` between its target and the body that listens. */
-function fromButtonInside(event: Event): boolean {
-  for (const node of event.composedPath()) {
-    if (node === event.currentTarget) {
-      return false;
-    }
-    if (node instanceof HTMLButtonElement) {
-      return true;
-    }
-  }
-  return false;
 }
 
 export class PressController implements ReactiveController {
@@ -44,15 +32,8 @@ export class PressController implements ReactiveController {
 
   binding(): PressBinding {
     return {
-      click: (event) => {
-        if (!fromButtonInside(event)) {
-          this.#actions.tap();
-        }
-      },
+      click: () => this.#actions.tap(),
       keydown: (event) => {
-        if (fromButtonInside(event)) {
-          return;
-        }
         if (event.key === "Enter") {
           // The press opens a dialog that takes the focus; without this the browser would
           // go on to press the button the focus has moved to.
@@ -72,7 +53,7 @@ export class PressController implements ReactiveController {
         }
         const armed = this.#spaceDown;
         this.#spaceDown = false;
-        if (armed && !fromButtonInside(event)) {
+        if (armed) {
           this.#actions.tap();
         }
       },

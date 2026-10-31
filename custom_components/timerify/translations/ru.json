@@ -498,7 +498,7 @@
     "card_error_chip": "Быстрая кнопка — целые минуты от 1 до 1440",
     "card_close": "Закрыть",
     "card_until": "до {time}",
-    "card_add_minutes": "Добавить {minutes} мин",
+    "card_add_time": "Добавить {duration}",
     "card_picker_description": "Обратный отсчёт, готовые значения и расписание таймера Timerify"
   }
 }

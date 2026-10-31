@@ -11,7 +11,7 @@ import {
   type FakeHass,
   type FakeHassOptions,
 } from "./fake-hass";
-import { mountCard, popupOf, textOf } from "./mount";
+import { bodyOf, mountCard, popupOf, textOf } from "./mount";
 
 const MINUTE = 60_000;
 const SECOND = 1000;
@@ -262,20 +262,37 @@ describe("the quick chip", () => {
     expect(card.shadowRoot?.querySelector("button")).toBeNull();
   });
 
-  it("is labelled with the minutes it adds", async () => {
+  it("is labelled with the time it adds", async () => {
     const card = await mountCard(counting(45), { entity: NUMBER, chip: 15 });
 
     expect(chipOf(card).textContent?.trim()).toBe("+15 min");
     expect(chipOf(card).getAttribute("aria-label")).toBe(
-      english.card_add_minutes.replace("{minutes}", "15"),
+      english.card_add_time.replace("{duration}", "15 min"),
     );
   });
 
-  it("reads a long chip in hours, and a minute count without grouping", async () => {
+  it("reads the longest chip, a day, in hours", async () => {
     const card = await mountCard(fakeHass(), { entity: NUMBER, chip: 1440 });
 
     expect(chipOf(card).textContent?.trim()).toBe("+24 hr");
-    expect(chipOf(card).getAttribute("aria-label")).toBe("Add 1440 min");
+    expect(chipOf(card).getAttribute("aria-label")).toBe(
+      english.card_add_time.replace("{duration}", "24 hr"),
+    );
+  });
+
+  it("is spoken as it is written, so that a voice user can say what they see", async () => {
+    for (const language of ["en", "ru"] as const) {
+      const card = await mountCard(counting(45, { language }), { entity: NUMBER, chip: 15 });
+      for (const chip of [15, 60, 90, 125, 1440]) {
+        card.setConfig({ entity: NUMBER, chip });
+        await card.updateComplete;
+
+        const written = chipOf(card).textContent?.trim().replace(/^\+/, "");
+        expect(written, `${chip} minutes in ${language}`).toMatch(/\S/);
+        expect(chipOf(card).getAttribute("aria-label")).toContain(written);
+      }
+      card.remove();
+    }
   });
 
   it("adds the chip's minutes without opening the pop-up", async () => {
@@ -310,6 +327,25 @@ describe("the quick chip", () => {
     expect(dialogOf(card)?.open).toBe(false);
   });
 
+  it("is a control of its own, beside the button that opens the pop-up", async () => {
+    const card = await mountCard(counting(45), { entity: NUMBER, chip: 15 });
+
+    const body = bodyOf(card);
+    expect(body.contains(chipOf(card))).toBe(false);
+    expect(chipOf(card).closest('[role="button"]')).toBeNull();
+    expect(card.shadowRoot?.querySelectorAll("button, [role='button']")).toHaveLength(2);
+  });
+
+  it("names the button that opens the pop-up by the name and the state, not by the chip", async () => {
+    const card = await mountCard(counting(45), { entity: NUMBER, chip: 15 });
+
+    const label = card.shadowRoot?.getElementById(
+      bodyOf(card).getAttribute("aria-labelledby") ?? "",
+    );
+
+    expect(label?.textContent?.replace(/\s+/g, " ").trim()).toBe(`Boiler 45:00 ${until("09:45")}`);
+  });
+
   it("leaves the rest of the pill to open the pop-up", async () => {
     const hass = counting(45);
     const card = await mountCard(hass, { entity: NUMBER, chip: 15 });
@@ -338,7 +374,7 @@ describe("the quick chip", () => {
         `+${minutes(chip, "minute")}`,
       );
       expect(chipOf(card).getAttribute("aria-label")).toBe(
-        russian.card_add_minutes.replace("{minutes}", String(chip)),
+        russian.card_add_time.replace("{duration}", minutes(chip, "minute")),
       );
     }
     card.setConfig({ entity: NUMBER, chip: 90 });

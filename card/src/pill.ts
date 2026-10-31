@@ -47,8 +47,11 @@ function renderStatus(view: TimerView, config: CardConfig, hass: HomeAssistant, 
 }
 
 /**
- * The card as a pill. Its body is a button, pressed through `binding`, that opens the pop-up;
- * `chip` is called when the chip is pressed, which the body does not take for a press of its own.
+ * The card as a pill, drawn at the instant `now` that `view` was made for. Its body is an
+ * empty layer under the content, as in Home Assistant's tile card: a button, pressed through
+ * `binding`, that opens the pop-up, named by the name and the state it covers. The content
+ * above lets presses through to it, except the chip, a button of its own beside the body:
+ * `chip` is called when it is pressed, and the body never hears of it.
  */
 export function renderPill(
   view: TimerView,
@@ -56,15 +59,17 @@ export function renderPill(
   hass: HomeAssistant,
   binding: PressBinding,
   chip: () => void,
+  now: number,
 ): TemplateResult {
   const filled = Math.round(view.progress * 1000) / 10;
   return html`
-    <ha-card class="pill">
+    <ha-card class="pill ${view.state}">
       <div
-        class="body ${view.state}"
+        class="body"
         role="button"
         tabindex="0"
         aria-haspopup="dialog"
+        aria-labelledby="label"
         @click=${binding.click}
         @keydown=${binding.keydown}
         @keyup=${binding.keyup}
@@ -72,10 +77,12 @@ export function renderPill(
         <span class="fill-clip" aria-hidden="true">
           <span class="fill" style=${styleMap({ width: `${filled}%` })}></span>
         </span>
+      </div>
+      <div class="content">
         <span class="icon">${renderIcon(view)}</span>
-        <span class="text">
+        <span class="text" id="label">
           <span class="name">${view.name}</span>
-          <span class="status">${renderStatus(view, config, hass, Date.now())}</span>
+          <span class="status">${renderStatus(view, config, hass, now)}</span>
         </span>
         ${config.chip === undefined
           ? nothing
@@ -83,7 +90,9 @@ export function renderPill(
               <button
                 class="chip"
                 type="button"
-                aria-label=${t(hass, "card_add_minutes", { minutes: config.chip })}
+                aria-label=${t(hass, "card_add_time", {
+                  duration: formatMinutes(hass, config.chip),
+                })}
                 @click=${chip}
               >
                 +${formatMinutes(hass, config.chip)}
@@ -101,13 +110,8 @@ export const pillStyles = css`
     border-radius: var(--timerify-radius);
   }
   .body {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    box-sizing: border-box;
-    height: 100%;
-    padding: 0 12px 0 8px;
+    position: absolute;
+    inset: 0;
     border-radius: var(--timerify-radius);
     cursor: pointer;
   }
@@ -120,7 +124,6 @@ export const pillStyles = css`
     inset: 0;
     overflow: hidden;
     border-radius: var(--timerify-radius);
-    pointer-events: none;
   }
   .fill {
     display: block;
@@ -128,8 +131,18 @@ export const pillStyles = css`
     background: var(--state-active-color, var(--primary-color));
     opacity: 0.3;
   }
-  .icon {
+  .content {
     position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-sizing: border-box;
+    height: 100%;
+    padding: 0 12px 0 8px;
+    /* A press anywhere on the card reaches the body underneath, except on the chip. */
+    pointer-events: none;
+  }
+  .icon {
     display: flex;
     flex: none;
     align-items: center;
@@ -146,7 +159,6 @@ export const pillStyles = css`
     color: var(--state-unavailable-color, var(--disabled-text-color));
   }
   .text {
-    position: relative;
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
@@ -172,7 +184,6 @@ export const pillStyles = css`
     font-variant-numeric: tabular-nums;
   }
   .chip {
-    position: relative;
     flex: none;
     height: 32px;
     padding: 0 12px;
@@ -183,6 +194,7 @@ export const pillStyles = css`
     font: inherit;
     font-size: var(--ha-font-size-m, 14px);
     cursor: pointer;
+    pointer-events: auto;
   }
   .chip:focus-visible {
     outline: 2px solid var(--primary-color);

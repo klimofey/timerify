@@ -223,10 +223,11 @@ export class TimerifyCard extends LitElement {
         </ha-card>
       `;
     }
-    const view = timerView(hass, config, this._lookup, Date.now());
+    const now = Date.now();
+    const view = timerView(hass, config, this._lookup, now);
     this.#view = view;
     return html`
-      ${renderPill(view, config, hass, this.#binding, this.#addChipMinutes)}
+      ${renderPill(view, config, hass, this.#binding, this.#addChipMinutes, now)}
       ${this._lookup.status === "found"
         ? html`
             <timerify-card-popup

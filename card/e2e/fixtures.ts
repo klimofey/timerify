@@ -112,10 +112,10 @@ const WORKER_WAIT = 40_000;
  * scoped custom element registry that knows nothing of it, so the dashboard shows "Custom
  * element doesn't exist: timerify-card" until the next load. Every load after it takes the
  * app file from the browser's cache, and shows the card. This is a frontend bug,
- * https://github.com/home-assistant/frontend/issues/53890, fixed in frontend 20261028 (Home
- * Assistant 2026.11) by https://github.com/home-assistant/frontend/pull/54444. The
- * investigation is in docs/research/2026-10-31-card-first-load.md; the test that shows it is
- * first-load.spec.ts.
+ * https://github.com/home-assistant/frontend/issues/53890, fixed by
+ * https://github.com/home-assistant/frontend/pull/54444 in frontend 20261028.0 and later,
+ * which Home Assistant 2026.11 is expected to carry. The investigation is in
+ * docs/research/2026-10-31-card-first-load.md; the test that shows it is first-load.spec.ts.
  *
  * So: wait for the load the worker serves (a reload of our own would race the frontend's),
  * and for the frontend to have started on it. The frontend reloads when the worker takes

@@ -4,12 +4,10 @@
 // own states, never from what the pop-up says.
 // View "popup": the strict timer's pill, which has the interval, and the loose timer's, which
 // has the fixture's pending command.
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
-import { REPO_ROOT } from "./constants";
 import { expect, test } from "./fixtures";
 import { tap } from "./press";
+import { stringsIn } from "./strings";
 import { hassWs } from "./ws";
 
 /** The browser's time zone, which the user's profile follows by default (the config's). */
@@ -34,15 +32,6 @@ function clockText(language: string, hourCycle: "h12" | "h23", moment: number): 
     options.weekday = "short";
   }
   return new Intl.DateTimeFormat(language, options).format(moment).replace(/\s+/g, " ");
-}
-
-/** The words of the card in Russian, read from the file the integration serves them from. */
-async function russianStrings(): Promise<Record<string, string>> {
-  const file = join(REPO_ROOT, "custom_components", "timerify", "translations", "ru.json");
-  const translations = JSON.parse(await readFile(file, "utf8")) as {
-    common: Record<string, string>;
-  };
-  return translations.common;
 }
 
 /** The cards of the view, in the order of the dashboard: the strict timer's, the loose one's. */
@@ -191,7 +180,7 @@ test.describe("the pop-up in Home Assistant", () => {
     test.use({ locale: "ru-RU" });
 
     test("speaks Russian", async ({ page, state, ws }) => {
-      const ru = await russianStrings();
+      const ru = await stringsIn("ru");
       const { strict: entities } = state.timers;
       await ws.callService("number", "set_value", { value: 45 }, { entity_id: entities.run_for });
       const end = Date.parse(String((await ws.state(entities.ends_at))?.state));

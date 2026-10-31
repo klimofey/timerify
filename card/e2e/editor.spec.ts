@@ -3,21 +3,11 @@
 // the card's schema, and sees a mistake in the YAML as an error. What the form saved is read
 // back from Home Assistant's own dashboard configuration.
 // View "editor": it has no card, the tests add one.
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import type { Page } from "@playwright/test";
-import { REPO_ROOT, type E2EState, type TimerEntities } from "./constants";
+import type { E2EState, TimerEntities } from "./constants";
 import { expect, test } from "./fixtures";
 import { tap } from "./press";
-
-/** The words of the card in a language, read from the file the integration serves them from. */
-async function stringsIn(language: "en" | "ru"): Promise<Record<string, string>> {
-  const file = join(REPO_ROOT, "custom_components", "timerify", "translations", `${language}.json`);
-  const translations = JSON.parse(await readFile(file, "utf8")) as {
-    common: Record<string, string>;
-  };
-  return translations.common;
-}
+import { stringsIn } from "./strings";
 
 const english = await stringsIn("en");
 

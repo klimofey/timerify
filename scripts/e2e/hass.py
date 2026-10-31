@@ -11,8 +11,10 @@ Home Assistant to restart runs `restart`.
 the pages' own APIs: an administrator and a user who is not one, each with a long-lived
 access token; a strict timer on a switch that sits on no device and a loose one on a
 switch that sits on a device; an interval on the strict timer that is never open while a
-test runs; a pending command on the loose timer that never comes due; and a dashboard of
-the card with a view for each file of tests that needs one. It writes what the tests
+test runs; a pending command on the loose timer that never comes due; a third timer
+whose "Ends at" sensor is disabled, which stays so, since enabling an entity makes Home
+Assistant reload its entry some time later; and a dashboard of the card with a view for
+each file of tests that needs one. It writes what the tests
 need to find all of it to the state file, which the Playwright side reads: see
 `E2EState` in card/e2e/constants.ts. The state file holds the dashboard as it was saved,
 for the reset that every test starts with to save it again.
@@ -85,6 +87,10 @@ STRICT_NAME = "Boiler"
 harness, which the smoke test shares, names it for itself; the fixture renames it in the
 entity registry, as a user does. card/e2e/constants.ts says the same."""
 
+DISABLED_TARGET = "switch.smoke_heater"
+"""What the third timer runs: a template switch that configuration.yaml declares, on no
+device, and that nothing else in the fixture uses."""
+
 QUICK_CHIP_MINUTES = 15
 """The minutes of the chip on the pill of the strict timer."""
 
@@ -94,7 +100,7 @@ def timerify_card(timer: Timer, **options: Any) -> dict[str, Any]:
     return {"type": "custom:timerify-card", "entity": timer.run_for, **options}
 
 
-def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
+def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, Any]:
     """The views of the dashboard, one for each file of tests. Each task that adds a
     file of tests adds its view here."""
     return {
@@ -147,6 +153,12 @@ def dashboard_config(strict: Timer, loose: Timer) -> dict[str, Any]:
                 "title": "Editor",
                 "path": "editor",
                 "cards": [],
+            },
+            {
+                # The timer whose "Ends at" sensor is disabled: the card says so.
+                "title": "Disabled",
+                "path": "disabled",
+                "cards": [timerify_card(disabled, layout="pill")],
             },
             {
                 # What the screenshots of the documentation show: both timers in one
@@ -263,6 +275,16 @@ async def build_fixture(
             on_target_device=True,
         )
 
+        say("Adding the timer whose Ends at sensor is disabled")
+        disabled = await add_timer(
+            session, socket, instance, access_token, DISABLED_TARGET
+        )
+        await socket.call(
+            "config/entity_registry/update",
+            entity_id=disabled.ends_at,
+            disabled_by="user",
+        )
+
         say("Adding the interval and the command")
         interval = await add_fixture_interval(
             session, instance, socket, access_token, strict
@@ -276,7 +298,7 @@ async def build_fixture(
         )
 
         say("Making the dashboard")
-        dashboard = dashboard_config(strict, loose)
+        dashboard = dashboard_config(strict, loose, disabled)
         await socket.call(
             "lovelace/dashboards/create",
             url_path=DASHBOARD,
@@ -293,7 +315,11 @@ async def build_fixture(
             "admin": {**asdict(ADMIN), "token": admin_token},
             "viewer": {**asdict(VIEWER), "token": viewer_token},
         },
-        "timers": {"strict": asdict(strict), "loose": asdict(loose)},
+        "timers": {
+            "strict": asdict(strict),
+            "loose": asdict(loose),
+            "disabled": asdict(disabled),
+        },
         "interval": interval,
         "command": {"action": COMMAND_ACTION, "delay": COMMAND_DELAY_MINUTES},
         "dashboard": DASHBOARD,

@@ -127,11 +127,33 @@ test.describe("the pill in Home Assistant", () => {
     const end = Date.parse(ends);
     expect(end, "Ends at should hold the end of the countdown").not.toBeNaN();
     await expectUntil(card, end);
+    // The frontend announces on the window each change of its connection to Home Assistant,
+    // which its own panels listen to. While it is cut off it goes on showing the last states,
+    // so the countdown on the card proves nothing of the connection; this does.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as Window & { connectionStatuses?: string[] }).connectionStatuses = seen;
+      window.addEventListener("connection-status", (event) =>
+        seen.push((event as CustomEvent<string>).detail),
+      );
+    });
 
     await runHarness("restart");
 
-    // The countdown is on the card again, to the end Timerify kept.
-    await expect(timeLeft).toBeVisible({ timeout: 120_000 });
+    // The page saw the connection drop with Home Assistant, and is connected again.
+    await expect
+      .poll(
+        async () => {
+          const seen = await page.evaluate(
+            () => (window as Window & { connectionStatuses?: string[] }).connectionStatuses ?? [],
+          );
+          return seen.includes("disconnected") && seen.at(-1) === "connected";
+        },
+        { message: "the page should have lost the connection and got it back", timeout: 120_000 },
+      )
+      .toBe(true);
+    // The countdown is on the card, to the end Timerify kept.
+    await expect(timeLeft).toBeVisible();
     await expectUntil(card, end);
     const afterwards = await hassWs(state);
     try {

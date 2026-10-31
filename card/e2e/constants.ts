@@ -54,6 +54,8 @@ export interface E2EState {
     strict: TimerEntities;
     /** On a switch that sits on a device of its own. */
     loose: TimerEntities;
+    /** Its "Ends at" sensor is disabled in the registry, and stays so. */
+    disabled: TimerEntities;
   };
   /** An interval of the strict timer, 12 hours from the start: it is never open in a run. */
   interval: {

@@ -72,9 +72,39 @@ function parseChip(raw: unknown): number | undefined {
   return minutes;
 }
 
+const recordOf = (raw: unknown): Record<string, unknown> =>
+  (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+
+/** A value the visual editor can show as minutes: a number, or the text of one. */
+const isMinutesText = (given: unknown): boolean =>
+  typeof given === "number" || typeof given === "string";
+
+/**
+ * Checks that the config has the right kinds of values, which is all the visual editor needs to
+ * show it: a layout the card does not know, a preset of 0 or a chip of 1441 stay in the form,
+ * and `parseConfig`, which the card runs, tells the user in the preview. The editor is thrown
+ * out of the form only for what it cannot show at all: the way Home Assistant's own cards with
+ * a form check their configs.
+ */
+export function assertShape(raw: unknown): void {
+  const { entity, layout, presets, chip } = recordOf(raw);
+  if (entity !== undefined && typeof entity !== "string") {
+    throw new ConfigError("card_error_entity");
+  }
+  if (layout !== undefined && typeof layout !== "string") {
+    throw new ConfigError("card_error_layout");
+  }
+  if (presets !== undefined && !(Array.isArray(presets) && presets.every(isMinutesText))) {
+    throw new ConfigError("card_error_presets");
+  }
+  if (chip !== undefined && !isMinutesText(chip)) {
+    throw new ConfigError("card_error_chip");
+  }
+}
+
 /** Checks the config Home Assistant hands to `setConfig`; keys the card does not know are left out. */
 export function parseConfig(raw: unknown): CardConfig {
-  const given = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const given = recordOf(raw);
   const { entity, layout = "pill", name, icon } = given;
   if (typeof entity !== "string" || !/^number\.[a-z0-9_]+$/.test(entity)) {
     throw new ConfigError("card_error_entity");

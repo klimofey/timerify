@@ -197,17 +197,19 @@ describe("the form of the visual editor", () => {
     }
   });
 
-  it("checks a config as the card does", async () => {
+  it("refuses a config of the wrong kind, as the card does", async () => {
     const { getConfigForm } = await freshEditor();
     const { assertConfig } = await getConfigForm();
-    const refused = [
-      [{ entity: NUMBER, presets: ["0"] }, english.card_error_presets],
-      [{ entity: "sensor.boiler_ends_at" }, english.card_error_entity],
-      [{ entity: NUMBER, layout: "square" }, english.card_error_layout],
-      [{ entity: NUMBER, chip: 1441 }, english.card_error_chip],
+    const wrongKind = [
+      [{ entity: 5 }, english.card_error_entity],
+      [{ entity: NUMBER, layout: 1 }, english.card_error_layout],
+      [{ entity: NUMBER, presets: "15" }, english.card_error_presets],
+      [{ entity: NUMBER, presets: [{}] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: [15, null] }, english.card_error_presets],
+      [{ entity: NUMBER, chip: true }, english.card_error_chip],
     ] as const;
 
-    for (const [config, message] of refused) {
+    for (const [config, message] of wrongKind) {
       expect(() => assertConfig(config), JSON.stringify(config)).toThrow(message);
       expect(() => new TimerifyCard().setConfig(config), JSON.stringify(config)).toThrow(message);
     }
@@ -216,17 +218,43 @@ describe("the form of the visual editor", () => {
         type: "custom:timerify-card",
         entity: NUMBER,
         layout: "round",
-        presets: ["15", "30", "20"],
+        presets: ["15", "30", 20],
+        chip: 10,
       }),
     ).not.toThrow();
+  });
+
+  it("keeps the user in the form when a value is wrong, and leaves it to the card to say so", async () => {
+    const { getConfigForm } = await freshEditor();
+    const { assertConfig } = await getConfigForm();
+    // What a user can type into the form: a preset of 0 or 1.5 or text, a chip out of range, and
+    // what a hand-written config may hold: a layout the card does not have, no timer yet.
+    const mistakes = [
+      [{ entity: NUMBER, presets: ["15", "0"] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: ["1.5"] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: ["abc"] }, english.card_error_presets],
+      [{ entity: NUMBER, chip: 1441 }, english.card_error_chip],
+      [{ entity: NUMBER, chip: 0 }, english.card_error_chip],
+      [{ entity: NUMBER, layout: "square" }, english.card_error_layout],
+      [{ entity: "sensor.boiler_ends_at" }, english.card_error_entity],
+      [{ entity: "" }, english.card_error_entity],
+      [{}, english.card_error_entity],
+    ] as const;
+
+    for (const [config, message] of mistakes) {
+      expect(() => assertConfig(config), JSON.stringify(config)).not.toThrow();
+      expect(() => new TimerifyCard().setConfig(config), JSON.stringify(config)).toThrow(message);
+    }
   });
 
   it("lets the user take the last preset away, as the helper says", async () => {
     const { getConfigForm } = await freshEditor();
     const { assertConfig } = await getConfigForm();
+    const config = { entity: NUMBER, presets: [] };
 
-    // Refusing this would throw the user out of the form, which has just promised the defaults.
-    expect(() => assertConfig({ entity: NUMBER, presets: [] })).not.toThrow();
+    // The form is not left, and the card takes the empty list for the defaults.
+    expect(() => assertConfig(config)).not.toThrow();
+    expect(() => new TimerifyCard().setConfig(config)).not.toThrow();
   });
 });
 

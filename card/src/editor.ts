@@ -4,7 +4,7 @@
 // (`getConfigForm`, the documented way for a custom card to have an editor); the frontend draws
 // the fields, keeps the card's config in step with them, and asks `assertConfig` whether the
 // card can work with what they hold. Nothing here renders anything.
-import { DEFAULT_PRESETS, MAX_MINUTES, parseConfig } from "./config";
+import { DEFAULT_PRESETS, MAX_MINUTES, assertShape } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant, Localize } from "./hass";
 import { lastLoaded, loadStrings, localizeName, t, type StringKey } from "./strings";
@@ -46,7 +46,7 @@ interface GridField {
 /** What `getConfigForm` hands Home Assistant; the frontend's `LovelaceConfigForm`. */
 export interface LovelaceConfigForm {
   schema: (SelectorField | GridField)[];
-  /** Throws, with a message for the user, when the card cannot work with the config. */
+  /** Throws, with a message for the user, when the form cannot show the config at all. */
   assertConfig(config: unknown): void;
   computeLabel(field: { name: string }, localize: Localize): string;
   computeHelper(field: { name: string }): string | undefined;
@@ -125,9 +125,9 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       // The label says that these are minutes, so the field has no unit of its own.
       { name: "chip", selector: { number: { min: 1, max: MAX_MINUTES, mode: "box" } } },
     ],
-    assertConfig(config) {
-      parseConfig(config);
-    },
+    // Only the shape: a value that is wrong stays in the form, and the card's own check of
+    // it (`setConfig`, which the preview runs) tells the user what it should be.
+    assertConfig: assertShape,
     computeLabel: ({ name }, localize) =>
       isLabelled(name) ? localize(localizeName(LABELS[name])) : "",
     computeHelper: ({ name }) =>

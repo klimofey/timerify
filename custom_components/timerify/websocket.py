@@ -18,8 +18,8 @@ or one of the two sensors, and leaves out the interval switches the user may not
 
 It also says which of the two sensors are disabled. A disabled entity has no state,
 which looks like an entity that has not started yet, and only the registry tells them
-apart; the card cannot work without either sensor, and tells the user which one it
-misses instead of staying silent.
+apart; the card draws the countdown from one and the pending commands from the other,
+and tells the user which one it misses instead of staying silent.
 """
 
 from typing import Any, Final, Literal, TypedDict

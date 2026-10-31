@@ -30,7 +30,7 @@ interface PendingCommand {
 
 /**
  * The commands the "Next command" sensor lists, in its order. A row the card cannot read
- * (no id, no time) is left out, so that the others still show.
+ * (no id, no time, an action it does not know) is left out, so that the others still show.
  */
 function pendingCommands(sensor: HassEntity | undefined): PendingCommand[] {
   const rows: unknown = sensor?.attributes["commands"];
@@ -43,14 +43,19 @@ function pendingCommands(sensor: HassEntity | undefined): PendingCommand[] {
     }
     const { id, at, action, minutes, settings } = row as Record<string, unknown>;
     const time = typeof at === "string" ? new Date(at) : undefined;
-    if (typeof id !== "string" || time === undefined || Number.isNaN(time.getTime())) {
+    if (
+      typeof id !== "string" ||
+      time === undefined ||
+      Number.isNaN(time.getTime()) ||
+      (action !== "on" && action !== "off")
+    ) {
       return [];
     }
     return [
       {
         id,
         at: time,
-        action: action === "off" ? "off" : "on",
+        action,
         minutes: typeof minutes === "number" && minutes > 0 ? minutes : null,
         settings: typeof settings === "object" && settings !== null ? Object.entries(settings) : [],
       },
@@ -255,6 +260,10 @@ export class TimerifyCardPopup extends LitElement {
       font-size: var(--ha-font-size-xl, 1.25rem);
       line-height: 1;
     }
+    button.cancel:disabled {
+      color: var(--disabled-text-color);
+      cursor: default;
+    }
     footer {
       display: flex;
       justify-content: flex-end;
@@ -413,12 +422,16 @@ export class TimerifyCardPopup extends LitElement {
     const step = formatMinutes(hass, STEP_MINUTES);
     const counting = view.state === "counting";
     const running = counting || view.state === "open";
+    // A timer that is unavailable has nothing to act on: Home Assistant would leave it out of
+    // the call without a word, and a press would seem to do nothing.
+    const unavailable = view.state === "unavailable";
     return html`
       <div class="presets">
         ${config.presets.map(
           (minutes) => html`
             <button
               class="action preset"
+              ?disabled=${unavailable}
               @click=${() => void setMinutes(hass, config.entity, minutes)}
             >
               ${formatMinutes(hass, minutes)}
@@ -438,6 +451,7 @@ export class TimerifyCardPopup extends LitElement {
         <button
           class="action step"
           aria-label=${t(hass, "card_add_time", { duration: step })}
+          ?disabled=${unavailable}
           @click=${() => void addMinutes(hass, config.entity, STEP_MINUTES)}
         >
           +${step}
@@ -500,18 +514,19 @@ export class TimerifyCardPopup extends LitElement {
 
   /** The commands that wait for their time, each with a button that cancels it. */
   #commands(now: number) {
-    const { hass, config, info } = this;
+    const { hass, config, info, view } = this;
     const commands = pendingCommands(hass.states[info.next_command]);
     if (commands.length === 0) {
       return nothing;
     }
+    const unavailable = view.state === "unavailable";
     return html`
       <section class="commands">
         <h3>${t(hass, "card_commands")}</h3>
         <ul>
           ${commands.map((command, index) => {
             const settings = command.settings.map(([key, value]) =>
-              settingText(hass, this.view.target, key, value),
+              settingText(hass, view.target, key, value),
             );
             return html`
               <li>
@@ -525,6 +540,7 @@ export class TimerifyCardPopup extends LitElement {
                   class="cancel"
                   aria-label=${t(hass, "card_cancel_command")}
                   aria-describedby="command-${index}"
+                  ?disabled=${unavailable}
                   @click=${() => void cancelCommand(hass, config.entity, command.id)}
                 >
                   <span aria-hidden="true">×</span>
@@ -554,10 +570,9 @@ export class TimerifyCardPopup extends LitElement {
     if (!this.hass.user?.is_admin) {
       return nothing;
     }
-    const path = settingsPath(this.info.entry_id);
     return html`
       <footer>
-        <a href=${path} @click=${(event: MouseEvent) => this.#goTo(event, path)}>
+        <a href=${settingsPath(this.info.entry_id)} @click=${this.#onSettingsClick}>
           ${t(this.hass, "card_settings")}
         </a>
       </footer>
@@ -565,23 +580,14 @@ export class TimerifyCardPopup extends LitElement {
   }
 
   /**
-   * Takes the user there the way Home Assistant's own navigation does: the address is
-   * pushed and the frontend is told, so it shows the page without loading the app again.
-   * A click that asks for a new tab or window is the browser's.
+   * The link is a plain one to a page of the same origin, and Home Assistant's frontend follows
+   * every such link itself, in the app and with the history entry its own back arrows need.
+   * So the click is left alone, and the pop-up only gets out of the way. A click that asks for
+   * a new tab or window is the browser's, and the pop-up stays.
    */
-  #goTo(event: MouseEvent, path: string): void {
-    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) {
-      return;
+  readonly #onSettingsClick = (event: MouseEvent): void => {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+      this.close();
     }
-    event.preventDefault();
-    this.close();
-    window.history.pushState(null, "", path);
-    window.dispatchEvent(
-      new CustomEvent("location-changed", {
-        detail: { replace: false },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
+  };
 }

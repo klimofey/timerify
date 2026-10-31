@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  STEP_MINUTES,
   addMinutes,
   cancelCommand,
   runWithoutDuration,
@@ -67,10 +66,6 @@ describe("what the card asks Timerify to do", () => {
     expect(hass.calls).toEqual([
       { domain: "timerify", service: "cancel_command", data: { command_id: "c1" }, target },
     ]);
-  });
-
-  it("steps the countdown by five minutes", () => {
-    expect(STEP_MINUTES).toBe(5);
   });
 
   it("leaves Home Assistant to tell the user when it refuses", async () => {

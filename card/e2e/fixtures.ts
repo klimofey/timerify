@@ -90,10 +90,10 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
 }
 
 /**
- * How long the frontend may take to start on a page, in milliseconds: to get its service
- * worker in control, which is the slowest step, and to take its launch screen away.
+ * How long the frontend may take to get its service worker in control on a first visit, in
+ * milliseconds.
  */
-const STARTUP_WAIT = 40_000;
+const WORKER_WAIT = 40_000;
 
 /**
  * Gets the frontend's service worker in control, and returns when the frontend has started on
@@ -129,7 +129,7 @@ async function primeServiceWorker(page: Page): Promise<void> {
     .poll(
       // The frontend's own reload can destroy the page this asks: that is "not yet".
       () => servedByWorker().catch(() => false),
-      { message: "the service worker should serve the page", timeout: STARTUP_WAIT },
+      { message: "the service worker should serve the page", timeout: WORKER_WAIT },
     )
     .toBe(true);
   await expect(page.locator("ha-sidebar")).toBeVisible();
@@ -154,7 +154,7 @@ function dashboardOpener(state: E2EState): OpenDashboard {
     // The frontend's launch screen covers the whole page until it has faded out, and a press
     // made before that lands on it, not on the card: Playwright's own click waits for what it
     // presses to be reachable, a press at a point of the page (`press.ts`) does not.
-    await expect(page.locator("#ha-launch-screen")).toHaveCount(0, { timeout: STARTUP_WAIT });
+    await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
   };
 }
 

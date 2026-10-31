@@ -282,11 +282,19 @@ describe("adding and taking off time", () => {
     expect(isDisabled(control(root, "Stop"))).toBe(false);
   });
 
-  it("offers no stop while the timer is unavailable", async () => {
-    const hass = boilerHass({ counting: 45 }).state(NUMBER, "unavailable");
+  it("offers nothing to press while the timer is unavailable", async () => {
+    const hass = boilerHass({ counting: 45, commands: [TURN_ON] }).state(NUMBER, "unavailable");
     const { root } = await opened(hass);
 
-    expect(isDisabled(control(root, "Stop"))).toBe(true);
+    const pressable = [
+      "45 min",
+      "Add 5 min",
+      "Take off 5 min",
+      "Stop",
+      english.card_cancel_command,
+    ].filter((name) => !isDisabled(control(root, name)));
+
+    expect(pressable).toEqual([]);
   });
 });
 
@@ -517,6 +525,26 @@ describe("the pending commands", () => {
     );
   });
 
+  it("reads right in Russian on the day and on another day of the week", async () => {
+    const { root } = await opened(boilerHass({ commands: [TURN_ON, TURN_OFF], language: "ru" }));
+    const hour = new Intl.NumberFormat("ru", {
+      style: "unit",
+      unit: "hour",
+      unitDisplay: "short",
+      useGrouping: false,
+    }).format(1);
+    const weekday = new Intl.DateTimeFormat("ru", { weekday: "short", timeZone: "UTC" }).format(
+      Date.parse(TURN_OFF.at),
+    );
+
+    // No preposition stands before the time: one before a weekday would be wrong Russian.
+    expect(rowsOf(root)).toEqual([
+      russian.card_command_on_for.replace("{time}", "9:15").replace("{duration}", hour),
+      russian.card_command_off.replace("{time}", `${weekday} 07:00`),
+    ]);
+    expect(weekday).not.toBe("");
+  });
+
   it("leaves out the section when nothing is pending", async () => {
     const { root } = await opened(boilerHass());
 
@@ -575,6 +603,15 @@ describe("the pending commands", () => {
     expect(rowsOf(root)).toEqual(["Off at Tue 07:00"]);
   });
 
+  it("leaves out a command whose action it does not know", async () => {
+    const hass = boilerHass().state(NEXT_COMMAND, TURN_OFF.at, {
+      commands: [{ ...TURN_ON, id: "strange", action: "toggle" }, TURN_OFF],
+    });
+    const { root } = await opened(hass);
+
+    expect(rowsOf(root)).toEqual(["Off at Tue 07:00"]);
+  });
+
   it("shows no section for a sensor that has no list", async () => {
     const hass = boilerHass().state(NEXT_COMMAND, "unavailable");
     const { root } = await opened(hass);
@@ -599,42 +636,49 @@ describe("the settings link", () => {
     expect(user.root.textContent).not.toContain(english.card_settings);
   });
 
-  it("goes to the timer's page without reloading, and closes the pop-up", async () => {
-    const pushState = vi.spyOn(window.history, "pushState").mockImplementation(() => undefined);
+  /**
+   * What Home Assistant's frontend does with every click that reaches the window: it follows
+   * the link of a plain anchor of its own origin, unless the click was cancelled. This stands
+   * in for that listener, to see what it would be given.
+   */
+  function watchWindowClicks(root: ShadowRoot, signal: AbortSignal) {
+    const seen: { cancelled: boolean; href: string | undefined; popupOpen: boolean }[] = [];
+    const listener = (event: MouseEvent) => {
+      const anchor = event
+        .composedPath()
+        .find((node): node is HTMLAnchorElement => node instanceof HTMLAnchorElement);
+      seen.push({
+        cancelled: event.defaultPrevented,
+        href: anchor?.getAttribute("href") ?? undefined,
+        popupOpen: dialogOf(root).open,
+      });
+    };
+    window.addEventListener("click", listener, { signal });
+    return seen;
+  }
+
+  it("closes the pop-up and leaves the navigation to Home Assistant's own", async () => {
+    const pushState = vi.spyOn(window.history, "pushState");
     const located = vi.fn();
     window.addEventListener("location-changed", located);
     const { card, root } = await opened(boilerHass({ isAdmin: true }));
-
-    const click = new MouseEvent("click", { bubbles: true, composed: true, cancelable: true });
-    root.querySelector("a")?.dispatchEvent(click);
-    await popupOf(card).updateComplete;
-
-    window.removeEventListener("location-changed", located);
-    expect(click.defaultPrevented).toBe(true);
-    expect(pushState).toHaveBeenCalledOnce();
-    expect(pushState).toHaveBeenCalledWith(null, "", URL_OF_BOILER);
-    expect(located).toHaveBeenCalledOnce();
-    const event = located.mock.calls[0]?.[0] as CustomEvent;
-    expect(event.detail).toEqual({ replace: false });
-    expect(event.bubbles).toBe(true);
-    expect(event.composed).toBe(true);
-    expect(dialogOf(root).open).toBe(false);
-  });
-
-  it("goes to the page after the pop-up has closed, not before", async () => {
-    const order: string[] = [];
-    const { root } = await opened(boilerHass({ isAdmin: true }));
-    vi.spyOn(window.history, "pushState").mockImplementation(() => {
-      order.push(dialogOf(root).open ? "navigated with the pop-up open" : "navigated");
-    });
+    const watch = new AbortController();
+    const seen = watchWindowClicks(root, watch.signal);
 
     root.querySelector("a")?.click();
+    await popupOf(card).updateComplete;
 
-    expect(order).toEqual(["navigated"]);
+    watch.abort();
+    window.removeEventListener("location-changed", located);
+    // The frontend finds the link, not cancelled, after the pop-up has got out of the way.
+    expect(seen).toEqual([{ cancelled: false, href: URL_OF_BOILER, popupOpen: false }]);
+    expect(dialogOf(root).open).toBe(false);
+    // The card does not navigate on its own: the history entry is the frontend's to make.
+    expect(pushState).not.toHaveBeenCalled();
+    expect(located).not.toHaveBeenCalled();
   });
 
-  it("leaves a click that asks for a new tab to the browser", async () => {
-    const pushState = vi.spyOn(window.history, "pushState").mockImplementation(() => undefined);
+  it("leaves a click that asks for a new tab to the browser, and stays open", async () => {
     const { root } = await opened(boilerHass({ isAdmin: true }));
     const link = root.querySelector<HTMLAnchorElement>("a");
     const seen: boolean[] = [];
@@ -652,7 +696,6 @@ describe("the settings link", () => {
     }
 
     expect(seen).toEqual([false, false, false, false]);
-    expect(pushState).not.toHaveBeenCalled();
     expect(dialogOf(root).open).toBe(true);
   });
 });

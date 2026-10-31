@@ -141,7 +141,10 @@ test.describe("the pop-up in Home Assistant", () => {
     await expect(dialog).toBeVisible();
   });
 
-  test("an admin reaches the timer's settings", async ({ page, state }) => {
+  test("an admin reaches the timer's settings and gets back from them", async ({
+    page,
+    state,
+  }) => {
     const { strict: entities } = state.timers;
     const dialog = await openPopup(page, cardsOf(page).strict);
 
@@ -154,6 +157,13 @@ test.describe("the pop-up in Home Assistant", () => {
     const row = page.locator(`ha-config-entry-row[data-entry-id="${entities.entry_id}"]`);
     await expect(row).toBeVisible();
     await expect(row).toHaveClass(/highlight/);
+
+    // The page's own back arrow returns to where the user came from, the dashboard's view, and
+    // not to the list of integrations it falls back to when it has no history to return to.
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/${state.dashboard}/popup$`));
+    await expect(page.locator("timerify-card")).toHaveCount(2);
   });
 
   test("closes on the backdrop, but not when a press from inside ends there", async ({

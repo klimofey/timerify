@@ -4,56 +4,12 @@
 import { css, html, nothing, type TemplateResult } from "lit";
 import { styleMap } from "lit/directives/style-map.js";
 import type { CardConfig } from "./config";
-import { formatClock, formatMinutes, formatRemaining } from "./format";
+import { formatMinutes } from "./format";
 import type { HomeAssistant } from "./hass";
+import { renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
-import { hasValue, type TimerView } from "./timer";
-
-/** The icon of the timer's target, or the one the config chooses. */
-export function renderIcon(view: TimerView): TemplateResult {
-  return "stateObj" in view.icon
-    ? html`<ha-state-icon .stateObj=${view.icon.stateObj}></ha-state-icon>`
-    : html`<ha-icon .icon=${view.icon.icon}></ha-icon>`;
-}
-
-/**
- * What the pill says under the name while nothing counts: the state of the target in the
- * user's language, or that the timer is unavailable. A timer that has a value and is only
- * waiting to be found says nothing yet, so a page that has just opened shows no flicker.
- */
-function stateText(view: TimerView, config: CardConfig, hass: HomeAssistant): string {
-  if (view.state !== "unavailable") {
-    return view.target ? hass.formatEntityState(view.target) : "";
-  }
-  const number = hass.states[config.entity];
-  if (hasValue(number)) {
-    return "";
-  }
-  // Home Assistant's own word for it, whatever the entity.
-  const unavailable = { entity_id: config.entity, state: "unavailable", attributes: {} };
-  return hass.formatEntityState(number ?? unavailable, "unavailable");
-}
-
-/**
- * What the card says of the timer's state: the time left and when it ends while counting,
- * else the state of the target (or that the timer is unavailable).
- */
-export function renderStatus(
-  view: TimerView,
-  config: CardConfig,
-  hass: HomeAssistant,
-  now: number,
-) {
-  if (view.state !== "counting" || view.endsAt === undefined) {
-    return stateText(view, config, hass);
-  }
-  const time = formatClock(hass, view.endsAt, now);
-  return html`
-    <span class="remaining">${formatRemaining(view.remaining)}</span>
-    <span class="until">${t(hass, "card_until", { time })}</span>
-  `;
-}
+import type { TimerView } from "./timer";
 
 /**
  * The card as a pill, drawn at the instant `now` that `view` was made for. Its body is an
@@ -111,58 +67,6 @@ export function renderPill(
     </ha-card>
   `;
 }
-
-/**
- * What the layouts share. The body is the layer that is pressed: it covers the whole card,
- * border included, under the content, and the content lets presses through to it, as in Home
- * Assistant's tile card. The radius is the layout's own, `--timerify-radius` on `ha-card`.
- */
-export const commonStyles = css`
-  .body {
-    position: absolute;
-    inset: 0;
-    /* Inset reaches the padding box; the card's border is part of what a press hits. */
-    margin: calc(-1 * var(--ha-card-border-width, 1px));
-    border-radius: var(--timerify-radius);
-    cursor: pointer;
-    /* A long touch must bring up neither a selection nor the browser's callout. */
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-  }
-  .body:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
-  }
-  .content {
-    position: relative;
-    box-sizing: border-box;
-    height: 100%;
-    /* A press anywhere on the card reaches the body underneath, except on a control. */
-    pointer-events: none;
-  }
-  .icon {
-    color: var(--state-icon-color, var(--secondary-text-color));
-  }
-  .counting .icon,
-  .open .icon {
-    color: var(--state-active-color, var(--primary-color));
-  }
-  .unavailable .icon {
-    color: var(--state-unavailable-color, var(--disabled-text-color));
-  }
-  .name {
-    overflow: hidden;
-    color: var(--primary-text-color);
-    font-size: var(--ha-font-size-m, 14px);
-    font-weight: var(--ha-font-weight-medium, 500);
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .remaining {
-    font-variant-numeric: tabular-nums;
-  }
-`;
 
 export const pillStyles = css`
   ha-card.pill {

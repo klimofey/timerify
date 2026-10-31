@@ -14,6 +14,7 @@ import {
   START,
   acTimer,
   boilerTimer,
+  counting,
   fakeHass,
   localizeFor,
   type FakeHass,
@@ -357,24 +358,52 @@ describe("its body", () => {
 
   it("covers the card's border too, however wide the theme draws it", async () => {
     for (const layout of ["pill", "round"]) {
-      const card = await mountCard(fakeHass(), { entity: NUMBER, layout });
-      card.style.setProperty("--ha-card-border-width", "3px");
+      for (const width of [undefined, "3px"]) {
+        const card = await mountCard(fakeHass(), { entity: NUMBER, layout });
+        if (width !== undefined) {
+          card.style.setProperty("--ha-card-border-width", width);
+        }
 
-      // As Home Assistant's tile card does: the body reaches the card's padding box, so it
-      // is pulled out over the border by its width.
-      const { marginTop, marginRight, marginBottom, marginLeft } = getComputedStyle(bodyOf(card));
-      for (const side of [marginTop, marginRight, marginBottom, marginLeft]) {
-        expect(side, layout).toBe("calc(-1 * 3px)");
+        // As Home Assistant's tile card does: the body reaches the card's padding box, so it
+        // is pulled out over the border by its width (1px unless the theme says otherwise).
+        // What an engine computes that margin to differs in form, so the margin is compared
+        // with the one it computes for a probe that is given the border's width.
+        const probe = document.createElement("div");
+        probe.style.margin = `calc(-1 * ${width ?? "1px"})`;
+        document.body.append(probe);
+        const wanted = getComputedStyle(probe).marginTop;
+        const { marginTop, marginRight, marginBottom, marginLeft } = getComputedStyle(
+          bodyOf(card),
+        );
+        for (const side of [marginTop, marginRight, marginBottom, marginLeft]) {
+          expect(side, `${layout} with a border of ${width ?? "the default width"}`).toBe(wanted);
+        }
+        probe.remove();
+        card.remove();
       }
-      card.remove();
     }
   });
 
-  it("cannot be selected by a long touch", async () => {
-    for (const layout of ["pill", "round"]) {
-      const card = await mountCard(fakeHass(), { entity: NUMBER, layout });
+  it("cannot be selected by a long touch, in the text that a finger rests on", async () => {
+    // What a person can select: text whose element, or one of the card's elements around it,
+    // is `user-select: none` (an element that says nothing follows the one around it).
+    const cannotBeSelected = (element: Element | null | undefined) => {
+      for (let node = element; node; node = node.parentElement) {
+        if (getComputedStyle(node).userSelect === "none") {
+          return true;
+        }
+      }
+      return false;
+    };
+    const texts = { pill: [".name", ".status"], round: [".name", ".time"] };
+    for (const [layout, selectors] of Object.entries(texts)) {
+      const card = await mountCard(counting(45), { entity: NUMBER, layout });
 
-      expect(getComputedStyle(bodyOf(card)).userSelect, layout).toBe("none");
+      for (const selector of selectors) {
+        const text = card.shadowRoot?.querySelector(selector);
+        expect(text?.textContent?.trim(), `${layout} ${selector}`).toBeTruthy();
+        expect(cannotBeSelected(text), `${layout} ${selector}`).toBe(true);
+      }
       card.remove();
     }
   });

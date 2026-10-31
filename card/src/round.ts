@@ -5,7 +5,7 @@ import { css, html, type TemplateResult } from "lit";
 import type { CardConfig } from "./config";
 import { formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
-import { renderIcon, renderStatus } from "./pill";
+import { renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 

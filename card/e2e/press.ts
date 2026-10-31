@@ -27,7 +27,9 @@ export async function tap(page: Page, card: Locator): Promise<void> {
 /**
  * Presses the middle of the card with the mouse and lets go once the card says that letting
  * go will act (`data-held`, which is what the user sees after half a second), as a user
- * does. There is no fixed wait: the assertion waits for the card.
+ * does. There is no fixed wait: the assertion waits for the card, on the browser's own clock:
+ * a test that holds must not install a fake one (`page.clock.install` would freeze the hold's
+ * timer, so that `data-held` never came).
  */
 export async function hold(page: Page, card: Locator): Promise<void> {
   const box = await boxOf(card);

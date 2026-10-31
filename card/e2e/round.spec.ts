@@ -88,4 +88,26 @@ test.describe("the round card in Home Assistant", () => {
     await expect(loose.locator(".time")).toHaveCount(0);
     await expect(loose.locator("dialog")).toBeHidden();
   });
+
+  test("holding stops a loose timer that runs without a countdown", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const { loose: entities } = state.timers;
+    const { loose } = cardsOf(page);
+    await hold(page, loose);
+    await expect.poll(async () => (await ws.state(entities.target))?.state).toBe("on");
+    // The card shows it runs, the ring full: it is what the second hold stops.
+    const ring = loose.locator("circle.progress");
+    await expect(ring).toHaveAttribute("stroke-dashoffset", "0");
+
+    await hold(page, loose);
+
+    await expect.poll(async () => (await ws.state(entities.target))?.state).toBe("off");
+    expect((await ws.state(entities.ends_at))?.state).toBe("unknown");
+    // The ring is empty again, and nothing opened.
+    await expect(ring).not.toHaveAttribute("stroke-dashoffset", "0");
+    await expect(loose.locator("dialog")).toBeHidden();
+  });
 });

@@ -689,13 +689,13 @@ describe("the settings link", () => {
       event.preventDefault();
     });
 
-    for (const modifier of ["ctrlKey", "metaKey", "shiftKey", "altKey"] as const) {
+    for (const modifier of ["ctrlKey", "metaKey", "shiftKey"] as const) {
       link?.dispatchEvent(
         new MouseEvent("click", { bubbles: true, composed: true, cancelable: true, [modifier]: true }),
       );
     }
 
-    expect(seen).toEqual([false, false, false, false]);
+    expect(seen).toEqual([false, false, false]);
     expect(dialogOf(root).open).toBe(true);
   });
 });

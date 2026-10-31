@@ -583,10 +583,11 @@ export class TimerifyCardPopup extends LitElement {
    * The link is a plain one to a page of the same origin, and Home Assistant's frontend follows
    * every such link itself, in the app and with the history entry its own back arrows need.
    * So the click is left alone, and the pop-up only gets out of the way. A click that asks for
-   * a new tab or window is the browser's, and the pop-up stays.
+   * a new tab or window (Ctrl, Cmd or Shift, the keys Home Assistant's own link check leaves to
+   * the browser) is the browser's, and the pop-up stays.
    */
   readonly #onSettingsClick = (event: MouseEvent): void => {
-    if (!event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+    if (!event.ctrlKey && !event.metaKey && !event.shiftKey) {
       this.close();
     }
   };

@@ -89,7 +89,8 @@ entity registry, as a user does. card/e2e/constants.ts says the same."""
 
 DISABLED_TARGET = "switch.smoke_heater"
 """What the third timer runs: a template switch that configuration.yaml declares, on no
-device, and that nothing else in the fixture uses."""
+device. The smoke test's thermostat names it as its heater; that thermostat starts
+switched off, and no E2E test touches it."""
 
 QUICK_CHIP_MINUTES = 15
 """The minutes of the chip on the pill of the strict timer."""

@@ -33,7 +33,10 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   `pyproject.toml` (`:16`) and the image in `scripts/harness/compose.yaml` (`:8`) move
   together. When the harness runs 2026.11,
   `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:29`) and the
-  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:143`).
+  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:143`). The expected failure
+  rests on a race the card's module wins against the app's bundle (8 of 8 runs here): on a
+  machine where the app's bundle wins, the test can pass unexpectedly on 2026.10 too, and that
+  does not mean the frontend fix has arrived.
   `custom_components/timerify/card.py:51` (the registration). Investigation:
   `docs/research/2026-10-31-card-first-load.md`.
 

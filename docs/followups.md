@@ -32,7 +32,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   makes the problem go away: `hacs.json` `homeassistant`, the
   `pytest-homeassistant-custom-component` pin in `pyproject.toml` (`:16`) and the image in
   `scripts/harness/compose.yaml` (`:8`) move together. When the harness runs 2026.11,
-  `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:29`) and the
+  `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:30`) and the
   reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:157`). The expected failure
   rests on a race the card's module wins against the app's bundle (8 of 8 runs here): on a
   machine where the app's bundle wins, the test can pass unexpectedly on 2026.10 too, and that
@@ -53,13 +53,34 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   left that is wrong by as much (never below 0:00; the end time shown is the server's). Home
   Assistant's own timer card does the same. A correction would need a reading of the server's
   clock, for example a websocket command that returns it, and it waits until a user needs it,
-  since every other card shows the same error. `card/src/timer.ts:68` (`timerView`, which
-  takes `now`) and `card/src/timerify-card.ts:258` (`Date.now()`).
+  since every other card shows the same error. `card/src/timer.ts:78` (`timerView`, which
+  takes `now`) and `card/src/timerify-card.ts:270` (`Date.now()`).
 - **`timerify/timer` gains `runtime` when the runtime counter exists (phase 6).** The answer
   names the entities the card reads, and the counter's sensor is not one of them yet; the
   card does not show it. The key, the card's `TimerInfo` and the card's watched entities move
-  together. `custom_components/timerify/websocket.py:70-87` (`TimerInfo`),
-  `card/src/hass.ts:70-85` (`TimerInfo`) and `card/src/timer.ts:112` (`watchedEntities`).
+  together. `custom_components/timerify/websocket.py:75-96` (`TimerInfo`),
+  `card/src/hass.ts:70-90` (`TimerInfo`) and `card/src/timer.ts:122` (`watchedEntities`).
+- **A timer whose target or sensor cannot be resolved is told to the user as "not the Run for
+  number of a Timerify timer".** `timerify/timer` answers `not_found` both when the entity is
+  not a timer's number and when it is, but the target is not in the entity registry (a target
+  stored as a UUID and then deleted) or a sensor is missing from it; the card has one wording
+  for all of them, so in the second case the message is false. It is rare, and the server's own
+  message is exact, but the card does not show it. The fix is a second error code that the
+  card turns into a neutral line, or one neutral wording; it needs a decision on the code, so it
+  waits. `custom_components/timerify/websocket.py:161`, `:166` and `:219` (the three
+  `_TimerNotFound` raises) and `card/src/timerify-card.ts:249` (`card_not_a_timer`).
+- **`PERCENT_SETTINGS` is a display-only copy of Timerify's knowledge of settings in the
+  browser.** The card writes `brightness_pct`, `percentage` and `humidity` as percentages
+  because this list says so; a percentage setting added to `domains.py` would be written raw
+  until the list is changed too. It is harmless (display only) and a list this short does not
+  justify a new key yet. The fix is to send the keys with `timerify/timer`, or to note the list
+  in `RULINGS.md` beside the entry "no copy of Timerify's rules". Take it with the next setting
+  that is a percentage. `card/src/format.ts:95` (`PERCENT_SETTINGS`) and `:110` (its use).
+- **`TimerInfo.mode` and `default_duration` are carried and never read by the card.** The
+  contract (C3) asks for them, so it is not a defect, but the card's only client ignores two of
+  its fields. Reconsider them when phase 6 adds `runtime` to the same answer: either the card
+  starts to use them or they leave the contract with the key that replaces them.
+  `card/src/hass.ts:73` and `:75`, `custom_components/timerify/websocket.py:80` and `:81`.
 - **The editor's labels come from the last strings a card loaded.** The names of the layouts,
   the labels of the preset options and the helper under them are in the language of
   `lastLoaded()`, because the form that Home Assistant builds is given no way to translate them
@@ -67,11 +88,11 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   has loaded its strings they are in English. The field labels use the frontend's own
   `localize` and are not affected. A frontend that translates a form's option labels itself
   would make `speaking()` unnecessary. `card/src/editor.ts:66-68` (`speaking`).
-- **`card/src/popup.ts` is about 590 lines, about 190 of them the styles.** It is one element
+- **`card/src/popup.ts` is about 610 lines, about 200 of them the styles.** It is one element
   with one job and is left whole while it does not grow. If it grows, move the styles out
   first, then the parser of the commands the "Next command" sensor lists, and give the
   schedule and the commands their own elements last. `card/src/popup.ts:79` (`styles`), `:35`
-  (`pendingCommands`) and `:516` (`#commands`).
+  (`pendingCommands`) and `:520` (`#commands`).
 - **A deleted target gives no sign.** `er.async_resolve_entity_id` returns the id even when the
   entity is gone from the registry, so a timer whose target was deleted still loads and drives
   nothing, with no message. `custom_components/timerify/controller.py:213-217`. It needs a

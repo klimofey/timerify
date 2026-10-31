@@ -2,10 +2,10 @@
 // a real Home Assistant, which has dialogs of its own: it opens as a modal above the whole
 // frontend, the page behind it takes no input, and Escape closes it. Everything else the
 // pop-up will do rests on this. View "dialog": one pill card on the strict timer.
+import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { focusedPlace, hasFocus } from "./focus";
 
-const NAME = "Smoke boiler";
 /** What `transparent` computes to: the probe's answer when the theme has no primary colour. */
 const NO_COLOR = "rgba(0, 0, 0, 0)";
 
@@ -15,7 +15,7 @@ test.describe("the card's dialog in Home Assistant", () => {
   });
 
   test("the card is on the dashboard", async ({ page }) => {
-    await expect(page.locator("timerify-card").getByText(NAME)).toBeVisible();
+    await expect(page.locator("timerify-card").getByText(STRICT_NAME)).toBeVisible();
   });
 
   test("a tap opens a modal dialog above Home Assistant", async ({ page }) => {
@@ -23,7 +23,7 @@ test.describe("the card's dialog in Home Assistant", () => {
     const dialog = card.locator("dialog");
     await expect(dialog).toBeHidden();
 
-    await card.getByRole("button", { name: NAME }).click();
+    await card.getByRole("button", { name: STRICT_NAME }).click();
 
     await expect(dialog).toBeVisible();
     const isModal = (node: HTMLDialogElement) => node.open && node.matches(":modal");
@@ -41,7 +41,7 @@ test.describe("the card's dialog in Home Assistant", () => {
     // The sidebar can be clicked as long as the dialog is closed.
     await sidebar.click({ trial: true });
 
-    await card.getByRole("button", { name: NAME }).click();
+    await card.getByRole("button", { name: STRICT_NAME }).click();
     await expect(dialog).toBeVisible();
 
     for (let presses = 1; presses <= 6; presses++) {
@@ -56,7 +56,7 @@ test.describe("the card's dialog in Home Assistant", () => {
   test("Escape closes it and gives focus back to the card", async ({ page }) => {
     const card = page.locator("timerify-card");
     const dialog = card.locator("dialog");
-    const body = card.getByRole("button", { name: NAME });
+    const body = card.getByRole("button", { name: STRICT_NAME });
     await body.click();
     await expect(dialog).toBeVisible();
 
@@ -67,7 +67,7 @@ test.describe("the card's dialog in Home Assistant", () => {
   });
 
   test("a keyboard user sees where the focus is", async ({ page }) => {
-    const body = page.locator("timerify-card").getByRole("button", { name: NAME });
+    const body = page.locator("timerify-card").getByRole("button", { name: STRICT_NAME });
     // Tab through the page, as a keyboard user does, until it reaches the card.
     for (let presses = 1; !(await hasFocus(body)); presses++) {
       expect(presses, "presses of Tab before the card has the focus").toBeLessThanOrEqual(100);

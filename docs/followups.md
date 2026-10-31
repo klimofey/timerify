@@ -24,14 +24,14 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   starts the app and the modules added with `add_extra_js_url` as independent `import()` calls,
   and a module that defines its element before the app installs its scoped custom element
   registry loses the definition (home-assistant/frontend#53890, fixed by frontend PR #54444 in
-  frontend 20261028, Home Assistant 2026.11.0). Every card added with `add_extra_js_url` is hit;
-  Lovelace resources are not. On 2026.10 no fix uses only public APIs, so the owner ruled to
-  document it, keep C1 and change no card code; plan ruling 19 (the README tells users to
-  refresh the browser once after installing or updating) covers it. The question for 1.0.0 is
-  whether to raise the minimum Home Assistant to 2026.11, which makes the problem go away:
-  `hacs.json` `homeassistant`, the `pytest-homeassistant-custom-component` pin in
-  `pyproject.toml` (`:16`) and the image in `scripts/harness/compose.yaml` (`:8`) move
-  together. When the harness runs 2026.11,
+  frontend 20261028.0 and later, which Home Assistant 2026.11 is expected to carry). Every card
+  added with `add_extra_js_url` is hit; Lovelace resources are not. On 2026.10 no fix uses only
+  public APIs, so the owner ruled to document it, keep C1 and change no card code; plan ruling
+  19 (the README tells users to refresh the browser once after installing or updating) covers
+  it. The question for 1.0.0 is whether to raise the minimum Home Assistant to 2026.11, which
+  makes the problem go away: `hacs.json` `homeassistant`, the
+  `pytest-homeassistant-custom-component` pin in `pyproject.toml` (`:16`) and the image in
+  `scripts/harness/compose.yaml` (`:8`) move together. When the harness runs 2026.11,
   `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:29`) and the
   reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:157`). The expected failure
   rests on a race the card's module wins against the app's bundle (8 of 8 runs here): on a

@@ -2,10 +2,10 @@
 // timer with no duration, or stops it when it runs, without opening the pop-up. View "round":
 // the strict timer's round card, then the loose timer's.
 import type { Locator, Page } from "@playwright/test";
+import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { hold, tap, tapBorder } from "./press";
 
-const STRICT_NAME = "Smoke boiler";
 /** The strict timer's default duration, which a bare run takes (Task 4's fixture). */
 const DEFAULT_MINUTES = "30";
 

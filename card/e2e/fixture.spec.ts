@@ -1,6 +1,7 @@
 // The reset that every test starts with must undo whatever a test did to the fixture: a
 // test that finds a timer left running, a command missing, an interval off or a dashboard
 // edited cannot be trusted. The first test does all of that at once.
+import { STRICT_NAME } from "./constants";
 import { commandsOf, expect, resetFixture, test } from "./fixtures";
 import { hassWs } from "./ws";
 
@@ -60,5 +61,5 @@ test("a user who is not an administrator gets to the dashboard too", async ({
   }
 
   await openDashboard(page, "dialog", { user: "viewer" });
-  await expect(page.locator("timerify-card").getByText("Smoke boiler")).toBeVisible();
+  await expect(page.locator("timerify-card").getByText(STRICT_NAME)).toBeVisible();
 });

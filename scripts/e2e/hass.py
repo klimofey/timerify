@@ -80,6 +80,11 @@ VIEWER = Account("viewer", "viewer-test-password")
 """A user who is not an administrator: a member of the group `system-users`."""
 
 
+STRICT_NAME = "Boiler"
+"""What the strict timer's target is called on the dashboard. The configuration of the
+harness, which the smoke test shares, names it for itself; the fixture renames it in the
+entity registry, as a user does. card/e2e/constants.ts says the same."""
+
 QUICK_CHIP_MINUTES = 15
 """The minutes of the chip on the pill of the strict timer."""
 
@@ -233,6 +238,9 @@ async def build_fixture(
         say("Adding the timers")
         access_token = await new_access_token(session, instance, admin_refresh)
         await socket.wait_for_state(SWITCH, has_state("off"), "off", CALL_TIMEOUT)
+        await socket.call(
+            "config/entity_registry/update", entity_id=SWITCH, name=STRICT_NAME
+        )
         strict = await add_timer(session, socket, instance, access_token, SWITCH)
         # The demo switch starts on; the loose timer starts with it off, as idle.
         await socket.wait_for_state(

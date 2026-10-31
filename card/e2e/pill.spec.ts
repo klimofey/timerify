@@ -4,12 +4,12 @@
 // restarts.
 // View "pill": one pill card on the strict timer, with a chip of 15.
 import type { Locator } from "@playwright/test";
+import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
 import { tapBorder } from "./press";
 import { hassWs } from "./ws";
 
-const NAME = "Smoke boiler";
 const CHIP_MINUTES = 15;
 const MINUTE = 60_000;
 /** The browser's time zone, which the user's profile follows by default (the config's). */
@@ -81,7 +81,7 @@ test.describe("the pill in Home Assistant", () => {
     // The name and the icon let a press through to the button under them, which is why
     // Playwright's own click on them is refused (it finds the button in the way): tap where
     // a finger or a mouse would, at the middle of each.
-    for (const part of [card.getByText(NAME, { exact: true }), card.locator(".icon")]) {
+    for (const part of [card.getByText(STRICT_NAME, { exact: true }), card.locator(".icon")]) {
       const box = await part.boundingBox();
       if (box === null) {
         throw new Error("The part of the pill should be on the page");

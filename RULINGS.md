@@ -1321,12 +1321,14 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   on `keydown`) call the same handler, since a body that is not a native button gets no click
   from the keyboard. A cancelled or moved-off pointer aborts the press, the context menu is
   suppressed while a hold is pending, and `data-held` on the card, which makes the ring pulse,
-  says that letting go will act. The pill has no hold: with a mouse a long press there is a
-  tap, and on touch it does nothing. Cost if wrong: a user may expect a long press on the pill
-  to act; there is none for keyboard users either, who start and stop through the pop-up.
+  says that letting go will act. A visible focus ring (`:focus-visible`) shows keyboard users
+  where they are on the card. The pill has no hold: with a mouse a long press there is a tap,
+  and on touch it does nothing. Cost if wrong: a user may expect a long press on the pill to
+  act; there is none for keyboard users either, who start and stop through the pop-up.
 - **The body is an empty layer that covers the whole card, border included, under the content,
   as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
-  `aria-labelledby` the name and the status text, and the fill.** The content row above it has
+  `aria-labelledby` the name and the status text, and, on the pill, the fill; the round tile's
+  ring is in the content and its body is empty.** The content row above it has
   `pointer-events: none`, so a press anywhere on the card reaches the body; the chip is a
   sibling of the body, not inside it, and has `pointer-events: auto`. A button inside an element
   with `role="button"` is presentational, so assistive technology would not see the chip; as a
@@ -1389,12 +1391,15 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   Cyrillic stays in `ru.json`. Custom integrations have no `strings.json`; `en.json` is the
   source. Cost if wrong: a language without a file shows English.
 - **The card's strings are typed by the keys of `en.json` `common`, and that English is built
-  into the bundle and used only before any card has loaded strings.** Config errors, the
-  picker's description and the editor's labels use `lastLoaded()`, the last `hass` whose
-  strings arrived, since `setConfig` and `getConfigForm` run without `hass`; everything else
-  uses the card's own `hass.localize`. A misspelt key fails `tsc`, a stale bundle fails
-  `build:check`, and a page whose first card is invalid shows that error in English. Cost if
-  wrong: the editor's words come from the last strings a card loaded (a follow-up).
+  into the bundle and used only before any card has loaded strings.** Config errors and the
+  picker's description use `lastLoaded()`, the last `hass` whose strings arrived, since
+  `setConfig` and `getConfigForm` run without `hass`; so do the editor's names of the two
+  layouts, the labels of its preset options and the text under them, because the form that Home
+  Assistant builds is given no way to translate those. The editor's field labels use the
+  frontend's own `localize`, and everything else the card's own `hass.localize`. A misspelt key
+  fails `tsc`, a stale bundle fails `build:check`, and a page whose first card is invalid shows
+  that error in English. Cost if wrong: the editor's option labels and helper come from the last
+  strings a card loaded, and are English when none has (a follow-up).
 
 ### The editor and the picker
 
@@ -1468,7 +1473,11 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   it.
 - **The gate from this phase on is the Python four (`pytest`, `ruff check`, `ruff format
   --check`, `mypy`), `npm --prefix card ci`, `build:check`, `typecheck`, `test` and `e2e`, and
-  hassfest, run locally on the final tree.** Cost if wrong: a longer gate, which needs Docker.
+  hassfest, run locally on the final tree.** GitHub Actions stay disabled and a green CI is
+  never a merge gate, so the gate is what runs on the machine; and each check proves what the
+  others cannot: `build:check` that the committed bundle is the sources', `tsc` the types, the
+  unit tests the logic, and the end-to-end tests and hassfest what only a real Home Assistant
+  shows. Cost if wrong: a longer gate, which needs Docker.
 - **The smoke test checks the delivery of the card first, before any countdown.** The index
   page `/` must contain `import("/timerify_frontend/timerify-card.js?v=<16 hex digits of the
   SHA-256 of the bundle in the checkout>")`, a GET of that address must return the bytes of
@@ -1486,9 +1495,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   scoped custom element registry, and then loses its definition: the dashboard shows "Custom
   element doesn't exist: timerify-card" until the page is loaded again
   ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890),
-  fixed by frontend PR #54444 in frontend 20261028, Home Assistant 2026.11.0). Every card that an
-  integration loads this way meets it, and Lovelace resources do not. No fix on 2026.10 uses only
-  the public APIs. The README tells users to refresh once more, and
+  fixed by frontend PR #54444, in frontend 20261028.0 and later, which Home Assistant 2026.11 is
+  expected to carry; the unchanged bundle was seen to keep its definition on a 2026.11 beta).
+  Every card that an integration loads this way meets it, and Lovelace resources do not. No
+  fix on 2026.10 uses only the public APIs. The README tells users to refresh once more, and
   `card/e2e/first-load.spec.ts` records the behaviour as an expected failure that Playwright
   reports when the problem goes away. That expected failure rests on a race the card's module
   wins against the application's bundle on the machine it was written on, so a machine on which

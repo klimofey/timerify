@@ -765,7 +765,7 @@ glance, and a tap opens a pop-up where you run the timer for a set time, add or 
 minutes, stop it, switch the intervals of its schedule and cancel pending commands. It has two
 layouts and a visual editor.
 
-### Installation
+### Loading the card
 
 There is nothing to add. Timerify serves the card and tells Home Assistant to load it on every
 dashboard, so there is no resource to create under **Dashboards**, and dashboards in YAML mode
@@ -778,8 +778,9 @@ first load after the frontend was updated), a card that an integration loads can
 the dashboard shows "Configuration error" and "Custom element doesn't exist: timerify-card".
 Refresh the page once more and the card is there. This is a fault of Home Assistant's frontend
 ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890)) that
-every such card meets, and the frontend that Home Assistant 2026.11 ships fixes it. Timerify does
-not work around it.
+every such card meets. It is fixed in the frontend from version 20261028.0 on
+([pull request #54444](https://github.com/home-assistant/frontend/pull/54444)), which Home
+Assistant 2026.11 is expected to carry. Timerify does not work around it.
 
 ### The two layouts
 
@@ -801,11 +802,13 @@ below. The round tile has no chip, and it can be long-pressed; see
 - The name and the icon are the target's. The icon follows the target's state, as it does on any
   card. Both can be set in the card's configuration.
 - A countdown that runs on without an end (loose mode, a target that is on with no countdown)
-  shows a full fill and a full ring, with the state of the target in words. An idle timer shows
-  an empty fill and an empty ring.
+  shows a full fill and a full ring; the pill says the state of the target in words, and the
+  round tile has them for screen readers only. An idle timer shows an empty fill and an empty
+  ring.
 - A countdown that began before Timerify was updated to 0.5.0 has no recorded beginning: its
   fill stays full until the countdown ends or is set again.
-- A timer whose number is unavailable shows that, and the pop-up's buttons are off. If the
+- A timer whose number is unavailable shows that, and its presets, plus, minus, Stop and
+  cancel buttons are off (see [The pop-up](#the-pop-up)). If the
   entity of the card does not exist, or is not the "Run for" number of a Timerify timer, the card
   says so and names it, and finds its timer again by itself when the entity is back. After you
   rename the number, point the card at its new entity id.
@@ -823,12 +826,12 @@ Every option is shown here with its default:
 
 ```yaml
 type: custom:timerify-card
-entity: number.boiler_run_for   # required: the "Run for" number of the timer
-layout: pill                    # pill (the default) or round
-name: Boiler                    # default: the name of the target
-icon: mdi:water-boiler          # default: the icon of the target, which follows its state
-presets: [15, 30, 45, 60, 120]  # the default: minutes the pop-up offers
-chip: 15                        # no chip by default: the pill's "+15 min" chip
+entity: number.boiler_run_for             # required: the "Run for" number of the timer
+layout: pill                              # pill (the default) or round
+name: Boiler                              # default: the name of the target
+icon: mdi:water-boiler                    # default: the icon of the target, which follows its state
+presets: ["15", "30", "45", "60", "120"]  # the default: the minutes the pop-up offers
+chip: 15                                  # no chip by default: the pill's "+15 min" chip
 ```
 
 | Option | Default | What it is |
@@ -857,8 +860,9 @@ presets, so you see them. A few things about the editor:
   not a list) sends the editor to YAML.
 - A card written by hand without `layout` is a pill, but the form does not preselect it:
   Home Assistant's editor does not apply the defaults of a form.
-- The words of the editor are in the language of the last card the page loaded, and in English
-  before any card has.
+- The names of the fields are translated by Home Assistant itself. The names of the two layouts,
+  the labels of the preset options and the text under them are in the language of the last card
+  the page loaded, and in English before any card has.
 
 ### The pop-up
 
@@ -871,8 +875,9 @@ the dimmed page behind it close it. From top to bottom it holds:
 - **The presets**: pressing one runs the timer for that long, as setting "Run for" does, and
   restarts a countdown that runs.
 - **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown
-  runs. Adding time to a timer that is idle starts it, as `timerify.add_time` does. Stop turns
-  the target off and ends the countdown, with or without one.
+  runs. Adding time to a timer that is idle starts it, as `timerify.add_time` does. Stop is offered
+  while the timer runs, with a countdown or without; it turns the target off and ends the
+  countdown.
 - **Schedule**, when the timer has intervals: a switch for each, named by its title, which
   turns the interval's [switch](#the-switch-of-an-interval) on and off. Creating and editing
   intervals is not done here; use the timer's page. An interval whose switch is unavailable is

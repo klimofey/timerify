@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url";
 /** `localhost`, not 127.0.0.1: the frontend's service worker registers only there or on https. */
 export const BASE_URL = "http://localhost:18124";
 export const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
+/**
+ * What the strict timer's target is called on the dashboard: `scripts.e2e.hass` gives it this
+ * name in the entity registry, as a user renames an entity (`STRICT_NAME` there says the same).
+ */
+export const STRICT_NAME = "Boiler";
 /** Written by `scripts.e2e.hass up`, read by the tests; the file goes with `down`. */
 export const STATE_FILE = fileURLToPath(new URL(".state.json", import.meta.url));
 

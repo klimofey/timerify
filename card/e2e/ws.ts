@@ -1,7 +1,7 @@
 // A test's own connection to Home Assistant's WebSocket API, with the long-lived token of
 // one of the fixture's users: it sets a timer up, or looks at what the card did, the way a
 // second device would. Node's own `WebSocket`, so there is nothing to install.
-import type { E2EState, UserName } from "./constants";
+import type { DashboardConfig, DashboardView, E2EState, UserName } from "./constants";
 
 /** The state of an entity as Home Assistant sends it. */
 export interface HassState {
@@ -11,10 +11,11 @@ export interface HassState {
   last_changed: string;
 }
 
-/** One view of a dashboard, as it is saved. */
-export interface DashboardView {
-  path: string;
-  [field: string]: unknown;
+/** The user a connection belongs to, as `auth/current_user` tells it. */
+export interface CurrentUser {
+  id: string;
+  name: string;
+  is_admin: boolean;
 }
 
 export interface HassWs {
@@ -26,10 +27,30 @@ export interface HassWs {
   ): Promise<unknown>;
   /** The state of the entity, or undefined when it has none. */
   state(entityId: string): Promise<HassState | undefined>;
+  /** The saved configuration of the fixture's dashboard. */
+  dashboard(): Promise<DashboardConfig>;
+  /** Saves the configuration of the fixture's dashboard; only an administrator may. */
+  saveDashboard(config: DashboardConfig): Promise<void>;
   /** The saved configuration of a view of the fixture's dashboard. */
   config(dashboardView: string): Promise<DashboardView>;
+  /** The user whose token this connection has. */
+  currentUser(): Promise<CurrentUser>;
+  /**
+   * Any command of the WebSocket API; resolves with its result. It rejects when the socket is
+   * not open, and when Home Assistant has not answered within the options' `callTimeout`.
+   */
+  command<T = unknown>(type: string, fields?: Record<string, unknown>): Promise<T>;
   close(): void;
 }
+
+export interface HassWsOptions {
+  /** How long a command may wait for its result, in milliseconds. */
+  callTimeout?: number;
+}
+
+/** Home Assistant answers a command in milliseconds; a service call, once it has run. */
+const CALL_TIMEOUT_MS = 15_000;
+const CLOSED = "The WebSocket is closed";
 
 interface Pending {
   resolve(result: unknown): void;
@@ -60,7 +81,11 @@ function connect(baseUrl: string, token: string): Promise<WebSocket> {
   });
 }
 
-export async function hassWs(state: E2EState, user: UserName = "admin"): Promise<HassWs> {
+export async function hassWs(
+  state: E2EState,
+  user: UserName = "admin",
+  { callTimeout = CALL_TIMEOUT_MS }: HassWsOptions = {},
+): Promise<HassWs> {
   const socket = await connect(state.base_url, state.users[user].token);
   const pending = new Map<number, Pending>();
   let nextId = 1;
@@ -86,35 +111,58 @@ export async function hassWs(state: E2EState, user: UserName = "admin"): Promise
   });
   socket.addEventListener("close", () => {
     for (const waiting of pending.values()) {
-      waiting.reject(new Error("The WebSocket closed"));
+      waiting.reject(new Error(CLOSED));
     }
     pending.clear();
   });
 
-  const call = <T>(command: { type: string; [field: string]: unknown }): Promise<T> =>
+  // A command sent on a socket that is not open would be dropped without a word, and the
+  // close handler above has rejected only the commands that were waiting when it closed.
+  const call = <T>(type: string, fields: Record<string, unknown> = {}): Promise<T> =>
     new Promise((resolve, reject) => {
+      if (socket.readyState !== WebSocket.OPEN) {
+        reject(new Error(`${CLOSED}: ${type} was not sent`));
+        return;
+      }
       const id = nextId++;
-      pending.set(id, { resolve: (result) => resolve(result as T), reject });
-      socket.send(JSON.stringify({ id, ...command }));
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Home Assistant did not answer ${type} within ${callTimeout} ms`));
+      }, callTimeout);
+      pending.set(id, {
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result as T);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      socket.send(JSON.stringify({ id, type, ...fields }));
     });
+
+  const dashboard = () =>
+    call<DashboardConfig>("lovelace/config", { url_path: state.dashboard, force: true });
 
   return {
     callService: (domain, service, data = {}, target) =>
-      call({ type: "call_service", domain, service, service_data: data, target }),
+      call("call_service", { domain, service, service_data: data, target }),
     state: async (entityId) =>
-      (await call<HassState[]>({ type: "get_states" })).find((s) => s.entity_id === entityId),
+      (await call<HassState[]>("get_states")).find((s) => s.entity_id === entityId),
+    dashboard,
+    saveDashboard: async (config) => {
+      await call("lovelace/config/save", { url_path: state.dashboard, config });
+    },
     config: async (dashboardView) => {
-      const config = await call<{ views: DashboardView[] }>({
-        type: "lovelace/config",
-        url_path: state.dashboard,
-        force: true,
-      });
-      const found = config.views.find((view) => view.path === dashboardView);
+      const found = (await dashboard()).views.find((view) => view.path === dashboardView);
       if (found === undefined) {
         throw new Error(`The dashboard ${state.dashboard} has no view ${dashboardView}`);
       }
       return found;
     },
+    currentUser: () => call<CurrentUser>("auth/current_user"),
+    command: call,
     close: () => socket.close(),
   };
 }

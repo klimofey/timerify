@@ -2,6 +2,7 @@
 // to Home Assistant, a login that works with the frontend's service worker, and a reset of
 // the fixture before every test.
 import { readFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { expect, test as base, type Page } from "@playwright/test";
 import { STATE_FILE, type E2EState, type TimerEntities, type UserName } from "./constants";
 import { hassWs, type HassWs } from "./ws";
@@ -9,6 +10,14 @@ import { hassWs, type HassWs } from "./ws";
 export interface OpenDashboardOptions {
   /** Who logs in; the administrator by default. */
   user?: UserName;
+  /**
+   * Whether to reload the page once more when the frontend's service worker serves it, which
+   * is what gets a card that Home Assistant loads with `add_extra_js_url` onto the page
+   * (see `primeServiceWorker`). Pass `false` to stay on the first load the worker serves,
+   * the page a user's very first visit ends on; it returns when the frontend has started
+   * there, whether or not the card is on it. True by default.
+   */
+  reload?: boolean;
 }
 
 /** Logs in at the login page, as a user does, and shows the view of the fixture's dashboard. */
@@ -33,7 +42,7 @@ export async function commandsOf(ws: HassWs, timer: TimerEntities): Promise<Comm
 /**
  * Puts the fixture back as `scripts.e2e.hass up` made it, whatever the last test did: both
  * numbers stopped, every command cancelled and the fixture's command added again, the
- * interval switched on. Returns when Home Assistant shows it.
+ * interval switched on, the dashboard saved as it was. Returns when Home Assistant shows it.
  */
 export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
   const { strict, loose } = state.timers;
@@ -47,6 +56,11 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
   }
   await ws.callService("timerify", "add_command", state.command, timer(loose));
   await ws.callService("switch", "turn_on", {}, { entity_id: state.interval.switch });
+  const dashboardIsRestored = async () =>
+    isDeepStrictEqual(await ws.dashboard(), state.dashboard_config);
+  if (!(await dashboardIsRestored())) {
+    await ws.saveDashboard(state.dashboard_config);
+  }
 
   const valueOf = async (entityId: string) => (await ws.state(entityId))?.state;
   await expect
@@ -59,6 +73,7 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
         looseTarget: await valueOf(loose.target),
         looseCommands: (await commandsOf(ws, loose)).length,
         interval: await valueOf(state.interval.switch),
+        dashboard: await dashboardIsRestored(),
       }),
       { message: "Home Assistant should show the fixture, restored" },
     )
@@ -70,19 +85,29 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
       looseTarget: "off",
       looseCommands: 1,
       interval: "on",
+      dashboard: true,
     });
 }
 
 /**
- * Gets the frontend's service worker in control, with its cache filled, and returns when the
- * page can be reloaded for good.
+ * Gets the frontend's service worker in control, and returns when the frontend has started on
+ * the page the worker serves. A page of ours can then be reloaded for good.
  *
  * On the first visit the frontend registers the worker and reloads the page itself when the
- * worker takes control. That first load under the worker has a cold cache, and a card module
- * can then run before the frontend is ready for it: the card is not defined, and the
- * dashboard shows a configuration error. Every load after it has the cache filled and shows
- * the card. So: wait for the load the worker serves (a reload of our own would race the
- * frontend's), and for the frontend to have started on it.
+ * worker takes control. That first load under the worker can lose the card: Home Assistant
+ * 2026.10 starts the app and the modules added with `add_extra_js_url` (how Timerify loads
+ * its card) as two independent `import()` calls, and the worker serves the large app file
+ * after the small card module. The card defines its element first; the app then installs a
+ * scoped custom element registry that knows nothing of it, so the dashboard shows "Custom
+ * element doesn't exist: timerify-card" until the next load. Every load after it takes the
+ * app file from the browser's cache, and shows the card. This is a frontend bug,
+ * https://github.com/home-assistant/frontend/issues/53890, fixed in frontend 20261028 (Home
+ * Assistant 2026.11) by https://github.com/home-assistant/frontend/pull/54444. The
+ * investigation is in docs/research/2026-10-31-card-first-load.md; the test that shows it is
+ * first-load.spec.ts.
+ *
+ * So: wait for the load the worker serves (a reload of our own would race the frontend's),
+ * and for the frontend to have started on it.
  */
 async function primeServiceWorker(page: Page): Promise<void> {
   const servedByWorker = () =>
@@ -102,7 +127,7 @@ async function primeServiceWorker(page: Page): Promise<void> {
 }
 
 function dashboardOpener(state: E2EState): OpenDashboard {
-  return async (page, view, { user = "admin" } = {}) => {
+  return async (page, view, { user = "admin", reload = true } = {}) => {
     const account = state.users[user];
     const path = `/${state.dashboard}/${view}`;
     await page.goto(path);
@@ -112,6 +137,9 @@ function dashboardOpener(state: E2EState): OpenDashboard {
     await password.press("Enter");
     await page.waitForURL((url) => url.pathname === path);
     await primeServiceWorker(page);
+    if (!reload) {
+      return;
+    }
     await page.reload({ waitUntil: "load" });
     await expect(page.locator("timerify-card ha-card").first()).toBeVisible();
   };

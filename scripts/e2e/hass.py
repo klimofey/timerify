@@ -14,7 +14,8 @@ switch that sits on a device; an interval on the strict timer that is never open
 test runs; a pending command on the loose timer that never comes due; and a dashboard of
 the card with a view for each file of tests that needs one. It writes what the tests
 need to find all of it to the state file, which the Playwright side reads: see
-`E2EState` in card/e2e/constants.ts.
+`E2EState` in card/e2e/constants.ts. The state file holds the dashboard as it was saved,
+for the reset that every test starts with to save it again.
 """
 
 import argparse
@@ -203,6 +204,7 @@ async def build_fixture(
         )
 
         say("Making the dashboard")
+        dashboard = dashboard_config(strict)
         await socket.call(
             "lovelace/dashboards/create",
             url_path=DASHBOARD,
@@ -211,11 +213,7 @@ async def build_fixture(
             show_in_sidebar=False,
             require_admin=False,
         )
-        await socket.call(
-            "lovelace/config/save",
-            url_path=DASHBOARD,
-            config=dashboard_config(strict),
-        )
+        await socket.call("lovelace/config/save", url_path=DASHBOARD, config=dashboard)
 
     return {
         "base_url": instance.base_url,
@@ -227,6 +225,7 @@ async def build_fixture(
         "interval": interval,
         "command": {"action": COMMAND_ACTION, "delay": COMMAND_DELAY_MINUTES},
         "dashboard": DASHBOARD,
+        "dashboard_config": dashboard,
     }
 
 
@@ -240,8 +239,8 @@ async def up(instance: Instance, state_file: Path) -> None:
 
 
 async def restart(instance: Instance, state_file: Path) -> None:
-    """Restart Home Assistant, and return when the numbers of the timers have a value
-    again, which is when Timerify has started."""
+    """Restart Home Assistant, and return when it is running again and the numbers of
+    the timers have a value, which is when Timerify has started."""
     fixture = json.loads(await asyncio.to_thread(state_file.read_text))
     admin = fixture["users"]["admin"]
     async with aiohttp.ClientSession() as session:
@@ -254,6 +253,9 @@ async def restart(instance: Instance, state_file: Path) -> None:
                 await socket.wait_for_state(
                     timer["run_for"], is_known, "a value", STARTUP_TIMEOUT
                 )
+            # The numbers can have a value before Home Assistant has finished starting,
+            # and a second restart before then loses what it had not yet saved.
+            await wait_until_running(socket)
     say("Home Assistant is back, and so are the timers")
 
 

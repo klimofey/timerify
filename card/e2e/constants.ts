@@ -28,6 +28,18 @@ export interface Account {
 
 export type UserName = "admin" | "viewer";
 
+/** One view of a dashboard, as it is saved. */
+export interface DashboardView {
+  path: string;
+  [field: string]: unknown;
+}
+
+/** A dashboard, as it is saved. */
+export interface DashboardConfig {
+  views: DashboardView[];
+  [field: string]: unknown;
+}
+
 /** What `scripts.e2e.hass up` leaves in the state file. */
 export interface E2EState {
   base_url: string;
@@ -50,4 +62,6 @@ export interface E2EState {
   command: { action: string; delay: number };
   /** The `url_path` of the dashboard that has one view for each file of tests. */
   dashboard: string;
+  /** The dashboard as `up` saved it: the reset saves it again after a test changed it. */
+  dashboard_config: DashboardConfig;
 }

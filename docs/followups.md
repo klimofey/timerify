@@ -17,6 +17,25 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   repository is built as a product. `custom_components/timerify/__init__.py:86-106`
   (`_follow_target`, the pattern), `custom_components/timerify/controller.py:236` (the
   option) and `:816-828` (`_follow_workday_sensor`, which subscribes to the id).
+- **The card can be missing from a browser's first page load on Home Assistant 2026.10.** On
+  the first load that the frontend's service worker serves (a first visit, a cold cache, a
+  frontend update) the dashboard can show "Configuration error: Custom element doesn't exist:
+  timerify-card" until the page is loaded again. It is not a card bug: Home Assistant 2026.10
+  starts the app and the modules added with `add_extra_js_url` as independent `import()` calls,
+  and a module that defines its element before the app installs its scoped custom element
+  registry loses the definition (home-assistant/frontend#53890, fixed by frontend PR #54444 in
+  frontend 20261028, Home Assistant 2026.11.0). Every card added with `add_extra_js_url` is hit;
+  Lovelace resources are not. On 2026.10 no fix uses only public APIs, so the owner ruled to
+  document it, keep C1 and change no card code; plan ruling 19 (the README tells users to
+  refresh the browser once after installing or updating) covers it. The question for 1.0.0 is
+  whether to raise the minimum Home Assistant to 2026.11, which makes the problem go away:
+  `hacs.json` `homeassistant`, the `pytest-homeassistant-custom-component` pin in
+  `pyproject.toml` (`:16`) and the image in `scripts/harness/compose.yaml` (`:8`) move
+  together. When the harness runs 2026.11,
+  `card/e2e/first-load.spec.ts` passes unexpectedly: remove its `test.fail` (`:29`) and the
+  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` (`:143`).
+  `custom_components/timerify/card.py:51` (the registration). Investigation:
+  `docs/research/2026-10-31-card-first-load.md`.
 
 ## Later
 

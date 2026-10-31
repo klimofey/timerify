@@ -1,6 +1,6 @@
 // The reset that every test starts with must undo whatever a test did to the fixture: a
-// test that finds a timer left running, a command missing or an interval off cannot be
-// trusted. The first test does all of that at once.
+// test that finds a timer left running, a command missing, an interval off or a dashboard
+// edited cannot be trusted. The first test does all of that at once.
 import { commandsOf, expect, resetFixture, test } from "./fixtures";
 import { hassWs } from "./ws";
 
@@ -18,8 +18,11 @@ test("the reset puts back everything a test changed", async ({ state, ws }) => {
     await ws.callService("timerify", "cancel_command", { command_id: command.id }, timer(loose));
   }
   await ws.callService("switch", "turn_off", {}, { entity_id: state.interval.switch });
+  // The dashboard has lost its views, as a test of the editor could leave it.
+  await ws.saveDashboard({ views: [{ path: "elsewhere", cards: [] }] });
   await expect.poll(() => valueOf(strict.target)).toBe("on");
   await expect.poll(() => valueOf(state.interval.switch)).toBe("off");
+  expect(await ws.dashboard()).not.toEqual(state.dashboard_config);
 
   await resetFixture(state, ws);
 
@@ -28,6 +31,7 @@ test("the reset puts back everything a test changed", async ({ state, ws }) => {
   expect(await valueOf(strict.target)).toBe("off");
   expect(await valueOf(loose.target)).toBe("off");
   expect(await valueOf(state.interval.switch)).toBe("on");
+  expect(await ws.dashboard()).toEqual(state.dashboard_config);
 });
 
 test("a view of the dashboard can be read back", async ({ state, ws }) => {
@@ -42,14 +46,19 @@ test("a user who is not an administrator gets to the dashboard too", async ({
   page,
   openDashboard,
   state,
+  ws,
 }) => {
-  await openDashboard(page, "dialog", { user: "viewer" });
-  await expect(page.locator("timerify-card").getByText("Smoke boiler")).toBeVisible();
-
+  // The tests of what an administrator alone may see rest on this: the viewer is no
+  // administrator, and the other account is one.
+  expect((await ws.currentUser()).is_admin).toBe(true);
   const viewer = await hassWs(state, "viewer");
   try {
+    expect((await viewer.currentUser()).is_admin).toBe(false);
     expect((await viewer.state(state.timers.strict.target))?.state).toBe("off");
   } finally {
     viewer.close();
   }
+
+  await openDashboard(page, "dialog", { user: "viewer" });
+  await expect(page.locator("timerify-card").getByText("Smoke boiler")).toBeVisible();
 });

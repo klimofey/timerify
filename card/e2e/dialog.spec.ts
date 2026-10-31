@@ -2,35 +2,12 @@
 // a real Home Assistant, which has dialogs of its own: it opens as a modal above the whole
 // frontend, the page behind it takes no input, and Escape closes it. Everything else the
 // pop-up will do rests on this. View "dialog": one pill card on the strict timer.
-import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { focusedPlace, hasFocus } from "./focus";
 
 const NAME = "Smoke boiler";
-
-/**
- * Where the keyboard focus is, as seen through the shadow roots of the whole page: inside the
- * dialog, nowhere (on the document or on nothing), or somewhere in the page behind it.
- */
-function focusedPlace(dialog: Locator): Promise<string> {
-  return dialog.evaluate((element) => {
-    let active: Element | null = document.activeElement;
-    while (active?.shadowRoot?.activeElement) {
-      active = active.shadowRoot.activeElement;
-    }
-    if (active === null || active === document.body || active === document.documentElement) {
-      return "nowhere";
-    }
-    return element.contains(active) ? "the dialog" : `the page behind: <${active.localName}>`;
-  });
-}
-
-/** Whether the element is the one that has the keyboard focus in its own tree. */
-function hasFocus(element: Locator): Promise<boolean> {
-  return element.evaluate((node) => {
-    const root = node.getRootNode();
-    return root instanceof ShadowRoot && root.activeElement === node;
-  });
-}
+/** What `transparent` computes to: the probe's answer when the theme has no primary colour. */
+const NO_COLOR = "rgba(0, 0, 0, 0)";
 
 test.describe("the card's dialog in Home Assistant", () => {
   test.beforeEach(async ({ page, openDashboard }) => {
@@ -97,7 +74,24 @@ test.describe("the card's dialog in Home Assistant", () => {
       await page.keyboard.press("Tab");
     }
 
-    const outline = await body.evaluate((node) => getComputedStyle(node).outlineStyle);
-    expect(outline).not.toBe("none");
+    // The card's own ring, not the browser's default one: `.body:focus-visible` in the card
+    // draws 2px, solid, in the theme's primary colour.
+    const outline = await body.evaluate((node, none) => {
+      const style = getComputedStyle(node);
+      // The theme's colour as the browser computes it, taken from a probe in the same tree.
+      const probe = document.createElement("span");
+      probe.style.color = `var(--primary-color, ${none})`;
+      node.parentNode?.append(probe);
+      const primary = getComputedStyle(probe).color;
+      probe.remove();
+      return {
+        style: style.outlineStyle,
+        width: style.outlineWidth,
+        color: style.outlineColor,
+        primary,
+      };
+    }, NO_COLOR);
+    expect(outline.primary, "the theme should define --primary-color").not.toBe(NO_COLOR);
+    expect(outline).toMatchObject({ style: "solid", width: "2px", color: outline.primary });
   });
 });

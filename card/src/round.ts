@@ -1,0 +1,183 @@
+// The round layout: a ring that shows the share of the countdown that is left, the time left
+// in its centre while it counts (the icon of the timer's target otherwise), and the name below.
+// A press anywhere on the card reaches its body; a long press acts, see `press.ts`.
+import { css, html, type TemplateResult } from "lit";
+import type { CardConfig } from "./config";
+import { formatRemaining } from "./format";
+import type { HomeAssistant } from "./hass";
+import { renderIcon, renderStatus } from "./layout";
+import type { PressBinding } from "./press";
+import type { TimerView } from "./timer";
+
+/** The ring is drawn in a square of this many units, scaled to the size it has on the page. */
+const SIZE = 80;
+const STROKE = 6;
+const RADIUS = (SIZE - STROKE) / 2;
+const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+
+/** The time left while the timer counts; the icon of its target otherwise. */
+function renderCentre(view: TimerView): TemplateResult {
+  if (view.state !== "counting") {
+    return html`<span class="icon">${renderIcon(view)}</span>`;
+  }
+  // The label of the body already says it, with the end.
+  const left = formatRemaining(view.remaining);
+  return html`<span class="time" aria-hidden="true">${left}</span>`;
+}
+
+/**
+ * The card as a round tile, drawn at the instant `now` that `view` was made for. Its body is
+ * an empty layer under the content, as the pill's, pressed through `binding`; the ring and
+ * the time are for the eye alone. The state that the ring and the icon show is also said in
+ * words that only assistive technology reads, so that the button is named by the name and
+ * the state, as the pill's is.
+ */
+export function renderRound(
+  view: TimerView,
+  config: CardConfig,
+  hass: HomeAssistant,
+  binding: PressBinding,
+  now: number,
+): TemplateResult {
+  const middle = SIZE / 2;
+  return html`
+    <ha-card class="round ${view.state}">
+      <div
+        class="body"
+        role="button"
+        tabindex="0"
+        aria-haspopup="dialog"
+        aria-labelledby="label"
+        @click=${binding.click}
+        @keydown=${binding.keydown}
+        @keyup=${binding.keyup}
+        @pointerdown=${binding.pointerdown}
+        @pointerup=${binding.pointerup}
+        @pointercancel=${binding.pointercancel}
+        @pointerleave=${binding.pointerleave}
+        @contextmenu=${binding.contextmenu}
+      ></div>
+      <div class="content">
+        <div class="dial">
+          <svg class="ring" viewBox="0 0 ${SIZE} ${SIZE}" aria-hidden="true">
+            <circle class="track" cx=${middle} cy=${middle} r=${RADIUS}></circle>
+            <circle
+              class="progress"
+              cx=${middle}
+              cy=${middle}
+              r=${RADIUS}
+              transform="rotate(-90 ${middle} ${middle})"
+              stroke-dasharray=${CIRCUMFERENCE}
+              stroke-dashoffset=${(1 - view.progress) * CIRCUMFERENCE}
+            ></circle>
+          </svg>
+          <span class="centre">
+            ${renderCentre(view)}
+          </span>
+        </div>
+        <span class="text" id="label">
+          <span class="name">${view.name}</span>
+          <span class="status">${renderStatus(view, config, hass, now)}</span>
+        </span>
+      </div>
+    </ha-card>
+  `;
+}
+
+export const roundStyles = css`
+  ha-card.round {
+    --timerify-radius: var(--ha-card-border-radius, var(--ha-border-radius-lg, 12px));
+    height: 120px;
+  }
+  .round .content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px;
+  }
+  .dial {
+    position: relative;
+    flex: none;
+    width: ${SIZE}px;
+    height: ${SIZE}px;
+  }
+  .ring {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .track,
+  .progress {
+    fill: none;
+    stroke-width: ${STROKE};
+  }
+  .track {
+    stroke: var(--divider-color, #e0e0e0);
+  }
+  .progress {
+    stroke: var(--state-active-color, var(--primary-color));
+  }
+  .centre {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .time {
+    color: var(--primary-text-color);
+    font-size: var(--ha-font-size-l, 16px);
+    font-weight: var(--ha-font-weight-medium, 500);
+    font-variant-numeric: tabular-nums;
+  }
+  .round .icon {
+    display: flex;
+    --mdc-icon-size: 32px;
+  }
+  .round .text {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .round .name {
+    max-width: 100%;
+  }
+  /* For assistive technology only: what the ring and the icon say. */
+  .round .status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  /*
+   * While letting go would act, the ring pulses. A timer that is unavailable has nothing to
+   * act on, so its ring stays still.
+   */
+  @keyframes pulse {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0.6;
+      transform: scale(1.08);
+    }
+  }
+  :host([data-held]) .round:not(.unavailable) .ring {
+    animation: pulse 0.8s ease-in-out infinite alternate;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :host([data-held]) .round:not(.unavailable) .ring {
+      animation: none;
+      transform: scale(1.08);
+    }
+  }
+`;

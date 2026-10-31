@@ -804,6 +804,7 @@ async def test_downtime_across_an_end_a_window_and_two_commands_ends_in_one_turn
     assert state_of(hass, AC_ENDS_AT) == iso(SUNDAY, "08:00")
     assert saved(hass_storage, entry) == payload(
         end=iso(SUNDAY, "08:00"),
+        started_at=iso(SUNDAY, "07:00"),
         windows=[
             window_json(
                 interval,

@@ -10,6 +10,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.helper_integration import async_handle_source_entity_changes
 from homeassistant.helpers.typing import ConfigType
 
+from .card import async_register_card
 from .const import CONF_TARGET, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
 from .services import async_setup_services
@@ -22,6 +23,7 @@ from .voice.files import (
     async_unload_voice_entry,
     is_voice_entry,
 )
+from .websocket import async_register_websocket_commands
 
 PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
 
@@ -29,10 +31,12 @@ CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Register the services and the intent handlers, which belong to the integration,
-    not to a timer."""
+    """Register the services, the intent handlers, the websocket commands and the
+    dashboard card, which belong to the integration, not to a timer."""
     async_setup_services(hass)
     async_register_intents(hass)
+    async_register_websocket_commands(hass)
+    await async_register_card(hass)
     return True
 
 

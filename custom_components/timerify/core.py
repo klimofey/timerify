@@ -67,6 +67,10 @@ class Snapshot:
 
     end: datetime | None = None
     """When the countdown reaches zero (timezone-aware UTC); None while idle."""
+    started_at: datetime | None = None
+    """When the current countdown began (timezone-aware UTC); None while idle, while
+    running without a countdown, and for a countdown stored before 0.5.0. Always before
+    `end` while both are set."""
     pending: Literal["on", "off"] | None = None
     """The switch the core asked for and has not yet seen the target confirm."""
     owed_settings: Settings = NO_SETTINGS
@@ -353,7 +357,7 @@ class TimerCore:
         sent with the turn-on, or on their own to a target that is on (P1).
         """
         now = _utc(now)
-        return self._run_until(now, now + duration, settings)
+        return self._run_until(now, now + duration, settings, began=now)
 
     @_reports_change
     def add(self, now: datetime, delta: timedelta) -> list[Effect]:
@@ -363,8 +367,8 @@ class TimerCore:
         if end is None:
             if delta <= timedelta(0):
                 return []
-            return self._run_until(now, now + delta)
-        return self._run_until(now, end + delta)
+            return self._run_until(now, now + delta, began=now)
+        return self._run_until(now, end + delta, began=self._kept_beginning(now))
 
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
@@ -388,8 +392,10 @@ class TimerCore:
         if self._wants_running(now, None):
             return self._want("on", settings)
         if self._mode == "strict":
-            return self._run_until(now, now + self._default_duration, settings)
-        self._set_end(None)
+            return self._run_until(
+                now, now + self._default_duration, settings, began=now
+            )
+        self._clear_end()
         return [self._wakeup(), *self._want("on", settings)]
 
     @_reports_change
@@ -705,7 +711,7 @@ class TimerCore:
         end = self._snapshot.end
         if window.end <= now or (end is not None and end >= window.end):
             return False
-        self._set_end(window.end, by=window.interval_id)
+        self._set_end(window.end, began=window.start, by=window.interval_id)
         if not self._runs_as_of(wish):
             self._owe(window.settings, turn_on_only=True)
         return True
@@ -739,7 +745,7 @@ class TimerCore:
             return "off"
         latest = max(open_windows, key=lambda w: (w.end, w.interval_id == interval_id))
         moved = latest.end != self._snapshot.end
-        self._set_end(latest.end, by=latest.interval_id)
+        self._set_end(latest.end, began=self._kept_beginning(at), by=latest.interval_id)
         return "on" if moved else None
 
     def _run_command(
@@ -763,7 +769,7 @@ class TimerCore:
         if command.minutes is None and self._wants_running(command.at, wish):
             self._owe(command.settings)
             return "on"
-        self._set_end(None if end is None else _capped(now, end))
+        self._set_end(None if end is None else _capped(now, end), began=command.at)
         self._owe(command.settings)
         return "on"
 
@@ -788,10 +794,10 @@ class TimerCore:
             self._suppress_windows()
             if self._snapshot.end is None:
                 return []
-            self._set_end(None)
+            self._clear_end()
             return [self._wakeup()]
         if self._mode == "strict" and self._snapshot.end is None:
-            return self._run_until(now, now + self._default_duration)
+            return self._run_until(now, now + self._default_duration, began=now)
         return []
 
     def _run_until(
@@ -799,11 +805,14 @@ class TimerCore:
         now: datetime,
         end: datetime,
         settings: Settings = NO_SETTINGS,
+        *,
+        began: datetime | None,
     ) -> list[Effect]:
-        """Count down to `end`, at most a day from now, or stop if it is not ahead."""
+        """Count down to `end`, at most a day from now, or stop if it is not ahead.
+        The countdown began at `began`: now, or when the one that was running did."""
         if end <= now:
             return self._stop()
-        self._set_end(_capped(now, end))
+        self._set_end(_capped(now, end), began=began)
         return [self._wakeup(), *self._want("on", settings)]
 
     def _stop(self) -> list[Effect]:
@@ -812,7 +821,7 @@ class TimerCore:
 
     def _end_timer(self) -> None:
         """The countdown is over: there is no end, and nothing to run with."""
-        self._set_end(None)
+        self._clear_end()
         self._clear_settings()
         self._suppress_windows()
 
@@ -825,13 +834,42 @@ class TimerCore:
         )
         self._snapshot = replace(self._snapshot, windows=windows)
 
-    def _set_end(self, end: datetime | None, *, by: str | None = None) -> None:
-        """The only writer of the end. `by` names the interval whose window end it is
-        (S1, S2); every other write, whoever made it, leaves the timer to nobody's
-        schedule (S3), and a timer with no end is nobody's."""
+    def _set_end(
+        self,
+        end: datetime | None,
+        *,
+        began: datetime | None,
+        by: str | None = None,
+    ) -> None:
+        """The only writer of the end and of the beginning of the countdown it counts
+        down to. `by` names the interval whose window end it is (S1, S2); every other
+        write, whoever made it, leaves the timer to nobody's schedule (S3), and a timer
+        with no end is nobody's.
+
+        `began` is when the countdown began: the caller works it out, a countdown that
+        goes on with a new end through `_kept_beginning`. None where there is none to
+        say, and always None for a timer with no end.
+        """
         self._snapshot = replace(
-            self._snapshot, end=end, scheduled_by=None if end is None else by
+            self._snapshot,
+            end=end,
+            started_at=None
+            if end is None or began is None
+            else _utc(began, "the beginning"),
+            scheduled_by=None if end is None else by,
         )
+
+    def _kept_beginning(self, at: datetime) -> datetime | None:
+        """The beginning of the running countdown for a write of its end as of `at`:
+        no later than `at`, so that a clock that stepped back cannot leave it at or
+        after an end that is ahead. None where it has none (it never had one, or
+        nothing runs)."""
+        kept = self._snapshot.started_at
+        return None if kept is None else min(kept, at)
+
+    def _clear_end(self) -> None:
+        """There is no countdown: no end, no beginning, nobody's schedule."""
+        self._set_end(None, began=None)
 
     def _want(
         self,

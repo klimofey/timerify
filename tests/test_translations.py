@@ -98,3 +98,15 @@ def test_a_path_with_a_placeholder_in_angle_brackets_is_markup() -> None:
     """The check sees what once broke hassfest: a path written with `<language>`."""
     with pytest.raises(probatio.Invalid):
         cv.string_with_no_html("custom_sentences/<language>/timerify.yaml")
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_card_strings_are_common_slugs_prefixed_card(language: str) -> None:
+    """The strings of the dashboard card sit in `common`, which the card loads in the
+    user's language, as flat texts whose keys cannot be taken for anything else."""
+    common = translations_of(language)["common"]
+
+    assert common
+    for key, text in common.items():
+        assert re.fullmatch(r"card_[a-z0-9_]+", key), key
+        assert isinstance(text, str), key

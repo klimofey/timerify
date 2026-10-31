@@ -89,7 +89,7 @@ async def test_stored_command_runs_on_time(
 
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "30"
-    assert saved(hass_storage, entry) == payload(end=at(40))
+    assert saved(hass_storage, entry) == payload(end=at(40), started_at=at(10))
     await advance(hass, freezer, minutes=30)
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 
@@ -108,7 +108,7 @@ async def test_command_due_during_downtime_runs_for_the_rest(
 
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "20"
-    assert saved(hass_storage, entry) == payload(end=at(20))
+    assert saved(hass_storage, entry) == payload(end=at(20), started_at=at(-10))
 
 
 async def test_command_whose_time_ran_out_during_downtime_is_dropped(
@@ -151,7 +151,7 @@ async def test_expired_timer_and_late_command_after_restart_keep_target_on(
     assert fake_target.calls == []
     assert state_of(hass, TARGET_ID) == "on"
     assert state_of(hass, NUMBER) == "50"
-    assert saved(hass_storage, entry) == payload(end=at(50))
+    assert saved(hass_storage, entry) == payload(end=at(50), started_at=at(-10))
     await advance(hass, freezer, minutes=50)
     assert fake_target.calls == [TURN_OFF]
 
@@ -471,7 +471,9 @@ async def test_stored_commands_are_kept_as_they_were_written(
 
     await set_number(hass, AC_NUMBER, 10)
 
-    assert saved(hass_storage, entry) == payload(end=at(10), commands=commands)
+    assert saved(hass_storage, entry) == payload(
+        end=at(10), started_at=at(0), commands=commands
+    )
 
 
 async def test_ac_in_15_minutes_for_an_hour_cooling_24(

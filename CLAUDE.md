@@ -6,14 +6,18 @@ entities, the way Powercalc attaches virtual power sensors to existing devices. 
 pending commands, a weekly schedule and a remaining-time sensor — plus Assist voice
 intents ("turn on the boiler for 10 minutes", "how long is left on the boiler").
 
-Status: phases 1 to 4 (the core timer: countdown, `number` and `sensor` entities, config and
+Status: phases 1 to 5 (the core timer: countdown, `number` and `sensor` entities, config and
 options flow, restarts, services; settings for turning on, pending commands and the "Next command"
 sensor; weekly schedules: intervals as config subentries by weekday or by a Workday sensor, an
 enable `switch` per interval, windows folded into the timer; voice: Assist sentences for the
 built-in agent in English and Russian, written by a "Voice settings" entry or copied by hand, and
-`timerify__` tools for LLM agents) are built; the later phases follow section 7 of the spec. Specs
-live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes in
-`docs/research/`, decisions made where the spec was silent in `RULINGS.md`, and open items in
+`timerify__` tools for LLM agents; the dashboard card: `custom:timerify-card` in a pill and a round
+layout with a pop-up, a long press on the round one and a visual editor, written in TypeScript in
+`card/`, built into the committed `custom_components/timerify/frontend/timerify-card.js` and loaded
+on every dashboard by the integration, with the `timerify/timer` websocket command and the
+`started_at` attribute of "Ends at" behind it) are built; the later phases follow section 7 of the
+spec. Specs live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes
+in `docs/research/`, decisions made where the spec was silent in `RULINGS.md`, and open items in
 `docs/followups.md`.
 
 ## Repository rules (non-negotiable)
@@ -66,5 +70,24 @@ uv run ruff format --check  # formatting
 uv run mypy                 # strict type check of custom_components and scripts
 ```
 
-All four checks (pytest, ruff check, ruff format --check, mypy) must pass locally before any
-commit lands on `main`.
+The card is a separate npm project in `card/` (Node >= 26); every command goes through `--prefix`:
+
+```sh
+npm --prefix card ci                                # install the locked packages
+npm --prefix card exec playwright install chromium  # once per machine, for the E2E tests
+npm --prefix card run build                         # rebuild the committed bundle (after any change in card/src or en.json)
+npm --prefix card run build:check                   # fail if the committed bundle is not what the sources build
+npm --prefix card run typecheck                     # strict tsc
+npm --prefix card test                              # vitest unit and component tests
+npm --prefix card run e2e                           # Playwright against a real Home Assistant in Docker (port 18124)
+npm --prefix card run screenshots                   # the two pictures of the README, by hand, when the card's look changes
+```
+
+Docker runs the rest: hassfest (`docker run --rm --platform linux/amd64 -v "$PWD:/github/workspace"
+ghcr.io/home-assistant/hassfest`) and the smoke test (`uv run python -m scripts.smoke.run`, port
+18123, about fifteen minutes, at the end of a phase). Before running the E2E or the smoke test,
+compare `date -u +%s` with `docker run --rm alpine date -u +%s`: a Docker clock that has drifted
+fails the tests that compare the browser's clock with the server's.
+
+All checks (pytest, ruff check, ruff format --check, mypy, `npm --prefix card ci`, `build:check`,
+`typecheck`, `test`, `e2e` and hassfest) must pass locally before any commit lands on `main`.

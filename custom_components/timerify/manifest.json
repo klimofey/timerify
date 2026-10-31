@@ -1,14 +1,14 @@
 {
   "domain": "timerify",
   "name": "Timerify",
-  "after_dependencies": ["conversation", "llm"],
+  "after_dependencies": ["conversation", "frontend", "llm"],
   "codeowners": ["@klimofey"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http"],
   "documentation": "https://github.com/klimofey/timerify",
   "integration_type": "helper",
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/klimofey/timerify/issues",
   "requirements": [],
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

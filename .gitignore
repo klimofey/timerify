@@ -8,5 +8,12 @@ __pycache__/
 htmlcov/
 .superpowers/
 
-# Throwaway Home Assistant configuration of the smoke test
+# Throwaway Home Assistant configuration of the smoke test and of the card's end-to-end tests
 /scripts/smoke/config/
+/scripts/e2e/config/
+
+# The dashboard card: dependencies of the TypeScript project
+card/node_modules/
+card/test-results/
+card/playwright-report/
+card/e2e/.state.json

@@ -113,6 +113,38 @@ MANAGED_HEADER: Final = (
 """The first line of every sentence file Timerify writes."""
 
 
+KEY_RUN_FOR: Final = "run_for"
+KEY_ENDS_AT: Final = "ends_at"
+KEY_NEXT_COMMAND: Final = "next_command"
+"""The keys of the entities a timer has one of: with the entry's id they make an
+entity's unique id (see `timer_unique_id`)."""
+
+
+def timer_unique_id(entry_id: str, key: str) -> str:
+    """The unique id of the entity of a timer that has the key `key` (`KEY_RUN_FOR`,
+    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`).
+
+    A unique id is an entity's identity in the registry: changing how it is made would
+    leave every installed entity behind, with its entity id, its history and its place
+    on the dashboards. It is built here so that the entities and whoever looks them up
+    by it, such as the card's websocket command, cannot disagree.
+    """
+    return f"{entry_id}_{key}"
+
+
+def interval_unique_id(entry_id: str, subentry_id: str) -> str:
+    """The unique id of the switch of the schedule interval that is the subentry
+    `subentry_id` of the timer; see `timer_unique_id`."""
+    return f"{entry_id}_interval_{subentry_id}"
+
+
+def default_duration_minutes(options: Mapping[str, Any]) -> int:
+    """The minutes a timer of strict mode runs by default: its option, or
+    `DEFAULT_DURATION_MINUTES` for an entry that has none."""
+    minutes: int = options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
+    return minutes
+
+
 def is_voice_options(options: Mapping[str, Any]) -> bool:
     """Whether the options are those of the voice settings, not of a timer."""
     return options.get(CONF_KIND) == KIND_VOICE_SETTINGS

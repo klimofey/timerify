@@ -12,6 +12,26 @@ from .const import DOMAIN, freeze_settings
 from .core import Command, Snapshot, Window, checked_window
 
 
+def _time_to_json(moment: datetime | None) -> str | None:
+    """A time as ISO-8601 UTC, or None for none."""
+    return None if moment is None else moment.astimezone(UTC).isoformat()
+
+
+def _time_from_json(text: str, what: str) -> datetime:
+    """A stored time, in UTC whatever offset the file gives it, as the core holds every
+    time; a ValueError naming `what` for a time with no offset, which no timer wrote
+    and which cannot be compared with the clock."""
+    moment = datetime.fromisoformat(text)
+    if moment.utcoffset() is None:
+        raise ValueError(f"{what} must be timezone-aware")
+    return moment.astimezone(UTC)
+
+
+def _optional_time_from_json(text: str | None, what: str) -> datetime | None:
+    """`_time_from_json`, or None for a time that is not there."""
+    return None if text is None else _time_from_json(text, what)
+
+
 def command_to_json(command: Command) -> dict[str, Any]:
     """A pending command as plain data: its time as ISO-8601 UTC, its settings as a
     dict. The file of the timer and the "Next command" sensor show it alike."""
@@ -27,7 +47,7 @@ def command_to_json(command: Command) -> dict[str, Any]:
 def _command_from_json(data: dict[str, Any]) -> Command:
     return Command(
         id=data["id"],
-        at=datetime.fromisoformat(data["at"]),
+        at=_time_from_json(data["at"], "the command's time"),
         action=data["action"],
         minutes=data["minutes"],
         settings=freeze_settings(data["settings"]),
@@ -84,6 +104,11 @@ def _validated(snapshot: Snapshot) -> Snapshot:
         )
     if snapshot.scheduled_by is not None and snapshot.end is None:
         raise ValueError("the timer is scheduled by an interval but has no end")
+    if snapshot.started_at is not None:
+        if snapshot.end is None:
+            raise ValueError("the countdown has a beginning but no end")
+        if snapshot.started_at >= snapshot.end:
+            raise ValueError("the countdown begins at or after its end")
     if snapshot.owed_turn_on_only and not snapshot.owed_settings:
         raise ValueError("the turn-on-only marker is set without owed settings")
     return snapshot
@@ -98,17 +123,17 @@ def _disabled_from_json(interval_ids: list[str]) -> frozenset[str]:
 
 
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
-    """What is stored of a snapshot: the countdown and the interval whose window end it
-    carries, the wish not yet confirmed, the settings not yet confirmed with whether
-    they may only go with a turn-on, the pending commands, the schedule windows and the
-    intervals that are switched off.
+    """What is stored of a snapshot: the countdown with when it began, and the interval
+    whose window end it carries, the wish not yet confirmed, the settings not yet
+    confirmed with whether they may only go with a turn-on, the pending commands, the
+    schedule windows and the intervals that are switched off.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
     """
-    end = snapshot.end
     return {
-        "end": None if end is None else end.astimezone(UTC).isoformat(),
+        "end": _time_to_json(snapshot.end),
+        "started_at": _time_to_json(snapshot.started_at),
         "pending": snapshot.pending,
         "owed_settings": dict(snapshot.owed_settings),
         "commands": [command_to_json(command) for command in snapshot.commands],
@@ -133,7 +158,9 @@ class _TimerFile(Store[dict[str, Any]]):
         Version 1 knew no settings and no commands, so nothing was owed and nothing
         waited. Version 2 knew no schedules, so every setting that was owed came from a
         command and may reach a running target (P1), and no window existed for a timer
-        to be carried by, nor an interval to be switched off.
+        to be carried by, nor an interval to be switched off. Version 3 knew no
+        beginning of a countdown, and nothing says when one that is stored began, so it
+        has none.
         """
         if old_major_version == 1:
             return {
@@ -144,6 +171,7 @@ class _TimerFile(Store[dict[str, Any]]):
                 "scheduled_by": None,
                 "windows": [],
                 "disabled_intervals": [],
+                "started_at": None,
             }
         if old_major_version == 2:
             return {
@@ -152,14 +180,17 @@ class _TimerFile(Store[dict[str, Any]]):
                 "scheduled_by": None,
                 "windows": [],
                 "disabled_intervals": [],
+                "started_at": None,
             }
+        if old_major_version == 3:
+            return {**old_data, "started_at": None}
         raise NotImplementedError
 
 
 class TimerStore:
     """The stored timer of one config entry, in a versioned file of its own."""
 
-    STORAGE_VERSION: Final = 3
+    STORAGE_VERSION: Final = 4
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store = _TimerFile(hass, self.STORAGE_VERSION, f"timerify.{entry_id}")
@@ -191,10 +222,12 @@ class TimerStore:
     @staticmethod
     def _read(data: dict[str, Any]) -> Snapshot:
         """The timer a file of the current version holds."""
-        end = data["end"]
         return _validated(
             Snapshot(
-                end=None if end is None else datetime.fromisoformat(end),
+                end=_optional_time_from_json(data["end"], "the end of the countdown"),
+                started_at=_optional_time_from_json(
+                    data["started_at"], "the beginning of the countdown"
+                ),
                 pending=data["pending"],
                 owed_settings=freeze_settings(data["owed_settings"]),
                 owed_turn_on_only=data["owed_turn_on_only"],

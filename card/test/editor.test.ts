@@ -1,0 +1,323 @@
+import { describe, expect, it, vi } from "vitest";
+import { common as english } from "../../custom_components/timerify/translations/en.json";
+import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import * as registered from "../src/editor";
+import type { RegistryEntry } from "../src/hass";
+import { TimerifyCard } from "../src/timerify-card";
+import { NUMBER, fakeHass, localizeFor, type FakeHass } from "./fake-hass";
+
+/**
+ * The editor and the strings as a page that has just opened has them: nothing loaded yet. (The
+ * card the page defined keeps the instances that were there when it was defined.)
+ */
+async function freshEditor() {
+  vi.resetModules();
+  const [editor, strings] = await Promise.all([import("../src/editor"), import("../src/strings")]);
+  return { ...editor, ...strings };
+}
+
+const DEFAULT_PRESETS = [15, 30, 45, 60, 120];
+
+/** What Intl writes for a length of time, in a language, as the presets are labelled. */
+function lengths(language: string) {
+  const unit = (count: number, name: "hour" | "minute") =>
+    new Intl.NumberFormat(language, {
+      style: "unit",
+      unit: name,
+      unitDisplay: "short",
+      useGrouping: false,
+    }).format(count);
+  return {
+    presets: [
+      unit(15, "minute"),
+      unit(30, "minute"),
+      unit(45, "minute"),
+      unit(1, "hour"),
+      unit(2, "hour"),
+    ],
+    listOf: (items: string[]) =>
+      new Intl.ListFormat(language, { style: "long", type: "conjunction" }).format(items),
+  };
+}
+
+/** A registry entry of Timerify's, as the frontend's `hass.entities` holds it. */
+const timerifyEntry = (entity_id: string, translation_key: string): RegistryEntry => ({
+  entity_id,
+  platform: "timerify",
+  translation_key,
+});
+
+/**
+ * Entities that look like a timer to a careless filter, and sort before any timer of the
+ * tests: a number of another integration with the same translation key, a number of
+ * Timerify that is not the one a timer runs for, and one of its sensors.
+ */
+const LOOK_ALIKES: Record<string, RegistryEntry> = {
+  "number.a_demo_run_for": {
+    ...timerifyEntry("number.a_demo_run_for", "run_for"),
+    platform: "demo",
+  },
+  "number.a_demo_volume": { entity_id: "number.a_demo_volume", platform: "demo" },
+  "number.a_other_timerify": timerifyEntry("number.a_other_timerify", "other"),
+  "sensor.a_ends_at": timerifyEntry("sensor.a_ends_at", "ends_at"),
+};
+
+/** A page whose registry has these "Run for" numbers of Timerify, besides the look-alikes. */
+function pageWithTimers(...numbers: string[]): FakeHass {
+  const entities: Record<string, RegistryEntry> = { ...LOOK_ALIKES };
+  for (const number of numbers) {
+    entities[number] = timerifyEntry(number, "run_for");
+  }
+  return fakeHass({ timers: [] }).with({ entities });
+}
+
+describe("the form of the visual editor", () => {
+  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets and a chip", async () => {
+    const { getConfigForm } = await freshEditor();
+
+    const { schema } = await getConfigForm();
+
+    expect(schema).toStrictEqual([
+      {
+        name: "entity",
+        required: true,
+        selector: { entity: { filter: { integration: "timerify", domain: "number" } } },
+      },
+      {
+        name: "layout",
+        selector: {
+          select: {
+            options: [
+              { value: "pill", label: english.card_editor_layout_pill },
+              { value: "round", label: english.card_editor_layout_round },
+            ],
+          },
+        },
+      },
+      {
+        name: "",
+        type: "grid",
+        schema: [
+          { name: "name", selector: { text: {} } },
+          { name: "icon", selector: { icon: {} } },
+        ],
+      },
+      {
+        name: "presets",
+        selector: {
+          select: {
+            multiple: true,
+            custom_value: true,
+            options: DEFAULT_PRESETS.map((minutes, index) => ({
+              value: String(minutes),
+              label: lengths("en").presets[index],
+            })),
+          },
+        },
+      },
+      // No unit of its own: its label says minutes.
+      { name: "chip", selector: { number: { min: 1, max: 1440, mode: "box" } } },
+    ]);
+    expect(lengths("en").presets).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+  });
+
+  it("labels its fields and options in the user's language", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass({ language: "ru" }));
+
+    const form = await getConfigForm();
+
+    const localize = localizeFor("ru");
+    for (const field of ["entity", "layout", "name", "icon", "presets", "chip"] as const) {
+      expect(form.computeLabel({ name: field }, localize), field).toBe(
+        russian[`card_editor_${field}`],
+      );
+    }
+    const russianLengths = lengths("ru");
+    const [, layout, , presets] = form.schema;
+    expect(layout).toMatchObject({
+      selector: {
+        select: {
+          options: [
+            { value: "pill", label: russian.card_editor_layout_pill },
+            { value: "round", label: russian.card_editor_layout_round },
+          ],
+        },
+      },
+    });
+    expect(presets).toMatchObject({
+      selector: {
+        select: {
+          options: DEFAULT_PRESETS.map((minutes, index) => ({
+            value: String(minutes),
+            label: russianLengths.presets[index],
+          })),
+        },
+      },
+    });
+    expect(form.computeHelper({ name: "presets" })).toBe(
+      russian.card_editor_presets_helper.replace(
+        "{presets}",
+        russianLengths.listOf(russianLengths.presets),
+      ),
+    );
+    // Not a word of the English file is glued to a number.
+    expect(form.computeHelper({ name: "presets" })).not.toMatch(/\b(min|hr)\b/);
+  });
+
+  it("speaks English until a card has loaded the user's language", async () => {
+    const { getConfigForm, lastLoaded } = await freshEditor();
+    expect(lastLoaded()).toBeUndefined();
+
+    const form = await getConfigForm();
+
+    expect(form.computeHelper({ name: "presets" })).toBe(
+      english.card_editor_presets_helper.replace(
+        "{presets}",
+        lengths("en").listOf(lengths("en").presets),
+      ),
+    );
+    expect(form.computeHelper({ name: "presets" })).toBe(
+      "Leave empty for 15 min, 30 min, 45 min, 1 hr, and 2 hr",
+    );
+    // The label is the frontend's `localize` of the page; before the strings reach it, it says
+    // nothing, and the editor falls back on its own words.
+    expect(form.computeLabel({ name: "entity" }, fakeHass({ stringsLoaded: false }).localize)).toBe(
+      "",
+    );
+  });
+
+  it("explains only the presets", async () => {
+    const { getConfigForm } = await freshEditor();
+
+    const form = await getConfigForm();
+
+    for (const field of ["entity", "layout", "name", "icon", "chip", ""]) {
+      expect(form.computeHelper({ name: field }), field).toBeUndefined();
+    }
+  });
+
+  it("refuses a config of the wrong kind, as the card does", async () => {
+    const { getConfigForm } = await freshEditor();
+    const { assertConfig } = await getConfigForm();
+    const wrongKind = [
+      [{ entity: 5 }, english.card_error_entity],
+      [{ entity: NUMBER, layout: 1 }, english.card_error_layout],
+      [{ entity: NUMBER, presets: "15" }, english.card_error_presets],
+      [{ entity: NUMBER, presets: [{}] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: [15, null] }, english.card_error_presets],
+      [{ entity: NUMBER, chip: true }, english.card_error_chip],
+    ] as const;
+
+    for (const [config, message] of wrongKind) {
+      expect(() => assertConfig(config), JSON.stringify(config)).toThrow(message);
+      expect(() => new TimerifyCard().setConfig(config), JSON.stringify(config)).toThrow(message);
+    }
+    expect(() =>
+      assertConfig({
+        type: "custom:timerify-card",
+        entity: NUMBER,
+        layout: "round",
+        presets: ["15", "30", 20],
+        chip: 10,
+      }),
+    ).not.toThrow();
+  });
+
+  it("keeps the user in the form when a value is wrong, and leaves it to the card to say so", async () => {
+    const { getConfigForm } = await freshEditor();
+    const { assertConfig } = await getConfigForm();
+    // What a user can type into the form: a preset of 0 or 1.5 or text, a chip out of range, and
+    // what a hand-written config may hold: a layout the card does not have, no timer yet.
+    const mistakes = [
+      [{ entity: NUMBER, presets: ["15", "0"] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: ["1.5"] }, english.card_error_presets],
+      [{ entity: NUMBER, presets: ["abc"] }, english.card_error_presets],
+      [{ entity: NUMBER, chip: 1441 }, english.card_error_chip],
+      [{ entity: NUMBER, chip: 0 }, english.card_error_chip],
+      [{ entity: NUMBER, layout: "square" }, english.card_error_layout],
+      [{ entity: "sensor.boiler_ends_at" }, english.card_error_entity],
+      [{ entity: "" }, english.card_error_entity],
+      [{}, english.card_error_entity],
+    ] as const;
+
+    for (const [config, message] of mistakes) {
+      expect(() => assertConfig(config), JSON.stringify(config)).not.toThrow();
+      expect(() => new TimerifyCard().setConfig(config), JSON.stringify(config)).toThrow(message);
+    }
+  });
+
+  it("lets the user take the last preset away, as the helper says", async () => {
+    const { getConfigForm } = await freshEditor();
+    const { assertConfig } = await getConfigForm();
+    const config = { entity: NUMBER, presets: [] };
+
+    // The form is not left, and the card takes the empty list for the defaults.
+    expect(() => assertConfig(config)).not.toThrow();
+    expect(() => new TimerifyCard().setConfig(config)).not.toThrow();
+  });
+});
+
+describe("the card in the card picker", () => {
+  it("picks the first unused timer for a new card, with the default presets", async () => {
+    const { getStubConfig } = await freshEditor();
+    const hass = pageWithTimers("number.c_run_for", "number.b_run_for", "number.a_run_for");
+
+    const unused = getStubConfig(
+      hass,
+      [...Object.keys(LOOK_ALIKES), "number.b_run_for", "number.a_run_for"],
+      ["number.c_run_for"],
+    );
+    const onlyUsed = getStubConfig(
+      hass,
+      [],
+      [...Object.keys(LOOK_ALIKES), "number.c_run_for", "number.b_run_for"],
+    );
+
+    expect(unused).toStrictEqual({
+      entity: "number.a_run_for",
+      layout: "pill",
+      // As the editor writes them: strings.
+      presets: ["15", "30", "45", "60", "120"],
+    });
+    expect(onlyUsed.entity).toBe("number.b_run_for");
+  });
+
+  it("takes any timer of Timerify when the dashboard offers none", async () => {
+    const { getStubConfig } = await freshEditor();
+    const hass = pageWithTimers("number.c_run_for", "number.b_run_for");
+
+    // The picker leaves out entities that are unavailable, so these lists can be empty
+    // although the timers exist.
+    expect(getStubConfig(hass, [], []).entity).toBe("number.b_run_for");
+    expect(getStubConfig(hass, Object.keys(LOOK_ALIKES), []).entity).toBe("number.b_run_for");
+  });
+
+  it("asks for a timer when there is none", async () => {
+    const { getStubConfig } = await freshEditor();
+    const hass = pageWithTimers();
+
+    const stub = getStubConfig(hass, Object.keys(LOOK_ALIKES), Object.keys(LOOK_ALIKES));
+
+    expect(stub.entity).toBe("");
+    expect(() => new TimerifyCard().setConfig(stub)).toThrow(english.card_error_entity);
+  });
+
+  it("starts loading the user's language, and does not wait for it", async () => {
+    const { getStubConfig, lastLoaded } = await freshEditor();
+    const hass = fakeHass({ language: "ru", stringsLoaded: false });
+
+    getStubConfig(hass, [NUMBER], []);
+
+    expect(hass.translationLoads).toEqual([["common", "timerify"]]);
+    expect(lastLoaded()).toBeUndefined();
+    await vi.waitFor(() => expect(lastLoaded()).toBeDefined());
+  });
+
+  it("is what Home Assistant finds on the card's class", async () => {
+    const card = customElements.get("timerify-card") as typeof TimerifyCard | undefined;
+
+    expect(card?.getConfigForm).toBe(registered.getConfigForm);
+    expect(card?.getStubConfig).toBe(registered.getStubConfig);
+  });
+});

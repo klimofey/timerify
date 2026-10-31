@@ -263,7 +263,12 @@
     },
     "sensor": {
       "ends_at": {
-        "name": "Ends at"
+        "name": "Ends at",
+        "state_attributes": {
+          "started_at": {
+            "name": "Started at"
+          }
+        }
       },
       "next_command": {
         "name": "Next command",
@@ -483,5 +488,38 @@
     "workday_sensor_missing": {
       "message": "A schedule interval of this timer runs on working days or non-working days, but the timer has no Workday sensor. Set the sensor in the timer's settings, or change those intervals to weekdays."
     }
+  },
+  "common": {
+    "card_entity_not_found": "Entity not found: {entity}",
+    "card_not_a_timer": "{entity} is not the Run for number of a Timerify timer",
+    "card_not_allowed": "You are not allowed to see the timer {entity}",
+    "card_ends_at_disabled": "The Ends at sensor of this timer, {sensor}, is disabled. Enable it for the card to work",
+    "card_error_entity": "Choose the Run for number of a timer",
+    "card_error_layout": "The layout is pill or round",
+    "card_error_presets": "Presets are whole minutes from 1 to 1440",
+    "card_error_chip": "The quick chip is whole minutes from 1 to 1440",
+    "card_close": "Close",
+    "card_until": "until {time}",
+    "card_add_time": "Add {duration}",
+    "card_subtract_time": "Take off {duration}",
+    "card_stop": "Stop",
+    "card_schedule": "Schedule",
+    "card_commands": "Pending commands",
+    "card_commands_disabled": "Pending commands are hidden: the Next command sensor, {sensor}, is disabled",
+    "card_command_on": "On at {time}",
+    "card_command_on_for": "On at {time} for {duration}",
+    "card_command_off": "Off at {time}",
+    "card_cancel_command": "Cancel",
+    "card_settings": "Settings",
+    "card_picker_description": "The countdown, presets and schedule of a Timerify timer",
+    "card_editor_entity": "Timer",
+    "card_editor_layout": "Layout",
+    "card_editor_layout_pill": "Pill",
+    "card_editor_layout_round": "Round",
+    "card_editor_name": "Name",
+    "card_editor_icon": "Icon",
+    "card_editor_presets": "Duration presets (minutes)",
+    "card_editor_presets_helper": "Leave empty for {presets}",
+    "card_editor_chip": "Quick add chip (minutes, pill only)"
   }
 }

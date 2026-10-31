@@ -267,6 +267,25 @@ class _Setting:
 
 
 @dataclass(frozen=True)
+class OnRule:
+    """Which states of an entity count as on: the ones it names (`is`), or all but the
+    ones it names (`is_not`).
+
+    A rule is data, not a function, so that the dashboard card is told what counts as
+    on for a target and does not keep a copy of the table. It is only meaningful for
+    states that are not unavailable or unknown, which is why callers go through
+    `actual_state`.
+    """
+
+    match: Literal["is", "is_not"]
+    states: frozenset[str]
+
+    def matches(self, state: str) -> bool:
+        """Whether an entity in `state` is on."""
+        return (state in self.states) == (self.match == "is")
+
+
+@dataclass(frozen=True)
 class DomainBehaviour:
     """How to switch the entities of one domain and how to read their state."""
 
@@ -274,9 +293,8 @@ class DomainBehaviour:
     """(domain, service) that turns an entity on."""
     off_service: tuple[str, str]
     """(domain, service) that turns an entity off."""
-    is_on: Callable[[State], bool]
-    """Whether a state counts as on; only meaningful for states that are not
-    unavailable or unknown, which is why callers go through `actual_state`."""
+    on_rule: OnRule
+    """Which states of the entity count as on."""
     required_features: tuple[IntFlag, ...] = ()
     """The features an entity must advertise for the on and off services to work."""
     automatic_resends: int = MAX_AUTOMATIC_RESENDS
@@ -324,21 +342,14 @@ class DomainBehaviour:
         return alone
 
 
-def _is_state_on(state: State) -> bool:
-    return state.state == STATE_ON
-
-
-def _is_not_off(state: State) -> bool:
-    return state.state != STATE_OFF
-
-
-def _is_not_off_or_standby(state: State) -> bool:
-    return state.state not in (STATE_OFF, STATE_STANDBY)
+_ONLY_ON: Final = OnRule("is", frozenset({STATE_ON}))
+_NOT_OFF: Final = OnRule("is_not", frozenset({STATE_OFF}))
+_NOT_OFF_OR_STANDBY: Final = OnRule("is_not", frozenset({STATE_OFF, STATE_STANDBY}))
 
 
 def _domain_behaviour(
     domain: str,
-    is_on: Callable[[State], bool] = _is_state_on,
+    on_rule: OnRule = _ONLY_ON,
     *,
     required_features: tuple[IntFlag, ...] = (),
     automatic_resends: int = MAX_AUTOMATIC_RESENDS,
@@ -348,7 +359,7 @@ def _domain_behaviour(
     return DomainBehaviour(
         on_service=(domain, SERVICE_TURN_ON),
         off_service=(domain, SERVICE_TURN_OFF),
-        is_on=is_on,
+        on_rule=on_rule,
         required_features=required_features,
         automatic_resends=automatic_resends,
         settings=settings,
@@ -358,7 +369,7 @@ def _domain_behaviour(
 FALLBACK: Final = DomainBehaviour(
     on_service=("homeassistant", SERVICE_TURN_ON),
     off_service=("homeassistant", SERVICE_TURN_OFF),
-    is_on=_is_state_on,
+    on_rule=_ONLY_ON,
     judged_by_state=True,
 )
 """The row of every domain that has none of its own."""
@@ -480,13 +491,13 @@ _BEHAVIOURS: Final[Mapping[str, DomainBehaviour]] = {
     # The state of these is an HVAC or operation mode, not on/off.
     "climate": _domain_behaviour(
         "climate",
-        _is_not_off,
+        _NOT_OFF,
         required_features=(ClimateEntityFeature.TURN_ON, ClimateEntityFeature.TURN_OFF),
         settings=_CLIMATE_SETTINGS,
     ),
     "water_heater": _domain_behaviour(
         "water_heater",
-        _is_not_off,
+        _NOT_OFF,
         required_features=(WaterHeaterEntityFeature.ON_OFF,),
         settings=_WATER_HEATER_SETTINGS,
     ),
@@ -495,7 +506,7 @@ _BEHAVIOURS: Final[Mapping[str, DomainBehaviour]] = {
     # can switch a toggling one off again.
     "media_player": _domain_behaviour(
         "media_player",
-        _is_not_off_or_standby,
+        _NOT_OFF_OR_STANDBY,
         required_features=(
             MediaPlayerEntityFeature.TURN_ON,
             MediaPlayerEntityFeature.TURN_OFF,
@@ -549,7 +560,8 @@ def actual_state(state: State | None) -> Actual:
     """
     if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return "unavailable"
-    return "on" if behaviour_for(state.entity_id).is_on(state) else "off"
+    on_rule = behaviour_for(state.entity_id).on_rule
+    return "on" if on_rule.matches(state.state) else "off"
 
 
 def _capabilities_of(hass: HomeAssistant, entity_id: str) -> _Capabilities | None:

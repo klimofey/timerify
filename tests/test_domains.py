@@ -33,6 +33,7 @@ from custom_components.timerify.domains import (
     FALLBACK,
     SUPPORTED_DOMAINS,
     Actual,
+    OnRule,
     TargetCall,
     actual_state,
     behaviour_for,
@@ -151,6 +152,57 @@ def test_unlisted_domain_uses_generic_fallback(entity_id: str) -> None:
 def test_fallback_reads_only_on_as_on(state: str, expected: Actual) -> None:
     """A camera has states of its own; only `on` counts as on for the fallback."""
     assert actual_state(State("camera.door", state)) == expected
+
+
+ON_ONLY = OnRule("is", frozenset({"on"}))
+NOT_OFF = OnRule("is_not", frozenset({"off"}))
+NOT_OFF_OR_STANDBY = OnRule("is_not", frozenset({"off", "standby"}))
+
+
+@pytest.mark.parametrize(
+    ("rule", "state", "expected"),
+    [
+        (ON_ONLY, "on", True),
+        (ON_ONLY, "off", False),
+        (ON_ONLY, "idle", False),
+        (NOT_OFF, "heat", True),
+        (NOT_OFF, "off", False),
+        (NOT_OFF_OR_STANDBY, "playing", True),
+        (NOT_OFF_OR_STANDBY, "standby", False),
+        (NOT_OFF_OR_STANDBY, "off", False),
+    ],
+)
+def test_a_rule_says_which_states_count_as_on(
+    rule: OnRule, state: str, expected: bool
+) -> None:
+    """A rule that names the states of on counts only those; one that names the states
+    of off counts every other state."""
+    assert rule.matches(state) is expected
+
+
+@pytest.mark.parametrize(
+    ("entity_id", "expected"),
+    [
+        ("switch.boiler", ON_ONLY),
+        ("input_boolean.guest_mode", ON_ONLY),
+        ("light.grow_lamp", ON_ONLY),
+        ("fan.bathroom", ON_ONLY),
+        ("humidifier.bedroom", ON_ONLY),
+        ("siren.hallway", ON_ONLY),
+        ("remote.living_room", ON_ONLY),
+        ("group.all_lights", ON_ONLY),
+        ("kettle.tea", ON_ONLY),
+        ("climate.ac", NOT_OFF),
+        ("water_heater.tank", NOT_OFF),
+        ("media_player.tv", NOT_OFF_OR_STANDBY),
+    ],
+)
+def test_each_row_tells_what_counts_as_on_as_data(
+    entity_id: str, expected: OnRule
+) -> None:
+    """The card is told the rule of the target's domain, not a copy of the table, so a
+    row states it as data."""
+    assert behaviour_for(entity_id).on_rule == expected
 
 
 def test_only_rows_that_misread_other_states_are_judged_by_state() -> None:

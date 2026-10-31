@@ -42,11 +42,9 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
-    DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
@@ -56,6 +54,7 @@ from .const import (
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
     SettingValue,
+    default_duration_minutes,
     freeze_settings,
 )
 from .core import (
@@ -221,9 +220,7 @@ class TargetController:
         # a restart, so its first report counts as the target coming back.
         self._core = TimerCore(
             options[CONF_MODE],
-            timedelta(
-                minutes=options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
-            ),
+            timedelta(minutes=default_duration_minutes(options)),
             snapshot,
             automatic_resends=self._behaviour.automatic_resends,
         )
@@ -252,6 +249,7 @@ class TargetController:
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
+        self._notified_started_at = self.snapshot.started_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         self._wakeup_alarm: CALLBACK_TYPE | None = None
@@ -991,11 +989,12 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown, the pending commands and which
-        # intervals are switched off; the rest of the snapshot is bookkeeping that
-        # needs no state write.
+        # The entities show the end of the countdown and when it began, the pending
+        # commands and which intervals are switched off; the rest of the snapshot is
+        # bookkeeping that needs no state write.
         if (
             self.snapshot.end != self._notified_end
+            or self.snapshot.started_at != self._notified_started_at
             or self.snapshot.commands != self._notified_commands
             or self.snapshot.disabled_intervals != self._notified_disabled
         ):
@@ -1184,6 +1183,7 @@ class TargetController:
 
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
+        self._notified_started_at = self.snapshot.started_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         for listener in list(self._listeners):

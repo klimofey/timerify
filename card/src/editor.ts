@@ -3,7 +3,8 @@
 // The editor is the frontend's own form. The card gives Home Assistant a schema of selectors
 // (`getConfigForm`, the documented way for a custom card to have an editor); the frontend draws
 // the fields, keeps the card's config in step with them, and asks `assertConfig` whether the
-// card can work with what they hold. Nothing here renders anything.
+// form can show what they hold; whether the card can work with it is the card's own `setConfig`.
+// Nothing here renders anything.
 import { DEFAULT_PRESETS, MAX_MINUTES, assertShape } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant, Localize } from "./hass";

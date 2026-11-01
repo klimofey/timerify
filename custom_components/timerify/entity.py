@@ -45,7 +45,10 @@ def remove_fallback_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> N
     nothing follows that: the entities move to the target's device when they are added,
     but the device made for the timer stays behind, empty. The entities are moved here
     first, because the registry removes the entities of a device it removes, and they
-    would vanish for the automations that watch them and then come back.
+    would vanish for the automations that watch them and then come back. An entity that
+    was disabled with the made device (`disabled_by` is the device) is enabled on the
+    target's, as the registry does when a device is enabled; one the user disabled
+    stays disabled.
 
     A target that is still on no device keeps the device made for it.
     """
@@ -60,7 +63,12 @@ def remove_fallback_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> N
     for entity in er.async_entries_for_device(
         entities, fallback.id, include_disabled_entities=True
     ):
-        entities.async_update_entity(entity.entity_id, device_id=device.id)
+        disabled_by = entity.disabled_by
+        if disabled_by is er.RegistryEntryDisabler.DEVICE and not device.disabled:
+            disabled_by = None
+        entities.async_update_entity(
+            entity.entity_id, device_id=device.id, disabled_by=disabled_by
+        )
     devices.async_remove_device(fallback.id)
 
 

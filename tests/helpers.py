@@ -292,9 +292,10 @@ async def restart_after(
     """Stop the entry, let `delta` pass with nobody listening, and start it again: a
     Home Assistant that was down meanwhile. Nothing fires while it is down.
 
-    `while_down` is what happens to the registries in that time, as when the user links
-    a device to the target by hand or an update of the target's integration does; it
-    runs once the entry has stopped, so nothing follows it.
+    `while_down` is how the registries differ when the entry starts again, as after a
+    restored backup or an update of the target's integration that linked its entity to
+    a device before Timerify set up. It runs once the entry has stopped, so nothing of
+    Timerify's follows it.
     """
     await hass.config_entries.async_unload(entry.entry_id)
     if while_down is not None:

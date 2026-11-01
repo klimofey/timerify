@@ -1,6 +1,6 @@
 # Follow-ups
 
-Open items that the finished phases did not fix, with where they are as of the end of phase 5.
+Open items that the finished phases did not fix, with where they are as of the end of phase 6.
 Each line says what is wrong, why it is not fixed yet, and which phase should take it.
 Decisions that were made on purpose are in `RULINGS.md`, not here.
 
@@ -14,9 +14,9 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   the timer reloads. The fix is the `_follow_target` pattern for a second entity (follow the
   rename and update the option). Found in the review of the Workday task of phase 3 and
   split off; the README states the limit. Take it before the first public release, since the
-  repository is built as a product. `custom_components/timerify/__init__.py:86-106`
-  (`_follow_target`, the pattern), `custom_components/timerify/controller.py:236` (the
-  option) and `:816-828` (`_follow_workday_sensor`, which subscribes to the id).
+  repository is built as a product. `custom_components/timerify/__init__.py:92-112`
+  (`_follow_target`, the pattern), `custom_components/timerify/controller.py:233` (the
+  option) and `:832-844` (`_follow_workday_sensor`, which subscribes to the id).
 - **The card can be missing from a browser's first page load on Home Assistant 2026.10.** On
   the first load that the frontend's service worker serves (a first visit, a cold cache, a
   frontend update) the dashboard can show "Configuration error: Custom element doesn't exist:
@@ -55,11 +55,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   clock, for example a websocket command that returns it, and it waits until a user needs it,
   since every other card shows the same error. `card/src/timer.ts:78` (`timerView`, which
   takes `now`) and `card/src/timerify-card.ts:270` (`Date.now()`).
-- **`timerify/timer` gains `runtime` when the runtime counter exists (phase 6).** The answer
-  names the entities the card reads, and the counter's sensor is not one of them yet; the
-  card does not show it. The key, the card's `TimerInfo` and the card's watched entities move
-  together. `custom_components/timerify/websocket.py:75-96` (`TimerInfo`),
-  `card/src/hass.ts:70-90` (`TimerInfo`) and `card/src/timer.ts:122` (`watchedEntities`).
 - **A timer whose target or sensor cannot be resolved is told to the user as "not the Run for
   number of a Timerify timer".** `timerify/timer` answers `not_found` both when the entity is
   not a timer's number and when it is, but the target is not in the entity registry (a target
@@ -76,11 +71,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   justify a new key yet. The fix is to send the keys with `timerify/timer`, or to note the list
   in `RULINGS.md` beside the entry "no copy of Timerify's rules". Take it with the next setting
   that is a percentage. `card/src/format.ts:95` (`PERCENT_SETTINGS`) and `:110` (its use).
-- **`TimerInfo.mode` and `default_duration` are carried and never read by the card.** The
-  contract (C3) asks for them, so it is not a defect, but the card's only client ignores two of
-  its fields. Reconsider them when phase 6 adds `runtime` to the same answer: either the card
-  starts to use them or they leave the contract with the key that replaces them.
-  `card/src/hass.ts:73` and `:75`, `custom_components/timerify/websocket.py:80` and `:81`.
 - **The editor's labels come from the last strings a card loaded.** The names of the layouts,
   the labels of the preset options and the helper under them are in the language of
   `lastLoaded()`, because the form that Home Assistant builds is given no way to translate them
@@ -95,7 +85,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (`pendingCommands`) and `:520` (`#commands`).
 - **A deleted target gives no sign.** `er.async_resolve_entity_id` returns the id even when the
   entity is gone from the registry, so a timer whose target was deleted still loads and drives
-  nothing, with no message. `custom_components/timerify/controller.py:213-217`. It needs a
+  nothing, with no message. `custom_components/timerify/controller.py:212-217`. It needs a
   repairs issue; the spec is silent and no spec-defined behaviour changes, so it waits for a
   later phase.
 - **A device that answers each refused call with `unknown` and then its old state is re-sent
@@ -104,22 +94,22 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   total limit would close it. A contradicting report of our own call is not part of it:
   it is corrected once for each wish that was settled without a call (the entry "A report
   of our own call that contradicts the timer" in `RULINGS.md`), and a correction that
-  does not land is an ordinary unsent wish. `custom_components/timerify/core.py:556-560`
-  (the reset in `observe`) and `:872-885` (`_resend`).
+  does not land is an ordinary unsent wish. `custom_components/timerify/core.py:570-573`
+  (the reset in `observe`) and `:923-936` (`_resend`).
 - **The give-up warning is logged once per allowance, not once per wish.** A refusing target
   that keeps dropping off Wi-Fi logs one warning per reconnect. Bounded by the reconnects.
-  `custom_components/timerify/controller.py:995-1014` (`_log_gave_up`) and
-  `custom_components/timerify/core.py:251-276` (`_Allowance`).
+  `custom_components/timerify/controller.py:1012-1031` (`_log_gave_up`) and
+  `custom_components/timerify/core.py:255-280` (`_Allowance`).
 - **`type Actual` has no runtime arguments.** `typing.get_args(Actual)` is `()` because the alias
   is a PEP 695 `type`; use `Actual.__value__` if the values are ever enumerated (for example
   to validate stored data). `custom_components/timerify/domains.py:55`. Do it when needed.
 - **Device following is one-way for targets without a device.** A target that gains or loses a
   device is followed, but the fallback device made for a target without one can stay behind
   after the target is linked to a device on a restart.
-  `custom_components/timerify/__init__.py:86-106` (`_follow_target`).
+  `custom_components/timerify/__init__.py:92-112` (`_follow_target`).
 - **The options keep a stale default duration after strict to loose.** Harmless: loose mode
   ignores it and it is the prefill when the user switches back.
-  `custom_components/timerify/config_flow.py:279-281` (`_after_mode`) and `:427-432`
+  `custom_components/timerify/config_flow.py:286-288` (`_after_mode`) and `:443-448`
   (`OPTIONS_FLOW`).
 - **One "before started" rule for every command.** Before Home Assistant has started, a
   change folds stored items against a target that has not been seen. A phase-2 command
@@ -133,10 +123,10 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   until `_handle_started` has run, a command records its change and saves it, arms nothing
   and leaves the folding to `_handle_started`. A guard on the interval switch alone would
   be a special case, so it waits for the policy.
-  `custom_components/timerify/controller.py:274-282` (`async_start`), `:452-467` and
-  `:558-575` (`async_set_interval_enabled` and the `_async_set_interval_enabled_locked` it
-  calls), `:588-597` (`_command`) and `:782-814` (`_handle_started`), and
-  `custom_components/timerify/core.py:154-165` (`next_wakeup`).
+  `custom_components/timerify/controller.py:277-285` (`async_start`), `:462-477` and
+  `:571-588` (`async_set_interval_enabled` and the `_async_set_interval_enabled_locked` it
+  calls), `:601-610` (`_command`) and `:798-830` (`_handle_started`), and
+  `custom_components/timerify/core.py:158-169` (`next_wakeup`).
 - **The R10 lines are not written by the folds of start-up and of a report of the target.**
   `_fold_due` (the alarm, the refresh of the windows and the switching off of an interval)
   says what came due while the target is unavailable: the countdown that ended, the command
@@ -144,8 +134,8 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   through `_execute_fold` alone and say nothing, so a window or command that came due
   during downtime, found at start-up with the target unavailable, is applied when it is
   back without a line in the log. The phase-2 lines have the same gap. It changes no
-  behaviour. `custom_components/timerify/controller.py:851-859` (`_fold_due`), `:878-923`
-  (`_log_due_while_unavailable`), `:782-814` (`_handle_started`) and `:833-843`
+  behaviour. `custom_components/timerify/controller.py:867-875` (`_fold_due`), `:894-939`
+  (`_log_due_while_unavailable`), `:798-830` (`_handle_started`) and `:849-859`
   (`_handle_state_change`).
 - **A time zone changed in YAML is not noticed.** Changing the zone in the settings fires
   `EVENT_CORE_CONFIG_UPDATE`, which the controller listens to, but `configuration.yaml`
@@ -153,25 +143,25 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (`async_process_ha_core_config`) without that event. The windows keep the old zone until
   a window ends, the Workday sensor reports or the timer reloads. It needs a signal that
   Home Assistant does not fire for this path; look for one before working around it.
-  `custom_components/timerify/controller.py:776-780` (`_handle_core_config_update`) and
-  `:794-798` (where it is subscribed, in `_handle_started`).
+  `custom_components/timerify/controller.py:792-796` (`_handle_core_config_update`) and
+  `:810-814` (where it is subscribed, in `_handle_started`).
 - **An old generated title stays in the old language.** An edit renames an interval only if
   its title is still the one generated from its old data in the current language; after the
   house language changes the old title no longer matches and is kept as if the user had
   chosen it. A stored mark that the title was generated would end it. Subentry titles are
-  plain strings today. `custom_components/timerify/config_flow.py:521-522`.
+  plain strings today. `custom_components/timerify/config_flow.py:537-538`.
 - **Settings that the target no longer supports are dropped silently on the next edit.** The
   form offers only what the target can do now, so a stored setting that is no longer
   offered is missing from the submitted form and from the saved interval, with no message.
-  `custom_components/timerify/config_flow.py:538-584` (`_interval_schema`, the section) and
-  `:586-628` (`_interval_from`).
+  `custom_components/timerify/config_flow.py:554-600` (`_interval_schema`, the section) and
+  `:602-644` (`_interval_from`).
 - **A store file that contradicts itself fails the timer, and the interface cannot repair
   it.** `_validated` refuses a file that no timer could have written (two windows of one
   interval, a window that is suppressed but has not started, and so on), which means a
   defect, and the entry stays failed with a reason in words (`stored_timer_invalid`). The
   only way out is to delete the timer and add it again, which loses its commands and the
   flags of its intervals. A repairs issue with a "reset the stored timer" fix would do.
-  `custom_components/timerify/store.py:65-89` (`_validated`) and `:169-189` (`async_load`).
+  `custom_components/timerify/store.py:85-114` (`_validated`) and `:200-220` (`async_load`).
 - **A pending command keeps the settings it was made with.** The settings of an interval's
   window are checked again when the window is worked out, and the ones the target no longer
   takes are left out (`RULINGS.md`), but a command is checked only when it is made.
@@ -179,30 +169,22 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   when it comes due, and the log says so at every attempt. The fix is the same filter
   where the calls are made (`_execute`), which covers the owed settings of every origin;
   it is not a phase 3 regression, so it waits.
-  `custom_components/timerify/controller.py:348` (`async_add_command`, the check) and
-  `:930-972` (`_execute`, where the calls are made).
+  `custom_components/timerify/controller.py:358` (`async_add_command`, the check) and
+  `:946-988` (`_execute`, where the calls are made).
 - **The settings of an interval are checked when its window is worked out, not when the
   call is made.** A target that reports no capabilities for a moment (some cloud climates
   while they connect) gets a window built without its settings, and keeps it until the
   next refresh, which for a weekday interval is the window's end; the warning says so
   once. Checking in `_execute`, where the calls are made, would close it, and it is the
   same filter as for the pending commands above, so the two go together.
-  `custom_components/timerify/controller.py:650-681` (`_with_settings_the_target_takes`).
+  `custom_components/timerify/controller.py:663-697` (`_with_settings_the_target_takes`).
 - **The reason in the Russian `stored_timer_invalid` message is English.** `{reason}` is
   the text of the `ValueError` of the store, which is for the bug report of a defect
   (`RULINGS.md`), so it is not translated. Translating it would mean a key for each of
   the checks of `_validated` and of `checked_window`, which is not worth it for a message
   that a file written by Timerify alone cannot cause.
-  `custom_components/timerify/store.py:169-189` (`async_load`) and
-  `custom_components/timerify/translations/ru.json:423-425`.
-- **The store does not check the offset of the stored end and of the time of a command.**
-  A window is read through `checked_window`, which refuses a time with no offset; the
-  end of the countdown and the `at` of a command are read as they are, so a naive one
-  from a hand-edited file raises in the first fold instead of when the timer loads.
-  Only a hand-edited file can hold one, because the store writes UTC. The fix is one
-  helper in the store that reads a time and refuses a naive one, used by the three.
-  `custom_components/timerify/store.py:27-34` (`_command_from_json`) and `:192-206`
-  (`_read`, the end).
+  `custom_components/timerify/store.py:200-220` (`async_load`) and
+  `custom_components/timerify/translations/ru.json:435-437`.
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.
@@ -215,7 +197,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   waits for a phase that can test every spoken form of a time in both languages.
   `custom_components/timerify/voice/commands.py:31-111` (`DelayedCommandHandler`) and
   `:136-150` (`_clock_time_of`, which only the tool feeds), and
-  `scripts/generate_core_commands.py:385-420` (`_delayed_blocks`, where the delayed
+  `scripts/generate_core_commands.py:385-418` (`_delayed_blocks`, where the delayed
   sentences are made).
 - **A target that is not in the entity registry: a changed friendly name is listed only
   after its timer reloads.** The sentence file is written again when an entity or a device
@@ -225,7 +207,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   device that changes its own list of modes (a firmware update). The fix is to follow the
   `state_changed` events of the targets when the name or the modes differ from the ones
   last written. The managed entry is the only one affected; the manual route is redone by
-  hand anyway. `custom_components/timerify/voice/files.py:356-378` (`_entity_updated`,
+  hand anyway. `custom_components/timerify/voice/files.py:357-378` (`_entity_updated`,
   `_device_updated`, the only triggers) and `custom_components/timerify/voice/sentences.py:156-181`
   (`voice_names`, the name of a target with no registry entry).
 - **A one-time repair issue listing interval switches exposed under 0.3.0.** Version 0.3.0
@@ -235,7 +217,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   entity stays, so an upgraded house keeps exposing them: "turn off Schedule 06:30 to 07:15"
   works, and the entity is offered to an LLM agent. The README tells how to take them
   away. A repairs issue at set-up that names the exposed ones and offers to unexpose them
-  would do it for the user. `custom_components/timerify/switch.py:33-79` (`IntervalSwitch`,
+  would do it for the user. `custom_components/timerify/switch.py:33-81` (`IntervalSwitch`,
   `entity_category` at line 47).
 - **An unavailable target with no timer is answered "off".** "How long is left on the
   boiler" says "Boiler is off and has no timer" for a target that is unavailable and is not
@@ -265,7 +247,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (a hyphen matches the dash of the title). A spoken form of the generated title ("the
   6:30 schedule") would need the times and the days in words in both languages.
   `custom_components/timerify/voice/sentences.py:185-201` (`interval_names`, which lists the
-  titles), `custom_components/timerify/schedule.py:128-155` (`interval_title`) and `:158-174`
+  titles), `custom_components/timerify/schedule.py:128-141` (`interval_title`) and `:158-171`
   (`title_key`).
 - **Voice names and titles do not fold the Russian letter yo.** Said as "elka", a name
   or an interval title "Yolka" is not matched, as the letter is in the file as it is
@@ -324,9 +306,30 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (the checklist of phase 4), and a fixture file of rendered answers, which the hook would
   allow under `sentences/ru/`, would pin them. `tests/voice/test_time_left.py:345-355` and
   `tests/voice/helpers.py:366` (`assert_one_form_per_class`).
+- **The recorder tests repeat two autouse fixtures.** `tests/test_runtime_statistics.py:30-46`
+  copies `auto_enable_custom_integrations` (with `recorder_db_url`, so that the recorder's
+  database is ready before Home Assistant loads the custom integration) and `quiet_sql_engine`
+  (which keeps the recorder's SQL out of the output) from `tests/test_recorder.py:19-39`. Two
+  modules do not justify a shared module, and the statistics test did not touch the older one.
+  When a third recorder module appears, or a task names `tests/test_recorder.py`, move both
+  fixtures into one shared module and delete the copies.
 
 ## Accepted
 
+- **`timerify/timer` has no `runtime` key.** Decided, not fixed: the Runtime sensor of phase 6
+  is not one of the entities the card reads, because the card shows actions and the countdown,
+  not the runtime, and a key that nobody reads is dead weight (`RULINGS.md`, phase 6, "Neither
+  `timerify/timer` nor the card gets a `runtime` key in this phase"). A card feature that shows
+  the runtime adds the key in three places together:
+  `custom_components/timerify/websocket.py:75-96` (`TimerInfo`), `card/src/hass.ts:70-90`
+  (`TimerInfo`) and `card/src/timer.ts:122` (`watchedEntities`).
+- **`TimerInfo.mode` and `default_duration` are carried and never read by the card.** Decided,
+  not fixed: the contract (C3) asks for them, so it is not a defect, and the occasion this item
+  waited for, a `runtime` key that would change the same answer, did not come (`RULINGS.md`,
+  phase 6, "Neither `timerify/timer` nor the card gets a `runtime` key in this phase"). They
+  stay as they are; reconsider them with the first card feature that changes the answer.
+  `card/src/hass.ts:73` and `:75`,
+  `custom_components/timerify/websocket.py:80` and `:81`.
 - **`services.yaml` hard-codes the limits.** The ranges of `add_time` (plus and minus 1440,
   `custom_components/timerify/services.yaml:12-13`), of the minutes of `run` (`:27-28`) and of
   `add_command` (`:127-128`) and of its delay (1 to 10080, `:114-115`) are written there as well

@@ -9,12 +9,12 @@ off when the countdown ends.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
 
-> **Status:** version 0.5.0, the fifth phase. The core timer, settings for turning on
+> **Status:** version 0.6.0, the sixth phase. The core timer, settings for turning on
 > ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes"), weekly schedules
 > ("working days 06:30 to 07:15"), voice control through Assist ("turn on the boiler for
-> 10 minutes", "how long is left on the boiler") and a dashboard card work and are described
-> below. The runtime counter is not built yet; see
-> [What is not here yet](#what-is-not-here-yet).
+> 10 minutes", "how long is left on the boiler"), a dashboard card and a runtime counter
+> ("how many hours did the boiler run this week") work and are described below. See
+> [What is not here yet](#what-is-not-here-yet) for what they leave out.
 
 ## What it does
 
@@ -87,6 +87,7 @@ after it.
 | `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs, or when the countdown began before version 0.5.0); the card's fill is drawn from it. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
 | `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
+| `sensor` Runtime | Only when you ask for it: the minutes the target was on, a total that only goes up. See [Runtime counter](#runtime-counter). |
 
 ## Settings
 
@@ -969,6 +970,61 @@ your profile; for any other language they are in English. Times, durations and n
 written by the browser for your language, so they are right in every language. The names and
 states of entities are Home Assistant's.
 
+## Runtime counter
+
+A timer can add up how long its target was on, to answer "how many hours did the boiler run
+this week" without an automation. It is off to begin with. Tick **Count runtime** when you add
+the timer, or later under **Configure**, and the timer gains a `sensor` **Runtime** on the
+same device.
+
+- **Every "on" of the target counts**, whoever caused it: Timerify, the target's own app, a
+  switch on the wall, an automation. "On" is judged the way the rest of Timerify judges it: a
+  climate or water heater entity is on in any mode but off, a media player when it is neither
+  off nor in standby, and any other target when it reports `on`. The counter only watches. It
+  never starts or stops the target, and it does not look at the timer's countdown, pending
+  commands or schedule.
+- **The value is in minutes**, a total that only goes up, and it starts at 0 the first time
+  you switch the counter on (a target that is already on counts from that moment, not from
+  when its countdown began). It is written at most once a minute, near the end of the
+  minute, and only when it has changed; nothing is written when the target turns on or off.
+  The sensor shows whole minutes and keeps two decimals in its state. Its display unit can
+  be changed in the entity's settings, to hours for instance.
+- **Daily and weekly views come from Home Assistant's statistics**, with no extra entities.
+  The sensor is a total that only goes up, so Home Assistant keeps its long-term statistics,
+  and a run that crosses midnight is split between the two days to within a second, as long as
+  the file of the total is written in under half a second (on a stalled disk the last minute
+  of a day may fall on the next one). The history graph shows the total; a statistics graph
+  card shows the minutes per day or per week:
+
+  ```yaml
+  type: statistics-graph
+  entities:
+    - sensor.boiler_runtime
+  chart_type: bar
+  period: day
+  stat_types: change
+  ```
+
+- **Time that Timerify did not see is not counted**: the time Home Assistant is not running,
+  and the time the target is unavailable or unknown. When Home Assistant is back, or the
+  target reports again, and the target is on, the count goes on from that moment. The total
+  never goes down, not even when the clock of the machine is set back, unless its file cannot
+  be written (a full or read-only disk), which Home Assistant logs.
+- **A restart loses nothing.** The total is stored in a file of its own, before the sensor
+  shows it. Stopping or restarting Home Assistant, and reloading the timer, keep every second
+  the counter has seen. If Home Assistant crashes, a run loses at most its last minute.
+- **Switching the counter off** (untick **Count runtime** under **Configure**) removes the
+  sensor from the registry, so that no unavailable entity is left behind. Its statistics stay
+  in **Developer tools > Statistics**, where you can clear them. Ticking the box again brings
+  the sensor back with the same entity id and customisations, and **continues from the old
+  total**; the time in between is not counted.
+- **Disabling the Runtime entity** in its own settings is not the same: it pauses the count
+  and keeps the total, and enabling it again carries on from there. To stop counting for good,
+  switch the option off.
+- **There is no reset.** Deleting the timer deletes the total, and a timer added again counts
+  from zero. The dashboard card does not show the runtime; use Home Assistant's own cards, as
+  above.
+
 ## Installation
 
 ### With HACS
@@ -993,28 +1049,31 @@ Add one timer per entity:
    **Timerify**, and in the menu choose **Add a timer**. (The **Add integration** button
    on the Integrations tab lists it too, as "Timerify (Helper)". The other item of the
    menu, **Voice settings**, is described under [Voice and AI](#voice-and-ai).)
-2. Pick the entity, and the mode.
+2. Pick the entity, and the mode, and tick **Count runtime** if you want the timer to add up
+   how long the entity is on (it is not ticked to begin with; see
+   [Runtime counter](#runtime-counter)).
 3. In strict mode, set the default duration.
 4. If your house has a Workday sensor, pick the one this timer follows, or leave it empty;
    see [Days](#days).
 
-The timer appears on the entity's device page. To change the mode, the default duration or
-the Workday sensor later, open the timer on the Timerify integration page and choose
-**Configure**. The entity itself cannot be changed: add a timer for the other entity
+The timer appears on the entity's device page. To change the mode, the runtime counter, the
+default duration or the Workday sensor later, open the timer on the Timerify integration page
+and choose **Configure**. The entity itself cannot be changed: add a timer for the other entity
 instead. Schedule intervals are added on the same page; see [Schedules](#schedules).
 
 Renaming the target, or moving it to another device, is followed: the timer keeps running.
 
 ## What is not here yet
 
-Planned for later versions, none of it available in 0.5.0: a runtime counter, a sensor
-that adds up how long the target was on. What cannot be said to Assist is listed under
-[What is not by voice](#what-is-not-by-voice), and what the card leaves to the timer's page
-(creating and editing schedule intervals) under [The pop-up](#the-pop-up).
+Every feature planned for Timerify is built. What cannot be said to Assist is listed under
+[What is not by voice](#what-is-not-by-voice), what the card leaves to the timer's page
+(creating and editing schedule intervals) under [The pop-up](#the-pop-up), and what the
+runtime counter leaves out (a reset, and a place on the card) under
+[Runtime counter](#runtime-counter).
 
 ## Verification
 
-What 0.5.0 was checked with before release:
+What 0.6.0 was checked with before release:
 
 - The test suite (`uv run pytest`): every rule above is a scenario, with time moved
   explicitly, among them the days the clock changes, Home Assistant down overnight, a
@@ -1024,6 +1083,11 @@ What 0.5.0 was checked with before release:
   from their sources and checked against the shipped ones. The beginning of a countdown
   (`started_at`) is checked in every path that sets an end, across restarts, and the card's
   websocket command for a user who may and one who may not read the timer's entities.
+  The runtime counter is checked the way a user meets it: a manual run, a countdown, a
+  flapping relay, Home Assistant stopped, restarted or crashed between two writes of the
+  sensor, a target that goes unavailable, a clock set back, a renamed target, the counter
+  switched off and on again, and a file written by a newer release; and, through Home
+  Assistant's real recorder, a run across midnight whose minutes land on the right day.
 - The card's own tests (`npm --prefix card test`): both layouts, the pop-up, the long press, the
   editor and the picker, in English and Russian, with a stand-in for Home Assistant's frontend
   object and time moved explicitly.
@@ -1047,7 +1111,9 @@ What 0.5.0 was checked with before release:
   over the REST API: it refuses a device that is not exposed to Assist, and once the
   device is exposed, "turn on ... for 2 minutes", "how much time is left", "turn off in 1
   minute", a bare "turn on" and a bare "turn off" each give the answer the sentence is
-  meant to and leave the switch in the state the REST API reports.
+  meant to and leave the switch in the state the REST API reports. The first timer is
+  added with the runtime counter ticked, and after its 2 minute run its Runtime sensor
+  reads 2 minutes, in minutes, as a total that only goes up.
 
 ## Development
 
@@ -1120,8 +1186,9 @@ turns the first switch on at its start and off two minutes later (its switch is 
 timer's device), that the built-in agent, given the Voice settings through the config flow
 and talked to over the REST API, runs, shortens and stops the first switch by sentences,
 that a 3 minute countdown survives a restart of the container, that a pending command
-turns the demo switch on at its time and off a minute later, and that the thermostat takes
-the mode and the temperature of a run. It takes about fifteen minutes.
+turns the demo switch on at its time and off a minute later, that the thermostat takes
+the mode and the temperature of a run, and that the first timer, added with the runtime
+counter ticked, shows its 2 minute run on its Runtime sensor. It takes about fifteen minutes.
 
 ```sh
 uv run python -m scripts.smoke.run

@@ -14,11 +14,13 @@
         "description": "Pick the entity that the timer turns on and off.",
         "data": {
           "target": "Entity",
-          "mode": "Mode"
+          "mode": "Mode",
+          "runtime": "Count runtime"
         },
         "data_description": {
           "target": "The switch, light, fan or other entity to run on a timer.",
-          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
         }
       },
       "voice_settings": {
@@ -64,10 +66,12 @@
       "init": {
         "title": "Timer settings",
         "data": {
-          "mode": "Mode"
+          "mode": "Mode",
+          "runtime": "Count runtime"
         },
         "data_description": {
-          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer."
+          "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
         }
       },
       "voice_settings": {
@@ -277,6 +281,9 @@
             "name": "Commands"
           }
         }
+      },
+      "runtime": {
+        "name": "Runtime"
       }
     },
     "switch": {

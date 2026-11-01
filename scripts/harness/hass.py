@@ -123,6 +123,8 @@ class Timer:
     next_command: str
     device_id: str
     """The device the entities sit on, from the entity registry."""
+    runtime: str | None = None
+    """The Runtime sensor; None for a timer that was added without the counter."""
 
 
 def has_state(*values: str) -> Matcher:
@@ -532,12 +534,16 @@ async def add_timer(
     *,
     mode: Literal["strict", "loose"] = "strict",
     on_target_device: bool = False,
+    runtime: bool = False,
 ) -> Timer:
     """Add a timer for `target` in Timerify the way the integrations page does.
 
     A strict timer gets the default duration of `DEFAULT_DURATION_MINUTES`; a loose one
     has none. With `on_target_device` the target must sit on a device, and the timer's
-    entities must sit on that same device.
+    entities must sit on that same device. With `runtime` the box "Count runtime" of the
+    first form is ticked; without it the form is submitted as before the counter
+    existed, which leaves the box at its default, and the timer must have no Runtime
+    sensor.
     """
     flow_path = "/api/config/config_entries/flow"
     flow = await request_json(
@@ -558,9 +564,10 @@ async def add_timer(
         access_token,
         json={"next_step_id": "target"},
     )
-    steps: list[tuple[str, dict[str, Any]]] = [
-        ("target", {"target": target, "mode": mode})
-    ]
+    first_form: dict[str, Any] = {"target": target, "mode": mode}
+    if runtime:
+        first_form["runtime"] = True
+    steps: list[tuple[str, dict[str, Any]]] = [("target", first_form)]
     if mode == "strict":
         steps.append(("duration", {"default_duration": DEFAULT_DURATION_MINUTES}))
     for step_id, user_input in steps:
@@ -608,6 +615,12 @@ async def add_timer(
     (device_id,) = device_ids
     if on_target_device:
         await expect_on_device_of(socket, registry, target, device_id)
+    runtime_row = rows.get(f"{entry_id}_runtime")
+    if (runtime_row is not None) != runtime:
+        raise HarnessFailure(
+            f"The timer should have {'a' if runtime else 'no'} Runtime sensor, "
+            f"but the entities are {list(rows)}"
+        )
     return Timer(
         entry_id,
         target,
@@ -615,6 +628,7 @@ async def add_timer(
         ends_at["entity_id"],
         next_command["entity_id"],
         device_id,
+        None if runtime_row is None else runtime_row["entity_id"],
     )
 
 

@@ -2,10 +2,11 @@
 the voice sentences.
 
 The flow starts with a menu: add a timer, or, while there is none, the voice settings.
-Adding a timer takes the entity and the binding mode, in strict mode a default
-duration, and, in a house that has a Workday sensor, that sensor. The options flow
-changes the mode, the duration and the sensor; the target stays. Schedule intervals are
-subentries of the timer's entry, added, edited and deleted one by one from its page.
+Adding a timer takes the entity, the binding mode and whether to count how long the
+target is on, in strict mode a default duration, and, in a house that has a Workday
+sensor, that sensor. The options flow changes the mode, the counting, the duration and
+the sensor; the target stays. Schedule intervals are subentries of the timer's entry,
+added, edited and deleted one by one from its page.
 
 The voice settings are an entry of their own, of which there is one: whether Timerify
 writes the sentence files for the built-in agent, and in which languages. The options
@@ -61,6 +62,7 @@ from .const import (
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_MODE,
+    CONF_RUNTIME,
     CONF_SETTINGS,
     CONF_START,
     CONF_TARGET,
@@ -167,13 +169,18 @@ def _duration_selector() -> selector.NumberSelector:
 
 
 async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
-    """The form that adds a timer, built for the domains on offer when it is shown."""
+    """The form that adds a timer, built for the domains on offer when it is shown.
+
+    The runtime box is on this form, not on a step of its own, so that a timer that
+    takes every default is still added in three clicks.
+    """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
     return probatio.Schema(
         {
             probatio.Required(CONF_TARGET): _target_selector(flow.hass),
             probatio.Required(CONF_MODE, default="strict"): _mode_selector(),
+            probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
         }
     )
 
@@ -399,11 +406,20 @@ _VOICE_STEP = SchemaFlowFormStep(
 async def _options_init_schema(
     handler: SchemaCommonFlowHandler,
 ) -> probatio.Schema | None:
-    """The first form of the options: a timer's mode. The voice settings have none, and
-    go to their own form."""
+    """The first form of the options: a timer's mode and whether it counts the runtime.
+    The voice settings have neither, and go to their own form.
+
+    The form opens with the options the entry has. A timer made before the counter has
+    no such option, so the box has no suggested value and shows its default, unticked.
+    """
     if is_voice_options(handler.options):
         return None
-    return probatio.Schema({probatio.Required(CONF_MODE): _mode_selector()})
+    return probatio.Schema(
+        {
+            probatio.Required(CONF_MODE): _mode_selector(),
+            probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
+        }
+    )
 
 
 async def _after_options_init(options: dict[str, Any]) -> str:

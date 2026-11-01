@@ -1226,10 +1226,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   for core's own commands.
 - **`timerify/timer` also returns `target_on`, the target's on-rule from `domains.py` as data
   (`OnRule` replaces `DomainBehaviour.is_on`), and `default_duration` is null in loose mode;
-  there is no `runtime` key until the runtime counter exists.** The card must say "on without a
-  countdown" and decide what a long press does exactly as Timerify judges the target, without a
-  copy of the domain table in the browser (§2). Cost if wrong: none; the key is added with the
-  sensor.
+  there is no `runtime` key, because the card does not show the runtime (phase 6).** The card
+  must say "on without a countdown" and decide what a long press does exactly as Timerify judges
+  the target, without a copy of the domain table in the browser (§2). Cost if wrong: none; a card
+  feature that shows the runtime adds the key (see "The forms and the card" in phase 6).
 - **The lookup is asked again on a new configured entity, a new `hass.entities` (an interval
   added or deleted shows up there), the connection coming back and the number's state becoming
   available. A `not_found` shows a warning only while the number is missing or has a value,
@@ -1538,3 +1538,91 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   the application wins can see it pass on 2026.10 as well (`docs/followups.md`). Raising the
   minimum Home Assistant to 2026.11 would remove the problem, and is a question for 1.0.0.
   Cost if wrong: a user's first load in a fresh browser shows an error card until a refresh.
+
+## Phase 6: runtime counter
+
+The decisions of the runtime counter's phase (`docs/superpowers/plans/2026-11-01-phase-6-runtime-counter.md`),
+in the form they have now. Section numbers (§) are those of the spec; "research §n" points into
+`docs/research/2026-11-01-runtime-counter.md`.
+
+### The counter and its file
+
+- **The counter has a file of its own, `timerify.<entry_id>.runtime` (version 1,
+  `{"seconds": float}`), and a pure class, `RuntimeCounter`. Nothing is added to the timer's
+  file, its `Snapshot` or the core.** The counter records what the target did and decides
+  nothing, so the timer stays the single source of truth for what runs, and `TimerStore`'s
+  migration chain is untouched. A `RestoreSensor` is ruled out for the reason §5.7 gives for the
+  timer: it is dumped every 15 minutes, so a crash would make a `total_increasing` value go
+  down, and the recorder subtracts a dip of under 10 % from the sum (research §1). Cost if
+  wrong: a second small file per timer.
+- **Time that was not observed is not counted.** This covers Home Assistant being down, and the
+  target being unavailable or unknown. At start, and when the target becomes available, a run
+  opens at that moment if the target is on. §5.7 handles a restart "as if the change had just
+  happened" and never reconstructs the downtime; a record holds only what was seen, so it never
+  overcounts and it stays monotonic. Pending commands and the wish are promises, not runtime.
+  Cost if wrong: an undercount bounded by the outage, which the README states.
+- **The file is saved immediately (`async_save`) before every published value, and flushed on
+  unload and when Home Assistant stops.** A stop unloads no entry, so without the second the
+  seconds since the last tick would be lost at every stop. The stored value is then always at
+  least the shown one, so no restart or crash can make the value go down, unless the file
+  cannot be written (Home Assistant logs a failed write and does not raise it). Cost if wrong:
+  one tiny write a minute while the target is on.
+- **Switching the counter off and on again keeps the stored total.** No false reset in the
+  statistics and no silent loss. Deleting the timer deletes the file. Cost if wrong: a user who
+  wants a fresh start clears the statistics and deletes the timer.
+- **There is no reset action.** The spec does not ask for one, and Home Assistant's statistics
+  tools exist. Writing 0 later is safe for statistics. Cost if wrong: a user who wants to reset
+  deletes and re-adds the timer.
+
+### The sensor
+
+- **The sensor publishes at second 59 of every UTC minute: the exact total in minutes, rounded
+  to 2 decimals, shown with display precision 0.** The spec's point is attributing runtime to
+  the right hour and day. A tick at second 59, even with its jitter of up to 0.5 s, lands before
+  the minute's boundary, so a run across midnight splits within a second, with one write a
+  minute, provided the file write that precedes the state write finishes promptly: the tick
+  saves the file first, and the recorder dates the state by the write of the state.
+  Whole minutes at second 0 would land after every boundary and could be off by up to
+  2 minutes (research §3). Cost if wrong: the raw state carries decimals, which the display
+  hides; a file write slower than about half a second at 23:59:59 (a stalled disk) moves the
+  day's last minute to the next day, and nothing is lost.
+- **The sensor has one tick listener for its whole life, and subscribes to the target's state on
+  its own.** It does not go through the controller, its lock or its notifications, and it
+  time-stamps a change with `event.time_fired`. The controller's handler can wait up to 30 s
+  behind a service call (research §3), which would date runs late. A no-op tick is a
+  comparison. Cost if wrong: a second state subscription per counted target.
+- **The sensor never turns unavailable because its target does.** It is a total, not a reading,
+  and cards and automations read its value. Cost if wrong: none known.
+- **A counter switched off has its registry entry removed (not disabled).** Otherwise an
+  `unavailable` ghost would come back at every start. A removed entry returns with the same
+  entity id and customisations when the counter is switched on again, so history and statistics
+  stay attached (research §4). The statistics are kept, because they are the user's. Cost if
+  wrong: none known.
+
+### The forms and the card
+
+- **The "Count runtime" checkbox sits on the first form of a new timer, next to the entity and
+  the mode (default off), and on the first form of its settings.** This is the owner's decision
+  of 2026-11-01. §6.2 asks both for the order "entity → mode → duration → runtime → Workday" and
+  for "three clicks for the common case". A separate step would make every timer take four
+  clicks. Within one form, the order is a matter of layout. Cost if wrong: the counter is chosen
+  before the duration.
+- **Neither `timerify/timer` nor the card gets a `runtime` key in this phase.** §6.3's card
+  shows actions and the countdown, not runtime, and a key that nobody reads is dead weight. This
+  settles the earlier plan to add one "with the sensor". `mode` and `default_duration`, which
+  the answer has carried since phase 5 and the card does not read, stay as they are for the
+  same reason: the answer is a contract that the card mirrors key for key, and changing it for
+  two fields alone, with no card feature to ask for it, gains nothing; the first card feature
+  that changes the answer is the time to reconsider them. Cost if wrong: a later card feature
+  adds the key in three places (the Python `TimerInfo`, `hass.ts` and `watchedEntities`), and
+  two fields stay in the answer that nothing reads.
+
+### Verification
+
+- **The smoke test adds its first timer with the counter on, and after the first 2 minute run
+  checks the sensor against the real container.** The sensor must reach at least 1.95 within 90
+  seconds of the target turning off (it publishes at the end of the minute), and then be at most
+  2.1, in minutes, with the state class `total_increasing`. The other timers of the smoke test
+  and of the end-to-end tests are added as before and have no counter. The statistics
+  themselves are proved by pytest with the recorder, not in the container. Cost if wrong: the
+  container shows the unit, the class and the figure of one run, not a day's split.

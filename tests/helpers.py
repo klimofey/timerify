@@ -30,6 +30,7 @@ TARGET_ID = "switch.boiler"
 NUMBER = "number.boiler_run_for"
 SENSOR = "sensor.boiler_ends_at"
 NEXT = "sensor.boiler_next_command"
+RUNTIME = "sensor.boiler_runtime"
 TURN_ON = ("turn_on", TARGET_ID)
 TURN_OFF = ("turn_off", TARGET_ID)
 
@@ -61,6 +62,7 @@ Assistant keeps on its state, also while it is unavailable."""
 AC_NUMBER = "number.ac_run_for"
 AC_ENDS_AT = "sensor.ac_ends_at"
 AC_NEXT = "sensor.ac_next_command"
+AC_RUNTIME = "sensor.ac_runtime"
 
 
 async def call_service(
@@ -363,6 +365,17 @@ def payload(
 def saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> dict[str, Any]:
     """What the storage file of `entry` holds."""
     return hass_storage[storage_key(entry)]["data"]
+
+
+def runtime_storage_key(entry: ConfigEntry) -> str:
+    """The key under which the runtime total of `entry` is stored."""
+    return f"timerify.{entry.entry_id}.runtime"
+
+
+def runtime_saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> float:
+    """The seconds the runtime file of `entry` holds."""
+    seconds: float = hass_storage[runtime_storage_key(entry)]["data"]["seconds"]
+    return seconds
 
 
 def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:

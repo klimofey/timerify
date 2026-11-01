@@ -11,7 +11,10 @@ user would see:
    address serves the bundle byte for byte; and the card's websocket command tells the
    first timer's entry and entities.
 2. "Run for" 2 minutes on a switch that sits on no device (an input_boolean): the switch
-   turns on, and turns off when the countdown ends.
+   turns on, and turns off when the countdown ends. This timer was added with the
+   runtime counter ticked, and its Runtime sensor then shows the 2 minutes, in minutes,
+   as a total that only goes up (it publishes at the end of every minute, so this waits
+   for the minute to end).
 3. A pending command on the switch of the demo integration, which sits on a device: the
    timer's entities sit on that device, and a command to turn on in 1 minute for
    1 minute turns the switch on at its time, clears the "Next command" sensor, and
@@ -111,6 +114,17 @@ START_SLACK = timedelta(seconds=5)
 EXPIRY_SLACK = timedelta(seconds=5)
 """How late after the end of a countdown the switch may turn off."""
 CLOCK_TOLERANCE = timedelta(seconds=1)
+RUNTIME_PUBLISH_TIMEOUT = 90.0
+"""How long after a run ends its minutes may take to reach the Runtime sensor: it
+publishes once a minute, at the end of the minute, so a minute and a half is room
+enough."""
+RUNTIME_BELOW = 0.05
+"""How many minutes short of the run the Runtime sensor may be when it first shows it:
+the sensor rounds to hundredths of a minute, and the run starts a moment after "Run
+for" is set."""
+RUNTIME_ABOVE = 0.1
+"""How many minutes beyond the run the Runtime sensor may show: the switch turns off a
+moment after the countdown ends."""
 
 
 class SmokeFailure(HarnessFailure):
@@ -124,6 +138,18 @@ def heating_to(temperature: float) -> Matcher:
         and state["state"] == "heat"
         and state["attributes"].get("temperature") == temperature
     )
+
+
+def at_least(minimum: float) -> Matcher:
+    """Match a numeric state of `minimum` or more."""
+
+    def matches(state: State | None) -> bool:
+        try:
+            return state is not None and float(state["state"]) >= minimum
+        except ValueError:
+            return False
+
+    return matches
 
 
 def ends_near(moment: datetime) -> Matcher:
@@ -194,6 +220,33 @@ async def expect_off_at(socket: Socket, timer: Timer, end: datetime) -> None:
     say(f"  {timer.target} off {(stopped - end).total_seconds():+.1f}s from the end")
 
 
+async def expect_runtime(socket: Socket, timer: Timer, minutes: int) -> None:
+    """Check the Runtime sensor of a timer whose only run, of `minutes`, has just ended:
+    it reaches that many minutes and no more than a little over, in minutes, as a total
+    that only goes up."""
+    if timer.runtime is None:
+        raise SmokeFailure(f"The timer of {timer.target} counts no runtime")
+    shown = await socket.wait_for_state(
+        timer.runtime,
+        at_least(minutes - RUNTIME_BELOW),
+        f"at least {minutes - RUNTIME_BELOW:g} minutes",
+        RUNTIME_PUBLISH_TIMEOUT,
+    )
+    total = float(shown["state"])
+    if total > minutes + RUNTIME_ABOVE:
+        raise SmokeFailure(
+            f"{timer.runtime} shows {total} minutes of a run of {minutes}"
+        )
+    attributes = shown["attributes"]
+    if attributes.get("unit_of_measurement") != "min":
+        raise SmokeFailure(
+            f"{timer.runtime} is in {attributes.get('unit_of_measurement')}"
+        )
+    if attributes.get("state_class") != "total_increasing":
+        raise SmokeFailure(f"{timer.runtime} is a {attributes.get('state_class')}")
+    say(f"  {timer.runtime} shows {total:g} minutes (min, total_increasing)")
+
+
 async def scenario_card(
     session: aiohttp.ClientSession, refresh_token: str, timer: Timer
 ) -> None:
@@ -228,6 +281,7 @@ async def scenario_expiry(
     async with open_socket(session, INSTANCE, refresh_token) as socket:
         end = await start_countdown(socket, timer, 2)
         await expect_off_at(socket, timer, end)
+        await expect_runtime(socket, timer, 2)
 
 
 async def scenario_command(session: aiohttp.ClientSession, refresh_token: str) -> None:
@@ -624,8 +678,9 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
             INSTANCE,
             await new_access_token(session, INSTANCE, refresh_token),
             SWITCH,
+            runtime=True,
         )
-    say(f"Added a timer for {SWITCH}")
+    say(f"Added a timer for {SWITCH}, counting its runtime")
     await scenario_card(session, refresh_token, timer)
     await scenario_expiry(session, refresh_token, timer)
     await scenario_command(session, refresh_token)

@@ -284,5 +284,5 @@ Each ruling is a decision, then why, then the cost if it is wrong. They apply wh
 | T2 → T3 | `CONF_RUNTIME`; sensor setup reads `entry.options.get(CONF_RUNTIME)` | T3 only writes the option; T2's tests set it through `setup_target(runtime=True)` | yes |
 | T2, T3 | `translations/en.json` + `ru.json` | T2 adds `entity.sensor.runtime`; T3 adds the two form fields; `test_translations.py` guards parity | yes |
 | T2 | `tests/conftest.py` `setup_target`, `tests/helpers.py` | `runtime` defaults to False and adds no key, so every phase 1–5 test sees the options it saw | yes |
-| T3 | `test_add_target_with_every_default_takes_three_clicks` | the one phase 1–5 test edited: its options gain `runtime: False` | yes |
+| T3 | the flow tests in `tests/test_config_flow.py` that compare the stored options exactly | the field is `Required` with a default, so every flow stores it: each such phase 1–5 test (`test_add_target_with_every_default_takes_three_clicks` and six more) gains `runtime: False` and nothing else | yes |
 | T4 | `scripts/smoke/run.py` | the first scenario's flow input gains `runtime: True`; the other scenarios are unchanged | yes |

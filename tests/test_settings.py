@@ -557,6 +557,43 @@ async def test_a_setting_left_out_is_said_once_when_the_turn_on_is_sent_again(
     ]
 
 
+async def test_a_mode_left_out_is_said_again_after_another_mode_is_taken(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three commands were made while the air conditioner offered cooling: cooling,
+    then heating, then cooling again. Its integration takes cooling away. The first
+    cooling is left out and said. The heating is taken, so the log has no memory of the
+    cooling any more, and the second cooling is left out and said again."""
+    await setup_target(target=AC_ID)
+    for delay, mode in [(10, "cool"), (20, "heat"), (30, "cool")]:
+        await add_command(hass, AC_NUMBER, action="on", delay=delay, hvac_mode=mode)
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.write("off")
+    cooling_left_out = (
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    )
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data == [("turn_on", {})]
+    assert timerify_warnings(caplog) == [cooling_left_out]
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data[1:] == [("set_hvac_mode", {"hvac_mode": "heat"})]
+    assert timerify_warnings(caplog) == [cooling_left_out]
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data[2:] == []
+    assert state_of(hass, AC_ID) == "heat"
+    assert timerify_warnings(caplog) == [cooling_left_out, cooling_left_out]
+
+
 @pytest.mark.parametrize(
     ("data", "key"),
     [

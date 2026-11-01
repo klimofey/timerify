@@ -1019,9 +1019,9 @@ async def test_a_climate_without_capabilities_keeps_the_settings_of_its_window(
     setup_target: SetupTarget,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Home Assistant starts while the AC is still connecting: it is unavailable and
-    offers no modes yet. The window is worked out then, and it must keep its cooling
-    at 24 degrees. The AC has its modes back when the window starts, and gets them."""
+    """Home Assistant starts while the AC shows no modes: it is unavailable and offers
+    none yet. The window is worked out then, and it must keep its cooling at 24
+    degrees. The AC shows its modes again when the window starts, and gets them."""
     await open_sunday(hass, freezer)
     entry = await setup_target(target=AC_ID)
     await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)

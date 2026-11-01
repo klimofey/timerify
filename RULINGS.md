@@ -1900,24 +1900,33 @@ in `docs/followups.md`.
   A setting that is left out is said once, as a warning that names the target and the
   setting: "climate.ac cannot take the setting hvac_mode=cool now; it is left out". The
   controller remembers the pair of name and value while it stays left out. A later call that
-  carries the name and finds it taken forgets the pair, so it is said again if it is left
-  out again. It names no interval or command, since any origin may owe it.
+  carries the name and finds it taken forgets every pair of that name, so a setting that
+  was left out, then taken with another value, then left out again is said again. The memory
+  is in the controller and not stored, so it lasts for one load of the timer: a restart or a
+  reload says a setting that is still missing once more. The warning names no interval or
+  command, since any origin may owe the setting.
   Settings that were all left out count as delivered. The turn-on goes out plain, or an
   `ApplySettings` with nothing left makes no call, and the core is told `settings_applied`
   as for any delivery: it clears what is owed and touches no allowance. A setting that
   nobody can send must not be owed, sent again and given up on.
   Why: #18. Only a window was filtered, and when it was worked out, not when it was sent.
   A pending command whose mode was renamed failed its call every time. A window worked out
-  while the target showed no modes (its integration was still connecting, as at start-up)
-  lost the settings for good, until the next window refresh. Sending is the one place all
-  settings pass through, and the moment at which what the target takes is what matters.
-  Cost if wrong: a setting that comes and goes between two calls is warned about again, and
-  a target that shows incomplete capabilities at the moment of sending (an integration
-  still connecting) gets its turn-on without the setting, which is not sent again later:
-  it counts as delivered.
+  while the target showed no modes lost the settings until the next window refresh.
+  Sending is the one place all settings pass through, and the moment at which what the
+  target takes is what matters.
+  Cost if wrong: a setting that comes and goes between two calls is warned about again. An
+  integration that reports the device as available before it lists its modes gets its
+  turn-on without the setting, which is not sent again later: it counts as delivered.
+  Start-up and a return from unavailable do not lose settings this way. The core sends
+  nothing to a target that is away or has not been seen (`observe`, `_want`,
+  `_deliver_settings`), and Home Assistant keeps the capability attributes on an
+  unavailable state and on one restored from the registry. So do not keep a setting owed
+  for the sake of a target that cannot take it: it would be sent again until the allowance
+  gives up.
   Tests: `test_a_due_command_whose_mode_was_renamed_turns_on_without_it`,
   `test_a_running_ac_that_lost_the_only_setting_of_a_command_gets_no_call`,
   `test_a_setting_left_out_is_said_once_when_the_turn_on_is_sent_again`,
+  `test_a_mode_left_out_is_said_again_after_another_mode_is_taken`,
   `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
   `test_setting_that_comes_back_and_goes_again_is_said_again`,
   `test_a_climate_without_capabilities_keeps_the_settings_of_its_window`.

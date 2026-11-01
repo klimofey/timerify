@@ -508,7 +508,7 @@
         },
         "abort": {
           "timer_gone": "This timer was already deleted.",
-          "issue_gone": "This problem is already solved: the device is back and the timer works again."
+          "issue_gone": "This problem is no longer open. Nothing needs to be done."
         }
       }
     }

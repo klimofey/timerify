@@ -28,8 +28,8 @@ class DeleteTimerFlow(RepairsFlow):
         """Show what will be deleted; once the user submits, delete it.
 
         The fix does nothing, and says why, when its timer is gone, deleted on its
-        integration page while the repair stood open, or when the problem is solved: the
-        target is back and the issue went away, while the timer works. A step that is
+        integration page while the repair stood open, or when its issue is no longer
+        open: the target is back, or the timer was unloaded since. A step that is
         shown again then would only show blanks in place of the names of the timer and
         the entity.
         """

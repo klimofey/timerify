@@ -455,7 +455,7 @@ async def test_a_repair_shown_again_after_the_boiler_is_back_does_nothing(
     setup_target: SetupTarget,
 ) -> None:
     """The user opens the repair, the device is added again, and the dialog asks for its
-    step again: it says the problem is solved, and the timer is still there."""
+    step again: it says the problem is no longer open, and the timer is still there."""
     entry = await setup_target()
     await fake_target.delete()
     manager, flow_id = await open_repair_dialog(hass, entry)

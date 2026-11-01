@@ -755,6 +755,24 @@ async def test_options_switching_to_strict_asks_for_the_duration(
     assert state_of(hass, NUMBER) == "20"
 
 
+async def test_options_offer_the_default_duration_kept_through_loose_mode(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A user who tries loose mode and goes back to strict finds the default duration
+    they had: loose mode ignores it and does not erase it."""
+    entry = await setup_target(mode="strict", default_duration=45)
+
+    await change_options(hass, entry, {CONF_MODE: "loose"})
+
+    assert entry.options[CONF_MODE] == "loose"
+    assert entry.options[CONF_DEFAULT_DURATION] == 45
+
+    result = await change_options(hass, entry, {CONF_MODE: "strict"})
+
+    assert result["step_id"] == "duration"
+    assert suggested_value(result, CONF_DEFAULT_DURATION) == 45
+
+
 async def test_options_show_the_current_settings(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:

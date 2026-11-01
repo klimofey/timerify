@@ -85,7 +85,7 @@ their names and entity ids, and the device that was made for them is removed.
 | Entity | What it shows |
 | --- | --- |
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
-| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs, or when the countdown began before version 0.5.0); the card's fill is drawn from it. |
+| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs); the card's fill is drawn from it. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
 | `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 | `sensor` Runtime | Only when you ask for it: the minutes the target was on, a total that only goes up. See [Runtime counter](#runtime-counter). |
@@ -808,8 +808,6 @@ below. The round tile has no chip, and it can be long-pressed; see
   shows a full fill and a full ring; the pill says the state of the target in words, and the
   round tile has them for screen readers only. An idle timer shows an empty fill and an empty
   ring.
-- A countdown that began before Timerify was updated to 0.5.0 has no recorded beginning: its
-  fill stays full until the countdown ends or is set again.
 - A timer whose number is unavailable shows that, and its chip, presets, plus, minus, Stop and
   cancel buttons are off (see [The pop-up](#the-pop-up)). If the
   entity of the card does not exist, or is not the "Run for" number of a Timerify timer, the card
@@ -1126,6 +1124,14 @@ What 1.0.0 was checked with before release:
   meant to and leave the switch in the state the REST API reports. The first timer is
   added with the runtime counter ticked, and after its 2 minute run its Runtime sensor
   reads 2 minutes, in minutes, as a total that only goes up.
+- A manual walk-through in a real Home Assistant 2026.10.4 container, through the browser,
+  done before release; its screenshots are in `docs/screenshots/smoke-*.png`. It covered the
+  integration page at 1.0.0 with its icon, adding a timer with the runtime counter, a
+  countdown running, and a countdown kept across a restart of Home Assistant (the target
+  was an `input_boolean`, which restores its state; a demo switch does not, and the timer
+  clears the countdown of a target that is no longer on). It went on to a schedule interval
+  that turned the target on at its start, two Assist sentences said to the built-in agent,
+  and the card in the pill and in the round layout.
 
 ## Development
 

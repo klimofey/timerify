@@ -1647,11 +1647,14 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
 - **`timerify/timer` answers `timer_incomplete` when the number is a timer's and the timer
   cannot be told of, and the card says so in a neutral line.** There are two cases: the
   timer's target was stored by registry id and that entry is gone, or one of its two sensors is
-  not in the entity registry, which happens while the entry is not set up. `not_found` keeps
-  its meaning, "this is no timer's number", and the check that the user may read the number
-  still runs first, so the code tells a user who may not read an entity nothing. The card
-  shows `card_timer_incomplete` ("The timer of {entity} cannot be shown: its target or one of
-  its sensors is missing. Open the timer's page to see why.") in every state of the number.
+  not in the entity registry. The registry keeps a timer's entities across restarts and
+  reloads, so that happens only for a moment while a new timer is set up for the first time
+  (below), and after a sensor was deleted from the entity registry, until the timer is set up
+  again. `not_found` keeps its meaning, "this is no timer's number", and the check that the
+  user may read the number still runs first, so the code tells a user who may not read an
+  entity nothing. The card shows `card_timer_incomplete` ("The timer of {entity} cannot be
+  shown: its target or one of its sensors is missing. Open the timer's page to see why.") in
+  every state of the number.
   Why: the one wording for all of these, "is not the Run for number of a Timerify timer", was
   false for a number that is a timer's. A target stored as an entity id, which every flow
   writes, resolves whether or not the entity exists, so a timer whose target was deleted still
@@ -1706,12 +1709,19 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   target that is on no device is tracked in the registry, so one that gains its first device
   while Home Assistant runs (a user picks a device in the settings of a helper, its
   integration links it after Timerify set up, or it is registered later with a device) reloads
-  the entry once, and the reload runs the same step. A rename is left to `_follow_target`,
-  whose update of the `target` option reloads, because `async_schedule_reload` does not
-  merge: two calls for one registry update would reload twice. Why: a target's integration
-  can link its entity to a device after the timer's device was made, and the made one would
-  stay behind, empty. Cost if wrong: a start-up in which the target's integration links its
-  entity late costs the timer one more reload.
+  the entry once, and the reload runs the same step. The one case with a second reload is a
+  made device that the user had disabled: enabling its entities changes their `disabled_by`,
+  and Home Assistant's own `EntityRegistryDisabledHandler` reloads the entry 30 seconds
+  later (`RELOAD_AFTER_UPDATE_DELAY`). That reload is Home Assistant's, not Timerify's, and
+  it is harmless: state survives a reload, and no call is added to the target. A rename is
+  left to `_follow_target`, whose update of the `target` option reloads, because
+  `async_schedule_reload` does not merge: two calls for one registry update would reload
+  twice. Why: a target's integration can link its entity to a device after the timer's
+  device was made, and the made one would stay behind, empty. Cost if wrong: a start-up in
+  which the target's integration links its entity late costs the timer one more reload.
+  Test: `test_entities_disabled_with_the_fallback_device_are_enabled_on_the_boilers`
+  moves time past the 30 seconds and finds the entities enabled on the boiler's device and
+  a countdown that was started meanwhile still running.
 
 ### Voice
 
@@ -1743,7 +1753,7 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   and `test_services_are_described_for_the_ui` in `tests/test_services.py` fails when they
   drift. Why: Home Assistant reads `services.yaml` as data and cannot name a constant in it,
   and generating the file or patching the descriptions at run time is more machinery than
-  four numbers need. Cost if wrong: a limit changes in two places, and the test says which.
+  five numbers need. Cost if wrong: a limit changes in two places, and the test says which.
 - **A deleted interval is still worked out until the timer reloads.** Deleting an interval
   reloads the timer at once, which lets it go; only a reload that waits behind another set-up
   leaves the loaded timer with it, and for that time a window of it can be worked out and
@@ -1765,11 +1775,11 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   unexposes them under **Settings > Voice assistants > Expose**.
 - **The minimum Home Assistant stays 2026.10.4 at 1.0.0; raising it to 2026.11 is #7.**
   2026.11 carries the frontend that removes the first-load error ("Custom element doesn't
-  exist"), but on the day of this release it is in beta, so a minimum of it would keep
-  Timerify from every house that is still on 2026.10, and the error is cured by a refresh,
-  which the README says. Raising it moves `hacs.json`, the `pytest-homeassistant-custom-component`
-  pin in `pyproject.toml` and the image in `scripts/harness/compose.yaml` together; then
-  `card/e2e/first-load.spec.ts` passes unexpectedly, and its `test.fail` and the extra
-  reload after `primeServiceWorker` in `card/e2e/fixtures.ts` go. Cost if wrong: a user's
-  first load in a fresh browser shows an error card until a refresh (see "Known issue" in
-  phase 5).
+  exist"), but 2026.11.0 was in beta when 1.0.0 was prepared (2026-11-01) and was due on
+  2026-11-04, so a minimum of it would have kept Timerify from every house that was still on
+  2026.10, and the error is cured by a refresh, which the README says. Raising it moves
+  `hacs.json`, the `pytest-homeassistant-custom-component` pin in `pyproject.toml` and the
+  image in `scripts/harness/compose.yaml` together; then `card/e2e/first-load.spec.ts` passes
+  unexpectedly, and its `test.fail` and the extra reload after `primeServiceWorker` in
+  `card/e2e/fixtures.ts` go. Cost if wrong: a user's first load in a fresh browser shows an
+  error card until a refresh (see "Known issue" in phase 5).

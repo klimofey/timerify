@@ -17,6 +17,7 @@ from .card import async_register_card
 from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
 from .entity import remove_fallback_device
+from .issues import TARGET_DELETED, async_clear
 from .runtime import RuntimeStore
 from .services import async_setup_services
 from .store import TimerStore
@@ -57,6 +58,7 @@ async def async_setup_entry(
     entry.runtime_data = controller
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
+    _follow_target_restored(hass, entry)
     _follow_target_gaining_a_device(hass, entry)
     remove_fallback_device(hass, entry)
     if CONF_WORKDAY_SENSOR in entry.options:
@@ -88,11 +90,12 @@ async def async_unload_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> None:
-    """Delete the stored timer and the stored runtime total of a removed entry, or the
-    sentence files of the voice settings."""
+    """Delete the stored timer and the stored runtime total of a removed entry, take its
+    repair away, or delete the sentence files of the voice settings."""
     if is_voice_entry(entry):
         await async_remove_voice_entry(hass, entry)
         return
+    async_clear(hass, TARGET_DELETED, entry.entry_id)
     await TimerStore(hass, entry.entry_id).async_remove()
     await RuntimeStore(hass, entry.entry_id).async_remove()
 
@@ -102,9 +105,12 @@ def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_
 
     A renamed target is followed by updating the `target` option, which reloads the
     entry through its update listener; a target that moves to another device, or off
-    its device, takes the entities along; the entities of a removed target are left
-    on no device. A target that is on no device and gets one is left to
-    `_follow_target_gaining_a_device`, since the helper does nothing for it.
+    its device, takes the entities along. A removed target is told to the controller
+    (`async_target_removed`), which raises the repair; the entities stay where they are,
+    and Home Assistant leaves them on no device only if it is the device that is
+    removed. A target that is on no device and gets one is left to
+    `_follow_target_gaining_a_device`, since the helper does nothing for it, and one
+    that is registered again after it was removed to `_follow_target_restored`.
     """
 
     def set_target(entity_id: str) -> None:
@@ -118,6 +124,32 @@ def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_
         set_source_entity_id_or_uuid=set_target,
         source_device_id=async_entity_id_to_device_id(hass, entry.options[CONF_TARGET]),
         source_entity_id_or_uuid=entry.options[CONF_TARGET],
+        source_entity_removed=entry.runtime_data.async_target_removed,
+    )
+
+
+def _follow_target_restored(hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+    """Reload the entry when its target is registered, which is when the user adds the
+    device again after the target was deleted.
+
+    The reload sets the timer up again: its entities go back on the target's device,
+    which they have left if the device itself was removed, and start-up ends the repair
+    of the deleted target. The state that the restored entity writes ends the repair
+    too (`TargetController._handle_state_change`), so the timer works as soon as it
+    reports; the reload follows. A target that never had a registry entry gets one,
+    when its integration gives the entity a unique id, and is reloaded the same way,
+    once.
+    """
+
+    @callback
+    def reload_when_registered(event: Event[EventEntityRegistryUpdatedData]) -> None:
+        if event.data["action"] == "create":
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(
+        async_track_entity_registry_updated_event(
+            hass, entry.runtime_data.target_entity_id, reload_when_registered
+        )
     )
 
 
@@ -138,7 +170,9 @@ def _follow_target_gaining_a_device(
 
     A rename, which carries the old entity id, is left to the reload that updating the
     `target` option brings: scheduled reloads do not merge, each one runs. A target that
-    is on a device needs nothing, as the helper reloads for a move.
+    is on a device needs nothing, as the helper reloads for a move. The registration of
+    a target is left to `_follow_target_restored`, which reloads for every one, so only
+    a change of the registry entry is followed here.
     """
     target = entry.runtime_data.target_entity_id
     if async_entity_id_to_device_id(hass, target) is not None:
@@ -149,7 +183,7 @@ def _follow_target_gaining_a_device(
         event: Event[EventEntityRegistryUpdatedData],
     ) -> None:
         data = event.data
-        if data["action"] == "remove" or "old_entity_id" in data:
+        if data["action"] != "update" or "old_entity_id" in data:
             return
         registered = er.async_get(hass).async_get(data["entity_id"])
         if registered is not None and registered.device_id is not None:

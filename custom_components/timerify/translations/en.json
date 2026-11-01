@@ -496,6 +496,22 @@
       "message": "A schedule interval of this timer runs on working days or non-working days, but the timer has no Workday sensor. Set the sensor in the timer's settings, or change those intervals to weekdays."
     }
   },
+  "issues": {
+    "target_deleted": {
+      "title": "The device of timer {timer} was deleted",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Delete the timer {timer}",
+            "description": "The entity {target} that the timer {timer} switches no longer exists in Home Assistant. Until it is back, the timer switches nothing. Its countdown and pending commands are kept. If you add the device again with the same entity ID, the timer works again by itself and this message goes away. Submit to delete the timer, with its entities, schedule intervals and pending commands."
+          }
+        },
+        "abort": {
+          "timer_gone": "This timer was already deleted."
+        }
+      }
+    }
+  },
   "common": {
     "card_entity_not_found": "Entity not found: {entity}",
     "card_not_a_timer": "{entity} is not the Run for number of a Timerify timer",

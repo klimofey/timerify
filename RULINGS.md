@@ -45,7 +45,8 @@ not repeated beside its successor.
   Such thermostats wait for a later "turn on with a default mode" option.
 - **A target missing at setup fails the entry** with `ConfigEntryError`
   (`target_not_found`), so Home Assistant shows the entry as failed and retries on reload.
-  A target deleted later is not noticed yet (issue #10).
+  A target deleted later raises a repair: see "A timer whose target was deleted stays loaded
+  and switches nothing, with a repair that deletes it" under Release 1.1.0.
 
 ### The timer
 
@@ -357,9 +358,9 @@ not repeated beside its successor.
 
 ### Deferred
 
-- **A deleted target still gives no sign.** The spec is silent and it changes no
-  spec-defined behaviour, so it is left to issue #10. Cost if wrong: timers of deleted
-  targets stay silent until it is done.
+- **A deleted target still gives no sign.** Changed in 1.1.0: see "A timer whose target was
+  deleted stays loaded and switches nothing, with a repair that deletes it" under Release
+  1.1.0.
 
 ## Phase 3: schedules
 
@@ -1637,11 +1638,11 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   Why: the one wording for all of these, "is not the Run for number of a Timerify timer", was
   false for a number that is a timer's. A target stored as an entity id, which every flow
   writes, resolves whether or not the entity exists, so a timer whose target was deleted still
-  answers `found` and drives nothing, until #10. Right after a timer is added the line can show
-  for a moment, because the platforms are set up together, the number first; it clears on the
-  next registry change, when the card asks again. Cost if wrong: that moment on a card that
-  points at a brand-new timer, and no word on the card for a deleted target stored as an
-  entity id.
+  answers `found` and drives nothing (1.1.0 adds a repair for it). Right after a timer is
+  added the line can show for a moment, because the platforms are set up together, the number
+  first; it clears on the next registry change, when the card asks again. Cost if wrong: that
+  moment on a card that points at a brand-new timer, and no word on the card for a deleted
+  target stored as an entity id.
 - **`timerify/timer` sends `percent_settings`, the settings the card writes with a percent
   sign, and the card keeps no list of its own.** The keys are those of the target's domain row
   with `voice == "percent"`, taken from the row as `target_on` is and not from what this entity
@@ -1930,3 +1931,54 @@ in `docs/followups.md`.
   `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
   `test_setting_that_comes_back_and_goes_again_is_said_again`,
   `test_a_climate_without_capabilities_keeps_the_settings_of_its_window`.
+- **A timer whose target was deleted stays loaded and switches nothing, with a repair that
+  deletes it.** The repair is "The device of timer X was deleted" (`target_deleted_<entry>`,
+  severity error, fixable). Its fix has one step, which shows what is deleted; submitting it
+  removes the config entry, and so the entities, the intervals and the stored files. A timer
+  that was already deleted on its integration page, with the repair still open, aborts with
+  `timer_gone`. The decisions:
+  - The timer keeps its entities and accepts commands, as for an unavailable target (R10).
+    Nothing needs gating. A deleted target has no state, so the core takes it for a target
+    that is away: a command, the end of a countdown and the start of a window are carried in
+    the core and sent when the target is back. Before start-up the target is unseen and the
+    gate of the ruling on start-up holds. The log says it (a warning when the target is
+    deleted, an info line when it is back), and so does the repair.
+  - It is checked at start-up (`_handle_started`), not at the top of set-up. A target that is
+    not in the registry has no state until its integration has set up, and an entity of YAML
+    without a unique id is never in the registry. The target is there when it has a registry
+    entry or a state (`_target_exists`). It is deleted live when the registry removes it
+    (`source_entity_removed` of `async_handle_source_entity_changes`). An entity of YAML
+    that loses its state while Home Assistant runs has no registry event to tell it: it is
+    an unavailable target until the next start, which finds it gone.
+  - A state ends it: the report of a target that exists, judged by what exists when the
+    report is read and not by the report alone, since a report may have waited for the lock
+    while the target was deleted. A registry entry created for the target ends it too, by
+    reloading the timer (`_follow_target_restored`), which also puts its entities back on
+    the target's device. Only the same entity id counts. A device added again under another
+    entity id leaves the repair standing: the user deletes the timer and adds it again.
+  - The issue lives with the loaded timer: it is cleared at unload and raised again at
+    set-up, so a reload never leaves a stale one and a restart finds it again. It is not
+    persistent. Removing the entry clears it as well. `_follow_target_gaining_a_device` now
+    follows registry updates only, as a created entry is the restored handler's, and two
+    handlers would reload the timer twice.
+  - The timer's entities stay where they are when the entity is deleted: the controller is
+    told, and the helper's default of unlinking them is not wanted. Home Assistant unlinks
+    them if the device itself is removed, as it does for the entities of any other
+    integration on it. At the next start, the entities of a timer whose target has no
+    registry entry are put on the device made for it, as for any target that is on none
+    (`timer_device`); the reload that a created entry brings moves them back
+    (`remove_fallback_device`). The test of 1.0.0 that expected the entities to be unlinked
+    when only the entity is deleted is changed to match.
+  - A registry entry created for a target that never had one, say a template entity that is
+    given a unique id later, also reloads the timer once. `_follow_target_restored` does not
+    tell the two apart.
+  Why: #10. Before this the timer loaded, kept its entities and drove nothing, and nothing
+  told the user. The repair names the timer and says what it does meanwhile; the user can
+  restore the device or delete the timer from the same place.
+  Cost if wrong: a user who never opens Repairs sees a timer counting down on nothing, and a
+  command given to it waits for a device that may never be back. A device re-added under a
+  new entity id keeps the repair until the user deletes the timer.
+  Tests: `test_deleting_the_target_raises_a_repair_that_names_the_timer`,
+  `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`,
+  `test_a_report_queued_before_the_deletion_does_not_end_the_repair`,
+  `test_deleting_the_timer_on_the_integration_page_clears_the_repair`.

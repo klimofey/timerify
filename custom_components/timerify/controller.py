@@ -74,6 +74,7 @@ from .core import (
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
+from .issues import TARGET_DELETED, async_clear, async_raise_target_deleted
 from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
@@ -248,6 +249,9 @@ class TargetController:
         call."""
         self._lock = asyncio.Lock()
         self._stopped = False
+        self._target_deleted = False
+        """Whether the target is deleted, so that a repair says the timer switches
+        nothing (`_set_target_deleted`)."""
         self._started = False
         """Whether start-up has taken stock of the target (`_handle_started`). Until it
         has, nothing is sent to the target and no report of the target is answered,
@@ -283,14 +287,31 @@ class TargetController:
         return self._core.wanted_running(now)
 
     async def async_start(self) -> None:
-        """Follow the target; once Home Assistant is running, take stock of it."""
+        """Follow the target; once Home Assistant is running, take stock of it.
+
+        The repair of a deleted target lives with the loaded timer: it goes when the
+        timer is unloaded, and start-up raises it again if the target is still gone.
+        """
         self._entry.async_on_unload(self._stop)
+        self._entry.async_on_unload(
+            lambda: async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
+        )
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, self.target_entity_id, self._handle_state_change
             )
         )
         self._entry.async_on_unload(async_at_started(self._hass, self._handle_started))
+
+    async def async_target_removed(self) -> None:
+        """The target left the entity registry: the user deleted it, or its device.
+
+        The timer stays loaded and keeps its countdown and its commands. It switches
+        nothing until the target is back (`_set_target_deleted`), which its repair
+        says. The state of the target goes with the entity, and the core takes that for
+        a target that is away.
+        """
+        self._set_target_deleted(True)
 
     async def async_set_minutes(self, minutes: int) -> None:
         """Count down `minutes` from now; zero stops the timer.
@@ -831,6 +852,7 @@ class TargetController:
             effects = self._set_windows(now, windows, unknown)
             self._schedule_refresh()
             before = self.snapshot
+            self._set_target_deleted(not self._target_exists())
             state = self._hass.states.get(self.target_entity_id)
             effects += self._core.observe(now, actual_state(state), by_us=False)
             self._started = True  # reports are answered from here
@@ -857,6 +879,10 @@ class TargetController:
         async with self._lock:
             if self._stopped or not self._started:
                 return  # `_handle_started` reads the state itself
+            if event.data["new_state"] is not None and self._target_exists():
+                # What exists now counts, not only the event: a report that waited for
+                # the lock may be one the target made before it was deleted.
+                self._set_target_deleted(False)
             before = self.snapshot
             now = dt_util.utcnow()
             effects = self._core.observe(
@@ -865,6 +891,42 @@ class TargetController:
                 by_us=event.context.id in self._own_contexts,
             )
             await self._execute_fold(before, now, effects)
+
+    def _target_exists(self) -> bool:
+        """Whether the target is there: it has a registry entry or a state. Either is
+        enough. A registered entity has no state until its integration has set up, and
+        an entity of YAML without a unique id has no registry entry."""
+        return (
+            er.async_get(self._hass).async_get(self.target_entity_id) is not None
+            or self._hass.states.get(self.target_entity_id) is not None
+        )
+
+    def _set_target_deleted(self, deleted: bool) -> None:
+        """Note that the target is deleted, or back, and say so; it acts only on a
+        change.
+
+        A deleted target is an unavailable one for the core, which sends it nothing and
+        keeps what it owes it (R10), so the timer needs no other change. The user is
+        told by a repair, which deletes the timer, and by the log. When the target is
+        back the repair goes away by itself.
+        """
+        if deleted == self._target_deleted:
+            return
+        self._target_deleted = deleted
+        title = self._entry.title
+        if deleted:
+            async_raise_target_deleted(self._hass, self._entry, self.target_entity_id)
+            _LOGGER.warning(
+                "The entity %s of the timer %s was deleted;"
+                " the timer switches nothing until it is back",
+                self.target_entity_id,
+                title,
+            )
+        else:
+            async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
+            _LOGGER.info(
+                "The entity %s of the timer %s is back", self.target_entity_id, title
+            )
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:

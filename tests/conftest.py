@@ -150,6 +150,16 @@ class FakeTarget:
     hass: HomeAssistant
     device_id: str | None
     """The device the entity is on; None when it belongs to no device."""
+    platform: str
+    """The integration that provides the entity."""
+    unique_id: str
+    """The unique id the integration gives the entity, which it gives again when it
+    restores the entity."""
+    provider: MockConfigEntry | None
+    """The integration's config entry; None for an entity that is not in the registry,
+    as an entity of YAML without a unique id is."""
+    name: str
+    """The name of the entity, and of its device."""
     entity_id: str = TARGET_ID
     capability_attributes: dict[str, Any] = field(default_factory=dict)
     """What Home Assistant keeps on every state of the entity, also while it is
@@ -199,6 +209,51 @@ class FakeTarget:
     async def set_state(self, value: str, **attributes: str | int) -> None:
         """Change the state from outside, as a wall switch or a vendor app would."""
         self.write(value, **attributes)
+        await self.hass.async_block_till_done()
+
+    async def delete(self) -> None:
+        """Delete the entity, as the user does in its settings: the registry entry goes,
+        and the integration takes the state away. Everything that follows settles."""
+        er.async_get(self.hass).async_remove(self.entity_id)
+        self.hass.states.async_remove(self.entity_id)
+        await self.hass.async_block_till_done()
+
+    async def delete_device(self) -> None:
+        """Delete the device the entity is on, as the user does on its page: the
+        registry removes the entity with it, and the integration takes the state away.
+        Everything that follows settles."""
+        assert self.device_id is not None, "the entity is on no device"
+        dr.async_get(self.hass).async_remove_device(self.device_id)
+        self.hass.states.async_remove(self.entity_id)
+        await self.hass.async_block_till_done()
+
+    async def restore(self, state: str = "off") -> None:
+        """Bring the entity back, as its integration does when the user adds the device
+        again: the device, if it is gone, with the same identifiers, then the entity
+        under the same platform and unique id, which gets its registry id and entity id
+        back, then its `state`. Everything that follows settles.
+
+        The entity id is free again only once the state is gone, which `delete` and
+        `delete_device` see to.
+        """
+        if self.provider is not None:
+            if self.device_id is not None:
+                dr.async_get(self.hass).async_get_or_create(
+                    config_entry_id=self.provider.entry_id,
+                    identifiers={(self.platform, self.unique_id)},
+                    name=self.name,
+                )
+            domain, object_id = split_entity_id(self.entity_id)
+            er.async_get(self.hass).async_get_or_create(
+                domain,
+                self.platform,
+                self.unique_id,
+                config_entry=self.provider,
+                device_id=self.device_id,
+                original_name=self.name,
+                suggested_object_id=object_id,
+            )
+        self.write(state)
         await self.hass.async_block_till_done()
 
     def fail_next_call(
@@ -604,38 +659,50 @@ def provide_fake(
     *,
     name: str,
     on_device: bool = True,
+    registered: bool = True,
     capability_attributes: dict[str, Any] | None = None,
     state_attributes: dict[str, Any] | None = None,
 ) -> FakeTarget:
     """Make an entity the way another integration provides it, switched off: a registry
     entry (on a device called `name` unless `on_device` is false), a state, and the
-    services of `obeys`, which `services` hands the calls for the entity to."""
+    services of `obeys`, which `services` hands the calls for the entity to.
+
+    An entity that is not `registered` has a state and services and no registry entry,
+    nor a device, as an entity of YAML without a unique id has.
+    """
     domain, object_id = split_entity_id(entity_id)
-    provider = MockConfigEntry(domain=f"{object_id}_maker")
-    provider.add_to_hass(hass)
+    platform = f"{object_id}_maker"
+    provider = None
     device_id = None
-    if on_device:
-        device_id = (
-            dr.async_get(hass)
-            .async_get_or_create(
-                config_entry_id=provider.entry_id,
-                identifiers={(provider.domain, object_id)},
-                name=name,
+    if registered:
+        provider = MockConfigEntry(domain=platform)
+        provider.add_to_hass(hass)
+        if on_device:
+            device_id = (
+                dr.async_get(hass)
+                .async_get_or_create(
+                    config_entry_id=provider.entry_id,
+                    identifiers={(platform, object_id)},
+                    name=name,
+                )
+                .id
             )
-            .id
+        er.async_get(hass).async_get_or_create(
+            domain,
+            platform,
+            object_id,
+            config_entry=provider,
+            device_id=device_id,
+            original_name=name,
+            suggested_object_id=object_id,
         )
-    er.async_get(hass).async_get_or_create(
-        domain,
-        provider.domain,
-        object_id,
-        config_entry=provider,
-        device_id=device_id,
-        original_name=name,
-        suggested_object_id=object_id,
-    )
     target = FakeTarget(
         hass,
         device_id,
+        platform,
+        object_id,
+        provider,
+        name,
         entity_id,
         capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
         state_attributes=state_attributes or {},
@@ -650,7 +717,8 @@ async def provide_target(
     hass: HomeAssistant, clock_at_start: None
 ) -> AsyncIterator[ProvideTarget]:
     """Make an entity the way another integration provides it, switched off, at
-    `START`: `provide(entity_id, services, name=..., ...)`.
+    `START`: `provide(entity_id, services, name=..., ...)`, with `registered=False` for
+    an entity that has a state and no registry entry.
 
     The fakes of a test share the services of their domains, and each takes only the
     calls for its own entity. A call for any other entity fails, but Timerify catches
@@ -667,6 +735,7 @@ async def provide_target(
         *,
         name: str,
         on_device: bool = True,
+        registered: bool = True,
         capability_attributes: dict[str, Any] | None = None,
         state_attributes: dict[str, Any] | None = None,
     ) -> FakeTarget:
@@ -677,6 +746,7 @@ async def provide_target(
             services,
             name=name,
             on_device=on_device,
+            registered=registered,
             capability_attributes=capability_attributes,
             state_attributes=state_attributes,
         )

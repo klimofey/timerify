@@ -2180,17 +2180,28 @@ in `docs/followups.md`.
   order of the form (the row of the domain), whatever order they are stored in.
   There is one warning per interval, naming all its settings by the labels of the form in
   the language of the house. Its title carries the interval, so that two warnings of a
-  timer differ in the Repairs list. It is a Repairs issue with severity warning, not
-  fixable and with no data, so it has no fix flow (spec). It is raised again only when
-  the names change, and it is judged after each report of the target and after the
-  start-up fold, so that reading the texts never delays what the timer owes the target.
-  An interval deleted but not yet reloaded gets no warning. Deleting the interval drops a
-  setting the form no longer shows.
-  While the target is deleted there is none, whose repair speaks for it. While it is
-  unavailable or unknown, the warnings stay as they are: none is raised and none is
-  cleared. An integration may drop its modes and features with the connection, which
-  would make every setting "not taken" for the length of an outage, and nothing is sent
-  then. They are judged again when the target reports a real state.
+  timer differ in the Repairs list, and both are quoted in the texts, because a generated
+  title has a comma in it. It is a Repairs issue with severity warning and not fixable,
+  so it has no fix flow (spec). Its data holds the names it was raised with. It is
+  changed only when the names or the interval change, and it is judged after each report
+  of the target and after the start-up fold, so that reading the texts never delays what
+  the timer owes the target. An interval deleted but not yet reloaded gets no warning.
+  Deleting the interval drops a setting the form no longer shows.
+  While the target is deleted there is none, whose repair speaks for it.
+  While the target is unavailable or unknown, what the device does not take stays as it
+  was. An integration may drop its modes and features with the connection, which would
+  make every setting "not taken" for the length of an outage, and nothing is sent then.
+  The warning still follows the interval itself, which the user edits meanwhile: it is
+  raised again with the title the interval has now, and names only the settings the
+  interval still holds (one dropped from the interval leaves it, and an interval with
+  none left loses it). The target is judged again when it reports a real state. A
+  warning that Home Assistant loaded from its file after a restart keeps no data, so its
+  names are not known: it is left alone until the target reports.
+  A warning is updated in place, which keeps the Ignore of the user, when its names are
+  the same or fewer. When the interval gains a name that the warning does not list, the
+  warning is deleted and raised again, so that an Ignore of the earlier settings does not
+  hide the new one. The names of an earlier load come from the data of its issue; when
+  they are not known, the warning is updated in place.
   The warning outlives the unload, unlike the repair of a deleted target. That repair is
   cleared on unload and raised again at start-up: it asks the user to delete the timer,
   and an Ignore of it has nothing to keep. The user may knowingly accept this warning
@@ -2202,9 +2213,13 @@ in `docs/followups.md`.
   its interval gone (`_reconcile_settings_warnings`, by the id prefix in the issue
   registry), when the entry is removed (`async_remove_entry`), and when the entry is
   disabled, since it is not loaded again. The load remembers the warnings of the earlier
-  one with no names, so that its first judgement of a real state raises them again or
-  takes them away. A warning that went away and comes back is new, not ignored.
-  A timer that does not load (a setup error) keeps its warnings until it does.
+  one, so that its first judgement raises them again, with the title the interval has
+  now, or takes them away. A warning that went away and comes back is new, not ignored.
+  A timer that fails to set up (an unreadable stored file, a Workday sensor missing, or
+  any other raise) takes its warnings away at once (`async_setup_entry`): it turns
+  nothing on, and a disabled timer in that state would keep them, because Home Assistant
+  runs no unload callback for it. If it loads again later, the first judgement raises
+  them again and an earlier Ignore is lost.
   Why: #16. An edit dropped the settings the form did not offer, silently, and the window
   left them out with only a line in the log.
   Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
@@ -2238,4 +2253,14 @@ in `docs/followups.md`.
   `test_a_warning_that_went_away_comes_back_unignored`,
   `test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up`,
   `test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up`,
+  `test_a_timer_that_cannot_read_its_file_has_no_settings_warning`,
+  `test_a_timer_that_cannot_set_up_has_no_settings_warning`,
+  `test_an_ignored_warning_returns_when_another_setting_is_lost`,
+  `test_an_ignored_warning_stays_ignored_when_a_setting_comes_back`,
+  `test_a_setting_lost_while_down_returns_an_ignored_warning`,
+  `test_renaming_an_interval_keeps_the_ignore_of_its_warning`,
+  `test_an_ignored_warning_survives_a_restart_with_the_ac_offline`,
+  `test_an_interval_renamed_while_the_ac_is_offline_renames_its_warning`,
+  `test_a_setting_dropped_from_an_interval_leaves_its_warning_while_offline`,
+  `test_an_interval_left_with_no_setting_loses_its_warning_while_offline`,
   `test_disabling_the_timer_takes_its_warnings_away`.

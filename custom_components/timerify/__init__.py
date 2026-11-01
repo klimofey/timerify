@@ -106,6 +106,18 @@ async def async_setup_entry(
     have no target and no entities."""
     if is_voice_entry(entry):
         return await async_setup_voice_entry(hass, entry)
+    try:
+        return await _async_setup_timer(hass, entry)
+    except Exception:
+        # A timer that does not load turns nothing on, so it has nothing to warn about.
+        # The warnings outlive an unload (see `TargetController.async_start`); a timer
+        # that loads again raises them again.
+        async_clear_settings_warnings(hass, entry.entry_id)
+        raise
+
+
+async def _async_setup_timer(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:
+    """Set up the timer of one target and its entities."""
     store = TimerStore(hass, entry.entry_id)
     try:
         snapshot = await store.async_load()

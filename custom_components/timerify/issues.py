@@ -16,7 +16,8 @@ STORED_TIMER_INVALID: Final = "stored_timer_invalid"
 
 SETTINGS_NOT_TAKEN: Final = "settings_not_taken"
 """The kind of the warning of a schedule interval whose settings the target does not
-take. It has no fix: it is not fixable, and carries no data."""
+take. It has no fix: it is not fixable, and its data only remembers the names of the
+settings it was raised with (`async_warned_settings`)."""
 
 type TimerIssueKind = Literal["target_deleted", "stored_timer_invalid"]
 """The kinds of issue that a timer has at most one of, and that the user can fix. The
@@ -33,6 +34,11 @@ def issue_id(kind: TimerIssueKind, entry_id: str) -> str:
     return f"{kind}_{entry_id}"
 
 
+_NAMES: Final = "names"
+_NAME_SEPARATOR: Final = ","
+"""The key and the separator of the names of the settings in the data of a warning."""
+
+
 def _interval_issue_prefix(entry_id: str) -> str:
     return f"{SETTINGS_NOT_TAKEN}_{entry_id}_"
 
@@ -41,6 +47,16 @@ def interval_issue_id(entry_id: str, subentry_id: str) -> str:
     """The id of the warning of the interval `subentry_id` of the timer `entry_id`: one
     interval has at most one."""
     return f"{_interval_issue_prefix(entry_id)}{subentry_id}"
+
+
+type IssueData = dict[str, str | int | float | None]
+"""What Home Assistant keeps with an issue, for the code that handles it."""
+
+
+def _fix_data(entry: ConfigEntry, kind: TimerIssueKind) -> IssueData:
+    """The data of a fixable issue, which `repairs.async_create_fix_flow` picks its fix
+    by."""
+    return {"entry_id": entry.entry_id, "kind": kind}
 
 
 @callback
@@ -52,16 +68,17 @@ def _async_raise(
     *,
     fixable: bool,
     severity: ir.IssueSeverity,
+    data: IssueData | None,
     **placeholders: str,
 ) -> None:
-    """Raise the issue `identifier` of `kind` for the timer `entry`. A fixable issue
-    carries the data that `repairs.async_create_fix_flow` picks its fix by. It is not
-    persistent: the timer raises it again when it is set up, if it still stands."""
+    """Raise the issue `identifier` of `kind` for the timer `entry`. It is not
+    persistent: the timer raises it again when it is set up, if it still stands. An
+    issue that exists is updated in place and keeps the Ignore of the user."""
     ir.async_create_issue(
         hass,
         DOMAIN,
         identifier,
-        data={"entry_id": entry.entry_id, "kind": kind} if fixable else None,
+        data=data,
         is_fixable=fixable,
         is_persistent=False,
         severity=severity,
@@ -83,6 +100,7 @@ def async_raise_target_deleted(
         issue_id(TARGET_DELETED, entry.entry_id),
         fixable=True,
         severity=ir.IssueSeverity.ERROR,
+        data=_fix_data(entry, TARGET_DELETED),
         target=target,
     )
 
@@ -100,18 +118,24 @@ def async_raise_stored_timer_invalid(
         issue_id(STORED_TIMER_INVALID, entry.entry_id),
         fixable=True,
         severity=ir.IssueSeverity.ERROR,
+        data=_fix_data(entry, STORED_TIMER_INVALID),
         reason=reason,
     )
 
 
 @callback
 def async_raise_settings_not_taken(
-    hass: HomeAssistant, entry: ConfigEntry, subentry: ConfigSubentry, settings: str
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    subentry: ConfigSubentry,
+    names: tuple[str, ...],
+    settings: str,
 ) -> None:
-    """Warn the user that the target of the timer `entry` does not take `settings`,
-    the labels of the settings of the interval `subentry` that it turns the target on
-    with. The warning has no fix: the target taking them again, or the user choosing
-    others, makes it go."""
+    """Warn the user that the target of the timer `entry` does not take the settings
+    `names` of the interval `subentry`, which `settings` calls by their labels. The
+    warning has no fix: the target taking them again, or the user choosing others,
+    makes it go. The names are kept with it, so that a load of the timer that finds it
+    can tell whether the settings grew."""
     _async_raise(
         hass,
         entry,
@@ -119,6 +143,7 @@ def async_raise_settings_not_taken(
         interval_issue_id(entry.entry_id, subentry.subentry_id),
         fixable=False,
         severity=ir.IssueSeverity.WARNING,
+        data={_NAMES: _NAME_SEPARATOR.join(names)},
         interval=subentry.title,
         settings=settings,
     )
@@ -139,14 +164,24 @@ def async_clear_settings_not_taken(
     ir.async_delete_issue(hass, DOMAIN, interval_issue_id(entry_id, subentry_id))
 
 
+def _names_of(issue: ir.IssueEntry) -> tuple[str, ...] | None:
+    """The names of the settings a warning was raised with; None when it keeps none."""
+    names = issue.data.get(_NAMES) if issue.data else None
+    return tuple(names.split(_NAME_SEPARATOR)) if isinstance(names, str) else None
+
+
 @callback
-def async_warned_intervals(hass: HomeAssistant, entry_id: str) -> set[str]:
-    """The ids of the intervals of the timer `entry_id` that have a warning in the
-    issue registry, also one that an earlier load of the timer raised."""
+def async_warned_settings(
+    hass: HomeAssistant, entry_id: str
+) -> dict[str, tuple[str, ...] | None]:
+    """The warnings in the issue registry for the intervals of the timer `entry_id`,
+    also those that an earlier load of the timer raised: the names of the settings of
+    each, by the id of its interval. The names are None for a warning that Home
+    Assistant loaded from its file after a restart, which keeps no data."""
     prefix = _interval_issue_prefix(entry_id)
     return {
-        found.removeprefix(prefix)
-        for domain, found in ir.async_get(hass).issues
+        issue.issue_id.removeprefix(prefix): _names_of(issue)
+        for (domain, found), issue in ir.async_get(hass).issues.items()
         if domain == DOMAIN and found.startswith(prefix)
     }
 
@@ -154,5 +189,5 @@ def async_warned_intervals(hass: HomeAssistant, entry_id: str) -> set[str]:
 @callback
 def async_clear_settings_warnings(hass: HomeAssistant, entry_id: str) -> None:
     """Take every warning of the intervals of the timer `entry_id` away."""
-    for subentry_id in async_warned_intervals(hass, entry_id):
+    for subentry_id in async_warned_settings(hass, entry_id):
         async_clear_settings_not_taken(hass, entry_id, subentry_id)

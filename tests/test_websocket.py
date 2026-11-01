@@ -151,6 +151,7 @@ def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
         "next_command": NEXT,
         "intervals": [],
         "target_on": {"match": "is", "states": ["on"]},
+        "percent_settings": [],
         "disabled_sensors": [],
         **different,
     }
@@ -181,6 +182,7 @@ async def test_card_finds_the_timer_of_its_number(
         "next_command": "sensor.boiler_next_command",
         "intervals": [],
         "target_on": {"match": "is", "states": ["on"]},
+        "percent_settings": [],
         "disabled_sensors": [],
     }
 
@@ -271,6 +273,39 @@ async def test_media_player_target_says_that_standby_is_off(
         ends_at="sensor.tv_ends_at",
         next_command="sensor.tv_next_command",
         target_on={"match": "is_not", "states": ["off", "standby"]},
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "percent_settings"),
+    [
+        ("light.lamp", ["brightness_pct"]),
+        ("fan.vent", ["percentage"]),
+        ("humidifier.room", ["humidity"]),
+    ],
+)
+async def test_target_says_which_of_its_settings_are_percentages(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+    target: str,
+    percent_settings: list[str],
+) -> None:
+    """The card writes a brightness, a fan's speed and a humidity with a percent sign,
+    and a temperature without: Timerify names the settings of the target that are
+    percentages, so that the card keeps no list of its own."""
+    object_id = target.split(".")[1]
+    provide_target(target, SWITCH_SERVICES, name=object_id.capitalize())
+    entry = await setup_target(target=target)
+
+    assert await found(client, f"number.{object_id}_run_for") == told_about(
+        entry,
+        target=target,
+        ends_at=f"sensor.{object_id}_ends_at",
+        next_command=f"sensor.{object_id}_next_command",
+        target_on={"match": "is", "states": ["on"]},
+        percent_settings=percent_settings,
     )
 
 

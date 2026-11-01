@@ -83,6 +83,11 @@ export interface TimerInfo {
   intervals: IntervalInfo[];
   target_on: OnRule;
   /**
+   * The settings of the target that are a share of something, from 0 to 100, which the card
+   * writes with a percent sign. Empty for a switch or a thermostat.
+   */
+  percent_settings: string[];
+  /**
    * The ids of the two sensors that are disabled in the registry. A disabled entity has no
    * state, which looks like one that has not started yet, so only this tells them apart.
    */

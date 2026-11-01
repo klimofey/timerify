@@ -314,6 +314,14 @@ class DomainBehaviour:
         """The names of the settings the entities can be turned on with."""
         return frozenset(setting.name for setting in self.settings)
 
+    @property
+    def percent_setting_names(self) -> frozenset[str]:
+        """The names of the settings that are a share of something, from 0 to 100: the
+        ones a person gives in percent (see `VoiceMeaning`)."""
+        return frozenset(
+            setting.name for setting in self.settings if setting.voice == "percent"
+        )
+
     def turn_on_calls(self, settings: Settings) -> tuple[TargetCall, ...]:
         """The calls that turn the entity on with `settings`, in order.
 

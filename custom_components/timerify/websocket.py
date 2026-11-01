@@ -99,6 +99,10 @@ class TimerInfo(TypedDict):
     """The intervals in the order they were added; one with no switch in the registry
     is left out."""
     target_on: OnRuleInfo
+    percent_settings: list[str]
+    """The settings of the target's domain that are a share of something, from 0 to
+    100, which the card writes with a percent sign, whether or not this entity takes
+    them; none for a switch or a thermostat."""
     disabled_sensors: list[str]
     """The entity ids of the two sensors that are disabled in the registry; none when
     both are enabled. A disabled sensor has no state, so the card cannot tell it from
@@ -188,7 +192,8 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
     ends_at = _sensor(registry, entry, entity_id, KEY_ENDS_AT)
     next_command = _sensor(registry, entry, entity_id, KEY_NEXT_COMMAND)
     mode: Mode = entry.options[CONF_MODE]
-    on_rule = behaviour_for(target).on_rule
+    behaviour = behaviour_for(target)
+    on_rule = behaviour.on_rule
     return TimerInfo(
         entry_id=entry.entry_id,
         target=target,
@@ -200,6 +205,7 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
         next_command=next_command.entity_id,
         intervals=_intervals(registry, entry),
         target_on=OnRuleInfo(match=on_rule.match, states=sorted(on_rule.states)),
+        percent_settings=sorted(behaviour.percent_setting_names),
         disabled_sensors=[
             sensor.entity_id for sensor in (ends_at, next_command) if sensor.disabled
         ],

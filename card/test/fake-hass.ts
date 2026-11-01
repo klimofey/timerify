@@ -123,6 +123,7 @@ export function boilerTimer(overrides: Partial<TimerInfo> = {}): FakeTimer {
     next_command: NEXT_COMMAND,
     intervals: [],
     target_on: { match: "is", states: ["on"] },
+    percent_settings: [],
     disabled_sensors: [],
     ...overrides,
   };
@@ -143,6 +144,7 @@ export function acTimer(): FakeTimer {
     next_command: AC_NEXT_COMMAND,
     intervals: [],
     target_on: { match: "is_not", states: ["off"] },
+    percent_settings: [],
     disabled_sensors: [],
   };
   return timerOf(AC_NUMBER, "AC", info, {

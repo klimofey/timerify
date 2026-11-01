@@ -10,7 +10,6 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
@@ -53,6 +52,7 @@ from .const import (
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
+    Settings,
     SettingValue,
     default_duration_minutes,
     freeze_settings,
@@ -74,6 +74,7 @@ from .core import (
     remaining_minutes,
 )
 from .domains import TargetCall, actual_state, behaviour_for, validate_settings
+from .issues import TARGET_DELETED, async_clear, async_raise_target_deleted
 from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
@@ -195,7 +196,9 @@ class TargetController:
     `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
     `async_cancel_commands`, `async_set_interval_enabled`,
     `async_set_schedule_enabled`) waits for its turn and raises HomeAssistantError
-    (`timer_unloaded`) if the timer was unloaded meanwhile.
+    (`timer_unloaded`) if the timer was unloaded meanwhile. While Home Assistant is
+    still starting, a command first folds what fell due before it, without the target
+    (`_async_catch_up_while_starting_locked`).
     """
 
     def __init__(
@@ -240,12 +243,21 @@ class TargetController:
         self._workday_unanswered = False
         """Whether the last question to the Workday sensor went unanswered, so that an
         outage is logged once, not at every question."""
-        self._left_out: dict[str, frozenset[str]] = {}
-        """For each interval, the names of the settings that the target could not take
-        when its window was last worked out, so that they are said once, not at every
-        refresh."""
+        self._left_out = set[tuple[str, SettingValue]]()
+        """The settings, as (name, value), that the target could not take when they were
+        last sent, so that each is said once for as long as it is left out, not at every
+        call."""
         self._lock = asyncio.Lock()
         self._stopped = False
+        self._target_deleted = False
+        """Whether the target is deleted, so that a repair says the timer switches
+        nothing (`_set_target_deleted`)."""
+        self._started = False
+        """Whether start-up has taken stock of the target (`_handle_started`). Until it
+        has, nothing is sent to the target and no report of the target is answered,
+        because the target has not been seen. A command given meanwhile still takes
+        effect at its own moment, after what fell due before it
+        (`_async_catch_up_while_starting_locked`), and its outcome is saved."""
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
@@ -275,14 +287,31 @@ class TargetController:
         return self._core.wanted_running(now)
 
     async def async_start(self) -> None:
-        """Follow the target; once Home Assistant is running, take stock of it."""
+        """Follow the target; once Home Assistant is running, take stock of it.
+
+        The repair of a deleted target lives with the loaded timer: it goes when the
+        timer is unloaded, and start-up raises it again if the target is still gone.
+        """
         self._entry.async_on_unload(self._stop)
+        self._entry.async_on_unload(
+            lambda: async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
+        )
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, self.target_entity_id, self._handle_state_change
             )
         )
         self._entry.async_on_unload(async_at_started(self._hass, self._handle_started))
+
+    async def async_target_removed(self) -> None:
+        """The target left the entity registry: the user deleted it, or its device.
+
+        The timer stays loaded and keeps its countdown and its commands. It switches
+        nothing until the target is back (`_set_target_deleted`), which its repair
+        says. The state of the target goes with the entity, and the core takes that for
+        a target that is away.
+        """
+        self._set_target_deleted(True)
 
     async def async_set_minutes(self, minutes: int) -> None:
         """Count down `minutes` from now; zero stops the timer.
@@ -470,10 +499,16 @@ class TargetController:
         Switching on is one change: the flag is recorded and shown with the window, once
         the window is known, which may mean waiting for the Workday sensor. A timer that
         is unloaded meanwhile changes nothing and says so. An interval that is on
-        already is left as it is: nothing is worked out and nobody is asked.
+        already is left as it is: nothing is worked out and nobody is asked for it.
+
+        While Home Assistant is still starting, the switch comes after the catch-up
+        (`_async_catch_up_while_starting_locked`), which works the windows out and
+        asks the Workday sensor as start-up would, whether or not the interval is on
+        already. The target is switched at start-up.
         """
         async with self._lock:
             self._raise_if_unloaded()
+            await self._async_catch_up_while_starting_locked()
             await self._async_set_interval_enabled_locked(interval_id, enabled)
 
     async def async_set_schedule_enabled(
@@ -522,6 +557,7 @@ class TargetController:
                 }
                 if not titles:
                     raise self._unknown_interval(interval, every_title.values())
+            await self._async_catch_up_while_starting_locked()
             for interval_id in titles:
                 self._raise_if_unloaded()
                 await self._async_set_interval_enabled_locked(interval_id, enabled)
@@ -572,11 +608,13 @@ class TargetController:
         self, interval_id: str, enabled: bool
     ) -> None:
         """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
-        the caller holds the lock and has seen that the timer is not unloaded."""
+        the caller holds the lock, has seen that the timer is not unloaded and, while
+        Home Assistant is still starting, has folded what fell due before the switch
+        (`_async_catch_up_while_starting_locked`)."""
         now = dt_util.utcnow()
+        if enabled and interval_id not in self.snapshot.disabled_intervals:
+            return
         if enabled:
-            if interval_id not in self.snapshot.disabled_intervals:
-                return
             effects = self._core.set_interval_enabled(now, interval_id, True)
             if not await self._async_refresh_windows_locked(effects):
                 raise _unloaded_error()
@@ -599,7 +637,9 @@ class TargetController:
         return remove
 
     async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
-        """Run `command` with the time now and carry out its effects.
+        """Run `command` with the time now and carry out its effects; while Home
+        Assistant is still starting, after what fell due before it
+        (`_async_catch_up_while_starting_locked`).
 
         Raises HomeAssistantError, having done nothing, if the timer was unloaded
         before its turn came: the call reached the timer, so returning as if the
@@ -607,7 +647,29 @@ class TargetController:
         """
         async with self._lock:
             self._raise_if_unloaded()
+            await self._async_catch_up_while_starting_locked()
             await self._execute(command(dt_util.utcnow()))
+
+    async def _async_catch_up_while_starting_locked(self) -> None:
+        """Before start-up has taken stock, bring the timer up to now as start-up
+        would, so that a command given now comes after what fell due before it, as it
+        would with Home Assistant running: the windows are worked out and merged, and
+        the stored end, the commands and the windows that fell due while Home Assistant
+        was down are folded in, in the order they fell due. After start-up has taken
+        stock this returns at once; after an earlier command while starting, the alarms
+        it armed have folded what came due since, and this finds little to fold.
+
+        The fold changes the timer only, and so do the alarms it arms: the target has
+        not been seen, so nothing is sent to it (`TimerCore` treats it as away), and
+        the target is switched at start-up, once. The caller holds the lock and has
+        seen that the timer is not unloaded. Raises HomeAssistantError
+        (`timer_unloaded`) if it was unloaded while the windows were worked out: the
+        command is not made.
+        """
+        if self._started:
+            return
+        await self._async_refresh_windows_locked()
+        self._raise_if_unloaded()
 
     def _raise_if_unloaded(self) -> None:
         """Raise HomeAssistantError (`timer_unloaded`) if the timer was unloaded: a call
@@ -640,10 +702,9 @@ class TargetController:
 
         windows: list[Window] = []
         unknown: set[str] = set()
-        for configured in self._intervals.values():
-            if configured.id in disabled:
+        for interval in self._intervals.values():
+            if interval.id in disabled:
                 continue
-            interval = self._with_settings_the_target_takes(configured)
             if interval.days == "weekdays":
                 window = weekday_window(interval, now, zone)
             elif unanswered:
@@ -659,42 +720,6 @@ class TargetController:
             if window is not None:
                 windows.append(window)
         return windows, frozenset(unknown)
-
-    def _with_settings_the_target_takes(self, interval: Interval) -> Interval:
-        """`interval` with only the settings the target can be turned on with now.
-
-        They were checked when the interval was saved, and what the target takes can
-        change after that: an update of its integration renames a mode, or the device
-        is replaced. A setting it no longer takes would fail its call, and the window
-        would turn nothing on. Each setting is judged alone, as the form offers them.
-        What is left out is said once, for as long as it is.
-        """
-        taken: dict[str, SettingValue] = {}
-        for name, value in interval.settings.items():
-            try:
-                validate_settings(self._hass, self.target_entity_id, {name: value})
-            except ServiceValidationError:
-                continue
-            taken[name] = value
-        left_out = frozenset(interval.settings) - frozenset(taken)
-        if left_out != self._left_out.get(interval.id, frozenset()):
-            if left_out:
-                self._left_out[interval.id] = left_out
-                # An interval deleted since the timer was loaded is named by its id:
-                # its title went with it, and the reload that follows lets it go.
-                subentry = self._entry.subentries.get(interval.id)
-                _LOGGER.warning(
-                    "The schedule interval %s of %s asks for settings that the target"
-                    " cannot take now (%s); it is turned on without them",
-                    interval.id if subentry is None else subentry.title,
-                    self.target_entity_id,
-                    ", ".join(sorted(left_out)),
-                )
-            else:
-                del self._left_out[interval.id]
-        return (
-            replace(interval, settings=freeze_settings(taken)) if left_out else interval
-        )
 
     async def _async_is_workday(self, day: date) -> bool:
         """Ask the Workday sensor whether `day` is a working day, as the sensor says it:
@@ -799,7 +824,10 @@ class TargetController:
         """Take stock of the target once, with Home Assistant fully started.
 
         The windows come first: the stored ones are merged with the ones worked out
-        now, so that the first observation folds both in one catch-up (§5.7).
+        now, so that the first observation folds both in one catch-up (§5.7). Until
+        then no report of the target was answered (`_started`), so the target is read
+        here, not from the reports it made on the way. A command given meanwhile has
+        already folded what fell due before it; this folds what fell due since.
         """
         async with self._lock:
             if self._stopped:
@@ -818,16 +846,17 @@ class TargetController:
                 return
             now = dt_util.utcnow()
             # Merging the windows arms the alarm for the next thing the timer waits for,
-            # which the observation does not do for a timer restored unchanged. Nothing
-            # is armed earlier: a stored end, command or window that has long passed
-            # would switch a target that has not been seen yet, and the first
-            # observation folds it in.
+            # which the observation does not do for a timer restored unchanged: a
+            # restored timer arms nothing at set-up. Only a command given meanwhile
+            # does, after it has worked the windows out and folded what was due.
             effects = self._set_windows(now, windows, unknown)
             self._schedule_refresh()
             before = self.snapshot
+            self._set_target_deleted(not self._target_exists())
             state = self._hass.states.get(self.target_entity_id)
             effects += self._core.observe(now, actual_state(state), by_us=False)
-            await self._execute_fold(before, effects)
+            self._started = True  # reports are answered from here
+            await self._execute_fold(before, now, effects)
 
     def _follow_workday_sensor(self) -> None:
         """Work the windows out again whenever the Workday sensor changes or reports.
@@ -848,15 +877,58 @@ class TargetController:
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
         async with self._lock:
-            if self._stopped:
-                return
+            if self._stopped or not self._started:
+                return  # `_handle_started` reads the state itself
+            # What exists now counts, not only the event: a report that waited for the
+            # lock may be one the target made before it was deleted. It is read as a
+            # target that is gone, so the core sends it nothing.
+            new_state = event.data["new_state"] if self._target_exists() else None
+            if new_state is not None:
+                self._set_target_deleted(False)
             before = self.snapshot
+            now = dt_util.utcnow()
             effects = self._core.observe(
-                dt_util.utcnow(),
-                actual_state(event.data["new_state"]),
+                now,
+                actual_state(new_state),
                 by_us=event.context.id in self._own_contexts,
             )
-            await self._execute_fold(before, effects)
+            await self._execute_fold(before, now, effects)
+
+    def _target_exists(self) -> bool:
+        """Whether the target is there: it has a registry entry or a state. Either is
+        enough. A registered entity has no state until its integration has set up, and
+        an entity of YAML without a unique id has no registry entry."""
+        return (
+            er.async_get(self._hass).async_get(self.target_entity_id) is not None
+            or self._hass.states.get(self.target_entity_id) is not None
+        )
+
+    def _set_target_deleted(self, deleted: bool) -> None:
+        """Note that the target is deleted, or back, and say so; it acts only on a
+        change.
+
+        A deleted target is an unavailable one for the core, which sends it nothing and
+        keeps what it owes it (R10), so the timer needs no other change. The user is
+        told by a repair, which deletes the timer, and by the log. When the target is
+        back the repair goes away by itself.
+        """
+        if deleted == self._target_deleted:
+            return
+        self._target_deleted = deleted
+        title = self._entry.title
+        if deleted:
+            async_raise_target_deleted(self._hass, self._entry, self.target_entity_id)
+            _LOGGER.warning(
+                "The entity %s of the timer %s was deleted;"
+                " the timer switches nothing until it is back",
+                self.target_entity_id,
+                title,
+            )
+        else:
+            async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
+            _LOGGER.info(
+                "The entity %s of the timer %s is back", self.target_entity_id, title
+            )
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
@@ -866,17 +938,21 @@ class TargetController:
 
     async def _fold_due(self, now: datetime, effects: list[Effect]) -> None:
         """Carry out `effects`, which the caller has just made the core produce, and
-        whatever falls due at `now` on top of them, and say what came due while the
-        target is unavailable. Every event that folds what is due goes through here:
-        the alarm, the refresh of the windows and the switching off of an interval."""
+        whatever falls due at `now` on top of them. Every event that folds what is due
+        by a tick goes through here: the alarm, the refresh of the windows (also the
+        catch-up of a change made while starting) and the switching off of an
+        interval."""
         before = self.snapshot
         effects = effects + self._core.tick(now)
-        self._log_due_while_unavailable(before, now, effects)
-        await self._execute_fold(before, effects)
+        await self._execute_fold(before, now, effects)
 
-    async def _execute_fold(self, before: Snapshot, effects: list[Effect]) -> None:
-        """Carry out the effects of a fold of what fell due, which `tick` and `observe`
-        make; the snapshot before it is `before`.
+    async def _execute_fold(
+        self, before: Snapshot, now: datetime, effects: list[Effect]
+    ) -> None:
+        """Carry out the effects of a fold of what fell due at `now`, which `tick` and
+        `observe` make, and say what came due while the target is away. Every fold
+        goes through here: a tick, the first observation of the target at start-up and
+        each later report of it. The snapshot before the fold is `before`.
 
         A window the fold found over is replaced by the next one of its interval. That
         goes for whichever event folds it: a report of the target may get the lock
@@ -887,6 +963,7 @@ class TargetController:
         ended = {w.interval_id for w in before.windows} - {
             w.interval_id for w in self.snapshot.windows
         }
+        self._log_due_while_unavailable(before, now, effects)
         await self._execute(effects)
         if ended and not self._stopped:
             await self._async_refresh_windows_locked()
@@ -895,7 +972,12 @@ class TargetController:
         self, before: Snapshot, now: datetime, effects: list[Effect]
     ) -> None:
         """Say what came due while the target is away, worded by what it was: nothing
-        else shows that a switch waits for the target to come back (R10)."""
+        else shows that a switch waits for the target to come back (R10).
+
+        Only a target that reports "unavailable" is away. One that has not been seen
+        (`last_actual is None`, until start-up observes it) is not known to be, so a
+        fold before start-up says nothing; start-up says what it folds itself.
+        """
         after = self.snapshot
         if after.last_actual != "unavailable":
             return
@@ -957,15 +1039,21 @@ class TargetController:
                 return  # Unloaded while an earlier effect was under way.
             match effect:
                 case TurnOn(settings):
+                    # Settings that were all left out count as delivered: the turn-on
+                    # is all there is to send, and nothing stays owed.
                     await self._carry_out(
                         "on",
-                        self._behaviour.turn_on_calls(settings),
+                        self._behaviour.turn_on_calls(
+                            self._settings_the_target_takes(settings)
+                        ),
                         with_settings=bool(settings),
                     )
                 case ApplySettings(settings):
                     await self._carry_out(
                         "settings",
-                        self._behaviour.apply_calls(settings),
+                        self._behaviour.apply_calls(
+                            self._settings_the_target_takes(settings)
+                        ),
                         with_settings=True,
                     )
                 case TurnOff():
@@ -986,6 +1074,35 @@ class TargetController:
                     self._log_dropped(command)
                 case _:
                     assert_never(effect)
+
+    def _settings_the_target_takes(self, settings: Settings) -> Settings:
+        """The part of `settings` that the target can be turned on with now.
+
+        They were checked when the command was made or the interval was saved, and
+        what the target takes can change after that: an update of its integration
+        renames a mode, or the device is replaced. A setting it no longer takes would
+        fail its call, and nothing would be turned on. So it is judged when it is sent,
+        whoever owes it: a run, a pending command, a window or settings carried over.
+        Each setting is judged alone, as the form offers them, and one that is left out
+        is said once, for as long as it is.
+        """
+        taken: dict[str, SettingValue] = {}
+        for name, value in settings.items():
+            try:
+                validate_settings(self._hass, self.target_entity_id, {name: value})
+            except ServiceValidationError:
+                if (name, value) not in self._left_out:
+                    self._left_out.add((name, value))
+                    _LOGGER.warning(
+                        "%s cannot take the setting %s=%s now; it is left out",
+                        self.target_entity_id,
+                        name,
+                        value,
+                    )
+                continue
+            taken[name] = value
+            self._left_out -= {pair for pair in self._left_out if pair[0] == name}
+        return freeze_settings(taken)
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
@@ -1014,16 +1131,16 @@ class TargetController:
         noun = "attempt" if attempts == 1 else "attempts"
         if what == "settings":
             _LOGGER.warning(
-                "%s did not take its settings after %d %s; Timerify will try"
-                " again when it reports a change or on the next command",
+                "%s did not take its settings after %d %s; Timerify will not send"
+                " them again until it is asked again",
                 self.target_entity_id,
                 attempts,
                 noun,
             )
         else:
             _LOGGER.warning(
-                "%s did not turn %s after %d %s; Timerify will try"
-                " again when it reports a change or on the next command",
+                "%s did not turn %s after %d %s; Timerify will not send it again"
+                " until it is asked again",
                 self.target_entity_id,
                 what,
                 attempts,

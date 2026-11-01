@@ -61,10 +61,12 @@ SERVICE_CALL_TIMEOUT: Final = timedelta(seconds=30)
 """How long a turn_on or turn_off call may take before it counts as failed."""
 
 MAX_AUTOMATIC_RESENDS: Final = 3
-"""How many times a wish that did not reach the target is sent again by reports that
-merely repeat the target's state, before the timer stops asking until the state
-changes or a command wants the wish again. Without a bound, a device that refuses a
-command and answers it with a report of its old state would be commanded for ever."""
+"""How many times a wish that did not reach the target, or a set of settings that did
+not, is sent again by reports of the target after the first delivery, before the timer
+stops asking until new work wants it again: a new command, or a countdown or a
+schedule interval that switches the target. A device that refuses a command and
+answers with a report of its old state, or one that drops off the network and comes
+back, would be commanded for ever without a bound."""
 
 VOICE_LANGUAGES: Final = ("en", "ru")
 """The languages Timerify ships sentences for: a directory of `sentences/` each."""

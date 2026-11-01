@@ -1,6 +1,8 @@
 """Persistence of one target's timer, saved whenever it changes."""
 
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, Final
 
@@ -32,6 +34,16 @@ def _optional_time_from_json(text: str | None, what: str) -> datetime | None:
     return None if text is None else _time_from_json(text, what)
 
 
+@contextmanager
+def _fields_of(what: str) -> Iterator[None]:
+    """A ValueError saying that a field of `what` is missing, in place of the KeyError
+    of the field alone, which would not say whose it is."""
+    try:
+        yield
+    except KeyError as err:
+        raise ValueError(f"the field {err.args[0]} of {what} is missing") from None
+
+
 def command_to_json(command: Command) -> dict[str, Any]:
     """A pending command as plain data: its time as ISO-8601 UTC, its settings as a
     dict. The file of the timer and the "Next command" sensor show it alike."""
@@ -45,13 +57,14 @@ def command_to_json(command: Command) -> dict[str, Any]:
 
 
 def _command_from_json(data: dict[str, Any]) -> Command:
-    return Command(
-        id=data["id"],
-        at=_time_from_json(data["at"], "the command's time"),
-        action=data["action"],
-        minutes=data["minutes"],
-        settings=freeze_settings(data["settings"]),
-    )
+    with _fields_of("a pending command"):
+        return Command(
+            id=data["id"],
+            at=_time_from_json(data["at"], "the command's time"),
+            action=data["action"],
+            minutes=data["minutes"],
+            settings=freeze_settings(data["settings"]),
+        )
 
 
 def window_to_json(window: Window) -> dict[str, Any]:
@@ -70,8 +83,8 @@ def window_to_json(window: Window) -> dict[str, Any]:
 def _window_from_json(data: dict[str, Any]) -> Window:
     """A stored window, in UTC; a ValueError for one that no schedule could have made,
     by the rule that holds for every window the core is given."""
-    return checked_window(
-        Window(
+    with _fields_of("a schedule window"):
+        window = Window(
             interval_id=data["interval"],
             start=datetime.fromisoformat(data["start"]),
             end=datetime.fromisoformat(data["end"]),
@@ -79,7 +92,7 @@ def _window_from_json(data: dict[str, Any]) -> Window:
             started=data["started"],
             suppressed=data["suppressed"],
         )
-    )
+    return checked_window(window)
 
 
 def _validated(snapshot: Snapshot) -> Snapshot:
@@ -144,6 +157,20 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
     }
 
 
+class StoredTimerInvalid(ConfigEntryError):
+    """The stored timer cannot be used. `reason` says what is wrong with it, in words
+    for the user: the set-up fails with it, and so does the repair that resets the
+    file."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            translation_domain=DOMAIN,
+            translation_key="stored_timer_invalid",
+            translation_placeholders={"reason": reason},
+        )
+        self.reason = reason
+
+
 class _TimerFile(Store[dict[str, Any]]):
     """The file of a timer, which reads what earlier versions wrote."""
 
@@ -201,8 +228,9 @@ class TimerStore:
         """The stored timer, migrated to the current version if need be; an idle one
         when nothing was stored yet.
 
-        Raises ConfigEntryError (`stored_timer_invalid`), saying what is wrong, for a
-        file that contradicts itself (see `_validated`) or holds a time that is not one.
+        Raises StoredTimerInvalid, saying what is wrong, for a file that contradicts
+        itself (see `_validated`), holds a time that is not one, lacks a field or holds
+        a field of a type that no timer writes.
         """
         data = await self._store.async_load()
         if data is None:
@@ -210,12 +238,14 @@ class TimerStore:
         else:
             try:
                 snapshot = self._read(data)
-            except ValueError as err:
-                raise ConfigEntryError(
-                    translation_domain=DOMAIN,
-                    translation_key="stored_timer_invalid",
-                    translation_placeholders={"reason": str(err)},
-                ) from None  # The reason says all there is to say of it.
+            except KeyError as err:
+                raise StoredTimerInvalid(
+                    f"the field {err.args[0]} is missing"
+                ) from None
+            except (ValueError, TypeError) as err:
+                # The reason says all there is to say of it; the cause would only add
+                # a traceback of Python's to the log.
+                raise StoredTimerInvalid(str(err)) from None
         self._saved = _payload(snapshot)
         return snapshot
 

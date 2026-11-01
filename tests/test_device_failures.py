@@ -181,8 +181,8 @@ async def test_device_that_refuses_and_echoes_is_commanded_a_limited_number_of_t
     assert state_of(hass, TARGET_ID) == "on"
     assert state_of(hass, NUMBER) == "0"
     assert timerify_warnings(caplog) == [
-        "switch.boiler did not turn off after 4 attempts; Timerify will try again"
-        " when it reports a change or on the next command"
+        "switch.boiler did not turn off after 4 attempts; Timerify will not send it"
+        " again until it is asked again"
     ]
 
     await fake_target.set_state("on", rssi=-80)
@@ -193,26 +193,66 @@ async def test_device_that_refuses_and_echoes_is_commanded_a_limited_number_of_t
     assert len(timerify_warnings(caplog)) == 1
 
 
-@pytest.mark.parametrize("what_happens", ["it_comes_back", "stop"])
-async def test_refusing_device_is_commanded_again_when_it_changes_or_on_a_command(
+async def test_unknown_then_the_old_state_is_commanded_a_limited_number_of_times(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
-    what_happens: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """After Timerify gave up, a change of the device's state or a stop reaches it."""
+    """A device that answers each refused call by dropping to `unknown` and showing its
+    old state again looks like a device that goes away and comes back at every call.
+    That is no new chance: Timerify asks 3 times after the first and says so once."""
+    await setup_target(mode="strict")
+    await set_number(hass, NUMBER, 10)
+    fake_target.ignore_calls(echo_unknown=True)
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_target.calls == [TURN_ON] + [TURN_OFF] * (1 + MAX_AUTOMATIC_RESENDS)
+    assert state_of(hass, TARGET_ID) == "on"
+    assert timerify_warnings(caplog) == [
+        "switch.boiler did not turn off after 4 attempts; Timerify will not send it"
+        " again until it is asked again"
+    ]
+
+
+async def test_refusing_device_that_keeps_dropping_off_is_not_commanded_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A device that dropped off the network and came back, again and again, after
+    Timerify gave up on it, is neither commanded nor warned about a second time."""
+    await setup_target(mode="strict")
+    await run_into_a_refusing_device(hass, freezer, fake_target)
+    calls = list(fake_target.calls)
+
+    for _ in range(3):
+        await fake_target.set_state("unavailable")
+        await fake_target.set_state("on")
+
+    assert fake_target.calls == calls
+    assert len(timerify_warnings(caplog)) == 1
+
+
+async def test_refusing_device_is_commanded_again_on_a_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """After Timerify gave up, a stop is a new request: it is sent, and a device that
+    refuses it again is asked 3 times more."""
     await setup_target(mode="strict")
     await run_into_a_refusing_device(hass, freezer, fake_target)
     asked = 1 + MAX_AUTOMATIC_RESENDS
     assert fake_target.calls == [TURN_ON] + [TURN_OFF] * asked
     fake_target.obey_calls()
 
-    if what_happens == "it_comes_back":
-        await fake_target.set_state("unavailable")
-        await fake_target.set_state("on")
-    else:
-        await set_number(hass, NUMBER, 0)
+    await set_number(hass, NUMBER, 0)
 
     assert fake_target.calls == [TURN_ON] + [TURN_OFF] * (asked + 1)
     assert state_of(hass, TARGET_ID) == "off"
@@ -262,7 +302,7 @@ async def test_media_player_is_not_turned_on_again_by_repeated_reports(
 ) -> None:
     """A player that is slow to wake, or a toggle that a second turn_on would switch
     off again, is told once: reports that repeat its state send nothing, and the
-    timer says so in the log. Only a change of its state is answered."""
+    timer says so in the log."""
     await setup_target(target="media_player.tv")
     fake_media_player.ignore_calls()
 
@@ -275,14 +315,14 @@ async def test_media_player_is_not_turned_on_again_by_repeated_reports(
 
     assert fake_media_player.calls == [("turn_on", "media_player.tv")]
     assert timerify_warnings(caplog) == [
-        "media_player.tv did not turn on after 1 attempt; Timerify will try again"
-        " when it reports a change or on the next command"
+        "media_player.tv did not turn on after 1 attempt; Timerify will not send it"
+        " again until it is asked again"
     ]
 
     await fake_media_player.set_state("unavailable")
     await fake_media_player.set_state("off")
 
-    assert fake_media_player.calls == [("turn_on", "media_player.tv")] * 2
+    assert fake_media_player.calls == [("turn_on", "media_player.tv")]
 
 
 # --- A device that reports after the call returned -----------------------------------
@@ -438,6 +478,6 @@ async def test_boiler_that_goes_on_refusing_late_is_asked_a_limited_number_of_ti
     )
     assert state_of(hass, TARGET_ID) == "off"
     assert timerify_warnings(caplog) == [
-        "switch.boiler did not turn on after 4 attempts; Timerify will try again"
-        " when it reports a change or on the next command"
+        "switch.boiler did not turn on after 4 attempts; Timerify will not send it"
+        " again until it is asked again"
     ]

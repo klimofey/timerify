@@ -298,8 +298,8 @@ class DomainBehaviour:
     required_features: tuple[IntFlag, ...] = ()
     """The features an entity must advertise for the on and off services to work."""
     automatic_resends: int = MAX_AUTOMATIC_RESENDS
-    """How often reports that repeat the entity's state send an unsent wish again,
-    at most; see `MAX_AUTOMATIC_RESENDS`."""
+    """How often reports of the entity's state send an unsent wish, or settings, again
+    after the first delivery, at most; see `MAX_AUTOMATIC_RESENDS`."""
     settings: tuple[_Setting, ...] = ()
     """The settings the entities can be turned on with, in the order that their calls
     are made."""

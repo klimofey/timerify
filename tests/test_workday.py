@@ -70,6 +70,7 @@ from .helpers import (
     storage_key,
     timerify_info,
     timerify_warnings,
+    window_json,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -945,6 +946,128 @@ async def test_workday_sensor_is_followed_from_the_moment_home_assistant_has_sta
     assert fake_workday.asked == [SUNDAY]
     await fake_workday.report()
     assert fake_workday.asked == [SUNDAY, SUNDAY]
+
+
+async def test_stopping_while_starting_comes_after_a_window_only_the_sensor_knows(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """Home Assistant was down from Sunday to Monday morning, and Monday's working-day
+    window opened meanwhile; the file knows only Sunday's. "Run for 0" while Home
+    Assistant is still starting asks the sensor first, as start-up would, so it stops
+    Monday's window by hand: the boiler is not turned on at start-up, nor until the
+    window ends."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    freezer.move_to(local(MONDAY, "06:40"))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    fake_workday.asked.clear()
+
+    await set_number(hass, NUMBER, 0)
+
+    assert fake_workday.asked == [MONDAY]
+    await fake_target.set_state("off")
+    await hass.async_start()
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == []
+    await advance_to(hass, freezer, local(MONDAY, "07:15"))
+    assert fake_target.calls == []
+
+
+async def test_a_command_while_starting_before_the_sensor_is_up_keeps_the_stored_window(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Home Assistant restarts across the start of the working-day window, and the
+    Workday sensor is not up yet when "Run for 30" is given while starting. The command
+    is carried out with the window the file holds, which has opened: the warning about
+    the sensor is logged once. At start-up the sensor answers, and the boiler is turned
+    on once, for the 30 minutes of the command."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    interval = await add_interval(
+        hass, entry, days="workdays", start="06:30", end="07:15"
+    )
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    await fake_workday.set_available(False)
+    freezer.move_to(local(SUNDAY, "06:40"))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await set_number(hass, NUMBER, 30)
+
+    assert [w.startswith(NOT_ASKED) for w in timerify_warnings(caplog)] == [True]
+    assert fake_target.calls == []
+    stored = saved(hass_storage, entry)
+    assert (stored["end"], stored["scheduled_by"]) == (iso(SUNDAY, "07:10"), None)
+    assert stored["windows"] == [
+        window_json(
+            interval, local(SUNDAY, "06:30"), local(SUNDAY, "07:15"), started=True
+        )
+    ]
+
+    await fake_workday.set_available(True)
+    await fake_target.set_state("off")
+    await hass.async_start()
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == [TURN_ON]
+    assert len(timerify_warnings(caplog)) == 1
+    await advance_to(hass, freezer, local(SUNDAY, "07:10"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_timer_unloaded_while_a_command_given_while_starting_waits_for_the_sensor(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """While Home Assistant is starting, "Run for 30" waits for the sensor, which works
+    the windows out before the command. The timer is replaced meanwhile: the command
+    says it was not made, and the file is left to the timer that replaces it."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    slow = fake_workday.hold_next_call()
+    waiting = hass.async_create_task(
+        hass.services.async_call(
+            "number", "set_value", {"entity_id": NUMBER, "value": 30}, blocking=True
+        )
+    )
+    await slow.reached.wait()
+    await hass.config_entries.async_unload(entry.entry_id)
+    stored = copy.deepcopy(hass_storage[storage_key(entry)])
+
+    slow.release.set()
+    with pytest.raises(HomeAssistantError) as raised:
+        await waiting
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "timer_unloaded"
+    assert fake_target.calls == []
+    assert hass_storage[storage_key(entry)] == stored
 
 
 async def test_editing_a_running_interval_to_days_off_stops_the_boiler(

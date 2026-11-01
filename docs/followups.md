@@ -14,12 +14,7 @@ One line per issue: its number and its title, under the area it belongs to.
 
 ## Engine
 
-- [#10](https://github.com/klimofey/timerify/issues/10) A timer whose target entity was deleted keeps loading and drives nothing, with no message
-- [#11](https://github.com/klimofey/timerify/issues/11) Bound automatic re-sends and the give-up warning per wish, not per state change
-- [#12](https://github.com/klimofey/timerify/issues/12) Commands before HA has started should record and save, not fold against an unseen target
-- [#13](https://github.com/klimofey/timerify/issues/13) Log what came due while the target was unavailable on start-up and on target reports
-- [#17](https://github.com/klimofey/timerify/issues/17) Offer a repairs fix "reset the stored timer" for stored_timer_invalid
-- [#18](https://github.com/klimofey/timerify/issues/18) Filter settings the target no longer takes in _execute, for commands and windows alike
+- [#42](https://github.com/klimofey/timerify/issues/42) Carry out a command at the moment it was given, not when it gets the lock
 
 ## Schedules
 
@@ -43,4 +38,3 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#27](https://github.com/klimofey/timerify/issues/27) Pin the Russian plural forms of voice answers with rendered fixtures
 - [#28](https://github.com/klimofey/timerify/issues/28) Pin happy-dom 21.0.4 (advisory GHSA-834v-8h66-3h79) on or after 2026-11-03
-- [#31](https://github.com/klimofey/timerify/issues/31) Test harness: a FakeTarget takes the service calls of every other entity of its domain

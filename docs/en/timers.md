@@ -72,15 +72,30 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 ## When the device does not answer
 
-- A device that drops off Wi-Fi keeps its countdown. Whatever came due meanwhile is applied when it reports again. For example, a countdown that ended turns it off.
+- A device that drops off Wi-Fi keeps its countdown. Whatever came due meanwhile is applied when it reports again. For example, a countdown that ended turns it off. The log says what came due while the device was unavailable. It also says so when Home Assistant starts while the device is unavailable. These are info lines, which Home Assistant hides by default. To see them, open the Timerify integration page and choose **Enable debug logging**.
 - A command that the device rejects, or accepts without doing anything, is not forgotten. Timerify sends it again when the device next reports its state. It also sends it again when you ask for the same thing again.
-- A device that keeps reporting the same state gets at most 3 such repeats. After that, Timerify writes a warning in the log. It then waits for the state to change, or for a new command.
-- Remotes and media players get no repeats from their reports. A repeat could switch a toggle remote back, or disturb a player that is still starting up. They are sent the command again only when their state changes, or when you ask again.
+- A device that rejects a command gets at most 3 repeats of it, however often it reports or reconnects.
+- Then Timerify writes one warning in the log and stops sending that command. It sends it again when you ask again. It also sends it again when the timer itself switches the device: a countdown ends, or a schedule interval starts.
+- Remotes and media players get no repeats at all. A repeat could switch a toggle remote back, or disturb a player that is still starting up. They are sent a command again only when you ask again, or when the timer itself switches them.
+
+## When the device is deleted
+
+- Say you delete the device or entity that a timer switches. Home Assistant then shows a repair: "The device of timer Boiler was deleted". You see it at the top of **Settings** and under **Settings > System > Repairs**.
+- Until you act, the timer switches nothing. It keeps its countdown and its pending commands. What comes due meanwhile is applied when the device is back, as it is for a [device that does not answer](#when-the-device-does-not-answer).
+- Add the device again with the same entity ID, and the timer works again by itself. The repair goes away.
+- To delete the timer instead, open **Repairs**, choose the repair, then choose **Submit**. The timer goes with its entities, schedule intervals and pending commands. Deleting the timer on its integration page does the same, and takes the repair away.
 
 ## When Home Assistant restarts
 
 - A countdown survives a Home Assistant restart. Timerify stores it on every change. At start-up it checks the end time against the clock.
 - A countdown that ended while Home Assistant was down turns the device off.
+- A change you make while Home Assistant is still starting is kept and saved. This covers **Run for**, **Add time**, **Run** and pending commands. It also covers the switch of a schedule interval and of the whole schedule. Timerify switches the device once Home Assistant has started.
+- Your change counts from the moment you make it. Timerify first applies what came due before it while Home Assistant was down. That can be a countdown that ended, a pending command or a schedule window. Then your change wins, as it does with Home Assistant running.
+- A pending command still runs at its own time. A command that came due while Home Assistant was down or still starting is handled at start-up.
+- Timerify keeps a timer's state in a file. If that file is not valid JSON, Home Assistant renames it and shows its own repair about it. The timer then starts with no countdown and no pending commands, and every schedule interval is on.
+- Suppose the file is valid JSON but holds a timer that Timerify cannot use. For example, a field is missing, or two parts of the file contradict each other. Then the timer does not start.
+- **Settings > System > Repairs** then shows "The stored state of the timer Boiler cannot be read".
+- To fix it, open **Repairs**, choose the repair, then choose **Submit**. The timer keeps its settings, its schedule intervals and its runtime total. It loses its countdown and its pending commands. A schedule interval that you had switched off is on again.
 
 ## Which devices can have a timer
 
@@ -104,7 +119,7 @@ It can also switch any other entity of a kind that has turn-on and turn-off acti
 
 A command that turns the device on can say how. It can set the mode and temperature of an air conditioner, the brightness of a light or the speed of a fan. These are the device's settings.
 
-Timerify offers only what the device says it can do. It checks a request when you make it. A wrong request is refused at once with a message, not when the device is already waiting for it.
+Timerify offers only what the device says it can do. It checks a request when you make it. A wrong request is refused at once with a message, not when the device is already waiting for it. A device can stop offering a setting later, for example when an update of its integration renames a mode. Then Timerify leaves that setting out when the command or the schedule interval runs. The device gets the rest, and the log names the setting.
 
 Settings are applied in these cases:
 

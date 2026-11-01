@@ -2,7 +2,7 @@
 
 import asyncio
 import copy
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Final
@@ -150,6 +150,16 @@ class FakeTarget:
     hass: HomeAssistant
     device_id: str | None
     """The device the entity is on; None when it belongs to no device."""
+    platform: str
+    """The integration that provides the entity."""
+    unique_id: str
+    """The unique id the integration gives the entity, which it gives again when it
+    restores the entity."""
+    provider: MockConfigEntry | None
+    """The integration's config entry; None for an entity that is not in the registry,
+    as an entity of YAML without a unique id is."""
+    name: str
+    """The name of the entity, and of its device."""
     entity_id: str = TARGET_ID
     capability_attributes: dict[str, Any] = field(default_factory=dict)
     """What Home Assistant keeps on every state of the entity, also while it is
@@ -164,18 +174,13 @@ class FakeTarget:
     _ignore_next: bool = False
     _ignoring: bool = False
     _echoing: bool = False
+    _echoing_unknown: bool = False
     _echoes: int = 0
     _reporting_late: bool = False
     _late: list[tuple[Obey, ServiceCall]] = field(default_factory=list)
     _reverting: int = 0
     _last_context: Context | None = None
     _held: HeldCall | None = None
-
-    def _is_timerify_entity(self, entity_id: str) -> bool:
-        """Whether `entity_id` is an entity of Timerify's own, not of the target's
-        integration: the target may have been renamed, so its id is not a test."""
-        registered = er.async_get(self.hass).async_get(entity_id)
-        return registered is not None and registered.platform == DOMAIN
 
     @property
     def state(self) -> str:
@@ -206,6 +211,51 @@ class FakeTarget:
         self.write(value, **attributes)
         await self.hass.async_block_till_done()
 
+    async def delete(self) -> None:
+        """Delete the entity, as the user does in its settings: the registry entry goes,
+        and the integration takes the state away. Everything that follows settles."""
+        er.async_get(self.hass).async_remove(self.entity_id)
+        self.hass.states.async_remove(self.entity_id)
+        await self.hass.async_block_till_done()
+
+    async def delete_device(self) -> None:
+        """Delete the device the entity is on, as the user does on its page: the
+        registry removes the entity with it, and the integration takes the state away.
+        Everything that follows settles."""
+        assert self.device_id is not None, "the entity is on no device"
+        dr.async_get(self.hass).async_remove_device(self.device_id)
+        self.hass.states.async_remove(self.entity_id)
+        await self.hass.async_block_till_done()
+
+    async def restore(self, state: str = "off") -> None:
+        """Bring the entity back, as its integration does when the user adds the device
+        again: the device, if it is gone, with the same identifiers, then the entity
+        under the same platform and unique id, which gets its registry id and entity id
+        back, then its `state`. Everything that follows settles.
+
+        The entity id is free again only once the state is gone, which `delete` and
+        `delete_device` see to.
+        """
+        if self.provider is not None:
+            if self.device_id is not None:
+                dr.async_get(self.hass).async_get_or_create(
+                    config_entry_id=self.provider.entry_id,
+                    identifiers={(self.platform, self.unique_id)},
+                    name=self.name,
+                )
+            domain, object_id = split_entity_id(self.entity_id)
+            er.async_get(self.hass).async_get_or_create(
+                domain,
+                self.platform,
+                self.unique_id,
+                config_entry=self.provider,
+                device_id=self.device_id,
+                original_name=self.name,
+                suggested_object_id=object_id,
+            )
+        self.write(state)
+        await self.hass.async_block_till_done()
+
     def fail_next_call(
         self, error: Exception | None = None, service: str | None = None
     ) -> None:
@@ -221,18 +271,24 @@ class FakeTarget:
         a device out of reach that the integration cannot tell about."""
         self._ignore_next = True
 
-    def ignore_calls(self, *, echo_attribute: bool = False) -> None:
+    def ignore_calls(
+        self, *, echo_attribute: bool = False, echo_unknown: bool = False
+    ) -> None:
         """Make every service call succeed without the entity doing anything, until
         `obey_calls`. With `echo_attribute` the device also answers each call with a
         report of its unchanged state and a new attribute, as an MQTT switch that
-        publishes its full state after every command does."""
+        publishes its full state after every command does. With `echo_unknown` it
+        answers each call by writing `unknown` and then the state it had, as a device
+        that drops its state while it handles a command."""
         self._ignoring = True
         self._echoing = echo_attribute
+        self._echoing_unknown = echo_unknown
 
     def obey_calls(self) -> None:
         """End `ignore_calls`: the entity does what it is told again."""
         self._ignoring = False
         self._echoing = False
+        self._echoing_unknown = False
 
     def report_next_call_late(self) -> None:
         """Make the next service call succeed with the entity changing only when
@@ -270,25 +326,16 @@ class FakeTarget:
         self._held = HeldCall()
         return self._held
 
-    def provide_services(self, services: Mapping[str, Obey]) -> None:
-        """Provide the services of the entity's domain.
+    def _echo(self, call: ServiceCall) -> None:
+        """Answer an ignored call as `ignore_calls` says, with the call's context."""
+        self._echoes += 1
+        before = self.state
+        if self._echoing_unknown:
+            self.write(STATE_UNKNOWN, context=call.context)
+        attributes = {"echoes": self._echoes} if self._echoing else {}
+        self.write(before, context=call.context, **attributes)
 
-        A domain has one set of services for all its entities, so a call for an entity
-        of Timerify's own (the switch of an interval) goes on to the service that was
-        there before, which is the domain's own. For the same reason the fake that
-        provided its services last takes the calls of every other entity of its
-        domain, so a test with two targets uses two domains.
-        """
-        domain, _ = split_entity_id(self.entity_id)
-        for service, obey in services.items():
-            elsewhere = self.hass.services.async_services_for_domain(domain).get(
-                service
-            )
-            self.hass.services.async_register(
-                domain, service, self._handler(service, obey, elsewhere)
-            )
-
-    async def _take(
+    async def take(
         self,
         service: str,
         obey: Obey,
@@ -315,9 +362,8 @@ class FakeTarget:
             return
         if self._ignoring or self._ignore_next:
             self._ignore_next = False
-            if self._echoing and self._echoes < ECHO_LIMIT:
-                self._echoes += 1
-                self.write(self.state, context=call.context, echoes=self._echoes)
+            if (self._echoing or self._echoing_unknown) and self._echoes < ECHO_LIMIT:
+                self._echo(call)
             return
         if self._reverting:
             self._reverting -= 1
@@ -327,34 +373,105 @@ class FakeTarget:
             return
         obey(self, call)
 
-    def _handler(
-        self, service: str, obey: Obey, elsewhere: Service | None
-    ) -> Callable[[ServiceCall], Awaitable[None]]:
+
+@dataclass
+class FakeServices:
+    """The services of the domains the fake targets of a test are in, and who takes
+    which call.
+
+    A domain has one set of services for all its entities, so the first fake of a
+    domain to provide a service registers one handler for it, and the handler hands
+    each entity of a call to the fake that owns the entity. An entity of Timerify's own
+    (the switch of an interval) goes on to the service that was there before, which is
+    the domain's own. A call for any other entity fails: it is the test that is wrong,
+    not the fake that happens to be of the same domain. The entities of that call which
+    have an owner still get their call, and the failure names every other one.
+    """
+
+    hass: HomeAssistant
+    strays: list[str] = field(default_factory=list)
+    """Every call for an entity no fake owns, as "<domain>.<service> <entity_id>"."""
+    _owners: dict[tuple[str, str], dict[str, tuple[FakeTarget, Obey]]] = field(
+        default_factory=dict
+    )
+    """For each (domain, service), the fake that owns each entity, by its `_key`, with
+    what the fake does when the device obeys the call."""
+
+    def provide(self, target: FakeTarget, services: Mapping[str, Obey]) -> None:
+        """Provide the services of the domain of `target`, and make it the owner of its
+        entity for each of them."""
+        domain, _ = split_entity_id(target.entity_id)
+        key = self._key(target.entity_id)
+        for service, obey in services.items():
+            if (domain, service) not in self._owners:
+                self._owners[domain, service] = {}
+                self._register(domain, service)
+            self._owners[domain, service][key] = (target, obey)
+
+    def _key(self, entity_id: str) -> str:
+        """What tells the owner of an entity: its registry id, which stays when the user
+        renames it and comes back when its integration restores it, else its entity
+        id."""
+        registered = er.async_get(self.hass).async_get(entity_id)
+        return entity_id if registered is None else registered.id
+
+    def _is_timerify_entity(self, entity_id: str) -> bool:
+        """Whether `entity_id` is an entity of Timerify's own, not of the target's
+        integration: the target may have been renamed, so its id is not a test."""
+        registered = er.async_get(self.hass).async_get(entity_id)
+        return registered is not None and registered.platform == DOMAIN
+
+    def _register(self, domain: str, service: str) -> None:
+        """Register the one handler of `domain.service`."""
+        elsewhere = self.hass.services.async_services_for_domain(domain).get(service)
+
         async def handle(call: ServiceCall) -> None:
             data = dict(call.data)
             entity_ids: list[str] = cv.ensure_list(data.pop("entity_id"))
-            ours = (
-                []
-                if elsewhere is None
-                else [e for e in entity_ids if self._is_timerify_entity(e)]
-            )
-            if elsewhere is not None and ours:
-                forwarded = ServiceCall(
-                    self.hass,
-                    call.domain,
-                    call.service,
-                    {**data, "entity_id": ours},
-                    call.context,
-                )
-                if (
-                    running := self.hass.async_run_hass_job(elsewhere.job, forwarded)
-                ) is not None:
-                    await running
+            ours: list[str] = []
+            owned: list[tuple[str, FakeTarget, Obey]] = []
+            strays: list[str] = []
             for entity_id in entity_ids:
-                if entity_id not in ours:
-                    await self._take(service, obey, call, entity_id, data)
+                if elsewhere is not None and self._is_timerify_entity(entity_id):
+                    ours.append(entity_id)
+                elif (
+                    owner := self._owners[domain, service].get(self._key(entity_id))
+                ) is not None:
+                    owned.append((entity_id, *owner))
+                else:
+                    strays.append(entity_id)
+            self.strays.extend(f"{domain}.{service} {stray}" for stray in strays)
+            if elsewhere is not None and ours:
+                await self._forward(elsewhere, call, data, ours)
+            for entity_id, target, obey in owned:
+                await target.take(service, obey, call, entity_id, data)
+            if strays:
+                raise AssertionError(
+                    f"no fake target owns {', '.join(strays)} ({domain}.{service})"
+                )
 
-        return handle
+        self.hass.services.async_register(domain, service, handle)
+
+    async def _forward(
+        self,
+        elsewhere: Service,
+        call: ServiceCall,
+        data: dict[str, Any],
+        entity_ids: list[str],
+    ) -> None:
+        """Hand the call for `entity_ids`, entities of Timerify's own, on to the service
+        that was there before."""
+        forwarded = ServiceCall(
+            self.hass,
+            call.domain,
+            call.service,
+            {**data, "entity_id": entity_ids},
+            call.context,
+        )
+        if (
+            running := self.hass.async_run_hass_job(elsewhere.job, forwarded)
+        ) is not None:
+            await running
 
 
 NO_ENTITY_MATCHED: Final = (
@@ -534,13 +651,83 @@ def hass_read_only_access_token(
     return hass_read_only_access_token
 
 
+def provide_fake(
+    hass: HomeAssistant,
+    services: FakeServices,
+    entity_id: str,
+    obeys: Mapping[str, Obey],
+    *,
+    name: str,
+    on_device: bool = True,
+    registered: bool = True,
+    capability_attributes: dict[str, Any] | None = None,
+    state_attributes: dict[str, Any] | None = None,
+) -> FakeTarget:
+    """Make an entity the way another integration provides it, switched off: a registry
+    entry (on a device called `name` unless `on_device` is false), a state, and the
+    services of `obeys`, which `services` hands the calls for the entity to.
+
+    An entity that is not `registered` has a state and services and no registry entry,
+    nor a device, as an entity of YAML without a unique id has.
+    """
+    domain, object_id = split_entity_id(entity_id)
+    platform = f"{object_id}_maker"
+    provider = None
+    device_id = None
+    if registered:
+        provider = MockConfigEntry(domain=platform)
+        provider.add_to_hass(hass)
+        if on_device:
+            device_id = (
+                dr.async_get(hass)
+                .async_get_or_create(
+                    config_entry_id=provider.entry_id,
+                    identifiers={(platform, object_id)},
+                    name=name,
+                )
+                .id
+            )
+        er.async_get(hass).async_get_or_create(
+            domain,
+            platform,
+            object_id,
+            config_entry=provider,
+            device_id=device_id,
+            original_name=name,
+            suggested_object_id=object_id,
+        )
+    target = FakeTarget(
+        hass,
+        device_id,
+        platform,
+        object_id,
+        provider,
+        name,
+        entity_id,
+        capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
+        state_attributes=state_attributes or {},
+    )
+    target.write("off")
+    services.provide(target, obeys)
+    return target
+
+
 @pytest.fixture
-async def provide_target(hass: HomeAssistant, clock_at_start: None) -> ProvideTarget:
+async def provide_target(
+    hass: HomeAssistant, clock_at_start: None
+) -> AsyncIterator[ProvideTarget]:
     """Make an entity the way another integration provides it, switched off, at
-    `START`: `provide(entity_id, services, device_name=..., ...)`."""
+    `START`: `provide(entity_id, services, name=..., ...)`, with `registered=False` for
+    an entity that has a state and no registry entry.
+
+    The fakes of a test share the services of their domains, and each takes only the
+    calls for its own entity. A call for any other entity fails, but Timerify catches
+    the failure of a service call, so the test ends with a check that there was none.
+    """
     # Timerify adds switches, so the switch component runs whenever it does. It sets its
     # services up with itself, and would replace those of a fake that came before it.
     assert await async_setup_component(hass, "switch", {})
+    fake_services = FakeServices(hass)
 
     def provide(
         entity_id: str,
@@ -548,44 +735,27 @@ async def provide_target(hass: HomeAssistant, clock_at_start: None) -> ProvideTa
         *,
         name: str,
         on_device: bool = True,
+        registered: bool = True,
         capability_attributes: dict[str, Any] | None = None,
         state_attributes: dict[str, Any] | None = None,
     ) -> FakeTarget:
-        domain, object_id = split_entity_id(entity_id)
-        provider = MockConfigEntry(domain=f"{object_id}_maker")
-        provider.add_to_hass(hass)
-        device_id = None
-        if on_device:
-            device_id = (
-                dr.async_get(hass)
-                .async_get_or_create(
-                    config_entry_id=provider.entry_id,
-                    identifiers={(provider.domain, object_id)},
-                    name=name,
-                )
-                .id
-            )
-        er.async_get(hass).async_get_or_create(
-            domain,
-            provider.domain,
-            object_id,
-            config_entry=provider,
-            device_id=device_id,
-            original_name=name,
-            suggested_object_id=object_id,
-        )
-        target = FakeTarget(
+        return provide_fake(
             hass,
-            device_id,
+            fake_services,
             entity_id,
-            capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
-            state_attributes=state_attributes or {},
+            services,
+            name=name,
+            on_device=on_device,
+            registered=registered,
+            capability_attributes=capability_attributes,
+            state_attributes=state_attributes,
         )
-        target.write("off")
-        target.provide_services(services)
-        return target
 
-    return provide
+    yield provide
+
+    assert fake_services.strays == [], (
+        f"calls for entities no fake target owns: {fake_services.strays}"
+    )
 
 
 @pytest.fixture

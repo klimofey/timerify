@@ -43,9 +43,12 @@ not repeated beside its successor.
 - **Climate without `TURN_ON` stays unsupported**, although `set_hvac_mode` (which needs
   no feature) could turn it on: a plain run without a mode would have nothing to send.
   Such thermostats wait for a later "turn on with a default mode" option.
-- **A target missing at setup fails the entry** with `ConfigEntryError`
-  (`target_not_found`), so Home Assistant shows the entry as failed and retries on reload.
-  A target deleted later is not noticed yet (issue #10).
+- **A target whose registry id does not resolve at setup fails the entry** with
+  `ConfigEntryError` (`target_not_found`), so Home Assistant shows the entry as failed and
+  retries on reload. Changed in 1.1.0: a target entity that is gone at start-up or later
+  raises a repair instead, and the timer stays loaded: see "A timer whose target was
+  deleted stays loaded and switches nothing, with a repair that deletes it" under Release
+  1.1.0.
 
 ### The timer
 
@@ -57,17 +60,17 @@ not repeated beside its successor.
   switch out of range, a cloud integration that only acknowledges) is sent it again. This
   is how "pending commands are firm promises" holds. Cost if wrong: a device that confirms
   its state only after the call returns may get one duplicate, idempotent command.
-  Reports that merely repeat the target's state send an unsent wish at most
-  `automatic_resends` times, a field of the domain row: `MAX_AUTOMATIC_RESENDS` (three)
+  Reports send an unsent wish again at most `automatic_resends` times (changed in 1.1.0:
+  reports of any kind count, after a free first delivery; see "Engine and reliability"
+  under Release 1.1.0), a field of the domain row: `MAX_AUTOMATIC_RESENDS` (three)
   for every row except `remote` and `media_player`, which get none. Then one warning is
-  logged and nothing more is sent; the count starts again when the target's state changes
-  (including a return from unavailable and start-up) or when a command wants the wish,
-  which always sends. Without the bound, a device that refuses a command and answers it
-  with a report of its old state would be commanded for ever. Remotes and media players
-  get none because a toggle-based remote can be switched back off by a repeat and a media
-  player that is still booting reports a state that is not on; they are sent the command
-  again on a state change or a command. Cost if wrong: an ignoring media player is retried
-  only then.
+  logged and nothing more is sent (per piece of work since 1.1.0, see Release 1.1.0).
+  Without the bound, a device that refuses a command and answers it with a report of its
+  old state would be commanded for ever. Remotes and media players get none because a
+  toggle-based remote can be switched back off by a repeat and a media player that is
+  still booting reports a state that is not on; they are sent the command again only when
+  it is asked again or when the timer itself switches them. Cost if wrong: an ignoring
+  media player is retried only then.
 - **A report of our own call that contradicts the timer, with no wish pending, is a wish
   that has not landed, and the core asks for the state it wished again, once for each
   wish that was settled without a call.** A call that the device accepted but does not
@@ -131,9 +134,9 @@ not repeated beside its successor.
   window that was over, and one that was handed over to a later window wanted nothing,
   so they log nothing. The lines are written by every fold that goes through
   `_fold_due`: the alarm, the refresh of the windows and the switching off of an
-  interval. The fold of start-up and of a report of the target writes none (issue
-  #13). A command dropped because the run it asked for is over is an
-  effect of the core (`CommandDropped`) that the controller logs at info level; the core
+  interval. Changed in 1.1.0 (#13): the folds of start-up and of a report of the target
+  write them too, through `_execute_fold`; see "Engine and reliability". A command
+  dropped because the run it asked for is over is an effect of the core (`CommandDropped`) that the controller logs at info level; the core
   stays pure and emits no other signal. Cost if wrong: none.
 
 ### Restarts and storage
@@ -158,13 +161,11 @@ not repeated beside its successor.
   interval, an interval switched off twice, `scheduled_by` without an end, the marker
   without owed settings, a window with a time that has no offset or that does not start
   before it ends or lasts more than a day (the rule of `checked_window`, the one the core
-  applies to every window it is given). The set-up fails with a `ConfigEntryError`
-  (`stored_timer_invalid`), whose translated reason says what is wrong and tells the
-  user to remove the timer and add it again, not with a bare `ValueError`. The reason
-  is the English text of the error, also in the Russian message: it is for the bug
-  report of a defect, not for the user. Only the timer's own code writes the file, so
-  such a file means a defect, and it should show when the timer loads, not as a target
-  switched for reasons nobody can follow. Versions 2 and
+  applies to every window it is given). Changed in 1.1.0: see "An unreadable stored timer
+  is reset only by the user" under Release 1.1.0, for what the set-up fails with and what
+  the user does. Only the timer's own code writes the file, so such a file means a defect,
+  and it should show when the timer loads, not as a target switched for reasons nobody can
+  follow. Versions 2 and
   3 were never released before their keys were complete, so they need no further steps.
   Cost if wrong: a version 2 or 3 file written by a development build from between the
   changes lacks a key and fails to load; that exists on developer machines only.
@@ -174,8 +175,9 @@ not repeated beside its successor.
   returns the alarm for the merged snapshot, the earliest of the stored end, the first
   stored command and the start and end of every window, and it is the first effect of the
   one `_execute` that also carries the first observation; an unchanged snapshot produces
-  no new alarm from the core otherwise. Nothing is armed earlier, because a stored end,
-  command or window that has long passed would switch a target that has not been seen.
+  no new alarm from the core otherwise. A restored timer arms nothing earlier. Changed in
+  1.1.0: a change made while starting first catches up and may arm its own alarm (see
+  "Until start-up has taken stock" under Release 1.1.0).
 
 ### Services
 
@@ -279,9 +281,8 @@ not repeated beside its successor.
   apply list.** It is simple and idempotent. Cost if wrong: settings that were already
   applied are sent twice.
 - **Owed settings have their own count of automatic re-sends with the wish's rules, then
-  `GaveUp("settings")` once.** Climate entities report attribute changes constantly, and
-  unbounded re-sends are forbidden above. Cost if wrong: a device that applies settings
-  only after its fourth report misses them until the next change or command.
+  `GaveUp("settings")` once.** Changed in 1.1.0: see "Each piece of work has one allowance
+  of automatic re-sends for its whole life" under Release 1.1.0.
 - **The controller's call lists, logs and `_raised_for` are labelled on, off or
   settings.** An apply has no wish, and `pending` is `None` while it runs. Cost if wrong:
   duplicate tracebacks if the label's settling is misjudged.
@@ -358,9 +359,9 @@ not repeated beside its successor.
 
 ### Deferred
 
-- **A deleted target still gives no sign.** The spec is silent and it changes no
-  spec-defined behaviour, so it is left to issue #10. Cost if wrong: timers of deleted
-  targets stay silent until it is done.
+- **A deleted target still gives no sign.** Changed in 1.1.0: see "A timer whose target was
+  deleted stays loaded and switches nothing, with a repair that deletes it" under Release
+  1.1.0.
 
 ## Phase 3: schedules
 
@@ -497,24 +498,8 @@ only the final behaviour is written.
   within 7 days; a Workday-based one with no match is searched again when the sensor
   reports, daily. Cost if wrong: none found.
 - **A window carries only the settings of its interval that the target takes when the
-  window is worked out; the rest are left out and said once.** The form checks the
-  settings when the interval is saved, but a window is worked out from data that can be
-  months old, and what a target takes changes (an update of its integration renames a
-  mode, the device is replaced). A setting the target no longer takes fails its call, and
-  the window would turn nothing on, with a warning every morning, where a plain turn-on
-  would have worked. Each setting is judged alone, as the form offers them and as the next
-  edit keeps them (`_with_settings_the_target_takes`, through `validate_settings`), so the
-  rest of the settings are still used. The warning names the interval and the settings,
-  and is repeated only when what is left out changes, not at every refresh. Windows are
-  worked out at start-up, at every window end, when the Workday sensor reports, when the
-  zone changes and when an interval is switched, so a change of capabilities is noticed by
-  the next of those, and a window worked out before it keeps the settings it had until
-  then. A window that is kept because its occurrence could not be worked out keeps the
-  settings it was worked out with. Cost if wrong: a setting that the target takes again is
-  missing from the window that was worked out while it did not, until the next refresh.
-  Pending commands are not covered (issue #18). Tests:
-  `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
-  `test_setting_that_comes_back_and_goes_again_is_said_again`.
+  window is worked out; the rest are left out and said once.** Changed in 1.1.0: see "The
+  settings are filtered when they are sent, whoever owes them" under Release 1.1.0.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
   callbacks use `_refresh_windows`, which takes the lock; after every await the controller
   re-checks that it is still loaded and takes `now` afresh.** `asyncio.Lock` is not
@@ -585,13 +570,9 @@ only the final behaviour is written.
   hand-edited file gets there, and asking a sensor that is not there would only fail. The
   update listener is added after the controller is built, so fixing the file does not
   reload the entry: the user reloads it. Cost if wrong: a manual reload.
-- **A change before Home Assistant has started is not held back.** The flip of an interval
-  runs its tick or its refresh, and a phase-2 command arms the alarm of a stored end,
-  command or window that has long passed, before the first observation of the target. The
-  wish goes out to a target that may not be there yet, fails, is marked unsent, and the
-  first observation sends it again, so the state converges, as it does for a restart. One
-  rule for every command (record and save, arm nothing, let `_handle_started` fold) is
-  issue #12. Cost if wrong: one failed call at start-up.
+- **A change before Home Assistant has started is not held back.** Changed in 1.1.0: see
+  "Until start-up has taken stock, nothing reaches the target, and a change made
+  meanwhile first folds what fell due before it." under Release 1.1.0.
 
 ### The entry, the intervals and the entities
 
@@ -1658,11 +1639,11 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   Why: the one wording for all of these, "is not the Run for number of a Timerify timer", was
   false for a number that is a timer's. A target stored as an entity id, which every flow
   writes, resolves whether or not the entity exists, so a timer whose target was deleted still
-  answers `found` and drives nothing, until #10. Right after a timer is added the line can show
-  for a moment, because the platforms are set up together, the number first; it clears on the
-  next registry change, when the card asks again. Cost if wrong: that moment on a card that
-  points at a brand-new timer, and no word on the card for a deleted target stored as an
-  entity id.
+  answers `found` and drives nothing (1.1.0 adds a repair for it). Right after a timer is
+  added the line can show for a moment, because the platforms are set up together, the number
+  first; it clears on the next registry change, when the card asks again. Cost if wrong: that
+  moment on a card that points at a brand-new timer, and no word on the card for a deleted
+  target stored as an entity id.
 - **`timerify/timer` sends `percent_settings`, the settings the card writes with a percent
   sign, and the card keeps no list of its own.** The keys are those of the target's domain row
   with `voice == "percent"`, taken from the row as `target_on` is and not from what this entity
@@ -1757,9 +1738,9 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
 - **A deleted interval is still worked out until the timer reloads.** Deleting an interval
   reloads the timer at once, which lets it go; only a reload that waits behind another set-up
   leaves the loaded timer with it, and for that time a window of it can be worked out and
-  opened. The commands that name an interval and the warning about its settings treat it as
-  gone already (`async_set_schedule_enabled`, `_with_settings_the_target_takes`), and the
-  reload drops its window (`TimerCore.set_windows`, `configured`). Why: the window is short,
+  opened. The commands that name an interval treat it as gone already
+  (`async_set_schedule_enabled`), and the reload drops its window
+  (`TimerCore.set_windows`, `configured`). Why: the window is short,
   and closing it would need a second judgement of which intervals exist beside the entry.
   Cost if wrong: for as long as a reload waits, a deleted interval can still open a window.
 
@@ -1783,3 +1764,295 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   unexpectedly, and its `test.fail` and the extra reload after `primeServiceWorker` in
   `card/e2e/fixtures.ts` go. Cost if wrong: a user's first load in a fresh browser shows an
   error card until a refresh (see "Known issue" in phase 5).
+
+## Release 1.1.0
+
+The decisions of the 1.1.0 release (`docs/superpowers/specs/2026-11-01-release-1.1.0-design.md`),
+in the form they have now. What is still open is a GitHub issue of klimofey/timerify, listed
+in `docs/followups.md`.
+
+### Engine and reliability
+
+- **Each piece of work has one allowance of automatic re-sends for its whole life.** A piece
+  of work is the pending wish to turn the target on or off, or the owed settings. The
+  allowance covers the first delivery, then `automatic_resends` re-sends prompted by reports
+  of any kind: a repeat of the state, a change of it, a return from unavailable, or the
+  first report after a start. Then comes one `GaveUp`, and after that nothing. A report that
+  finds the work never delivered by this core makes the first delivery, and it costs no
+  re-send: that is a wish restored from the file, or one made while the target was away.
+  Only new work renews the allowance: a new pending wish (any command, or an item of the
+  fold that wants a state, such as the end of a countdown or the start of a window), the one
+  correction of a late report of our own call, new owed settings, and a command that sends
+  the owed settings. A new wish to turn on also renews the allowance of the settings that
+  are owed, because it asks for them again: settings given up on are delivered when the
+  target returns, after a command made while it was away. Reports renew nothing. The log
+  says so: "did not turn off after 4 attempts; Timerify will not send it again until it is
+  asked again".
+  Why: #11. A device that answers each refused call with `unknown` and then its old state
+  looked like a target that went away and came back, and every such cycle reset the count, so
+  the device was commanded as often as it answered. A device that drops off Wi-Fi and
+  returns logged one give-up for each reconnect.
+  Cost if wrong: a device that refused four times, and then works again after a reconnect,
+  is not sent the command until it is asked again. A media player whose turn-on failed is
+  turned on only when asked again.
+- **Until start-up has taken stock, nothing reaches the target, and a change made
+  meanwhile first folds what fell due before it.** Before `_handle_started` has merged the
+  fresh windows and observed the target, nothing is sent and no report of the target is
+  answered. Two gates keep it so. The core treats a target it has never observed
+  (`last_actual is None`) as away, as `"unavailable"`: `_want` records a wish as unsent and
+  sends nothing, and `_deliver_settings` holds the owed settings back, also when a wish
+  restored from the file counts as in flight. The first `observe` delivers the wish and
+  the settings, free of the allowance, once. A report of the target before start-up is not
+  observed (`_handle_state_change`): `_handle_started` reads the state itself, under the
+  lock, and only then sets `_started`. A report would fold the stored items without the
+  fresh windows, and could switch the target twice. No alarm needs a gate: a restored timer
+  arms nothing at set-up, so a stored end, command or window that has long passed is never
+  folded by a tick without the windows of now. The first alarm comes from start-up, or
+  from a change made meanwhile once it has caught up (below). Such an alarm folds what
+  falls due at its own time, as with Home Assistant running, and sends nothing either.
+  Task 3 kept `_arm` from arming before start-up; after the catch-up that gate kept
+  nothing out, so it is gone.
+  A change made meanwhile takes effect at its own moment, as with Home Assistant running.
+  That is every command: the "Run for" number, `add_time`, `run`, `add_command`,
+  `turn_off_in`, the cancels, and the switch of an interval or of the whole schedule. It
+  first does what start-up does, without the target
+  (`_async_catch_up_while_starting_locked`): the windows are worked out now and merged,
+  and what fell due while Home Assistant was down is folded in the order it fell due, in
+  the core only. That is the stored end (with the S4 suppression of a started window), the
+  pending commands, and the windows that opened or closed. Then the change is applied, and
+  it wins. Its outcome is saved, so it survives a restart before start-up has finished.
+  Several changes apply in the order they were given, each after what fell due before it.
+  An interval's switch is such a change too: its flag (`disabled_intervals`) and the
+  window it removes or brings are applied as with Home Assistant running, after the
+  catch-up. Start-up then folds what fell due since the last change and switches the
+  target once. Changes after start-up are unchanged.
+  Why: #12 and "the user's last word wins". Before this, a command made while starting was
+  recorded on the timer as it was stored, and start-up folded the stored items after it: a
+  pending "off" that came due while Home Assistant was down turned the target off after
+  "Run for 30", and a countdown set by hand that ended while it was down left its window
+  unsuppressed for "Add time". §5.7's single catch-up holds: start-up switches the target
+  at most once. Folding with only the stored windows is not enough: the file holds the
+  current or next window of each interval as it was when Home Assistant stopped, so after
+  a long downtime, or for an interval added while starting, the window that is open now is
+  not in it, and "Run for 0" would come before it and be undone by it at start-up. Holding
+  the changes back and replaying them at start-up would need each command stored as data
+  next to the timer it applies to, to survive a restart before start-up has finished; the
+  windows of now are what start-up would work out at that moment, so working them out at
+  the change gives the same outcome without a second form of the file.
+  Cost if wrong: the catch-up asks the Workday sensor, whose integration may not be up yet
+  while Home Assistant starts. Then the interval keeps its stored window, as at any time
+  the sensor does not answer, and the warning is logged once. If that window is not the one
+  that is open now, start-up merges the right one after the change, and it may start then
+  (S1). A change that waits for its turn, behind another change
+  or a slow Workday answer, catches up to the moment it
+  runs, not the moment it was given, so it also wins over what fell due in between (#42).
+  A report of the target before start-up is answered a few seconds later, at start-up.
+- **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
+  end as `wanted_running` does: an end at or before now is over, whether or not it was
+  folded. The timer is then idle, and the rule for an idle timer applies (R7 and the
+  documented "adding to a timer that is not running starts it"): a positive delta runs the
+  target for the added time, counted from now, and a negative one changes nothing. A
+  change made while starting catches up first (see the ruling above), so `add` never meets
+  a passed end there. It meets one only in a race: `add` was given while the countdown
+  still ran, and waited for the lock behind a slow call until after the end. The lock wakes
+  its waiters in the order they came, so the alarm of the end, queued later, runs after
+  `add`: nothing that the end would fold is missed, and no S4 suppression either. The
+  difference is the time. The added minutes count from when the command ran (late by the
+  wait for the lock), not from the old end, and the countdown's beginning
+  (`started_at`) starts again. #42 tracks carrying out a command at the moment it was
+  given, which settles this race.
+  Why: an end that has passed is over for every other judgement (`wanted_running`,
+  `run_open`, a pending command that falls due).
+  Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
+  the next fold instead of being stopped at once. In the race above, the target runs
+  longer, by the wait for the lock, than with the command dated when it was given, and the
+  card's progress starts again.
+- **Every fold says what came due while the target is away, and a fold says it only about
+  a target that has reported "unavailable".** `_execute_fold(before, now, effects)` logs it
+  (`_log_due_while_unavailable`) and then carries out the effects. All folds pass through
+  it: a tick (`_fold_due`: the alarm, the refresh of the windows, the switching off of an
+  interval, and the catch-up of a change made while starting), the first observation of the
+  target at start-up (`_handle_started`) and each report of it (`_handle_state_change`),
+  with the `now` the fold observed at. Before, only the tick logged, so a countdown or a
+  command that came due while Home Assistant was down, and a command that fell due as the
+  target dropped off, went unsaid. The three texts are unchanged.
+  A fold before start-up says nothing. The catch-up of a change made while starting is
+  such a fold, and so is an alarm that fires before start-up: the target has not been
+  seen (`last_actual is None`), so it is not known to be unavailable, and "while it is
+  unavailable" would be a guess. Start-up logs what it folds itself, once: whatever fell
+  due since the last change made while starting, judged by the state it observes. What an
+  earlier fold took is not logged again, since it is no longer there to be found due.
+  Why: #13, and a log that stays true. Nothing else shows that a switch waits for the
+  target to come back (R10). A fold before start-up cannot tell the user that the target is
+  away. What it folds is also overridden by the change that comes after it, so "the timer
+  ended; it is turned off when it is back" could be false by the time start-up knows the
+  target is unavailable: "Run for 30" came after the end, and the target is turned on.
+  Cost if wrong: a countdown, a command or a window start that falls due after the first
+  change made while starting, but before start-up, is folded by its alarm in the core only. If the target
+  then turns out to be unavailable, the log does not mention it, though the target is
+  switched all the same when it is back. Home Assistant starts within minutes, and a
+  change made meanwhile is rare.
+- **The settings are filtered when they are sent, whoever owes them.** `_execute` judges the
+  settings of every `TurnOn` and `ApplySettings` against what the target takes at that
+  moment (`_settings_the_target_takes`, through `validate_settings`), each setting alone, as
+  the form offers them, and sends the ones it takes. That holds for settings of every
+  origin: a `run`, a pending command, a window, and settings carried over from the file. A
+  window carries the settings of its interval as saved, and nothing filters them when it is
+  worked out. `async_run` and `async_add_command` still refuse, at once, the settings that
+  the target does not take when the request is made.
+  A setting that is left out is said once, as a warning that names the target and the
+  setting: "climate.ac cannot take the setting hvac_mode=cool now; it is left out". The
+  controller remembers the pair of name and value while it stays left out. A later call that
+  carries the name and finds it taken forgets every pair of that name, so a setting that
+  was left out, then taken with another value, then left out again is said again. The memory
+  is in the controller and not stored, so it lasts for one load of the timer: a restart or a
+  reload says a setting that is still missing once more. The warning names no interval or
+  command, since any origin may owe the setting.
+  Settings that were all left out count as delivered. The turn-on goes out plain, or an
+  `ApplySettings` with nothing left makes no call, and the core is told `settings_applied`
+  as for any delivery: it clears what is owed and touches no allowance. A setting that
+  nobody can send must not be owed, sent again and given up on.
+  Why: #18. Only a window was filtered, and when it was worked out, not when it was sent.
+  A pending command whose mode was renamed failed its call every time. A window worked out
+  while the target showed no modes lost the settings until the next window refresh.
+  Sending is the one place all settings pass through, and the moment at which what the
+  target takes is what matters.
+  Cost if wrong: a setting that comes and goes between two calls is warned about again. An
+  integration that reports the device as available before it lists its modes gets its
+  turn-on without the setting, which is not sent again later: it counts as delivered.
+  Start-up and a return from unavailable do not lose settings this way. The core sends
+  nothing to a target that is away or has not been seen (`observe`, `_want`,
+  `_deliver_settings`), and Home Assistant keeps the capability attributes on an
+  unavailable state and on one restored from the registry. So do not keep a setting owed
+  for the sake of a target that cannot take it: it would be sent again until the allowance
+  gives up.
+  Tests: `test_a_due_command_whose_mode_was_renamed_turns_on_without_it`,
+  `test_a_running_ac_that_lost_the_only_setting_of_a_command_gets_no_call`,
+  `test_a_setting_left_out_is_said_once_when_the_turn_on_is_sent_again`,
+  `test_a_mode_left_out_is_said_again_after_another_mode_is_taken`,
+  `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
+  `test_setting_that_comes_back_and_goes_again_is_said_again`,
+  `test_a_climate_without_capabilities_keeps_the_settings_of_its_window`.
+- **A timer whose target was deleted stays loaded and switches nothing, with a repair that
+  deletes it.** The repair is "The device of timer X was deleted" (`target_deleted_<entry>`,
+  severity error, fixable). Its fix has one step, which shows what is deleted; submitting it
+  removes the config entry, and so the entities, the intervals and the stored files. A timer
+  that was already deleted on its integration page, with the repair still open, aborts with
+  `timer_gone`. A step that is shown again or submitted once its issue is gone aborts with
+  `issue_gone`, which says only that the problem is no longer open: the target may be
+  back, or the timer was unloaded (disabled, or reloaded and not yet checked again). So a
+  window of the repair that was left open does not delete a timer that works again. The
+  decisions:
+  - The timer keeps its entities and accepts commands, as for an unavailable target (R10).
+    The controller has no gate of its own. A deleted target has no state, so the core takes
+    it for a target that is away: a command, the end of a countdown and the start of a
+    window are carried in the core and sent when the target is back. Before start-up the
+    target is unseen and the gate of the ruling on start-up holds. A report of the target
+    that waited for the lock while it was deleted is read as the target being gone, not as
+    the state it carries (`_handle_state_change`), or its "off" would make the core send the
+    turn-on that failed to an entity that is not there. The log says it (a warning when the
+    target is deleted, an info line when it is back), and so does the repair.
+  - It is checked at start-up (`_handle_started`), not at the top of set-up. A target that is
+    not in the registry has no state until its integration has set up, and an entity of YAML
+    without a unique id is never in the registry. The target is there when it has a registry
+    entry or a state (`_target_exists`). It is deleted live when the registry removes it
+    (`source_entity_removed` of `async_handle_source_entity_changes`). An entity of YAML
+    that loses its state while Home Assistant runs has no registry event to tell it: it is
+    an unavailable target until the next start, which finds it gone.
+  - A state ends it: the report of a target that exists, judged by what exists when the
+    report is read and not by the report alone, since a report may have waited for the lock
+    while the target was deleted. A registry entry created for the target ends it too, by
+    reloading the timer (`_follow_target_restored`), which also puts its entities back on
+    the target's device. Only the same entity id counts. A device added again under another
+    entity id leaves the repair standing: the user deletes the timer and adds it again.
+  - The issue lives with the loaded timer: it is cleared at unload and raised again at
+    set-up, so a reload never leaves a stale one and a restart finds it again. It is not
+    persistent. Removing the entry clears it as well. `_follow_target_gaining_a_device` now
+    follows registry updates only, as a created entry is the restored handler's, and two
+    handlers would reload the timer twice.
+  - The timer's entities stay where they are when the entity is deleted: the controller is
+    told, and the helper's default of unlinking them is not wanted. Home Assistant unlinks
+    them if the device itself is removed, as it does for the entities of any other
+    integration on it. At the next start, the entities of a timer whose target has no
+    registry entry are put on the device made for it, as for any target that is on none
+    (`timer_device`); the reload that a created entry brings moves them back
+    (`remove_fallback_device`). The test of 1.0.0 that expected the entities to be unlinked
+    when only the entity is deleted is changed to match.
+  - A registry entry created for a target that never had one, say a template entity that is
+    given a unique id later, also reloads the timer once. `_follow_target_restored` does not
+    tell the two apart.
+  Why: #10. Before this the timer loaded, kept its entities and drove nothing, and nothing
+  told the user. The repair names the timer and says what it does meanwhile; the user can
+  restore the device or delete the timer from the same place.
+  Cost if wrong: a user who never opens Repairs sees a timer counting down on nothing, and a
+  command given to it waits for a device that may never be back. A device re-added under a
+  new entity id keeps the repair until the user deletes the timer.
+  Tests: `test_deleting_the_target_raises_a_repair_that_names_the_timer`,
+  `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`,
+  `test_a_report_queued_before_the_deletion_is_read_as_a_boiler_that_is_gone`,
+  `test_deleting_the_timer_on_the_integration_page_clears_the_repair`,
+  `test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing`.
+- **An unreadable stored timer is reset only by the user, through a repair, and the reset
+  drops the whole file.** A stored timer that cannot be used raises the repair "The stored
+  state of the timer X cannot be read" (`stored_timer_invalid_<entry>`, severity error,
+  fixable), and the set-up fails with the same reason (`StoredTimerInvalid`, a
+  `ConfigEntryError`), so the entry stays in `SETUP_ERROR`. The reason is the English text
+  of the error, also in the Russian message and the repair: it is for the bug report of a
+  defect, not for the user. The fix, "Reset the stored timer", has one step, which shows
+  the reason and what is kept. Submitting it deletes the file and reloads the entry. It
+  shares its steps with the fix of a deleted target. A timer deleted meanwhile aborts with
+  `timer_gone`. A step shown again or submitted once its issue is gone aborts with
+  `issue_gone`, so a window of the repair left open after the file was put right, or after
+  another window reset it, does not reset a timer that works. A reload that fails after the
+  reset (the timer cannot be set up for another reason, say an interval by working days
+  and no Workday sensor) aborts with `reload_failed`, which says that the file is reset
+  and that the timer's page has the reason, instead of ending as if the timer were fine.
+  The decisions:
+  - A missing field is as unreadable as a file that contradicts itself, and so is a field of
+    a type that no timer writes. The reason of a missing field is "the field X is missing",
+    and "the field X of a pending command is missing" (or "of a schedule window") for a
+    field inside one. For a wrong type it is the text Python gives. Neither is a bare
+    `KeyError` or `TypeError` in the log.
+  - A file that is not valid JSON is not this repair. Home Assistant's `Store` renames it
+    (`.corrupt.<time>`), raises its own `storage_corruption` repair and returns no data, so
+    the timer starts idle and every interval is on, without asking.
+  - The entry, its intervals (subentries) and the runtime file are kept. The countdown, the
+    pending commands and the flags of the switched-off intervals are lost, because nothing
+    in a file that contradicts itself can be trusted. Every interval is on again.
+  - Nothing resets the file but the user. The timer does not drop a file it cannot read on
+    its own, since the countdown and the commands in it may be worth keeping to someone who
+    can repair it by hand.
+  - The issue is raised at each failed set-up and is not persistent. A good load clears it,
+    as does removing the entry. A file put right by hand and a reload end the repair, and a
+    step shown again then aborts with `issue_gone`. A timer disabled while it failed to set
+    up keeps the repair until it is enabled, since Home Assistant runs no unload of ours
+    for an entry that never loaded; the file is still unreadable, so the text stays true.
+  - `async_create_fix_flow` refuses data without a known `kind` with one `ValueError`,
+    whether the `kind` is missing or unknown.
+  Why: #17. Before this the user was told to remove the timer and add it again, which also
+  loses the intervals and the runtime total that were fine.
+  Cost if wrong: a user loses the pending commands of a file that was only partly wrong.
+  Tests: `test_a_stored_timer_that_cannot_be_read_raises_a_repair`,
+  `test_a_stored_timer_missing_a_field_raises_the_same_repair`,
+  `test_a_stored_field_of_the_wrong_type_raises_the_same_repair`,
+  `test_a_field_missing_inside_a_command_or_window_says_whose_it_is`,
+  `test_resetting_the_stored_timer_keeps_the_entry_and_its_intervals`,
+  `test_a_stored_timer_that_is_put_right_clears_the_repair`,
+  `test_deleting_a_timer_whose_stored_timer_cannot_be_read_clears_the_repair`,
+  `test_the_reset_of_a_timer_deleted_meanwhile_does_nothing`,
+  `test_a_reset_shown_again_after_the_file_was_put_right_does_nothing`,
+  `test_a_reset_dialog_left_open_after_the_file_was_put_right_resets_nothing`,
+  `test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing`,
+  `test_a_reset_after_which_the_timer_does_not_load_does_not_say_it_worked`,
+  `test_an_issue_with_no_known_kind_has_no_fix`.
+- **Windows keep the old time zone after "Reload core configuration" until Home Assistant
+  signals it (#14, upstream).** Home Assistant 2026.10.4, 2026.11.0b1 and 2026.11.0b2 fire
+  nothing when that reload changes the zone: `_async_handle_reload_config` calls
+  `async_process_ha_core_config`, which sets the zone through `Config.async_set_time_zone`,
+  and that only calls `dt_util.set_default_time_zone`. `EVENT_CORE_CONFIG_UPDATE`, which
+  Timerify follows, comes only from `Config.async_update`, the settings page. Following
+  `EVENT_CALL_SERVICE` for `homeassistant.reload_core_config` was rejected: it fires before
+  the handler runs, so the zone has not changed yet, and waiting after it would be a guess.
+  The issue is labelled `upstream`; reporting it to Home Assistant is the owner's call.
+  Cost if wrong: after a YAML change of the zone and that reload, windows run in the old
+  zone until a window ends, the Workday sensor reports or the timer reloads.

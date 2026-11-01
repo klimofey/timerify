@@ -128,16 +128,17 @@ async def test_target_removed_from_its_device_gives_timer_a_device_of_its_own(
     assert entry.state is ConfigEntryState.LOADED
 
 
-async def test_target_removed_leaves_timer_entities_without_a_device(
+async def test_target_deleted_leaves_timer_entities_on_its_device(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
-    """The timer's entities stop belonging to the device of a target that is gone."""
+    """The timer's entities stay on the device of a target that is deleted. The
+    repair tells the user; Home Assistant unlinks the entities only when the device
+    itself is removed (see `test_repairs.py`)."""
     entry = await setup_target()
 
-    er.async_get(hass).async_remove(TARGET_ID)
-    await hass.async_block_till_done()
+    await fake_target.delete()
 
-    assert {e.device_id for e in timer_entities(hass, entry)} == {None}
+    assert {e.device_id for e in timer_entities(hass, entry)} == {fake_target.device_id}
     assert hass.states.get(SENSOR) is not None
 
 

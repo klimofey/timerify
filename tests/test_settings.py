@@ -5,6 +5,7 @@ from typing import Any
 
 import probatio
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.light.const import ColorMode
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
@@ -17,7 +18,10 @@ from .helpers import (
     AC_NUMBER,
     NUMBER,
     TURN_ON,
+    add_command,
+    advance,
     call_service,
+    saved,
     set_number,
     start_call_service,
     state_of,
@@ -375,10 +379,39 @@ async def test_settings_that_keep_failing_are_given_up_on(
     asked = 1 + MAX_AUTOMATIC_RESENDS
     assert fake_climate.call_data == [COOL] * asked
     assert timerify_warnings(caplog)[-1] == (
-        "climate.ac did not take its settings after 4 attempts; Timerify will try"
-        " again when it reports a change or on the next command"
+        "climate.ac did not take its settings after 4 attempts; Timerify will not"
+        " send them again until it is asked again"
     )
     assert len(timerify_warnings(caplog)) == asked + 1
+
+
+async def test_run_asked_while_the_ac_is_away_sends_given_up_settings_when_it_is_back(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Timerify gave up on the settings of an air conditioner that rejects them. The
+    air conditioner drops off Wi-Fi, and the user asks to run it again. That is asking
+    again: when it is back, the settings are sent."""
+    await setup_target(target=AC_ID)
+    await fake_climate.set_state("heat")
+    fake_climate.fail_next_call(service="set_hvac_mode")
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, hvac_mode="cool")
+    for signal in range(MAX_AUTOMATIC_RESENDS):
+        fake_climate.fail_next_call(service="set_hvac_mode")
+        await fake_climate.set_state("heat", signal=signal)
+    await fake_climate.set_state("heat", signal=MAX_AUTOMATIC_RESENDS)
+    asked = 1 + MAX_AUTOMATIC_RESENDS
+    assert fake_climate.call_data == [COOL] * asked
+    await fake_climate.set_state("unavailable")
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, minutes=30)
+    assert fake_climate.call_data == [COOL] * asked
+
+    await fake_climate.set_state("heat")
+
+    assert fake_climate.call_data == [COOL] * (asked + 1)
+    assert state_of(hass, AC_ID) == "cool"
+    assert state_of(hass, AC_NUMBER) == "30"
 
 
 async def test_service_that_keeps_raising_on_settings_logs_its_traceback_once(
@@ -408,6 +441,157 @@ async def test_service_that_keeps_raising_on_settings_logs_its_traceback_once(
     await call_service(hass, "run", {"entity_id": AC_NUMBER}, hvac_mode="fan_only")
 
     assert len([record for record in caplog.records if record.exc_info]) == 2
+
+
+NO_COOLING = ["off", "heat", "fan_only"]
+"""The modes of the air conditioner after an update of its integration took cooling
+away."""
+
+
+async def test_a_due_command_whose_mode_was_renamed_turns_on_without_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A command was made while the air conditioner offered cooling. An update of its
+    integration renames the mode before the command comes due. The air conditioner
+    is turned on at 24 degrees, which it can still do, instead of failing on the
+    mode, and the log names the setting that is left out."""
+    await setup_target(target=AC_ID)
+    await add_command(
+        hass,
+        AC_NUMBER,
+        action="on",
+        delay=10,
+        minutes=30,
+        hvac_mode="cool",
+        temperature=24,
+    )
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.write("off")
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data == [
+        ("turn_on", {}),
+        ("set_temperature", {"temperature": 24.0}),
+    ]
+    assert state_of(hass, AC_ID) == "heat"
+    assert state_of(hass, AC_NUMBER) == "30"
+    assert timerify_warnings(caplog) == [
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    ]
+
+
+async def test_a_running_ac_that_lost_the_only_setting_of_a_command_gets_no_call(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The air conditioner runs when a command that only sets cooling comes due, and
+    it no longer offers cooling. Nothing is sent, the log says once what is left out,
+    and nothing stays owed: a later report of the air conditioner sends no call."""
+    entry = await setup_target(target=AC_ID)
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, minutes=60)
+    await add_command(hass, AC_NUMBER, action="on", delay=10, hvac_mode="cool")
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.write("heat")
+    calls_before = list(fake_climate.call_data)
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data == calls_before
+    assert timerify_warnings(caplog) == [
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    ]
+    assert saved(hass_storage, entry)["owed_settings"] == {}
+
+    await fake_climate.set_state("heat", signal=70)
+
+    assert fake_climate.call_data == calls_before
+    assert timerify_warnings(caplog) == [
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    ]
+
+
+async def test_a_setting_left_out_is_said_once_when_the_turn_on_is_sent_again(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The only setting of a command is left out, and the air conditioner ignores the
+    plain turn-on. The setting stays owed while the air conditioner is off, and the
+    turn-on that its next report brings does not say it again. Once the air
+    conditioner is on, nothing is owed and a later report sends no call."""
+    entry = await setup_target(target=AC_ID)
+    await add_command(
+        hass, AC_NUMBER, action="on", delay=10, minutes=30, hvac_mode="cool"
+    )
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.write("off")
+    fake_climate.ignore_next_call()
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data == [("turn_on", {})]
+    assert state_of(hass, AC_ID) == "off"
+    assert saved(hass_storage, entry)["owed_settings"] == {"hvac_mode": "cool"}
+
+    await fake_climate.set_state("off", signal=70)
+
+    assert fake_climate.call_data == [("turn_on", {})] * 2
+    assert state_of(hass, AC_ID) == "heat"
+    assert saved(hass_storage, entry)["owed_settings"] == {}
+    await fake_climate.set_state("heat", signal=60)
+    assert fake_climate.call_data == [("turn_on", {})] * 2
+    assert timerify_warnings(caplog) == [
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    ]
+
+
+async def test_a_mode_left_out_is_said_again_after_another_mode_is_taken(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three commands were made while the air conditioner offered cooling: cooling,
+    then heating, then cooling again. Its integration takes cooling away. The first
+    cooling is left out and said. The heating is taken, so the log has no memory of the
+    cooling any more, and the second cooling is left out and said again."""
+    await setup_target(target=AC_ID)
+    for delay, mode in [(10, "cool"), (20, "heat"), (30, "cool")]:
+        await add_command(hass, AC_NUMBER, action="on", delay=delay, hvac_mode=mode)
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.write("off")
+    cooling_left_out = (
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
+    )
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data == [("turn_on", {})]
+    assert timerify_warnings(caplog) == [cooling_left_out]
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data[1:] == [("set_hvac_mode", {"hvac_mode": "heat"})]
+    assert timerify_warnings(caplog) == [cooling_left_out]
+
+    await advance(hass, freezer, minutes=10)
+
+    assert fake_climate.call_data[2:] == []
+    assert state_of(hass, AC_ID) == "heat"
+    assert timerify_warnings(caplog) == [cooling_left_out, cooling_left_out]
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -33,6 +33,7 @@ from .helpers import (
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_command,
     add_interval,
     advance_to,
     call_service,
@@ -49,6 +50,7 @@ from .helpers import (
     set_switch,
     state_of,
     storage_key,
+    window_json,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -660,6 +662,60 @@ async def titled_schedule(
     await retitle_interval(hass, entry, morning, "Morning")
     await retitle_interval(hass, entry, evening, "Evening")
     return entry, morning, evening
+
+
+async def test_the_schedule_switched_on_while_starting_comes_after_what_came_due(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The schedule is off and a pending "off" is due at 06:35 when Home Assistant
+    stops. While it is starting at 06:40, a title that no interval has is refused and
+    changes nothing. Then the schedule is switched on: the "off" came first, so the
+    morning window, open now, runs the boiler to its end, as with Home Assistant
+    running."""
+    entry, morning, evening = await titled_schedule(hass, freezer, setup_target)
+    await entry.runtime_data.async_set_schedule_enabled(False)
+    await add_command(hass, NUMBER, action="off", delay=35)
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    freezer.move_to(local(SUNDAY, "06:40"))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    controller = entry.runtime_data
+    stored = copy.deepcopy(saved(hass_storage, entry))
+
+    with pytest.raises(ServiceValidationError):
+        await controller.async_set_schedule_enabled(True, "Lunch")
+
+    assert saved(hass_storage, entry) == stored
+
+    assert await controller.async_set_schedule_enabled(True) == ("Morning", "Evening")
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "07:15"),
+        started_at=iso(SUNDAY, "06:30"),
+        pending="on",
+        scheduled_by=morning,
+        windows=[
+            window_json(
+                morning, local(SUNDAY, "06:30"), local(SUNDAY, "07:15"), started=True
+            ),
+            window_json(evening, local(SUNDAY, "18:00"), local(SUNDAY, "19:00")),
+        ],
+    )
+
+    await fake_target.set_state("off")
+    await hass.async_start()
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == [TURN_ON]
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
 def schedule_switches(hass: HomeAssistant) -> tuple[str, str]:

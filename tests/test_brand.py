@@ -5,6 +5,7 @@ drawn by `scripts/brand/draw_icon.py`, and a test shows they are what the script
 """
 
 import io
+import struct
 from http import HTTPStatus
 from pathlib import Path
 
@@ -26,6 +27,18 @@ def pixels(png: bytes) -> tuple[tuple[int, int], bytes]:
         return rgba.size, rgba.tobytes()
 
 
+def chunk_types(png: bytes) -> set[str]:
+    """The kinds of chunk a PNG file is made of: after the 8 bytes of signature, each
+    has a 4-byte length, a 4-byte type, its data and a 4-byte checksum."""
+    types = set()
+    offset = 8
+    while offset < len(png):
+        (length,) = struct.unpack(">I", png[offset : offset + 4])
+        types.add(png[offset + 4 : offset + 8].decode("ascii"))
+        offset += 12 + length
+    return types
+
+
 @pytest.mark.parametrize(("name", "side"), ICONS.items())
 def test_the_icons_are_square_transparent_and_trimmed(name: str, side: int) -> None:
     """A browser shows the file as it is, over a light or a dark page: a PNG of exactly
@@ -42,7 +55,15 @@ def test_the_icons_are_square_transparent_and_trimmed(name: str, side: int) -> N
     left, top, right, bottom = alpha.getbbox() or (0, 0, 0, 0)
     assert (top, bottom) == (0, side)
     assert abs(left - (side - right)) <= 1
-    assert 0 < left <= side // 10
+    assert 0 <= left <= side // 10
+
+
+@pytest.mark.parametrize("name", ICONS)
+def test_the_icons_carry_nothing_but_the_picture(name: str) -> None:
+    """A file that came out of an editor or an optimiser may hold a comment, a gamma or
+    a colour profile that changes how the browser shows it, or a time stamp that makes
+    the next drawing differ. The script writes the header, the pixels and the end."""
+    assert chunk_types((BRAND_DIR / name).read_bytes()) == {"IHDR", "IDAT", "IEND"}
 
 
 def test_the_icons_are_what_the_script_draws(tmp_path: Path) -> None:

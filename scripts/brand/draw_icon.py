@@ -6,11 +6,11 @@ the dialog that adds the integration, once the integration's `brand` folder hold
     uv run python -m scripts.brand.draw_icon
 
 The two files, `icon.png` and `icon@2x.png`, are the sizes the brands of Home Assistant
-ask for; it answers a request for a `logo` or a `dark_` variant with them. The mark is
-drawn with one colour, which reads on a light page and on a dark one, over a transparent
-background with no text, so that it is clear at 16 pixels as well as at 512. It is
-taller than wide, because of the stem: it fills the height of the square and stands in
-the middle of the width, with no empty border above or below.
+ask for; Home Assistant answers a request for a `logo` or a `dark_` variant with them.
+The mark is drawn with one colour, which reads on a light page and on a dark one, over a
+transparent background with no text, so that it is clear at 16 pixels as well as at 512.
+It is taller than wide, because of the stem: it fills the height of the square and
+stands in the middle of the width, with no empty border above or below.
 
 The mark is one colour, so what is drawn is how much of each pixel it covers: a mask,
 at four times the size, shrunk with a Lanczos filter for smooth edges, and used as the
@@ -35,6 +35,7 @@ ICONS: Final[Mapping[str, int]] = {"icon.png": 256, "icon@2x.png": 512}
 ACCENT: Final = (13, 148, 136)
 """A teal that reads on white and on near-black, and is not Home Assistant's blue."""
 OPAQUE: Final = 255
+"""The opacity, out of 255, of the mark itself."""
 TRACK_OPACITY: Final = 72
 """The opacity, out of 255, of the quarter of the ring that is not filled."""
 SUPERSAMPLING: Final = 4

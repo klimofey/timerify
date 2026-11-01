@@ -124,6 +124,21 @@ def incomplete(message: str) -> dict[str, str]:
     return {"code": "timer_incomplete", "message": message}
 
 
+async def restart_without_target(
+    hass: HomeAssistant, setup_target: SetupTarget
+) -> None:
+    """Set up the boiler's timer with its target stored by registry id, delete the
+    target from the registry and load the entry again, as after a restart; the entry
+    then fails to set up, and the number is still the timer's."""
+    registry = er.async_get(hass)
+    target = registry.async_get(TARGET_ID)
+    assert target is not None
+    entry = await setup_target(target=target.id)
+    registry.async_remove(TARGET_ID)
+    await hass.config_entries.async_reload(entry.entry_id)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+
+
 def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
     """What Timerify tells about the boiler's timer, for a timer that is set up with
     the defaults of the scenarios; `different` changes what the scenario changes."""
@@ -380,11 +395,7 @@ async def test_user_who_may_not_read_the_number_of_an_incomplete_timer_is_refuse
 ) -> None:
     """That a number is a timer's is not told to a user who may not read it, even for
     a timer that is incomplete."""
-    registry = er.async_get(hass)
-    target = registry.async_get(TARGET_ID)
-    assert target is not None
-    await setup_target(target=target.id)
-    registry.async_remove(TARGET_ID)
+    await restart_without_target(hass, setup_target)
     may_read_only(hass_read_only_user, SENSOR, NEXT)
 
     assert await refused(read_only_client, NUMBER) == UNAUTHORIZED
@@ -578,24 +589,18 @@ async def test_timer_that_failed_to_set_up_is_still_found(
     assert await found(client, NUMBER) == told_about(entry)
 
 
-async def test_timer_whose_target_was_deleted_is_incomplete(
+async def test_timer_whose_target_registry_id_is_gone_is_incomplete(
     hass: HomeAssistant,
     client: MockHAClientWebSocket,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """A timer names its target by registry id, so that it follows a rename. After the
-    target is deleted and Home Assistant starts again, the timer does not load and has
-    no target to tell the card of, but its number is still a timer's: the card is told
-    the timer is incomplete, which is not what it is told of a number that is no
-    timer's."""
-    registry = er.async_get(hass)
-    target = registry.async_get(TARGET_ID)
-    assert target is not None
-    entry = await setup_target(target=target.id)
-    registry.async_remove(TARGET_ID)
-    await hass.config_entries.async_reload(entry.entry_id)
-    assert entry.state is ConfigEntryState.SETUP_ERROR
+    """The option of the target may hold a registry id as well as an entity id. When
+    the id is gone from the registry, the timer has no target to resolve and does not
+    load, but its number is still a timer's: the card is told the timer is incomplete,
+    which is not what it is told of a number that is no timer's. A target stored as an
+    entity id resolves whether or not the entity exists, so it is not this case."""
+    await restart_without_target(hass, setup_target)
 
     assert await refused(client, NUMBER) == incomplete(
         f"The target of the Timerify timer of {NUMBER} is not in the entity registry"

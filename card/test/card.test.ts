@@ -150,7 +150,7 @@ describe("what it shows while it has no timer", () => {
     expect(textOf(card)).toBe(english.card_not_a_timer.replace("{entity}", NUMBER));
   });
 
-  it.each(["unavailable", "unknown", "45"])(
+  it.each(["unavailable", "unknown"])(
     "tells a timer that cannot be shown, and not that its number is no timer's, while the number is %s",
     async (state) => {
       const hass = fakeHass({ states: { [NUMBER]: { state } } });

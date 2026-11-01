@@ -27,22 +27,23 @@ class DeleteTimerFlow(RepairsFlow):
     ) -> RepairsFlowResult:
         """Show what will be deleted; once the user submits, delete it.
 
-        The timer may be gone by then, deleted on its integration page while the
-        repair stood open: the fix then does nothing and says so. A step that is shown
-        again without its issue says so as well, since it could only show blanks in
-        place of the names of the timer and the entity.
+        The fix does nothing, and says why, when its timer is gone, deleted on its
+        integration page while the repair stood open, or when the problem is solved: the
+        target is back and the issue went away, while the timer works. A step that is
+        shown again then would only show blanks in place of the names of the timer and
+        the entity.
         """
+        if self.hass.config_entries.async_get_entry(self._entry_id) is None:
+            return self.async_abort(reason="timer_gone")
         if user_input is None:
             issue = ir.async_get(self.hass).async_get_issue(DOMAIN, self.issue_id)
             if issue is None:
-                return self.async_abort(reason="timer_gone")
+                return self.async_abort(reason="issue_gone")
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=probatio.Schema({}),
                 description_placeholders=issue.translation_placeholders,
             )
-        if self.hass.config_entries.async_get_entry(self._entry_id) is None:
-            return self.async_abort(reason="timer_gone")
         await self.hass.config_entries.async_remove(self._entry_id)
         return self.async_create_entry(data={})
 

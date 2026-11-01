@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.components.repairs import repairs_flow_manager
+from homeassistant.components.repairs import RepairsFlowManager, repairs_flow_manager
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -414,26 +414,55 @@ async def test_the_repair_of_a_timer_deleted_meanwhile_does_nothing(
     assert done["reason"] == "timer_gone"
 
 
-async def test_a_repair_that_is_shown_again_without_its_issue_does_nothing(
-    hass: HomeAssistant,
-    repairs: None,
-    fake_target: FakeTarget,
-    setup_target: SetupTarget,
-) -> None:
-    """The user opens the repair, the timer is deleted on its integration page, and the
-    dialog asks for its step again: it aborts, rather than show a form with the names of
-    the timer and the entity left blank."""
-    entry = await setup_target()
-    await fake_target.delete()
+async def open_repair_dialog(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> tuple[RepairsFlowManager, str]:
+    """Open the repair of the timer's deleted target as the dialog does; return the
+    manager of the fixes and the id of the flow, which shows the form."""
     issue = target_deleted_issue(hass, entry)
     assert issue is not None
     manager = repairs_flow_manager(hass)
     assert manager is not None
     flow = await manager.async_init(DOMAIN, context={"issue_id": issue.issue_id})
     assert flow["type"] == "form"
+    return manager, flow["flow_id"]
+
+
+async def test_a_repair_shown_again_after_its_timer_was_deleted_does_nothing(
+    hass: HomeAssistant,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair, the timer is deleted on its integration page, and the
+    dialog asks for its step again: it says the timer is gone, rather than show a form
+    with the names of the timer and the entity left blank."""
+    entry = await setup_target()
+    await fake_target.delete()
+    manager, flow_id = await open_repair_dialog(hass, entry)
     await hass.config_entries.async_remove(entry.entry_id)
 
-    shown_again = await manager.async_configure(flow["flow_id"], None)
+    shown_again = await manager.async_configure(flow_id, None)
 
     assert shown_again["type"] == "abort"
     assert shown_again["reason"] == "timer_gone"
+
+
+async def test_a_repair_shown_again_after_the_boiler_is_back_does_nothing(
+    hass: HomeAssistant,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair, the device is added again, and the dialog asks for its
+    step again: it says the problem is solved, and the timer is still there."""
+    entry = await setup_target()
+    await fake_target.delete()
+    manager, flow_id = await open_repair_dialog(hass, entry)
+    await fake_target.restore()
+
+    shown_again = await manager.async_configure(flow_id, None)
+
+    assert shown_again["type"] == "abort"
+    assert shown_again["reason"] == "issue_gone"
+    assert hass.config_entries.async_get_entry(entry.entry_id) is not None

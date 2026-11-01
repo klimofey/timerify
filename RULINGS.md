@@ -1936,8 +1936,8 @@ in `docs/followups.md`.
   severity error, fixable). Its fix has one step, which shows what is deleted; submitting it
   removes the config entry, and so the entities, the intervals and the stored files. A timer
   that was already deleted on its integration page, with the repair still open, aborts with
-  `timer_gone`, and so does a step that is shown again once its issue is gone. The
-  decisions:
+  `timer_gone`. A step that is shown again once its issue is gone, because the target came
+  back and the timer works, aborts with `issue_gone`. The decisions:
   - The timer keeps its entities and accepts commands, as for an unavailable target (R10).
     The controller has no gate of its own. A deleted target has no state, so the core takes
     it for a target that is away: a command, the end of a countdown and the start of a

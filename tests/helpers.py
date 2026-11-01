@@ -13,8 +13,10 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, section
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -339,6 +341,7 @@ async def restart_after(
     entry: ConfigEntry,
     *,
     while_down: Callable[[], None] | None = None,
+    issues_reloaded: bool = False,
     **delta: float,
 ) -> None:
     """Stop the entry, let `delta` pass with nobody listening, and start it again: a
@@ -348,8 +351,16 @@ async def restart_after(
     restored backup or an update of the target's integration that linked its entity to
     a device before Timerify set up. It runs once the entry has stopped, so nothing of
     Timerify's follows it.
+
+    `issues_reloaded` is for a restart of Home Assistant itself, not just of the entry:
+    it writes its issue registry down as it stops and reads it back as it starts,
+    which keeps an issue that is not persistent without its data, and inactive.
     """
     await hass.config_entries.async_unload(entry.entry_id)
+    if issues_reloaded:
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)
+        await hass.async_block_till_done()
+        await ir.async_load(hass)
     if while_down is not None:
         while_down()
     freezer.tick(timedelta(**delta))

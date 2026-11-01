@@ -16,8 +16,9 @@ STORED_TIMER_INVALID: Final = "stored_timer_invalid"
 
 SETTINGS_NOT_TAKEN: Final = "settings_not_taken"
 """The kind of the warning of a schedule interval whose settings the target does not
-take. It has no fix: it is not fixable, and its data only remembers the names of the
-settings it was raised with (`async_warned_settings`)."""
+take. It has no fix: it is not fixable. It is persistent, so that Home Assistant keeps
+it, with its Ignore and the names of the settings it was raised with, through a restart
+(`async_warned_settings`)."""
 
 type TimerIssueKind = Literal["target_deleted", "stored_timer_invalid"]
 """The kinds of issue that a timer has at most one of, and that the user can fix. The
@@ -67,20 +68,23 @@ def _async_raise(
     identifier: str,
     *,
     fixable: bool,
+    persistent: bool,
     severity: ir.IssueSeverity,
     data: IssueData | None,
     **placeholders: str,
 ) -> None:
-    """Raise the issue `identifier` of `kind` for the timer `entry`. It is not
-    persistent: the timer raises it again when it is set up, if it still stands. An
-    issue that exists is updated in place and keeps the Ignore of the user."""
+    """Raise the issue `identifier` of `kind` for the timer `entry`. An issue that
+    exists is updated in place and keeps the Ignore of the user. Home Assistant saves
+    a persistent issue whole and loads it back active after a restart; it saves any
+    other with its Ignore only and loads it back inactive, until the code raises it
+    again, which the timer does when it is set up, if the issue still stands."""
     ir.async_create_issue(
         hass,
         DOMAIN,
         identifier,
         data=data,
         is_fixable=fixable,
-        is_persistent=False,
+        is_persistent=persistent,
         severity=severity,
         translation_key=kind,
         translation_placeholders={"timer": entry.title, **placeholders},
@@ -99,6 +103,7 @@ def async_raise_target_deleted(
         TARGET_DELETED,
         issue_id(TARGET_DELETED, entry.entry_id),
         fixable=True,
+        persistent=False,
         severity=ir.IssueSeverity.ERROR,
         data=_fix_data(entry, TARGET_DELETED),
         target=target,
@@ -117,6 +122,7 @@ def async_raise_stored_timer_invalid(
         STORED_TIMER_INVALID,
         issue_id(STORED_TIMER_INVALID, entry.entry_id),
         fixable=True,
+        persistent=False,
         severity=ir.IssueSeverity.ERROR,
         data=_fix_data(entry, STORED_TIMER_INVALID),
         reason=reason,
@@ -134,14 +140,17 @@ def async_raise_settings_not_taken(
     """Warn the user that the target of the timer `entry` does not take the settings
     `names` of the interval `subentry`, which `settings` calls by their labels. The
     warning has no fix: the target taking them again, or the user choosing others,
-    makes it go. The names are kept with it, so that a load of the timer that finds it
-    can tell whether the settings grew."""
+    makes it go. The names are kept with it, so that a load of the timer that finds it,
+    also after a restart, can tell whether the settings grew. It is persistent for
+    that: Home Assistant would save a warning that is not without its data, and the
+    Ignore of the user would not survive the growth that follows a restart."""
     _async_raise(
         hass,
         entry,
         SETTINGS_NOT_TAKEN,
         interval_issue_id(entry.entry_id, subentry.subentry_id),
         fixable=False,
+        persistent=True,
         severity=ir.IssueSeverity.WARNING,
         data={_NAMES: _NAME_SEPARATOR.join(names)},
         interval=subentry.title,
@@ -164,20 +173,21 @@ def async_clear_settings_not_taken(
     ir.async_delete_issue(hass, DOMAIN, interval_issue_id(entry_id, subentry_id))
 
 
-def _names_of(issue: ir.IssueEntry) -> tuple[str, ...] | None:
-    """The names of the settings a warning was raised with; None when it keeps none."""
+def _names_of(issue: ir.IssueEntry) -> tuple[str, ...]:
+    """The names of the settings a warning was raised with; none for an issue that keeps
+    no names, which this code never raises. Then every setting counts as new."""
     names = issue.data.get(_NAMES) if issue.data else None
-    return tuple(names.split(_NAME_SEPARATOR)) if isinstance(names, str) else None
+    return tuple(names.split(_NAME_SEPARATOR)) if isinstance(names, str) else ()
 
 
 @callback
 def async_warned_settings(
     hass: HomeAssistant, entry_id: str
-) -> dict[str, tuple[str, ...] | None]:
+) -> dict[str, tuple[str, ...]]:
     """The warnings in the issue registry for the intervals of the timer `entry_id`,
-    also those that an earlier load of the timer raised: the names of the settings of
-    each, by the id of its interval. The names are None for a warning that Home
-    Assistant loaded from its file after a restart, which keeps no data."""
+    also those that an earlier load of the timer raised, or that Home Assistant loaded
+    from its file after a restart: the names of the settings of each, by the id of its
+    interval."""
     prefix = _interval_issue_prefix(entry_id)
     return {
         issue.issue_id.removeprefix(prefix): _names_of(issue)

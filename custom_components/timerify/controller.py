@@ -271,10 +271,10 @@ class TargetController:
         self._settings_warned = dict[str, tuple[str, ...]]()
         """The names of the settings that this load raised the warning of each interval
         with, by the id of its subentry (`_async_check_interval_settings`)."""
-        self._settings_warned_before = dict[str, tuple[str, ...] | None]()
-        """The warnings that an earlier load raised, with the names they were raised
-        with, or None when those are not known. This load judges each of them once, and
-        it moves to `_settings_warned` or is taken away
+        self._settings_warned_before = dict[str, tuple[str, ...]]()
+        """The warnings that an earlier load raised, or that Home Assistant kept through
+        a restart, with the names they were raised with. This load judges each of them
+        once, and it moves to `_settings_warned` or is taken away
         (`_reconcile_settings_warnings`)."""
         self._lock = asyncio.Lock()
         self._stopped = False
@@ -975,14 +975,13 @@ class TargetController:
         An unavailable or unknown target may say nothing of what it takes, and sends
         wait for it. So its verdict stays as it was: the names of the warning of the
         interval, as far as the interval still holds them. An interval with no such
-        warning, or one whose names are not known, cannot be judged until the target
-        reports.
+        warning cannot be judged until the target reports.
         """
         if not self._target_exists():
             return dict.fromkeys(self._intervals, ())
         if actual_state(self._hass.states.get(self.target_entity_id)) == "unavailable":
             return {
-                interval.id: self._held(interval, self._warned_with(interval.id))
+                interval.id: self._held(interval)
                 for interval in self._intervals.values()
             }
         return {
@@ -992,19 +991,16 @@ class TargetController:
             for interval in self._intervals.values()
         }
 
-    @staticmethod
-    def _held(
-        interval: Interval, names: tuple[str, ...] | None
-    ) -> tuple[str, ...] | None:
-        """The part of `names` that `interval` still has as settings."""
-        if names is None:
+    def _held(self, interval: Interval) -> tuple[str, ...] | None:
+        """The names of the warning of `interval`, as far as it still has them as
+        settings; None when it has no warning."""
+        if (names := self._warned_with(interval.id)) is None:
             return None
         return tuple(name for name in names if name in interval.settings)
 
     def _warned_with(self, subentry_id: str) -> tuple[str, ...] | None:
         """The names of the settings that the warning of the interval was last raised
-        with, by this load or an earlier one; None when there is none or they are not
-        known."""
+        with, by this load or an earlier one; None when there is none."""
         return self._settings_warned.get(
             subentry_id, self._settings_warned_before.get(subentry_id)
         )
@@ -1077,8 +1073,9 @@ class TargetController:
         """Take the warnings of an earlier load into this one.
 
         A warning outlives the unload, so that an Ignore the user chose survives the
-        reload that every change of an interval makes. Home Assistant keeps the Ignore
-        of an issue that is raised again, and forgets it when the issue is deleted. The
+        reload that every change of an interval makes, and a restart of Home Assistant,
+        which loads a persistent issue back whole. Home Assistant keeps the Ignore of
+        an issue that is raised again, and forgets it when the issue is deleted. The
         warning of an interval that is gone is taken away now. The others are
         remembered, with the names they were raised with, and the first judgement of
         this load changes or takes them away.

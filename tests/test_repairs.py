@@ -24,7 +24,6 @@ from homeassistant.config_entries import (
     ConfigEntryState,
     ConfigSubentry,
 )
-from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -1409,9 +1408,9 @@ async def test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up(
     fake_climate: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """The warning outlives the unload. The interval is deleted while the timer is not
-    loaded, so no reload follows: the next load takes its warning away and keeps the
-    other."""
+    """The warning outlives a restart of Home Assistant. The interval is deleted while
+    the timer is not loaded, so no reload follows: the next load takes its warning away
+    and keeps the other."""
     entry = await setup_target(target=AC_ID)
     gone = await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
     left = await add_interval(hass, entry, start="18:00", end="19:00", settings=COOL24)
@@ -1421,7 +1420,14 @@ async def test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up(
     def delete_the_interval() -> None:
         hass.config_entries.async_remove_subentry(entry, gone)
 
-    await restart_after(hass, freezer, entry, minutes=5, while_down=delete_the_interval)
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=delete_the_interval,
+    )
 
     assert open_issues(hass) == {f"settings_not_taken_{entry.entry_id}_{left}"}
 
@@ -1433,7 +1439,7 @@ async def test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up(
     setup_target: SetupTarget,
 ) -> None:
     """The AC's integration is updated while Home Assistant is down and offers cooling
-    again: the warning that outlived the unload is taken away at start-up."""
+    again: the warning that outlived the restart is taken away at start-up."""
     entry = await setup_target(target=AC_ID)
     await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
     await stop_offering_cooling(fake_climate)
@@ -1443,7 +1449,9 @@ async def test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up(
         fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
         fake_climate.write("off")
 
-    await restart_after(hass, freezer, entry, minutes=5, while_down=update_the_ac)
+    await restart_after(
+        hass, freezer, entry, minutes=5, issues_reloaded=True, while_down=update_the_ac
+    )
 
     assert open_issues(hass) == set()
 
@@ -1610,8 +1618,9 @@ async def test_a_setting_lost_while_down_returns_an_ignored_warning(
     fake_climate: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """The user ignored the warning about the HVAC mode. The fan mode is lost while Home
-    Assistant is down: the timer that loads again shows the warning again."""
+    """The user ignored the warning about the HVAC mode. Home Assistant restarts, and
+    the fan mode is lost while it is down: the warning comes back, naming both, and
+    the Ignore does not hide it."""
     entry = await setup_target(target=AC_ID)
     subentry_id = await add_interval(
         hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
@@ -1625,9 +1634,20 @@ async def test_a_setting_lost_while_down_returns_an_ignored_warning(
         fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
         fake_climate.write("off")
 
-    await restart_after(hass, freezer, entry, minutes=5, while_down=lose_the_fan_mode)
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=lose_the_fan_mode,
+    )
 
     assert await listed_warnings(client) == {key: False}
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "HVAC mode, Fan mode"
 
 
 async def test_renaming_an_interval_keeps_the_ignore_of_its_warning(
@@ -1657,16 +1677,122 @@ async def test_renaming_an_interval_keeps_the_ignore_of_its_warning(
     assert issue.translation_placeholders["interval"] == "Morning cooling"
 
 
-async def test_an_ignored_warning_survives_a_restart_with_the_ac_offline(
+async def test_an_ignored_warning_survives_a_restart_of_home_assistant(
     hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
     hass_ws_client: WebSocketGenerator,
     repairs: None,
     fake_climate: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """Home Assistant restarts while the AC is away. It loads the warning from its file
-    as a hidden issue with only the Ignore. The timer neither deletes it nor shows it
-    until the AC reports; then it is shown again, still ignored."""
+    """The user ignored the warning. Home Assistant restarts and the AC still lacks the
+    same settings: the warning is still ignored."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    await ignore_issue(client, key)
+
+    await restart_after(hass, freezer, entry, minutes=5, issues_reloaded=True)
+
+    assert await listed_warnings(client) == {key: True}
+
+
+async def test_an_ignored_warning_stays_ignored_when_a_setting_returns_while_down(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user ignored the warning about two settings. Home Assistant restarts, and
+    the AC takes one back meanwhile: the warning names the other and stays ignored."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    await ignore_issue(client, key)
+
+    def take_the_hvac_mode_back() -> None:
+        fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
+        fake_climate.write("off")
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=take_the_hvac_mode_back,
+    )
+
+    assert await listed_warnings(client) == {key: True}
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "Fan mode"
+
+
+async def test_a_warning_stays_shown_after_a_restart_with_the_ac_offline(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Home Assistant restarts while the AC is away. The warning is shown from the first
+    moment, with the settings it last named, and goes when the AC takes them again."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=lambda: fake_climate.write("unavailable"),
+    )
+
+    assert await listed_warnings(client) == {key: False}
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "HVAC mode"
+
+    fake_climate.capability_attributes = dict(AC_ATTRS)
+    await fake_climate.set_state("off")
+
+    assert await listed_warnings(client) == {}
+
+
+async def test_an_ignored_warning_survives_a_restart_with_the_ac_offline(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Home Assistant restarts while the AC is away. The warning is shown, still
+    ignored, and the AC that reports the same loss does not bring it back."""
     entry = await setup_target(target=AC_ID)
     subentry_id = await add_interval(
         hass, entry, start="06:30", end="07:15", settings=COOL24
@@ -1675,25 +1801,58 @@ async def test_an_ignored_warning_survives_a_restart_with_the_ac_offline(
     client = await hass_ws_client(hass)
     key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
     await ignore_issue(client, key)
-    await hass.config_entries.async_unload(entry.entry_id)
-    hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)
-    await hass.async_block_till_done()
-    await ir.async_load(hass)
 
-    fake_climate.capability_attributes = {}
-    fake_climate.write("unavailable")
-    await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=lambda: fake_climate.write("unavailable"),
+    )
 
-    kept = ir.async_get(hass).async_get_issue(DOMAIN, key)
-    assert kept is not None
-    assert kept.dismissed_version is not None
-    assert await listed_warnings(client) == {}
+    assert await listed_warnings(client) == {key: True}
 
-    fake_climate.capability_attributes = {**AC_ATTRS, "hvac_modes": NO_COOLING}
     await fake_climate.set_state("off")
 
     assert await listed_warnings(client) == {key: True}
+
+
+async def test_a_setting_lost_while_the_ac_is_offline_shows_an_ignored_warning(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Home Assistant restarts while the AC is away, and the AC reports with one more
+    setting lost. The warning names both, and the Ignore does not hide it."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    await stop_offering_cooling(fake_climate)
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    await ignore_issue(client, key)
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=5,
+        issues_reloaded=True,
+        while_down=lambda: fake_climate.write("unavailable"),
+    )
+
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    assert await listed_warnings(client) == {key: False}
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "HVAC mode, Fan mode"
 
 
 async def test_an_interval_renamed_while_the_ac_is_offline_renames_its_warning(

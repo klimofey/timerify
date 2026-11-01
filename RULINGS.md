@@ -2182,8 +2182,8 @@ in `docs/followups.md`.
   the language of the house. Its title carries the interval, so that two warnings of a
   timer differ in the Repairs list, and both are quoted in the texts, because a generated
   title has a comma in it. It is a Repairs issue with severity warning and not fixable,
-  so it has no fix flow (spec). Its data holds the names it was raised with. It is
-  changed only when the names or the interval change, and it is judged after each report
+  so it has no fix flow (spec). It is persistent, and its data holds the names it was
+  raised with. It is changed only when the names or the interval change, and it is judged after each report
   of the target and after the start-up fold, so that reading the texts never delays what
   the timer owes the target. An interval deleted but not yet reloaded gets no warning.
   Deleting the interval drops a setting the form no longer shows.
@@ -2195,13 +2195,14 @@ in `docs/followups.md`.
   raised again with the title the interval has now, and names only the settings the
   interval still holds (one dropped from the interval leaves it, and an interval with
   none left loses it). The target is judged again when it reports a real state. A
-  warning that Home Assistant loaded from its file after a restart keeps no data, so its
-  names are not known: it is left alone until the target reports.
+  warning that Home Assistant loaded from its file after a restart is shown from the
+  first moment, with the names it last had, and stays so until the target reports.
   A warning is updated in place, which keeps the Ignore of the user, when its names are
   the same or fewer. When the interval gains a name that the warning does not list, the
   warning is deleted and raised again, so that an Ignore of the earlier settings does not
-  hide the new one. The names of an earlier load come from the data of its issue; when
-  they are not known, the warning is updated in place.
+  hide the new one. The names of an earlier load, also one before a restart, come from the
+  data of its issue. An issue that keeps none, which this code never raises, counts every
+  name as new: it is raised again and its Ignore is not kept.
   The warning outlives the unload, unlike the repair of a deleted target. That repair is
   cleared on unload and raised again at start-up: it asks the user to delete the timer,
   and an Ignore of it has nothing to keep. The user may knowingly accept this warning
@@ -2220,10 +2221,26 @@ in `docs/followups.md`.
   nothing on, and a disabled timer in that state would keep them, because Home Assistant
   runs no unload callback for it. If it loads again later, the first judgement raises
   them again and an earlier Ignore is lost.
+  The warning also outlives a restart of Home Assistant, so it is raised with
+  `is_persistent=True`. Home Assistant saves an issue that is not persistent with its
+  Ignore only, and loads it back inactive, with no data and no placeholders. The names
+  would be lost, and a setting lost while Home Assistant was down would keep the Ignore
+  over a warning that grew, against the docs (the Ignore does not hide a new setting).
+  A persistent issue is saved whole and loaded back active. After a restart a warning
+  that grew is raised again as new, one that is the same or smaller is updated in place
+  and keeps its Ignore, and with the target offline at start-up it is shown from the
+  first moment with its last names and its Ignore, until the target reports (the freeze
+  above). Whatever takes a warning away takes a persistent one away alike, since
+  `IssueRegistry.async_delete` does not tell them apart. The names stay in the data of
+  the issue, not in the store of the timer: that would change the format of the store
+  for what the issue registry keeps through public API.
   Why: #16. An edit dropped the settings the form did not offer, silently, and the window
   left them out with only a line in the log.
   Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
-  the log is the only other trace.
+  the log is the only other trace. A persistent warning is taken away only by the timer
+  that raised it: if the files of the integration are deleted from `custom_components`
+  without removing the entry, its warnings stay visible in Repairs, because no code of
+  Timerify is left to take them away.
   Tests: `test_editing_keeps_a_setting_the_ac_no_longer_offers`,
   `test_editing_changes_the_settings_shown_beside_a_kept_one`,
   `test_editing_keeps_every_setting_while_the_ac_is_gone`,
@@ -2259,7 +2276,11 @@ in `docs/followups.md`.
   `test_an_ignored_warning_stays_ignored_when_a_setting_comes_back`,
   `test_a_setting_lost_while_down_returns_an_ignored_warning`,
   `test_renaming_an_interval_keeps_the_ignore_of_its_warning`,
+  `test_an_ignored_warning_survives_a_restart_of_home_assistant`,
+  `test_an_ignored_warning_stays_ignored_when_a_setting_returns_while_down`,
+  `test_a_warning_stays_shown_after_a_restart_with_the_ac_offline`,
   `test_an_ignored_warning_survives_a_restart_with_the_ac_offline`,
+  `test_a_setting_lost_while_the_ac_is_offline_shows_an_ignored_warning`,
   `test_an_interval_renamed_while_the_ac_is_offline_renames_its_warning`,
   `test_a_setting_dropped_from_an_interval_leaves_its_warning_while_offline`,
   `test_an_interval_left_with_no_setting_loses_its_warning_while_offline`,

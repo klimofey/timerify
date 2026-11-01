@@ -115,7 +115,7 @@ An interval can turn the device on the way you want. It has the same settings as
 - Editing an interval while its window is open does not push the new settings onto the running device. They are used from the next window.
 - Suppose a device stops offering a setting of an interval, for example after an update of its integration. Editing the interval keeps the setting as it is, though the form no longer shows it.
 - While the device does not take it, **Settings > System > Repairs** shows a warning. Its title names the timer and the interval. Choose the warning to read which settings the device does not take. It has nothing to submit.
-- If you keep the setting on purpose, choose **Ignore** on the warning. It stays ignored while the device does not take the setting, also after the timer reloads. If the device stops taking one more setting of the interval, the warning comes back.
+- If you keep the setting on purpose, choose **Ignore** on the warning. It stays ignored while the device does not take the setting, also after the timer reloads or Home Assistant restarts. If the device stops taking one more setting of the interval, the warning comes back.
 - When the interval turns the device on, that setting is left out, and the log says so. The other settings go out.
 - The warning goes away when the device takes the setting again. It also goes when you pick a value the device takes, or delete the interval. A warning that comes back later is not ignored.
 - The form cannot drop a setting it no longer shows. To drop one, delete the interval and add it again.

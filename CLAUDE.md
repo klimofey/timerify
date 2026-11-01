@@ -40,8 +40,11 @@ decisions made where the spec was silent in `RULINGS.md`, and open items (GitHub
    they are disabled (`gh workflow disable <name>`) and are enabled only with the owner's
    explicit permission. A green CI is never a merge gate: the gate is a full local run of the
    checks below on the final tree, with the result reported.
-5. **Private for now, built as a product.** The repository is private, but everything is
-   written as if it were public: configurable for anyone's setup, nothing tailored to one home.
+5. **Public, built as a product.** The repository is public (since 1.0.0): configurable for
+   anyone's setup, nothing tailored to one home. Rulesets protect it: `main` changes only
+   through a pull request and cannot be deleted or force-pushed, and release tags `v*` cannot be
+   moved or deleted. A release is a GitHub Release with a `v<version>` tag on a commit of `main`
+   whose version matches `manifest.json`.
 
 ## Engineering priorities
 

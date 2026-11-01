@@ -20,13 +20,14 @@ switched on by a checkbox on the first form of a timer and of its settings, that
 long the target was on, kept in a file of its own and written at most once a minute). Specs live in
 `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes in `docs/research/`,
 decisions made where the spec was silent in `RULINGS.md`, and open items (GitHub issues) in
-`docs/followups.md`.
+`docs/followups.md`. The user documentation, for people who use the integration, lives in
+`docs/en/` and `docs/ru/`, with `README.md` and `README.ru.md` as the entry pages.
 
 ## Repository rules (non-negotiable)
 
 1. **English only.** Code, comments, docstrings, identifiers, commit messages, PR and issue text,
    docs, translations' source strings — all English. Cyrillic is permitted only in translations of
-   the product itself: a future `README.ru.md` (do not create it until the owner asks),
+   the product and of its user documentation: `README.ru.md`, everything under `docs/ru/`,
    `custom_components/timerify/translations/*.json` except `en.json`, and
    `custom_components/timerify/sentences/<lang>/` for every `<lang>` except `en`. The `pre-commit`
    hook rejects Cyrillic in any other staged file, the `commit-msg` hook rejects it in messages.
@@ -61,6 +62,27 @@ from the user's point of view (the scenario, not just the function).
 - Minimum supported Home Assistant version is pinned in `hacs.json` and must match the version
   `pytest-homeassistant-custom-component` is pinned to in `pyproject.toml`.
 
+## User documentation
+
+The pages for people who use Timerify are `README.md` and `README.ru.md` (the entry pages) and
+`docs/en/` and `docs/ru/` (one page per topic, the same file names in both). Specs, plans and
+research notes in the other folders of `docs/` are for contributors, not user documentation.
+
+- **Both languages, one commit.** Every change to a user page is made in the English and the
+  Russian page in the same commit. `tests/test_docs.py` pins the pairs: the same page names, the
+  same number of `##` and `###` headings, the same images; it also resolves every link and anchor.
+- **Style.** Short sentences (about 20 words at most), one idea each. Address the reader as
+  "you" (the polite plural in Russian). No long dashes (`—`, `–`): use a full stop, a comma, a
+  colon or brackets. No `§` and no rule ids (`R3`, `S1`, `P-7e`). No internal words ("wish",
+  "fold", "firm promise", "loose", "strict") unless the page says in plain words what they mean
+  the first time; the modes appear in the UI, so name them as the UI does and explain them.
+  Attribute names, service fields and YAML belong in `services.md`, and in code blocks elsewhere.
+- **Links.** In the READMEs, links to files of this repository are absolute
+  (`https://github.com/klimofey/timerify/blob/main/<path>`) and images are raw URLs
+  (`https://raw.githubusercontent.com/klimofey/timerify/main/<path>`): HACS and the Marketplace
+  show the README away from the repository, where a relative path breaks. Inside `docs/`, links
+  are relative.
+
 ## Commands
 
 ```sh
@@ -82,7 +104,7 @@ npm --prefix card run build:check                   # fail if the committed bund
 npm --prefix card run typecheck                     # strict tsc
 npm --prefix card test                              # vitest unit and component tests
 npm --prefix card run e2e                           # Playwright against a real Home Assistant in Docker (port 18124)
-npm --prefix card run screenshots                   # the two pictures of the README, by hand, when the card's look changes
+npm --prefix card run screenshots                   # the two pictures of the card page, by hand, when the card's look changes
 ```
 
 Docker runs the rest: hassfest (`docker run --rm --platform linux/amd64 -v "$PWD:/github/workspace"

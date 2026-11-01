@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Rejects staged text files containing Cyrillic: the repository is English-only.
-# The exceptions are translations of the product itself: README.ru.md, and every
-# language but English under custom_components/timerify/translations/<lang>.json
-# and custom_components/timerify/sentences/<lang>/, subfolders (src/) included.
+# The exceptions are translations of the product and of its user documentation:
+# README.ru.md, everything under docs/ru/, and every language but English under
+# custom_components/timerify/translations/<lang>.json and
+# custom_components/timerify/sentences/<lang>/, subfolders (src/) included.
 set -o pipefail  # a failing `git diff` must refuse the commit, not pass it unchecked
 status=0
 
 cyrillic_allowed() {
   local path="$1"
   [[ $path == README.ru.md ]] && return 0
+  [[ $path == docs/ru/* ]] && return 0
   if [[ $path =~ ^custom_components/timerify/translations/([^/]+)\.json$ ]]; then
     [[ ${BASH_REMATCH[1]} != en ]]
     return

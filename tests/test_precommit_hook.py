@@ -1,5 +1,5 @@
 """The pre-commit hook: Cyrillic is refused everywhere in the repository but in the
-translations of the product itself."""
+translations of the product and of its user documentation."""
 
 import subprocess
 from pathlib import Path
@@ -34,6 +34,8 @@ def commit_attempt(repository: Path, path: str) -> subprocess.CompletedProcess[s
     "path",
     [
         "README.ru.md",
+        "docs/ru/timers.md",
+        "docs/ru/notes/deeper.md",
         f"{TRANSLATIONS}/ru.json",
         f"{SENTENCES}/ru/timerify.yaml",
         f"{SENTENCES}/ru/src/timerify.yaml",
@@ -53,6 +55,8 @@ def test_cyrillic_is_allowed_in_the_translations_of_the_product(
     "path",
     [
         "README.md",
+        "docs/en/timers.md",
+        "docs/research/notes.md",
         "custom_components/timerify/const.py",
         f"{TRANSLATIONS}/en.json",
         f"{SENTENCES}/en/timerify.yaml",

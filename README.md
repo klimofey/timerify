@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="custom_components/timerify/brand/icon@2x.png" alt="Timerify" width="128">
+  <img src="https://raw.githubusercontent.com/klimofey/timerify/main/custom_components/timerify/brand/icon@2x.png" alt="Timerify" width="128">
 </p>
 
 <h1 align="center">Timerify</h1>
@@ -7,7 +7,7 @@
 <p align="center">
   <a href="https://hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5.svg" alt="HACS: Custom"></a>
   <a href="https://www.home-assistant.io/"><img src="https://img.shields.io/badge/Home%20Assistant-2026.10.4%2B-41BDF5.svg?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.10.4+"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/klimofey/timerify/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
 Timers for any Home Assistant entity, without writing automations.
@@ -17,7 +17,7 @@ virtual power sensor to a device. A boiler that is just a smart switch gains, on
 device page, a "Run for" control: set 10 minutes and the boiler turns on and turns itself
 off when the countdown ends.
 
-![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
+![The device page of a timer: Run for and Ends at, with a countdown running](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/phase-1-device-page.png)
 
 > **Status:** version 1.0.0, the first release. The core timer, settings for turning on
 > ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes"), weekly schedules
@@ -97,7 +97,7 @@ their names and entity ids, and the device that was made for them is removed.
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
 | `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs); the card's fill is drawn from it. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
-| `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
+| `switch` Schedule *06:30-07:15, Sun-Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 | `sensor` Runtime | Only when you ask for it: the minutes the target was on, a total that only goes up. See [Runtime counter](#runtime-counter). |
 
 ## Settings
@@ -241,7 +241,7 @@ is listed there with a menu to **Edit** or **Delete** it. The form asks for:
 - **Settings**, for a target that has some: see [Settings of an interval](#settings-of-an-interval).
   The section is folded away for a new interval and open when you edit one that has settings.
 
-An interval is named by its times and days, in your language: *06:30–07:15, Sun–Thu*. A
+An interval is named by its times and days, in your language: *06:30-07:15, Sun-Thu*. A
 name you gave it yourself is kept when you edit the interval; one that Timerify made follows
 the edit.
 
@@ -256,7 +256,7 @@ an interval removes its switch.
   Home Assistant's [Workday integration](https://www.home-assistant.io/integrations/workday/),
   which knows your country's public holidays and the working week you set in it. Its
   default week is Monday to Friday in every country, so set the week in the sensor's own
-  options, both fields: **Days to include** and **Days to exclude** — a day in both lists
+  options, both fields: **Days to include** and **Days to exclude**. A day in both lists
   is excluded. In Israel: include Sunday to Thursday, exclude Friday, Saturday and holidays.
   Timerify follows the sensor. A boiler that runs "on working days at 06:30" skips a
   holiday on its own.
@@ -310,7 +310,7 @@ clock on the wall, in Home Assistant's time zone:
 
 ### The switch of an interval
 
-Every interval has a `switch` on the timer's device, named *Schedule 06:30–07:15, Sun–Thu*.
+Every interval has a `switch` on the timer's device, named *Schedule 06:30-07:15, Sun-Thu*.
 It is on to begin with.
 
 - Switch it off and the interval is skipped. If its window is open and the schedule is
@@ -803,14 +803,14 @@ of the target, its name, and the time left with the moment the countdown ends; w
 counts, the state of the target stands in their place. An optional chip, "+15 min" in the
 picture, adds time without opening the pop-up.
 
-![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](docs/screenshots/card-pill.png)
+![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/card-pill.png)
 
 The **round** tile is made to sit several in a row. A ring shows the same share; the time left
 is in its centre while the countdown runs, and the icon of the target otherwise. The name is
 below. The round tile has no chip, and it can be long-pressed; see
 [The long press of the round tile](#the-long-press-of-the-round-tile).
 
-![The round layout: a ring two thirds full around 30:00, beside a timer that is off](docs/screenshots/card-round.png)
+![The round layout: a ring two thirds full around 30:00, beside a timer that is off](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/card-round.png)
 
 - The name and the icon are the target's. The icon follows the target's state, as it does on any
   card. Both can be set in the card's configuration.

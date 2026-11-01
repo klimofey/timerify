@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.config_entries import ConfigEntryState
+from homeassistant.config_entries import RELOAD_AFTER_UPDATE_DELAY, ConfigEntryState
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_FINAL_WRITE,
     EVENT_HOMEASSISTANT_STOP,
@@ -406,19 +406,27 @@ async def test_renaming_the_runtime_sensor_keeps_its_total(
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
 ) -> None:
-    """The user gives the Runtime sensor another entity id after 10 minutes on: Home
-    Assistant takes the entity out and adds it again, and the figure stays at 10 and
-    goes on, instead of going back to what was stored when the timer was set up."""
-    await setup_target(mode="loose", runtime=True)
+    """The user gives the Runtime sensor another entity id after nine and a half
+    minutes on: Home Assistant takes the entity out and adds it again, and the figure
+    goes on from there, instead of going back to what was stored when the timer was set
+    up. The figure the sensor shows when it comes back is in the file before it is
+    shown, as with every figure, so a crash right after cannot bring it back down."""
+    entry = await setup_target(mode="loose", runtime=True)
     await fake_target.set_state("on")
-    await advance(hass, freezer, minutes=10)
-    assert runtime_of(hass) == 10.0
+    await advance(hass, freezer, minutes=9)
+    assert runtime_of(hass) == 9.0
 
+    # 570.4 s are 9.5067 minutes, which show as 9.51, the same as 570.6 s do.
+    await advance(hass, freezer, seconds=30.4)
     er.async_get(hass).async_update_entity(RUNTIME, new_entity_id=RENAMED_RUNTIME)
     await hass.async_block_till_done()
 
     assert hass.states.get(RUNTIME) is None
+    assert runtime_of(hass, RENAMED_RUNTIME) == 9.51
+    assert runtime_saved(hass_storage, entry) >= 9.51 * 60
+    await advance(hass, freezer, seconds=29.6)
     assert runtime_of(hass, RENAMED_RUNTIME) == 10.0
     await advance(hass, freezer, minutes=1)
     assert runtime_of(hass, RENAMED_RUNTIME) == 11.0
@@ -500,6 +508,37 @@ async def test_disabling_the_counter_removes_its_entity(
     registered = registry.async_get(RUNTIME)
     assert registered is not None
     assert registered.unique_id == f"{entry.entry_id}_runtime"
+    assert runtime_of(hass) == 10.0
+    await advance(hass, freezer, minutes=1)
+    assert runtime_of(hass) == 11.0
+
+
+async def test_disabling_the_runtime_entity_pauses_the_count(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The user disables the Runtime entity after 10 minutes on, and the boiler stays on
+    for 20 more. Enabling it again (Home Assistant reloads the timer a moment later)
+    shows the 10 minutes it had, not the 20 nobody counted, and the count goes on."""
+    entry = await setup_target(mode="loose", runtime=True)
+    registry = er.async_get(hass)
+    await fake_target.set_state("on")
+    await advance(hass, freezer, minutes=10)
+    assert runtime_of(hass) == 10.0
+
+    registry.async_update_entity(RUNTIME, disabled_by=er.RegistryEntryDisabler.USER)
+    await hass.async_block_till_done()
+
+    await advance(hass, freezer, minutes=20)
+    assert hass.states.get(RUNTIME) is None
+    assert runtime_saved(hass_storage, entry) == 600.0
+
+    registry.async_update_entity(RUNTIME, disabled_by=None)
+    await advance(hass, freezer, seconds=RELOAD_AFTER_UPDATE_DELAY)
+
     assert runtime_of(hass) == 10.0
     await advance(hass, freezer, minutes=1)
     assert runtime_of(hass) == 11.0

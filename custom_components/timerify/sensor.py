@@ -21,7 +21,6 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_RUNTIME,
-    CONF_TARGET,
     DOMAIN,
     KEY_ENDS_AT,
     KEY_NEXT_COMMAND,
@@ -191,12 +190,18 @@ class RuntimeSensor(TimerifyEntity, SensorEntity):
     ) -> None:
         """`seconds` is what the file held: the counter goes on from it."""
         super().__init__(hass, entry)
-        self._target: str = entry.options[CONF_TARGET]
+        self._target = self._controller.target_entity_id
         self._store = store
         self._counter = RuntimeCounter(seconds)
 
     async def async_added_to_hass(self) -> None:
-        """Show the total as it is now, then count until the sensor is removed."""
+        """Show the total as it is now, then count until the sensor is removed.
+
+        The file is saved before the state is written, as at every tick. It matters
+        when Home Assistant adds the same object again, as it does for a new entity id:
+        the figure shown now can be a hundredth above what the removal saved, and a
+        crash before the next tick would bring the total back down.
+        """
         await super().async_added_to_hass()
         now = dt_util.utcnow()
         self._counter.observe(
@@ -219,6 +224,9 @@ class RuntimeSensor(TimerifyEntity, SensorEntity):
         self.async_on_remove(
             self.hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, self._async_flush)
         )
+        # Last, so that no change of the target falls between the first look at it and
+        # the subscription to it.
+        await self._store.async_save(self._counter.seconds_to_store(now))
 
     async def async_will_remove_from_hass(self) -> None:
         """Save the total as of now: an unload for any change of the timer, or its

@@ -136,8 +136,8 @@ class Changed:
 class GaveUp:
     """Something was sent again as often as reports alone may send it, and the target
     still does not show it: the switch to "on" or "off", or the owed settings. Said
-    once per allowance; nothing is sent until the target's state changes or a command
-    wants it again."""
+    once per piece of work; it is not sent again until new work asks for it (see
+    `_Allowance`)."""
 
     what: Literal["on", "off", "settings"]
 
@@ -253,24 +253,38 @@ start of one, a pending command or the end of the timer."""
 
 
 class _Allowance:
-    """How often reports that merely repeat the target's state may send something
-    again: `limit` times, then one give-up, then nothing until `reset`.
+    """How often reports may send a piece of work again: the pending wish, or the owed
+    settings. The first delivery, then `limit` re-sends prompted by reports of any
+    kind (a repeat, a change of state, a return from unavailable), then one give-up,
+    then nothing. The piece of work has one allowance for its whole life; only new
+    work, which `renew` starts, has a new one.
 
-    A device that refuses a command may answer every call with such a report, so
-    without the bound it would be commanded for ever.
+    A device that refuses a command may answer every call with a report, and a device
+    that drops off the network comes back with one, so without the bound it would be
+    commanded for ever.
     """
 
     def __init__(self, limit: int) -> None:
         self._limit = limit
+        self.renew()
+
+    def renew(self) -> None:
+        """New work: nothing of it has been delivered, and nothing is used."""
+        self._delivered = False
         self._used = 0
         self._gave_up = False
 
-    def reset(self) -> None:
-        self._used = 0
-        self._gave_up = False
+    def delivered(self) -> None:
+        """The work went out in a call: the first delivery is made."""
+        self._delivered = True
 
     def take(self) -> Literal["send", "give_up", "silent"]:
-        """What a report that repeats the target's state may do now."""
+        """What a report that finds the work still not shown may do now. The first
+        delivery by this core is free: the work was restored, or made while the target
+        was away."""
+        if not self._delivered:
+            self._delivered = True
+            return "send"
         if self._used < self._limit:
             self._used += 1
             return "send"
@@ -291,8 +305,8 @@ class TimerCore:
         *,
         automatic_resends: int = MAX_AUTOMATIC_RESENDS,
     ) -> None:
-        """`automatic_resends` is how often reports that repeat the target's state send
-        a wish, or the owed settings, again before the core gives up."""
+        """`automatic_resends` is how often reports send a wish, or the owed settings,
+        again after the first delivery, before the core gives up."""
         self._mode = mode
         self._default_duration = default_duration
         # Only the first command is ever looked at, so a snapshot that comes from
@@ -320,12 +334,13 @@ class TimerCore:
         it. Never persisted, because only the core that made a call can be answered
         by it."""
         self._wish_allowance = _Allowance(automatic_resends)
-        """Re-sends of the pending wish by reports. Only meaningful while a wish is
-        pending: every command that wants one starts it from zero, and so does a
-        change of the target's state. Never persisted."""
+        """The sends of the pending wish. Only meaningful while a wish is pending: it
+        has one for its whole life, and every new wish starts a new one. Never
+        persisted, so a stored wish starts a new one with the first report after a
+        start."""
         self._settings_allowance = _Allowance(automatic_resends)
-        """The same for the owed settings: new settings, a change of the target's
-        state and any command that sends them start it from zero."""
+        """The same for the owed settings: new settings, and a command that sends the
+        ones owed, start a new one."""
 
     @property
     def snapshot(self) -> Snapshot:
@@ -540,9 +555,9 @@ class TimerCore:
         call failed, or succeeded without the target changing.
 
         They are sent again by the next command that wants the same thing, or by a
-        report of the target, within the limit of `automatic_resends` for reports that
-        repeat its state. The caller reports a failure right after executing the
-        effects, before anything else reaches the core.
+        report of the target, within the limit of `automatic_resends` for the piece of
+        work. The caller reports a failure right after executing the effects, before
+        anything else reaches the core.
         """
         _utc(now)  # unused, but every command rejects a naive time alike
         if self._snapshot.pending is not None:
@@ -567,10 +582,6 @@ class TimerCore:
         now = _utc(now)
         previous = self._snapshot.last_actual
         repeated = actual == previous
-        if not repeated:
-            # The target moved, so asking again is not a loop.
-            self._wish_allowance.reset()
-            self._settings_allowance.reset()
         if previous in (None, "unavailable"):
             # A target that is back has not received the wish or the settings.
             if self._snapshot.pending is not None:
@@ -594,7 +605,7 @@ class TimerCore:
                     # turn-on-only, and are sent again on their own.
                     self._snapshot = replace(self._snapshot, owed_turn_on_only=False)
             else:
-                effects += self._resend(pending, repeated=repeated)
+                effects += self._resend(pending)
         elif by_us:
             if pending == actual:
                 self._settle()
@@ -604,7 +615,7 @@ class TimerCore:
             # What was due has just decided what the target is to do; it outranks
             # what someone else did to the target.
             effects += self._follow_external_change(now, actual)
-        return effects + self._deliver_settings(repeated=repeated)
+        return effects + self._deliver_settings(by_report=True)
 
     def _wakeup(self) -> Effect:
         """The alarm for what the snapshot waits for next, or none."""
@@ -898,7 +909,7 @@ class TimerCore:
             self._correction = target
             return self._settings_for_running_target(settings)
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
-        self._wish_allowance.reset()  # a command always sends, whatever reports did
+        self._wish_allowance.renew()  # new work, whatever became of the last wish
         self._owe(settings)  # they ride with the turn-on this causes
         if state.last_actual == "unavailable":
             self._unsent = True
@@ -910,29 +921,31 @@ class TimerCore:
         that runs. Settings that may only go with a turn-on, owed earlier and still
         owed, are dropped by `_deliver_settings`, not sent."""
         self._owe(settings)
-        return self._deliver_settings(repeated=False)
+        return self._deliver_settings(by_report=False)
 
     def _send(self, target: Literal["on", "off"]) -> list[Effect]:
         self._unsent = False
         self._correction = None  # a call is on its way: it is what reports answer
+        self._wish_allowance.delivered()
         if target == "off":
             return [TurnOff()]
         self._settings_unsent = False  # a turn-on takes the owed settings along
+        self._settings_allowance.delivered()
         return [TurnOn(self._snapshot.owed_settings)]
 
-    def _resend(self, wish: Literal["on", "off"], *, repeated: bool) -> list[Effect]:
+    def _resend(self, wish: Literal["on", "off"]) -> list[Effect]:
         """Send a wish again because the target reported and does not show it.
 
-        A report that moved the target's state is always answered. One that only
-        repeats it is answered `automatic_resends` times, then the core gives up
-        once and waits for a change or a command.
+        The first delivery by this core costs nothing. After it a report of any kind
+        is answered `automatic_resends` times in all, whatever the target did in
+        between, then the core gives up once and sends nothing more until a command
+        wants the wish again.
         """
-        if repeated:
-            match self._wish_allowance.take():
-                case "give_up":
-                    return [GaveUp(wish)]
-                case "silent":
-                    return []
+        match self._wish_allowance.take():
+            case "give_up":
+                return [GaveUp(wish)]
+            case "silent":
+                return []
         return self._send(wish)
 
     def _ask_again(self, correction: Literal["on", "off"]) -> list[Effect]:
@@ -941,12 +954,13 @@ class TimerCore:
         settled by the state the target had before that call landed.
 
         Sending uses up the permission (`_correction`), so this is the one correction
-        of the wish. The answer is a change of the target's state, never a repeat of
-        it, so it is always answered. If the new call does not land either, the wish is
-        pending like any other that did not reach the target, and the reports that
-        follow are answered within the limit for reports that repeat the state.
+        of the wish. The correction is new work, and so is always sent. If the new call
+        does not land either, the wish is pending like any other that did not reach
+        the target, and the reports that follow are answered within the allowance that
+        the correction started.
         """
         self._snapshot = replace(self._snapshot, pending=correction)
+        self._wish_allowance.renew()
         return self._send(correction)
 
     def _owe(self, settings: Settings, *, turn_on_only: bool = False) -> None:
@@ -957,9 +971,9 @@ class TimerCore:
                 self._snapshot, owed_settings=settings, owed_turn_on_only=turn_on_only
             )
             self._settings_unsent = True
-            self._settings_allowance.reset()
+            self._settings_allowance.renew()
 
-    def _deliver_settings(self, *, repeated: bool) -> list[Effect]:
+    def _deliver_settings(self, *, by_report: bool) -> list[Effect]:
         """Send the owed settings that have not reached the target, if it can take them.
 
         A target that is away gets nothing, and a turn-on that is yet to go out takes
@@ -968,8 +982,9 @@ class TimerCore:
         came back on, someone switched it on, the one on its way carries none) has been
         set up by someone, so they are dropped (§5.4). Only a turn-on of ours that
         switched the target on but did not get its settings through releases them
-        (`observe`). `repeated` says a report that merely repeated the target's state
-        asked: it is answered within the allowance, like a wish.
+        (`observe`). `by_report` says a report of the target asked: it is answered
+        within the allowance, like a wish. A command that asks sends them and starts a
+        new allowance.
         """
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):
@@ -980,14 +995,15 @@ class TimerCore:
         if state.owed_turn_on_only:
             self._clear_settings()
             return []
-        if repeated:
+        if by_report:
             match self._settings_allowance.take():
                 case "give_up":
                     return [GaveUp("settings")]
                 case "silent":
                     return []
         else:
-            self._settings_allowance.reset()  # a command or a change always sends
+            self._settings_allowance.renew()  # a command always sends
+            self._settings_allowance.delivered()
         self._settings_unsent = False
         return [ApplySettings(state.owed_settings)]
 
@@ -1029,7 +1045,6 @@ class TimerCore:
             self._snapshot, owed_settings=NO_SETTINGS, owed_turn_on_only=False
         )
         self._settings_unsent = False
-        self._settings_allowance.reset()
 
     def _settle(self) -> None:
         """Drop the pending wish: it was fulfilled or no longer applies."""

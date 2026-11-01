@@ -800,14 +800,20 @@ def refused_turn_off() -> TimerCore:
 
 
 def repeat_reports(
-    c: TimerCore, count: int, actual: Actual = "on", *, by_us: bool = False
+    c: TimerCore,
+    count: int,
+    actual: Actual = "on",
+    *,
+    by_us: bool = False,
+    since: timedelta = timedelta(0),
 ) -> list[list[Effect]]:
     """The effects of `count` reports in a row that repeat the target's state, from a
     device that refuses every call: each send comes back as not delivered. They are
-    answers to our own calls if `by_us`."""
+    answers to our own calls if `by_us`. The first is a minute after `since`, counted
+    from `NOW`."""
     results: list[list[Effect]] = []
     for step in range(count):
-        now = NOW + minutes(1 + step)
+        now = NOW + since + minutes(1 + step)
         effects = c.observe(now, actual, by_us=by_us)
         if any(isinstance(e, TurnOn | TurnOff | ApplySettings) for e in effects):
             c.call_failed(now)
@@ -828,19 +834,36 @@ def test_repeated_reports_send_a_refused_wish_a_limited_number_of_times() -> Non
     assert c.snapshot.pending == "off"
 
 
-def test_a_change_of_the_targets_state_gives_a_full_allowance_again() -> None:
-    """A target that went away and came back is a new chance, and the answer to that
-    report does not count against the limit."""
+def test_a_target_that_comes_back_gets_no_new_allowance_for_the_same_wish() -> None:
+    """A target that went away and came back is not a new chance: Timerify gave up on
+    the wish, and it is not sent again until it is asked again."""
     c = refused_turn_off()
     repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
 
     c.observe(NOW + minutes(10), "unavailable", by_us=False)
     back = c.observe(NOW + minutes(11), "on", by_us=False)
 
-    assert TurnOff() in back
-    c.call_failed(NOW + minutes(11))
-    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
-    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+    assert back == [Changed()]
+    assert repeat_reports(c, 2) == [[], []]
+    assert c.snapshot.pending == "off"
+
+
+def test_unknown_then_the_old_state_is_asked_a_limited_number_of_times() -> None:
+    """A device that answers each refused call with `unknown` and then the state it
+    had is a target that goes away and comes back at every call. It is still asked a
+    limited number of times, and told so once."""
+    c = refused_turn_off()
+    sent: list[Effect] = []
+    for cycle in range(10):
+        at = NOW + minutes(1 + 2 * cycle)
+        c.observe(at, "unavailable", by_us=True)
+        effects = c.observe(at + minutes(1), "on", by_us=True)
+        if any(isinstance(e, TurnOff) for e in effects):
+            c.call_failed(at + minutes(1))
+        sent += [e for e in effects if isinstance(e, TurnOff | GaveUp)]
+
+    assert sent == [TurnOff()] * MAX_AUTOMATIC_RESENDS + [GaveUp("off")]
+    assert c.snapshot.pending == "off"
 
 
 def test_the_first_report_after_a_start_gives_a_full_allowance() -> None:
@@ -852,6 +875,22 @@ def test_the_first_report_after_a_start_gives_a_full_allowance() -> None:
     again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
 
     assert start == [TurnOff(), Changed()]
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_a_wish_made_while_away_is_delivered_on_return_and_then_limited() -> None:
+    """The first delivery of a wish that waited for the target costs no re-send; the
+    re-sends after it are limited like any other."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(10))
+    c.observe(NOW + minutes(1), "unavailable", by_us=False)
+    assert TurnOff() not in c.stop(NOW + minutes(2))
+
+    back = c.observe(NOW + minutes(3), "on", by_us=False)
+    assert TurnOff() in back
+    c.call_failed(NOW + minutes(3))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
     assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
 
 
@@ -885,6 +924,40 @@ def test_a_wish_in_the_other_direction_replaces_the_one_given_up() -> None:
     assert c.snapshot.pending == "off"
     assert stop == [Disarm(), TurnOff(), Changed()]
     assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_the_end_of_a_new_countdown_sends_the_turn_off_after_a_give_up() -> None:
+    """The timer switching the target itself is new work, not a report: a countdown
+    that ends is turned off, and a device that refuses it is asked 3 times again."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    c.set_duration(NOW + minutes(10), minutes(20))
+
+    ended = c.tick(NOW + minutes(30))
+    c.call_failed(NOW + minutes(30))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+
+    assert TurnOff() in ended
+    assert again == [[TurnOff()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("off")]]
+
+
+def test_the_start_of_a_window_sends_the_turn_on_after_a_give_up() -> None:
+    """A schedule interval that starts is new work for the target too."""
+    c = core("loose", "off")
+    c.run_open(NOW)
+    c.call_failed(NOW)
+    gave_up = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1, actual="off")
+    assert gave_up[-1] == [GaveUp("on")]
+    c.set_windows(NOW, [window("a", 10, 40)], configured={"a"})
+
+    opened = c.tick(NOW + minutes(10))
+    c.call_failed(NOW + minutes(10))
+    again = repeat_reports(
+        c, MAX_AUTOMATIC_RESENDS + 1, actual="off", since=minutes(10)
+    )
+
+    assert TurnOn() in opened
+    assert again == [[TurnOn()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("on")]]
 
 
 def test_a_settled_wish_leaves_the_next_one_a_full_allowance() -> None:
@@ -1314,21 +1387,19 @@ def test_refused_settings_are_resent_a_limited_number_of_times() -> None:
     assert c.snapshot.owed_settings == COOL24
 
 
-def test_a_change_of_state_gives_settings_a_full_allowance_again() -> None:
-    """The target goes away and comes back: that is a new chance for the settings."""
+def test_a_target_that_comes_back_gets_no_new_allowance_for_the_same_settings() -> None:
+    """The target goes away and comes back: that is not a new chance for settings
+    that Timerify gave up on."""
     c = owing("strict", "on")
     c.call_failed(NOW)
     repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
 
     c.observe(NOW + minutes(10), "unavailable", by_us=False)
     back = c.observe(NOW + minutes(11), "on", by_us=False)
-    c.call_failed(NOW + minutes(11))
-    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
 
-    assert back == [ApplySettings(COOL24), Changed()]
-    assert again == [[ApplySettings(COOL24)]] * MAX_AUTOMATIC_RESENDS + [
-        [GaveUp("settings")]
-    ]
+    assert back == [Changed()]
+    assert repeat_reports(c, 1) == [[]]
+    assert c.snapshot.owed_settings == COOL24
 
 
 def test_new_settings_start_a_full_allowance_again() -> None:
@@ -1345,6 +1416,30 @@ def test_new_settings_start_a_full_allowance_again() -> None:
     assert ApplySettings(heat) in asked
     assert again == [[ApplySettings(heat)]] * MAX_AUTOMATIC_RESENDS + [
         [GaveUp("settings")]
+    ]
+
+
+def test_new_settings_riding_a_turn_on_have_an_allowance_of_their_own() -> None:
+    """Timerify gave up on settings, the target was stopped and started again with
+    others. The turn-on switched it on but not the settings: the turn-on was their
+    first delivery, so the report of the target is the first of the 3 re-sends."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    c.stop(NOW + minutes(10))
+    c.observe(NOW + minutes(11), "off", by_us=True)
+    assert c.snapshot.pending is None
+
+    c.set_duration(NOW + minutes(12), minutes(30), HEAT22)
+    c.call_failed(NOW + minutes(12))
+    on = c.observe(NOW + minutes(13), "on", by_us=True)
+    c.call_failed(NOW + minutes(13))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1, by_us=True, since=minutes(13))
+
+    assert on == [ApplySettings(HEAT22), Changed()]
+    assert again == [[ApplySettings(HEAT22)]] * (MAX_AUTOMATIC_RESENDS - 1) + [
+        [GaveUp("settings")],
+        [],
     ]
 
 
@@ -1378,8 +1473,9 @@ def test_the_limit_of_the_core_is_the_limit_of_its_settings_too() -> None:
     assert reports == [[ApplySettings(COOL24)], [GaveUp("settings")], []]
 
 
-def test_zero_automatic_resends_answers_only_changes() -> None:
-    """A device that must not be told twice is told again only after its state moved."""
+def test_zero_automatic_resends_answers_no_report() -> None:
+    """A device that must not be told twice is told again only when it is asked again,
+    not by a repeat of its state and not by its return from unavailable."""
     c = TimerCore(
         "strict", minutes(45), Snapshot(last_actual="off"), automatic_resends=0
     )
@@ -1389,9 +1485,11 @@ def test_zero_automatic_resends_answers_only_changes() -> None:
     repeated = c.observe(NOW + minutes(1), "off", by_us=False)
     c.observe(NOW + minutes(2), "unavailable", by_us=False)
     back = c.observe(NOW + minutes(3), "off", by_us=False)
+    asked = c.set_duration(NOW + minutes(4), minutes(10))
 
     assert repeated == [GaveUp("on")]
-    assert back == [TurnOn(), Changed()]
+    assert back == [Changed()]
+    assert TurnOn() in asked
 
 
 # --- Pending commands -------------------------------------------------------------
@@ -3862,6 +3960,24 @@ def test_the_turn_on_after_a_late_report_does_not_carry_the_window_settings() ->
 
     assert late == [TurnOn(), Changed()]
     assert c.snapshot.owed_settings == NO_SETTINGS
+
+
+def test_the_correction_of_a_late_report_has_an_allowance_of_its_own() -> None:
+    """Timerify gave up on a refused turn-off, and the user started the target again,
+    which needed no call as it still read on. The late report of the turn-off is
+    corrected with a turn-on, and a device that refuses that is asked 3 times more."""
+    c = refused_turn_off()
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    c.set_duration(NOW + minutes(10), minutes(30))
+
+    late = c.observe(NOW + minutes(11), "off", by_us=True)
+    c.call_failed(NOW + minutes(11))
+    again = repeat_reports(
+        c, MAX_AUTOMATIC_RESENDS + 1, actual="off", by_us=True, since=minutes(11)
+    )
+
+    assert late == [TurnOn(), Changed()]
+    assert again == [[TurnOn()]] * MAX_AUTOMATIC_RESENDS + [[GaveUp("on")]]
 
 
 def test_a_contradicting_report_is_answered_a_limited_number_of_times() -> None:

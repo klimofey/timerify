@@ -164,6 +164,7 @@ class FakeTarget:
     _ignore_next: bool = False
     _ignoring: bool = False
     _echoing: bool = False
+    _echoing_unknown: bool = False
     _echoes: int = 0
     _reporting_late: bool = False
     _late: list[tuple[Obey, ServiceCall]] = field(default_factory=list)
@@ -215,18 +216,24 @@ class FakeTarget:
         a device out of reach that the integration cannot tell about."""
         self._ignore_next = True
 
-    def ignore_calls(self, *, echo_attribute: bool = False) -> None:
+    def ignore_calls(
+        self, *, echo_attribute: bool = False, echo_unknown: bool = False
+    ) -> None:
         """Make every service call succeed without the entity doing anything, until
         `obey_calls`. With `echo_attribute` the device also answers each call with a
         report of its unchanged state and a new attribute, as an MQTT switch that
-        publishes its full state after every command does."""
+        publishes its full state after every command does. With `echo_unknown` it
+        answers each call by writing `unknown` and then the state it had, as a device
+        that drops its state while it handles a command."""
         self._ignoring = True
         self._echoing = echo_attribute
+        self._echoing_unknown = echo_unknown
 
     def obey_calls(self) -> None:
         """End `ignore_calls`: the entity does what it is told again."""
         self._ignoring = False
         self._echoing = False
+        self._echoing_unknown = False
 
     def report_next_call_late(self) -> None:
         """Make the next service call succeed with the entity changing only when
@@ -264,6 +271,15 @@ class FakeTarget:
         self._held = HeldCall()
         return self._held
 
+    def _echo(self, call: ServiceCall) -> None:
+        """Answer an ignored call as `ignore_calls` says, with the call's context."""
+        self._echoes += 1
+        before = self.state
+        if self._echoing_unknown:
+            self.write(STATE_UNKNOWN, context=call.context)
+        attributes = {"echoes": self._echoes} if self._echoing else {}
+        self.write(before, context=call.context, **attributes)
+
     async def take(
         self,
         service: str,
@@ -291,9 +307,8 @@ class FakeTarget:
             return
         if self._ignoring or self._ignore_next:
             self._ignore_next = False
-            if self._echoing and self._echoes < ECHO_LIMIT:
-                self._echoes += 1
-                self.write(self.state, context=call.context, echoes=self._echoes)
+            if (self._echoing or self._echoing_unknown) and self._echoes < ECHO_LIMIT:
+                self._echo(call)
             return
         if self._reverting:
             self._reverting -= 1

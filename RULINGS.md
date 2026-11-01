@@ -60,14 +60,12 @@ not repeated beside its successor.
   Reports that merely repeat the target's state send an unsent wish at most
   `automatic_resends` times, a field of the domain row: `MAX_AUTOMATIC_RESENDS` (three)
   for every row except `remote` and `media_player`, which get none. Then one warning is
-  logged and nothing more is sent; the count starts again when the target's state changes
-  (including a return from unavailable and start-up) or when a command wants the wish,
-  which always sends. Without the bound, a device that refuses a command and answers it
-  with a report of its old state would be commanded for ever. Remotes and media players
-  get none because a toggle-based remote can be switched back off by a repeat and a media
-  player that is still booting reports a state that is not on; they are sent the command
-  again on a state change or a command. Cost if wrong: an ignoring media player is retried
-  only then.
+  logged and nothing more is sent (per piece of work since 1.1.0, see Release 1.1.0).
+  Without the bound, a device that refuses a command and answers it with a report of its
+  old state would be commanded for ever. Remotes and media players get none because a
+  toggle-based remote can be switched back off by a repeat and a media player that is
+  still booting reports a state that is not on; they are sent the command again only when
+  it is asked again. Cost if wrong: an ignoring media player is retried only then.
 - **A report of our own call that contradicts the timer, with no wish pending, is a wish
   that has not landed, and the core asks for the state it wished again, once for each
   wish that was settled without a call.** A call that the device accepted but does not
@@ -279,9 +277,8 @@ not repeated beside its successor.
   apply list.** It is simple and idempotent. Cost if wrong: settings that were already
   applied are sent twice.
 - **Owed settings have their own count of automatic re-sends with the wish's rules, then
-  `GaveUp("settings")` once.** Climate entities report attribute changes constantly, and
-  unbounded re-sends are forbidden above. Cost if wrong: a device that applies settings
-  only after its fourth report misses them until the next change or command.
+  `GaveUp("settings")` once.** Changed in 1.1.0: see "Each piece of work has one allowance
+  of automatic re-sends for its whole life" under Release 1.1.0.
 - **The controller's call lists, logs and `_raised_for` are labelled on, off or
   settings.** An apply has no wish, and `pending` is `None` while it runs. Cost if wrong:
   duplicate tracebacks if the label's settling is misjudged.
@@ -1783,3 +1780,31 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   unexpectedly, and its `test.fail` and the extra reload after `primeServiceWorker` in
   `card/e2e/fixtures.ts` go. Cost if wrong: a user's first load in a fresh browser shows an
   error card until a refresh (see "Known issue" in phase 5).
+
+## Release 1.1.0
+
+The decisions of the 1.1.0 release (`docs/superpowers/specs/2026-11-01-release-1.1.0-design.md`),
+in the form they have now. What is still open is a GitHub issue of klimofey/timerify, listed
+in `docs/followups.md`.
+
+### Engine and reliability
+
+- **Each piece of work has one allowance of automatic re-sends for its whole life.** A piece
+  of work is the pending wish to turn the target on or off, or the owed settings. The
+  allowance covers the first delivery, then `automatic_resends` re-sends prompted by reports
+  of any kind: a repeat of the state, a change of it, a return from unavailable, or the
+  first report after a start. Then comes one `GaveUp`, and after that nothing. A report that
+  finds the work never delivered by this core makes the first delivery, and it costs no
+  re-send: that is a wish restored from the file, or one made while the target was away.
+  Only new work renews the allowance: a new pending wish (any command, or an item of the
+  fold that wants a state, such as the end of a countdown or the start of a window), the one
+  correction of a late report of our own call, new owed settings, and a command that sends
+  the owed settings. Reports renew nothing. The log says so: "did not turn off after 4
+  attempts; Timerify will not send it again until it is asked again".
+  Why: #11. A device that answers each refused call with `unknown` and then its old state
+  looked like a target that went away and came back, and every such cycle reset the count, so
+  the device was commanded as often as it answered. A device that drops off Wi-Fi and
+  returns logged one give-up for each reconnect.
+  Cost if wrong: a device that refused four times, and then works again after a reconnect,
+  is not sent the command until it is asked again. A media player whose turn-on failed is
+  turned on only when asked again.

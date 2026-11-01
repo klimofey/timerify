@@ -1014,16 +1014,16 @@ class TargetController:
         noun = "attempt" if attempts == 1 else "attempts"
         if what == "settings":
             _LOGGER.warning(
-                "%s did not take its settings after %d %s; Timerify will try"
-                " again when it reports a change or on the next command",
+                "%s did not take its settings after %d %s; Timerify will not send"
+                " them again until it is asked again",
                 self.target_entity_id,
                 attempts,
                 noun,
             )
         else:
             _LOGGER.warning(
-                "%s did not turn %s after %d %s; Timerify will try"
-                " again when it reports a change or on the next command",
+                "%s did not turn %s after %d %s; Timerify will not send it again"
+                " until it is asked again",
                 self.target_entity_id,
                 what,
                 attempts,

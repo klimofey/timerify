@@ -375,8 +375,8 @@ async def test_settings_that_keep_failing_are_given_up_on(
     asked = 1 + MAX_AUTOMATIC_RESENDS
     assert fake_climate.call_data == [COOL] * asked
     assert timerify_warnings(caplog)[-1] == (
-        "climate.ac did not take its settings after 4 attempts; Timerify will try"
-        " again when it reports a change or on the next command"
+        "climate.ac did not take its settings after 4 attempts; Timerify will not"
+        " send them again until it is asked again"
     )
     assert len(timerify_warnings(caplog)) == asked + 1
 

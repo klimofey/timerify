@@ -74,8 +74,9 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 - A device that drops off Wi-Fi keeps its countdown. Whatever came due meanwhile is applied when it reports again. For example, a countdown that ended turns it off.
 - A command that the device rejects, or accepts without doing anything, is not forgotten. Timerify sends it again when the device next reports its state. It also sends it again when you ask for the same thing again.
-- A device that keeps reporting the same state gets at most 3 such repeats. After that, Timerify writes a warning in the log. It then waits for the state to change, or for a new command.
-- Remotes and media players get no repeats from their reports. A repeat could switch a toggle remote back, or disturb a player that is still starting up. They are sent the command again only when their state changes, or when you ask again.
+- A device that rejects a command gets at most 3 repeats of it, however often it reports or reconnects.
+- Then Timerify writes one warning in the log and stops sending that command. It sends it again when you ask again. It also sends it again when the timer itself switches the device: a countdown ends, or a schedule interval starts.
+- Remotes and media players get no repeats at all. A repeat could switch a toggle remote back, or disturb a player that is still starting up. They are sent a command again only when you ask again.
 
 ## When Home Assistant restarts
 

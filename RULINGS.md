@@ -2285,3 +2285,26 @@ in `docs/followups.md`.
   `test_a_setting_dropped_from_an_interval_leaves_its_warning_while_offline`,
   `test_an_interval_left_with_no_setting_loses_its_warning_while_offline`,
   `test_disabling_the_timer_takes_its_warnings_away`.
+- **The integration page that does not re-render waits on Home Assistant (#40, upstream).**
+  After a timer or an interval is added, or an interval is edited, the Timerify page under
+  Settings > Devices & services shows nothing new until it is loaded again, on Home
+  Assistant 2026.10.4 (frontend 20260930.5) and on 2026.11.0b2 (frontend 20261028.1;
+  2026.11.0 was not published when it was tested). The page that behaved the same is the
+  one of the built-in Random helper, which also keeps saying "No entries" after a helper is
+  added. The pages of `kitchen_sink` (a sensor subentry) and `local_calendar` (a calendar)
+  show the change at once. The cause is in the frontend, in both versions: the page
+  subscribes with `config_entries/subscribe` and `type_filter` `device`, `hub`, `service`,
+  `hardware`, so it is sent no event for an integration of type `helper`; and
+  `ha-config-integration-page` loads the entries of an integration of any type but device,
+  hub and service once, in `_fetchManifest`, and never again. No local change was made,
+  because Timerify sends what `kitchen_sink` sends: a new entry is `added`, `updated`
+  (setup_in_progress), `updated` (loaded), and an interval added or edited is `updated`
+  (unload_in_progress), `updated` (not_loaded), `updated` (setup_in_progress) twice,
+  `updated` (loaded), through the reload that `_async_entry_updated` schedules. A copy of
+  Timerify whose manifest said `integration_type` `service` and nothing else different
+  showed every change within milliseconds, so the type alone decides it. That is not a
+  fix we take: it would move Timerify out of Helpers and its "Add helper" into "Add
+  service", a product decision, and a change made to get round a frontend fault. The issue
+  is labelled `upstream`; reporting it to Home Assistant is the owner's call.
+  Cost if wrong: none for the timers, their schedules or their entities, which are always
+  right on the server; the Timerify page lists the old state until it is loaded again.

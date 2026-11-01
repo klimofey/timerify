@@ -1809,20 +1809,35 @@ in `docs/followups.md`.
   turned on only when asked again.
 - **Until start-up has taken stock, the timer only records.** Before `_handle_started` has
   merged the fresh windows and observed the target, a command is recorded and saved, and
-  nothing folds. Three gates keep it so. The core treats a target it has never observed
-  (`last_actual is None`) as away, as `"unavailable"`: a wish is recorded as unsent and
-  sends nothing, and the first `observe` delivers it, free of the allowance. The controller
-  arms no alarm (`_arm`), so a stored end, command or window that has long passed is
-  folded by the first observation and not by a tick. Switching an interval only records
-  the flag; no window is worked out and nothing is ticked, and start-up works out the
-  windows of every interval that is on. A report of the target before start-up is not
-  observed either (`_handle_state_change`): `_handle_started` reads the state itself, under
-  the lock, and only then sets `_started`. The issue names commands only. A report would
-  fold the stored items without the fresh windows, which start-up merges first, and could
-  switch the target twice.
+  nothing is sent or folded. Three gates keep it so. The core treats a target it has never
+  observed (`last_actual is None`) as away, as `"unavailable"`: `_want` records a wish as
+  unsent and sends nothing, and `_deliver_settings` holds the owed settings back, also when
+  a wish restored from the file counts as in flight. The first `observe` delivers the wish
+  and the settings, free of the allowance, once. The controller arms no alarm (`_arm`), so
+  a stored end, command or window that has long passed is folded by the first observation
+  and not by a tick; a pending command that is not due yet is armed by start-up and runs
+  at its own time. Switching an interval only records the flag (`_started`); no window is
+  worked out and nothing is ticked, and start-up works out the windows of every interval
+  that is on and follows a removed window once. A report of the target before start-up is
+  not observed either (`_handle_state_change`): `_handle_started` reads the state itself,
+  under the lock, and only then sets `_started`. The issue names commands only. A report
+  would fold the stored items without the fresh windows, which start-up merges first, and
+  could switch the target twice.
   Why: #12, and §5.7's single catch-up: one fold of the stored items and the fresh windows,
   with the target seen, switches the target at most once. Before this a command made while
   Home Assistant was starting could send a call to a target that was not there yet, or fold
   a countdown that ended during downtime without the windows.
   Cost if wrong: a report of the target before start-up is answered a few seconds later,
   at start-up.
+- **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
+  end as `wanted_running` does: an end at or before now is over, whether or not it was
+  folded. The timer is then idle, and the rule for an idle timer applies (R7 and the
+  documented "adding to a timer that is not running starts it"): a positive delta runs the
+  target for the added time, counted from now, and a negative one changes nothing. The
+  stored end is folded at start-up as before.
+  Why: #12 makes this the normal case for a countdown that ended during downtime, because
+  nothing folds it before start-up. Extending the old end would turn the target off at
+  start-up, or run it for less than the added time, where Home Assistant running would have
+  run it for the whole of it.
+  Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
+  the next fold instead of being stopped at once.

@@ -12,6 +12,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import freeze_settings
 from custom_components.timerify.core import Command
@@ -19,6 +20,7 @@ from custom_components.timerify.store import TimerStore, command_to_json
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import (
+    AC_ATTRS,
     AC_ID,
     AC_NUMBER,
     NUMBER,
@@ -791,13 +793,16 @@ TARGET_APPEARS: Final[tuple[TargetAppears, ...]] = ("before_started", "after_sta
 
 
 async def set_up_while_starting(
-    hass: HomeAssistant, setup_target: SetupTarget, stored: dict[str, Any]
+    hass: HomeAssistant,
+    setup_target: SetupTarget,
+    stored: dict[str, Any],
+    target: str = TARGET_ID,
 ) -> ConfigEntry:
     """Set up the timer while Home Assistant is still starting and the target's own
     integration has not created its entity yet."""
     hass.set_state(CoreState.not_running)
-    hass.states.async_remove(TARGET_ID)
-    entry = await setup_target(stored=stored)
+    hass.states.async_remove(target)
+    entry = await setup_target(target=target, stored=stored)
     assert hass.state is CoreState.not_running
     return entry
 
@@ -866,12 +871,12 @@ async def test_countdown_that_ended_before_a_cold_start_switches_off_once(
     assert fake_target.calls == [TURN_OFF]
 
 
-type CommandWhileStarting = Literal["run_for", "add_time", "run", "add_command_off"]
+type CommandWhileStarting = Literal["run_for", "add_time", "run"]
 
 
 async def give_command(hass: HomeAssistant, command: CommandWhileStarting) -> None:
-    """Give the timer a command that runs the target for 30 minutes, or turns it off
-    after 10: by the slider, or by one of the services."""
+    """Give the timer a command that runs the target for 30 minutes: by the slider, or
+    by one of the services."""
     match command:
         case "run_for":
             await set_number(hass, NUMBER, 30)
@@ -879,11 +884,9 @@ async def give_command(hass: HomeAssistant, command: CommandWhileStarting) -> No
             await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=30)
         case "run":
             await call_service(hass, "run", {"entity_id": NUMBER}, minutes=30)
-        case "add_command_off":
-            await add_command(hass, NUMBER, action="off", delay=10)
 
 
-@pytest.mark.parametrize("command", ["run_for", "add_time", "run", "add_command_off"])
+@pytest.mark.parametrize("command", ["run_for", "add_time", "run"])
 async def test_a_command_given_while_starting_is_saved_and_sends_nothing_until_started(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -901,20 +904,45 @@ async def test_a_command_given_while_starting_is_saved_and_sends_nothing_until_s
     await give_command(hass, command)
 
     assert fake_target.calls == []
-    if command == "add_command_off":
-        (kept,) = saved(hass_storage, entry)["commands"]
-        assert (kept["at"], kept["action"]) == (at(10), "off")
-        minutes = 10
-    else:
-        assert saved(hass_storage, entry) == payload(
-            end=at(30), started_at=at(0), pending="on"
-        )
-        minutes = 30
+    assert saved(hass_storage, entry) == payload(
+        end=at(30), started_at=at(0), pending="on"
+    )
 
     await finish_start_up(hass, fake_target, "after_started")
 
     assert fake_target.calls == []
-    await advance(hass, freezer, minutes=minutes)
+    await advance(hass, freezer, minutes=30)
+    assert fake_target.calls == [TURN_OFF]
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+async def test_adding_time_while_starting_to_a_countdown_that_ended_while_down(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    target_appears: TargetAppears,
+) -> None:
+    """The countdown ended while Home Assistant was down, and nothing has folded it
+    yet. "Add time" runs the target for the added minutes from now, as it does with
+    Home Assistant running; the target is not turned off at start-up."""
+    entry = await set_up_while_starting(
+        hass, setup_target, payload(end=at(-40), started_at=at(-70))
+    )
+
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=30)
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=at(30), started_at=at(0), pending="on"
+    )
+
+    await finish_start_up(hass, fake_target, target_appears)
+
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "30"
+    await advance(hass, freezer, minutes=30)
     assert fake_target.calls == [TURN_OFF]
 
 
@@ -927,7 +955,7 @@ async def test_a_command_while_starting_does_not_fold_what_came_due_while_down(
 ) -> None:
     """A countdown that ended while Home Assistant was down is folded once, by the
     first look at the target: a command given before it does not fold it earlier, to
-    a target that has not been seen."""
+    a target that has not been seen. The command itself still runs at its own time."""
     entry = await set_up_while_starting(
         hass, setup_target, payload(end=at(-10), started_at=at(-40))
     )
@@ -942,6 +970,10 @@ async def test_a_command_while_starting_does_not_fold_what_came_due_while_down(
 
     assert fake_target.calls == [TURN_OFF]
     assert len(saved(hass_storage, entry)["commands"]) == 1
+    await advance(hass, freezer, minutes=60)
+    assert fake_target.calls == [TURN_OFF, TURN_ON]
+    await advance(hass, freezer, minutes=5)
+    assert fake_target.calls == [TURN_OFF, TURN_ON, TURN_OFF]
 
 
 async def test_switching_an_interval_while_starting_only_records_the_flag(
@@ -977,25 +1009,142 @@ async def test_switching_an_interval_while_starting_only_records_the_flag(
     assert fake_target.calls == []
 
 
+async def test_switching_off_the_interval_that_carries_the_countdown_while_starting(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The window of an interval carries the countdown when Home Assistant stops. The
+    interval is switched off while Home Assistant is still starting: only the flag is
+    recorded, and the countdown and the target are left as they were. Start-up follows
+    the window that is gone, and turns the target off once."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await set_switch(hass, "switch.boiler_schedule_06_30_07_15_mon_sun", False)
+
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "07:15"),
+        started_at=iso(SUNDAY, "06:30"),
+        scheduled_by=interval,
+        disabled_intervals=[interval],
+    )
+    assert fake_target.calls == [TURN_ON]
+
+    await finish_start_up(hass, fake_target, "before_started")
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert saved(hass_storage, entry) == payload(disabled_intervals=[interval])
+    await advance(hass, freezer, hours=1)
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
 async def test_a_report_of_the_target_while_starting_folds_nothing_until_started(
     hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
     hass_storage: dict[str, Any],
 ) -> None:
     """The target's integration comes up and reports before Home Assistant has
-    started. The report is not answered then: the countdown that ended while Home
-    Assistant was down is folded once, at start-up, together with the fresh windows."""
+    started. The report is not answered then. The countdown that ended while Home
+    Assistant was down and the window that opened after it are folded together, once,
+    at start-up: the target stays on, and is switched off once when the window ends."""
+    await open_sunday(hass, freezer)
     entry = await set_up_while_starting(
-        hass, setup_target, payload(end=at(-10), started_at=at(-40))
+        hass,
+        setup_target,
+        payload(end=iso(SUNDAY, "05:50"), started_at=iso(SUNDAY, "05:20")),
     )
+    interval = await add_interval(hass, entry, start="05:55", end="06:30")
 
     await fake_target.set_state("on")
 
     assert fake_target.calls == []
-    assert saved(hass_storage, entry)["end"] == at(-10)
+    assert saved(hass_storage, entry)["end"] == iso(SUNDAY, "05:50")
+    assert saved(hass_storage, entry)["windows"] == []
 
     await hass.async_start()
     await hass.async_block_till_done()
 
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "06:30"),
+        started_at=iso(SUNDAY, "05:55"),
+        scheduled_by=interval,
+        windows=[
+            window_json(
+                interval, local(SUNDAY, "05:55"), local(SUNDAY, "06:30"), started=True
+            )
+        ],
+    )
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
     assert fake_target.calls == [TURN_OFF]
+    await advance(hass, freezer, hours=1)
+    assert fake_target.calls == [TURN_OFF]
+
+
+async def test_settings_given_while_starting_wait_for_the_ac_and_go_out_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A turn-on that never reached the air conditioner is stored. A command given
+    while Home Assistant is still starting adds settings to it. Nothing is sent to an
+    air conditioner that has not been seen. At start-up the settings go out once."""
+    # The registry remembers what the air conditioner can do from the run before.
+    er.async_get(hass).async_update_entity(
+        AC_ID,
+        capabilities={k: v for k, v in AC_ATTRS.items() if k != "supported_features"},
+        supported_features=AC_ATTRS["supported_features"],
+    )
+    entry = await set_up_while_starting(
+        hass,
+        setup_target,
+        payload(end=at(60), started_at=at(0), pending="on"),
+        target=AC_ID,
+    )
+
+    await call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=30,
+        hvac_mode="cool",
+        temperature=24,
+    )
+
+    assert fake_climate.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=at(30),
+        started_at=at(0),
+        pending="on",
+        owed_settings={"hvac_mode": "cool", "temperature": 24.0},
+    )
+
+    await fake_climate.set_state("heat")  # it reports before Home Assistant has started
+
+    assert fake_climate.calls == []
+
+    await hass.async_start()
+    await hass.async_block_till_done()
+
+    assert fake_climate.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "cool"}),
+        ("set_temperature", {"temperature": 24.0}),
+    ]
+    assert saved(hass_storage, entry) == payload(end=at(30), started_at=at(0))
+    await advance(hass, freezer, minutes=1)
+    assert len(fake_climate.call_data) == 2

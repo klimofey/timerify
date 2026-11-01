@@ -82,7 +82,8 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 - A countdown survives a Home Assistant restart. Timerify stores it on every change. At start-up it checks the end time against the clock.
 - A countdown that ended while Home Assistant was down turns the device off.
-- A change you make while Home Assistant is still starting is kept and saved. Timerify carries it out once Home Assistant has started. This covers **Run for**, actions such as **Run** and **Add command**, and the switch of a schedule interval.
+- A change you make while Home Assistant is still starting is kept and saved. Timerify carries it out once Home Assistant has started. This covers **Run for**, **Add time**, **Run** and the switch of a schedule interval.
+- A pending command still runs at its own time. A command that came due while Home Assistant was down or still starting is handled at start-up.
 
 ## Which devices can have a timer
 

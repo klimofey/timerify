@@ -377,9 +377,16 @@ class TimerCore:
 
     @_reports_change
     def add(self, now: datetime, delta: timedelta) -> list[Effect]:
-        """Move the end by `delta`; on an idle timer only a positive delta starts it."""
+        """Move the end by `delta`; on an idle timer only a positive delta starts it.
+
+        An end that is not ahead is no countdown, as `wanted_running` judges it, though
+        nothing folded it yet (a timer restored before start-up has taken stock): the
+        timer is idle.
+        """
         now = _utc(now)
         end = self._snapshot.end
+        if end is not None and end <= now:
+            end = None
         if end is None:
             if delta <= timedelta(0):
                 return []
@@ -984,21 +991,22 @@ class TimerCore:
     def _deliver_settings(self, *, by_report: bool) -> list[Effect]:
         """Send the owed settings that have not reached the target, if it can take them.
 
-        A target that is away gets nothing, and a turn-on that is yet to go out takes
-        the settings itself. Settings that may only go with a turn-on are never sent on
-        their own: a target that runs without the turn-on that was to carry them (it
-        came back on, someone switched it on, the one on its way carries none) has been
-        set up by someone, so they are dropped (§5.4). Only a turn-on of ours that
-        switched the target on but did not get its settings through releases them
-        (`observe`). `by_report` says a report of the target asked: it is answered
-        within the allowance, like a wish. A command that asks sends them and starts a
-        new allowance.
+        A target that is away, or has not been seen yet, gets nothing: a wish restored
+        from the file counts as in flight, but its target is not known to be there. A
+        turn-on that is yet to go out takes the settings itself. Settings that may only
+        go with a turn-on are never sent on their own: a target that runs without the
+        turn-on that was to carry them (it came back on, someone switched it on, the
+        one on its way carries none) has been set up by someone, so they are dropped
+        (§5.4). Only a turn-on of ours that switched the target on but did not get its
+        settings through releases them (`observe`). `by_report` says a report of the
+        target asked: it is answered within the allowance, like a wish. A command that
+        asks sends them and starts a new allowance.
         """
         state = self._snapshot
         if not (state.owed_settings and self._settings_unsent):
             return []
         runs = state.last_actual == "on" or (state.pending == "on" and not self._unsent)
-        if state.last_actual == "unavailable" or not runs:
+        if state.last_actual in (None, "unavailable") or not runs:
             return []
         if state.owed_turn_on_only:
             self._clear_settings()

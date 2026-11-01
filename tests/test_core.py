@@ -246,6 +246,31 @@ def test_add_negative_on_idle_does_nothing() -> None:
     assert c.snapshot == before
 
 
+@pytest.mark.parametrize("ended", [-40, -10, 0])
+def test_add_to_a_countdown_that_has_ended_counts_from_now(ended: int) -> None:
+    """An end that is not ahead is no countdown, as `wanted_running` judges it, though
+    nothing folded it yet (start-up has not taken stock): adding time starts one from
+    now, as on an idle timer."""
+    stale = Snapshot(end=NOW + minutes(ended), started_at=NOW - minutes(70))
+    c = TimerCore("strict", minutes(45), stale)
+    idle = TimerCore("strict", minutes(45), Snapshot())
+
+    fx = c.add(NOW, minutes(30))
+
+    assert fx == idle.add(NOW, minutes(30))
+    assert c.snapshot == idle.snapshot
+
+
+def test_add_negative_to_a_countdown_that_has_ended_does_nothing() -> None:
+    """There is no time to take from a countdown that is over; what folds it later
+    still does."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(10)))
+    before = c.snapshot
+
+    assert c.add(NOW, minutes(-5)) == []
+    assert c.snapshot == before
+
+
 def test_run_open_strict_uses_default_duration() -> None:
     """Strict mode has no open-ended run, so the default duration applies."""
     c = core("strict", "off")
@@ -1383,6 +1408,33 @@ def test_a_command_before_the_first_report_is_sent_by_that_report() -> None:
     assert c.snapshot.pending == "on"
     assert c.snapshot.owed_settings == COOL24
     assert TurnOn(COOL24) in c.observe(NOW + minutes(1), "off", by_us=False)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        lambda c: c.run_open(NOW, COOL24),
+        lambda c: c.set_duration(NOW, minutes(20), COOL24),
+    ],
+    ids=["run_open", "set_duration"],
+)
+def test_settings_given_before_the_first_report_wait_for_it(
+    command: Callable[[TimerCore], list[Effect]],
+) -> None:
+    """A wish restored from the file counts as in flight until the target is seen, but
+    the target has not been seen: settings given with a command are held back, not
+    applied to an entity that may not exist yet. The first report applies them."""
+    stored = Snapshot(end=NOW + minutes(30), started_at=NOW - minutes(5), pending="on")
+    c = TimerCore("strict", minutes(45), stored)
+
+    fx = command(c)
+
+    assert not [e for e in fx if isinstance(e, TurnOn | TurnOff | ApplySettings)]
+    assert c.snapshot.owed_settings == COOL24
+    assert c.observe(NOW + minutes(1), "on", by_us=False) == [
+        ApplySettings(COOL24),
+        Changed(),
+    ]
 
 
 def test_refused_settings_are_resent_a_limited_number_of_times() -> None:

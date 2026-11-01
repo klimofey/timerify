@@ -17,6 +17,9 @@ CONF_DEFAULT_DURATION: Final = "default_duration"
 CONF_RUNTIME: Final = "runtime"
 """Option holding whether the timer counts how long its target was on, a `bool`. Absent
 or False: no counter, and no Runtime sensor; an entry of an earlier release has none."""
+CONF_RUN_FOR_MAX: Final = "run_for_max"
+"""Option holding the end of the Run for slider in whole minutes. An entry of an earlier
+release has none."""
 CONF_WORKDAY_SENSOR: Final = "workday_sensor"
 """Option holding the entity id of the target's Workday sensor, which the intervals of
 working days and of days off ask which days are which. Absent when there is none."""
@@ -155,6 +158,14 @@ def default_duration_minutes(options: Mapping[str, Any]) -> int:
     """The minutes a timer of strict mode runs by default: its option, or
     `DEFAULT_DURATION_MINUTES` for an entry that has none."""
     minutes: int = options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
+    return minutes
+
+
+def run_for_max_minutes(options: Mapping[str, Any]) -> int:
+    """The end of the Run for slider: its option, or `MAX_MINUTES` for an entry that
+    has none. It bounds the slider only; a countdown that something else starts may be
+    longer, up to `MAX_MINUTES`."""
+    minutes: int = options.get(CONF_RUN_FOR_MAX, MAX_MINUTES)
     return minutes
 
 

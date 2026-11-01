@@ -21,6 +21,7 @@ from homeassistant.setup import async_setup_component
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
+    CONF_RUN_FOR_MAX,
     CONF_RUNTIME,
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
@@ -47,6 +48,7 @@ from .helpers import (
     TURN_ON,
     add_interval,
     advance,
+    change_options,
     prefilled,
     set_number,
     state_of,
@@ -105,6 +107,15 @@ def default_value(result: FlowResult, key: str) -> Any:
     return default() if callable(default) else default
 
 
+def selector_of(result: FlowResult, key: str) -> dict[str, Any]:
+    """The selector of the field `key` of the form `result` shows, as the frontend
+    gets it."""
+    schema = result["data_schema"].schema
+    marker = next(marker for marker in schema if marker == key)
+    selector: dict[str, Any] = schema[marker].serialize()["selector"]
+    return selector
+
+
 def picker_of(result: FlowResult) -> dict[str, Any]:
     """The entity picker of the form `result` shows, as the frontend gets it."""
     (marker,) = (key for key in result["data_schema"].schema if key == CONF_TARGET)
@@ -128,19 +139,6 @@ def kettle(provide_target: ProvideTarget) -> FakeTarget:
     return provide_target("kettle.tea", SWITCH_SERVICES, name="Tea")
 
 
-async def change_options(
-    hass: HomeAssistant, entry: ConfigEntry, *steps: dict[str, Any]
-) -> FlowResult:
-    """Open the entry's settings, submit a form per step; return the last result."""
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    for user_input in steps:
-        result = await hass.config_entries.options.async_configure(
-            result["flow_id"], user_input
-        )
-    await hass.async_block_till_done()
-    return result
-
-
 async def test_add_strict_target_in_two_steps(
     hass: HomeAssistant, fake_target: FakeTarget
 ) -> None:
@@ -161,6 +159,7 @@ async def test_add_strict_target_in_two_steps(
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
     }
     await hass.async_block_till_done()
     assert result["result"].state is ConfigEntryState.LOADED
@@ -180,6 +179,7 @@ async def test_add_loose_target_skips_duration(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "loose",
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
     }
 
 
@@ -196,6 +196,7 @@ async def test_add_target_with_every_default_takes_three_clicks(
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: DEFAULT_DURATION_MINUTES,
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
     }
 
 
@@ -210,6 +211,7 @@ async def test_counting_runtime_is_one_tick_on_the_first_form(
         CONF_TARGET,
         CONF_MODE,
         CONF_RUNTIME,
+        CONF_RUN_FOR_MAX,
     ]
     assert default_value(form, CONF_RUNTIME) is False
 
@@ -223,8 +225,154 @@ async def test_counting_runtime_is_one_tick_on_the_first_form(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "loose",
         CONF_RUNTIME: True,
+        CONF_RUN_FOR_MAX: 1440,
     }
     assert float(state_of(hass, RUNTIME)) == 0.0
+
+
+async def test_the_first_form_asks_for_the_maximum_of_run_for(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """The end of the slider is asked on the first form, a day to begin with, so that
+    a timer that takes every default is still added in three clicks. The slider of the
+    new timer ends where the user put it."""
+    form = await start_flow(hass)
+    assert default_value(form, CONF_RUN_FOR_MAX) == MAX_MINUTES
+    assert selector_of(form, CONF_RUN_FOR_MAX) == {
+        "number": {
+            "min": 1,
+            "max": MAX_MINUTES,
+            "step": 1,
+            "mode": "box",
+            "unit_of_measurement": "min",
+        }
+    }
+
+    result = await submit(
+        hass,
+        form,
+        {CONF_TARGET: TARGET_ID, CONF_MODE: "strict", CONF_RUN_FOR_MAX: 120},
+    )
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 45})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_RUN_FOR_MAX] == 120
+    number = hass.states.get(NUMBER)
+    assert number is not None
+    assert number.attributes["max"] == 120
+
+
+async def test_a_default_duration_above_the_maximum_is_refused(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """A default of 90 minutes on a slider that ends at 60 would be a run the slider
+    cannot show. The refusal is on the duration form, whose only field it is; the
+    maximum itself is allowed."""
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: TARGET_ID, CONF_MODE: "strict", CONF_RUN_FOR_MAX: 60},
+    )
+
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 90})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "duration"
+    assert result["errors"] == {"base": "duration_above_maximum"}
+
+    result = await submit(hass, result, {CONF_DEFAULT_DURATION: 60})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_DEFAULT_DURATION] == 60
+
+
+async def test_the_duration_form_starts_at_a_maximum_below_thirty(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """A timer whose slider ends at 20 minutes offers 20 as its default duration, not
+    the usual 30, so that taking the form as it is still adds the timer."""
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: TARGET_ID, CONF_MODE: "strict", CONF_RUN_FOR_MAX: 20},
+    )
+    assert default_value(result, CONF_DEFAULT_DURATION) == 20
+
+    result = await submit(hass, result, {})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_DEFAULT_DURATION] == 20
+
+
+async def test_a_maximum_in_part_minutes_is_refused(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """Minutes are the unit of the timer, so a fraction of one is refused on the first
+    form, which stays open for the user to correct it."""
+    result = await submit(
+        hass,
+        await start_flow(hass),
+        {CONF_TARGET: TARGET_ID, CONF_MODE: "strict", CONF_RUN_FOR_MAX: 90.5},
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "target"
+    assert result["errors"] == {"base": "duration_not_whole"}
+
+
+async def test_settings_change_the_maximum_of_run_for(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The settings open at a day for a timer of an earlier release, and a new maximum
+    is the end of the slider once the timer has loaded again."""
+    entry = await setup_target()
+    assert CONF_RUN_FOR_MAX not in entry.options
+    form = await change_options(hass, entry)
+    assert default_value(form, CONF_RUN_FOR_MAX) == MAX_MINUTES
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "strict", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 120},
+        {CONF_DEFAULT_DURATION: 45},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUN_FOR_MAX] == 120
+    assert entry.state is ConfigEntryState.LOADED
+    number = hass.states.get(NUMBER)
+    assert number is not None
+    assert number.attributes["max"] == 120
+
+
+async def test_lowering_the_maximum_below_the_default_duration_asks_to_lower_it(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A timer that runs 45 minutes by default cannot get a slider that ends at 30. The
+    duration form shows the 45 the timer has, refuses it, and takes 30."""
+    entry = await setup_target(default_duration=45)
+
+    result = await change_options(
+        hass, entry, {CONF_MODE: "strict", CONF_RUN_FOR_MAX: 30}
+    )
+    assert result["step_id"] == "duration"
+    assert suggested_value(result, CONF_DEFAULT_DURATION) == 45
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 45}
+    )
+    assert result["step_id"] == "duration"
+    assert result["errors"] == {"base": "duration_above_maximum"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 30}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUN_FOR_MAX] == 30
+    assert entry.options[CONF_DEFAULT_DURATION] == 30
 
 
 async def test_target_is_identified_by_its_registry_id(
@@ -750,6 +898,7 @@ async def test_options_switching_to_strict_asks_for_the_duration(
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 20,
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
     }
     await fake_target.set_state("on")
     assert state_of(hass, NUMBER) == "20"
@@ -963,6 +1112,7 @@ async def test_workday_step_is_skipped_without_a_workday_sensor(
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
     }
     entry = result["result"]
     result = await change_options(
@@ -1001,6 +1151,7 @@ async def test_workday_sensor_is_asked_after_the_duration(
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
         CONF_WORKDAY_SENSOR: fake_workday.entity_id,
     }
     await hass.async_block_till_done()
@@ -1042,6 +1193,7 @@ async def test_loose_mode_asks_for_the_workday_sensor_after_the_mode(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "loose",
         CONF_RUNTIME: False,
+        CONF_RUN_FOR_MAX: 1440,
         CONF_WORKDAY_SENSOR: fake_workday.entity_id,
     }
 

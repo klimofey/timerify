@@ -2056,3 +2056,34 @@ in `docs/followups.md`.
   The issue is labelled `upstream`; reporting it to Home Assistant is the owner's call.
   Cost if wrong: after a YAML change of the zone and that reload, windows run in the old
   zone until a window ends, the Workday sensor reports or the timer reloads.
+
+### Forms and entities
+
+- **The maximum of Run for bounds the slider, not the timer.** The option
+  (`CONF_RUN_FOR_MAX`, whole minutes, a day when an entry has none) sets the `max` of the
+  "Run for" number. Home Assistant's `number.set_value` refuses more, so the slider, the
+  more-info dialog and the card's presets (which use `set_value`) follow it. `run`,
+  `add_time`, pending commands, voice, the LLM tools and windows keep the 1440-minute
+  limit. A countdown they start runs in full, and the number shows its minutes above
+  `max`. Lowering the maximum leaves a running countdown as it is.
+  The default duration may not be above the maximum. A schema flow has only `base` errors
+  (`schema_config_entry_flow.py:285`), so the error is the base error of the duration
+  form, whose only field it is. The selector stays 1 to 1440, so the error is translated,
+  not a selector's text. The duration form of a new timer starts at the smaller of 30
+  minutes and the maximum, so that taking every default still adds the timer.
+  A loose timer is not checked: it has no duration form, and a stored default duration is
+  used only in strict mode. Switching to strict shows the duration form, which checks it.
+  Why: #35. The owner rarely runs a device for more than two hours. Refusing a window or a
+  spoken "for 3 hours" would change what the base spec defines.
+  Cost if wrong: a card preset longer than the maximum is refused with Home Assistant's own
+  message.
+  Tests: `test_the_first_form_asks_for_the_maximum_of_run_for`,
+  `test_a_default_duration_above_the_maximum_is_refused`,
+  `test_the_duration_form_starts_at_a_maximum_below_thirty`,
+  `test_a_maximum_in_part_minutes_is_refused`,
+  `test_settings_change_the_maximum_of_run_for`,
+  `test_lowering_the_maximum_below_the_default_duration_asks_to_lower_it`,
+  `test_the_slider_ends_at_the_maximum_of_the_timer`,
+  `test_setting_run_for_above_the_maximum_is_refused`,
+  `test_actions_and_commands_run_past_the_maximum`,
+  `test_lowering_the_maximum_keeps_a_longer_countdown_running`.

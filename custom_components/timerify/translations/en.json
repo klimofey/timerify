@@ -15,12 +15,14 @@
         "data": {
           "target": "Entity",
           "mode": "Mode",
-          "runtime": "Count runtime"
+          "runtime": "Count runtime",
+          "run_for_max": "Maximum of Run for"
         },
         "data_description": {
           "target": "The switch, light, fan or other entity to run on a timer.",
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
-          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day."
         }
       },
       "voice_settings": {
@@ -53,6 +55,7 @@
       "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
       "not_switchable": "This entity does not report on or off, so a timer cannot tell whether it is running. Pick another one; if it is unavailable now, try again when it is back.",
       "duration_not_whole": "The duration must be a whole number of minutes.",
+      "duration_above_maximum": "The default duration must not be longer than the maximum of Run for.",
       "languages_required": "Pick at least one language."
     },
     "abort": {
@@ -67,11 +70,13 @@
         "title": "Timer settings",
         "data": {
           "mode": "Mode",
-          "runtime": "Count runtime"
+          "runtime": "Count runtime",
+          "run_for_max": "Maximum of Run for"
         },
         "data_description": {
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
-          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day."
         }
       },
       "voice_settings": {
@@ -102,6 +107,7 @@
     },
     "error": {
       "duration_not_whole": "The duration must be a whole number of minutes.",
+      "duration_above_maximum": "The default duration must not be longer than the maximum of Run for.",
       "workday_in_use": "A schedule interval of this timer runs on working days or non-working days, which the Workday sensor tells. Change or delete that interval first, or keep the sensor.",
       "languages_required": "Pick at least one language."
     }

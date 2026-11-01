@@ -14,7 +14,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
-from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.data_entry_flow import FlowResult, FlowResultType, section
 from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -233,6 +233,19 @@ async def reload_held_back(entry: ConfigEntry) -> AsyncIterator[None]:
     that is loaded is the one that was, with the entry already changed."""
     async with entry.setup_lock:
         yield
+
+
+async def change_options(
+    hass: HomeAssistant, entry: ConfigEntry, *steps: dict[str, Any]
+) -> FlowResult:
+    """Open the entry's settings, submit a form per step; return the last result."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    for user_input in steps:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input
+        )
+    await hass.async_block_till_done()
+    return result
 
 
 async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:

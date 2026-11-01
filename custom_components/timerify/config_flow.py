@@ -2,11 +2,12 @@
 the voice sentences.
 
 The flow starts with a menu: add a timer, or, while there is none, the voice settings.
-Adding a timer takes the entity, the binding mode and whether to count how long the
-target is on, in strict mode a default duration, and, in a house that has a Workday
-sensor, that sensor. The options flow changes the mode, the counting, the duration and
-the sensor; the target stays. Schedule intervals are subentries of the timer's entry,
-added, edited and deleted one by one from its page.
+Adding a timer takes the entity, the binding mode, whether to count how long the
+target is on and where the Run for slider ends, in strict mode a default duration, and,
+in a house that has a Workday sensor, that sensor. The options flow changes the mode,
+the counting, the end of the slider, the duration and the sensor; the target stays.
+Schedule intervals are subentries of the timer's entry, added, edited and deleted one
+by one from its page.
 
 The voice settings are an entry of their own, of which there is one: whether Timerify
 writes the sentence files for the built-in agent, and in which languages. The options
@@ -62,6 +63,7 @@ from .const import (
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_MODE,
+    CONF_RUN_FOR_MAX,
     CONF_RUNTIME,
     CONF_SETTINGS,
     CONF_START,
@@ -80,6 +82,7 @@ from .const import (
     DaysMode,
     Mode,
     is_voice_options,
+    run_for_max_minutes,
 )
 from .domains import (
     SUPPORTED_DOMAINS,
@@ -171,8 +174,8 @@ def _duration_selector() -> selector.NumberSelector:
 async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
     """The form that adds a timer, built for the domains on offer when it is shown.
 
-    The runtime box is on this form, not on a step of its own, so that a timer that
-    takes every default is still added in three clicks.
+    The runtime box and the end of the Run for slider are on this form, not on steps of
+    their own, so that a timer that takes every default is still added in three clicks.
     """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
@@ -181,6 +184,9 @@ async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
             probatio.Required(CONF_TARGET): _target_selector(flow.hass),
             probatio.Required(CONF_MODE, default="strict"): _mode_selector(),
             probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
+            probatio.Required(
+                CONF_RUN_FOR_MAX, default=MAX_MINUTES
+            ): _duration_selector(),
         }
     )
 
@@ -198,7 +204,8 @@ async def _validate_target(
 
     The target is stored as an entity id, whichever of the two the selector took.
     The entry is identified by the registry id, which a rename leaves alone; an
-    entity that is not in the registry has only its entity id.
+    entity that is not in the registry has only its entity id. The end of the Run for
+    slider is kept in whole minutes.
     """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
@@ -219,7 +226,7 @@ async def _validate_target(
     registered = registry.async_get(entity_id)
     await flow.async_set_unique_id(registered.id if registered else entity_id)
     flow._abort_if_unique_id_configured()
-    return {**user_input, CONF_TARGET: entity_id}
+    return _whole_minutes({**user_input, CONF_TARGET: entity_id}, CONF_RUN_FOR_MAX)
 
 
 def _reads_on_or_off(hass: HomeAssistant, entity_id: str) -> bool:
@@ -229,14 +236,44 @@ def _reads_on_or_off(hass: HomeAssistant, entity_id: str) -> bool:
     return state is not None and state.state in (STATE_ON, STATE_OFF)
 
 
-async def _validate_duration(
-    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
-) -> dict[str, Any]:
-    """Keep the default duration in whole minutes, the unit the timer counts in."""
-    minutes: float = user_input[CONF_DEFAULT_DURATION]
+def _whole_minutes(user_input: dict[str, Any], key: str) -> dict[str, Any]:
+    """The input with the minutes in `key` as an `int`, the unit the timer counts in; a
+    fraction of a minute is refused."""
+    minutes: float = user_input[key]
     if not minutes.is_integer():
         raise SchemaFlowError("duration_not_whole")
-    return {**user_input, CONF_DEFAULT_DURATION: int(minutes)}
+    return {**user_input, key: int(minutes)}
+
+
+async def _validate_duration(
+    handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the default duration in whole minutes, and not above the end of the Run for
+    slider, which the first form has already put in the options.
+
+    The selector keeps a day as its end, so that the form is the same for every timer;
+    this is where a duration beyond the slider is refused, in words the user can read.
+    """
+    accepted = _whole_minutes(user_input, CONF_DEFAULT_DURATION)
+    if accepted[CONF_DEFAULT_DURATION] > run_for_max_minutes(handler.options):
+        raise SchemaFlowError("duration_above_maximum")
+    return accepted
+
+
+async def _duration_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
+    """The form of the default duration: usually 30 minutes, but never above the end of
+    the Run for slider, so that a timer whose slider ends sooner takes every default
+    all the same."""
+    return probatio.Schema(
+        {
+            probatio.Required(
+                CONF_DEFAULT_DURATION,
+                default=min(
+                    DEFAULT_DURATION_MINUTES, run_for_max_minutes(handler.options)
+                ),
+            ): _duration_selector()
+        }
+    )
 
 
 def _workday_selector() -> selector.EntitySelector:
@@ -296,13 +333,7 @@ async def _after_duration(_options: dict[str, Any]) -> str:
 
 
 _DURATION_STEP = SchemaFlowFormStep(
-    probatio.Schema(
-        {
-            probatio.Required(
-                CONF_DEFAULT_DURATION, default=DEFAULT_DURATION_MINUTES
-            ): _duration_selector()
-        }
-    ),
+    _duration_schema,
     validate_user_input=_validate_duration,
     next_step=_after_duration,
 )
@@ -406,11 +437,13 @@ _VOICE_STEP = SchemaFlowFormStep(
 async def _options_init_schema(
     handler: SchemaCommonFlowHandler,
 ) -> probatio.Schema | None:
-    """The first form of the options: a timer's mode and whether it counts the runtime.
-    The voice settings have neither, and go to their own form.
+    """The first form of the options: a timer's mode, whether it counts the runtime and
+    where the Run for slider ends. The voice settings have none of them, and go to their
+    own form.
 
     The form opens with the options the entry has. A timer made before the counter has
-    no such option, so the box has no suggested value and shows its default, unticked.
+    no such option, so the box has no suggested value and shows its default, unticked;
+    one made before the maximum of Run for shows a day.
     """
     if is_voice_options(handler.options):
         return None
@@ -418,8 +451,19 @@ async def _options_init_schema(
         {
             probatio.Required(CONF_MODE): _mode_selector(),
             probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
+            probatio.Required(
+                CONF_RUN_FOR_MAX, default=MAX_MINUTES
+            ): _duration_selector(),
         }
     )
+
+
+async def _validate_timer_settings(
+    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the end of the Run for slider in whole minutes. The default duration is
+    checked against it on the form that follows."""
+    return _whole_minutes(user_input, CONF_RUN_FOR_MAX)
 
 
 async def _after_options_init(options: dict[str, Any]) -> str:
@@ -441,7 +485,11 @@ CONFIG_FLOW: Final = {
 }
 
 OPTIONS_FLOW: Final = {
-    "init": SchemaFlowFormStep(_options_init_schema, next_step=_after_options_init),
+    "init": SchemaFlowFormStep(
+        _options_init_schema,
+        validate_user_input=_validate_timer_settings,
+        next_step=_after_options_init,
+    ),
     "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
     "workday": _WORKDAY_STEP,

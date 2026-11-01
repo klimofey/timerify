@@ -674,6 +674,27 @@ async def test_an_edit_after_the_language_changed_renames_the_interval(
     assert state.name == "Boiler Schedule 06:30–07:30, Mon–Sun"
 
 
+async def test_a_house_language_without_translations_names_in_english(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Timerify has no German: Home Assistant falls back to English, so an interval is
+    named in English there, and the edit that follows a move from Russian to German
+    names it so."""
+    entry = await setup_target()
+    hass.config.language = "ru"
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+    assert entry.subentries[subentry_id].title != "06:30–07:15, Mon–Sun"
+    hass.config.language = "de"
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    subentry = entry.subentries[subentry_id]
+    assert subentry.title == "06:30–07:30, Mon–Sun"
+    assert subentry.data["generated_title"] == "06:30–07:30, Mon–Sun"
+    other = await add_interval(hass, entry, start="08:00", end="09:00")
+    assert entry.subentries[other].title == "08:00–09:00, Mon–Sun"
+
+
 async def test_a_renamed_interval_keeps_its_name_after_the_language_changed(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:

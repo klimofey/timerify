@@ -2126,30 +2126,44 @@ in `docs/followups.md`.
   the title and stores no key. A rename on the integration page changes only the title
   (`config_entries/subentries/update`), so it ends the mark with no hook of ours, which a
   flag could not tell.
+  An interval with no mark falls back to the rule of release 1.0.0: if its title equals
+  the title its data makes now, in the language of the house now, the edit makes the title
+  again and stores the mark. That covers an interval added or edited by 1.0.0 after a
+  downgrade, whose entry is already at minor version 2 and is not migrated again.
   The migration to minor version 2 (`async_migrate_entry`) marks a subentry whose title
   equals the title made from its data in any shipped language
   (`TRANSLATION_LANGUAGES`, pinned to the files of `translations/`), whatever language
   the house speaks now. A user title that happens to equal a generated one is taken as
-  generated, and the next edit renames it. The voice settings entry only moves to minor
-  version 2. `interval_title` and `async_title_labels` take the language as an argument,
-  so that the voice part can ask for the title of an interval in another language.
+  generated, and the next edit renames it. A subentry that no title can be made of (a
+  missing key, days that are no kind of days, a weekday that is not one) is checked for
+  explicitly (`stored_interval_title`) and left unmarked, so that one odd interval does
+  not fail the entry. The voice settings entry only moves to minor version 2.
+  `interval_title` and `async_title_labels` take the language as an argument, so that the
+  voice part can ask for the title of an interval in another language.
   Minor version 2 keeps a downgrade to 1.0.0 loading: that release has no
   `async_migrate_entry`, so Home Assistant accepts the entry (checked by loading an entry
-  of minor version 2 with the code of the `v1.0.0` tag). It ignores the key, its edit
-  stores none, and its old rule (a title different from the one made now is the user's)
-  applies again. An interval edited or added under 1.0.0 therefore has no mark when 1.1.0
-  comes back, and its title counts as the user's.
+  of minor version 2 with the code of the `v1.0.0` tag). It ignores the key, and its edit
+  stores none. The title of an interval it edited is found again by the fallback above
+  when 1.1.0 comes back, as long as the house language is the one the title was made in.
+  A house language without a translation of Timerify gets English, as Home Assistant
+  falls back, for the titles that are made and for the labels that are compared.
   Why: #15. The title was made in the language of the house when the interval was added
   and compared in the language of the house at the edit, so a house that changed language
   took every generated title for a chosen one, and the title never followed.
-  Cost if wrong: a title typed to look generated is renamed by an edit.
+  Cost if wrong: a title typed to look generated is renamed by an edit. A title that 1.0.0
+  made in another language than the house speaks when 1.1.0 comes back is taken as the
+  user's, since only the migration of a first upgrade tries every language.
   Tests: `test_a_new_interval_is_marked_as_titled_by_timerify`,
   `test_an_edit_after_the_language_changed_renames_the_interval`,
   `test_a_renamed_interval_keeps_its_name_after_the_language_changed`,
+  `test_a_house_language_without_translations_names_in_english`,
   `test_editing_keeps_a_title_the_user_chose`,
   `test_a_title_generated_in_english_is_marked`,
   `test_a_title_generated_in_russian_is_marked_in_an_english_house`,
   `test_a_title_of_working_days_is_marked`,
   `test_a_title_the_user_chose_is_not_marked`,
+  `test_an_interval_no_title_can_be_made_of_is_left_unmarked`,
+  `test_an_interval_without_the_mark_is_named_again_by_an_edit`,
+  `test_a_title_the_user_chose_is_kept_in_an_entry_of_the_current_version`,
   `test_the_voice_settings_entry_is_migrated_too`,
   `test_the_translation_languages_are_the_files`.

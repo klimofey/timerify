@@ -152,6 +152,24 @@ def interval_title(data: Mapping[str, Any], labels: Mapping[str, str]) -> str:
     return f"{data[CONF_START]}–{data[CONF_END]}, {label}"
 
 
+def stored_interval_title(
+    data: Mapping[str, Any], labels: Mapping[str, str]
+) -> str | None:
+    """The title `interval_title` makes of the data a subentry holds; None when that
+    data is not an interval's: a key is missing, the days are not a kind of days, or a
+    weekday is not one. The flow writes whole data, but the file can be edited by hand,
+    and what is read from it is not taken for granted."""
+    days = data.get(CONF_DAYS)
+    weekdays = data.get(CONF_WEEKDAYS)
+    if CONF_START not in data or CONF_END not in data or days not in DAYS_MODES:
+        return None
+    if days == "weekdays" and not (
+        isinstance(weekdays, list) and all(day in WEEKDAYS for day in weekdays)
+    ):
+        return None
+    return interval_title(data, labels)
+
+
 async def async_title_labels(hass: HomeAssistant, language: str) -> dict[str, str]:
     """The words of an interval's title in `language`: the short names of the weekdays,
     by their names, and the names of the kinds of days, by their `DaysMode`; the

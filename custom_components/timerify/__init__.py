@@ -33,7 +33,7 @@ from .issues import (
     async_raise_stored_timer_invalid,
 )
 from .runtime import RuntimeStore
-from .schedule import async_title_labels, interval_title
+from .schedule import async_title_labels, stored_interval_title
 from .services import async_setup_services
 from .store import StoredTimerInvalid, TimerStore
 from .voice import async_register_intents
@@ -73,7 +73,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     (`CONF_GENERATED_TITLE`), so that an edit names them again in the language of the
     house. A title that equals the one made in any shipped language is marked,
     whichever language the house was set to when the interval was made; any other is
-    the user's. The voice settings have no intervals and only move to the version.
+    the user's, and so is the title of an interval whose data no title can be made of.
+    The voice settings have no intervals and only move to the version.
 
     Release 1.0.0 has no migration, so it loads an entry of this version and ignores
     the mark, and its own rule for the title applies again.
@@ -85,7 +86,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ]
         for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
             if subentry.title in {
-                interval_title(subentry.data, labels) for labels in labels_by_language
+                stored_interval_title(subentry.data, labels)
+                for labels in labels_by_language
             }:
                 hass.config_entries.async_update_subentry(
                     entry,

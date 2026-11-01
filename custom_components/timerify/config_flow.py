@@ -100,6 +100,7 @@ from .schedule import (
     WEEKDAY_SELECTOR,
     async_title_labels,
     interval_title,
+    stored_interval_title,
 )
 from .services import SETTINGS_SCHEMA
 from .target import target_name
@@ -575,7 +576,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         the mistake and nothing more. A new interval is titled by its times and days in
         the language of the house, and keeps that title as `CONF_GENERATED_TITLE`. An
         edit titles an interval whose title is still that one again, in the language of
-        the house now, and keeps any other title, the user's own.
+        the house now, and keeps any other title, the user's own. An interval that has
+        no `CONF_GENERATED_TITLE` counts as titled by Timerify when its title equals the
+        one its data makes in the language of the house now.
         """
         entry = self._get_entry()
         subentry = (
@@ -593,7 +596,13 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                     return self.async_create_entry(
                         title=title, data={**data, CONF_GENERATED_TITLE: title}
                     )
-                if subentry.title == subentry.data.get(CONF_GENERATED_TITLE):
+                # An interval without the mark was made or last edited by release 1.0.0,
+                # which keeps none; its rule applies: the title is generated while it
+                # equals the title the interval's data makes now.
+                generated = subentry.data.get(CONF_GENERATED_TITLE)
+                if generated is None:
+                    generated = stored_interval_title(subentry.data, labels)
+                if subentry.title == generated:
                     data[CONF_GENERATED_TITLE] = title
                 else:
                     title = subentry.title

@@ -153,17 +153,19 @@ not repeated beside its successor.
   `owed_turn_on_only`, `scheduled_by`, `windows` and `disabled_intervals`, the one from
   version 2 the last four, and the store reads version 3 strictly: the migration
   guarantees the keys, and tolerant reads would hide a broken migration. A file that
-  contradicts itself is refused when the timer is set up, not repaired: two windows of one
+  contradicts itself is refused when the timer is set up, and the timer does not repair it
+  itself (the user resets it, see "An unreadable stored timer is reset only by the user"
+  under Release 1.1.0): two windows of one
   interval, a window that is suppressed but has not started, a window of a switched-off
   interval, an interval switched off twice, `scheduled_by` without an end, the marker
   without owed settings, a window with a time that has no offset or that does not start
   before it ends or lasts more than a day (the rule of `checked_window`, the one the core
-  applies to every window it is given). The set-up fails with a `ConfigEntryError`
-  (`stored_timer_invalid`), whose translated reason says what is wrong and tells the
-  user to remove the timer and add it again, not with a bare `ValueError`. The reason
-  is the English text of the error, also in the Russian message: it is for the bug
-  report of a defect, not for the user. Only the timer's own code writes the file, so
-  such a file means a defect, and it should show when the timer loads, not as a target
+  applies to every window it is given). The set-up fails with a `StoredTimerInvalid` (a
+  `ConfigEntryError`, `stored_timer_invalid`), whose translated reason says what is wrong
+  and tells the user to reset it under Repairs, not with a bare `ValueError`. The reason
+  is the English text of the error, also in the Russian message and the repair: it is for
+  the bug report of a defect, not for the user. Only the timer's own code writes the file,
+  so such a file means a defect, and it should show when the timer loads, not as a target
   switched for reasons nobody can follow. Versions 2 and
   3 were never released before their keys were complete, so they need no further steps.
   Cost if wrong: a version 2 or 3 file written by a development build from between the
@@ -1987,3 +1989,34 @@ in `docs/followups.md`.
   `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`,
   `test_a_report_queued_before_the_deletion_is_read_as_a_boiler_that_is_gone`,
   `test_deleting_the_timer_on_the_integration_page_clears_the_repair`.
+- **An unreadable stored timer is reset only by the user, through a repair, and the reset
+  drops the whole file.** A stored timer that cannot be used raises the repair "The stored
+  state of the timer X cannot be read" (`stored_timer_invalid_<entry>`, severity error,
+  fixable) and the set-up fails with the same reason, so the entry stays in `SETUP_ERROR`.
+  The fix, "Reset the stored timer", has one step, which shows the reason and what is kept.
+  Submitting it deletes the file and reloads the entry. It shares its steps with the fix of a
+  deleted target: a timer deleted meanwhile aborts with `timer_gone`, and a step shown again
+  once its issue is gone aborts with `issue_gone`. The decisions:
+  - A missing field is as unreadable as a file that contradicts itself, and so is a field of
+    a type that no timer writes. The reason of a missing field is "the field X is missing";
+    for a wrong type it is the text Python gives. Neither is a bare `KeyError` or `TypeError`
+    in the log.
+  - The entry, its intervals (subentries) and the runtime file are kept. The countdown, the
+    pending commands and the flags of the switched-off intervals are lost, because nothing
+    in a file that contradicts itself can be trusted. Every interval is on again.
+  - Nothing resets the file but the user. The timer does not drop a file it cannot read on
+    its own, since the countdown and the commands in it may be worth keeping to someone who
+    can repair it by hand.
+  - The issue is raised at each failed set-up and is not persistent. A good load clears it,
+    as does removing the entry. A file put right by hand and a reload end the repair, and a
+    step shown again then aborts with `issue_gone`. A timer disabled while it failed to set
+    up keeps the repair until it is enabled, since Home Assistant runs no unload of ours
+    for an entry that never loaded; the file is still unreadable, so the text stays true.
+  Why: #17. Before this the user was told to remove the timer and add it again, which also
+  loses the intervals and the runtime total that were fine.
+  Cost if wrong: a user loses the pending commands of a file that was only partly wrong.
+  Tests: `test_a_stored_timer_that_cannot_be_read_raises_a_repair`,
+  `test_resetting_the_stored_timer_keeps_the_entry_and_its_intervals`,
+  `test_a_stored_timer_that_is_put_right_clears_the_repair`,
+  `test_deleting_a_timer_whose_stored_timer_cannot_be_read_clears_the_repair`,
+  `test_a_stored_timer_missing_a_field_raises_the_same_repair`.

@@ -1,17 +1,20 @@
 """The fixes of the Repairs issues of a timer (`issues.py`)."""
 
+from abc import ABC, abstractmethod
+
 import probatio
 from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
-from .issues import TARGET_DELETED
+from .issues import STORED_TIMER_INVALID, TARGET_DELETED
+from .store import TimerStore
 
 
-class DeleteTimerFlow(RepairsFlow):
-    """The fix of a timer whose target was deleted: one step that asks the user to
-    confirm, then deletes the timer, with its entities, intervals and stored files."""
+class _ConfirmedFix(RepairsFlow, ABC):
+    """The fix of a problem of one timer: one step that asks the user to confirm, then
+    fixes it, in `_async_fix` of the subclass."""
 
     def __init__(self, entry_id: str) -> None:
         self._entry_id = entry_id
@@ -25,13 +28,12 @@ class DeleteTimerFlow(RepairsFlow):
     async def async_step_confirm(
         self, user_input: dict[str, str] | None = None
     ) -> RepairsFlowResult:
-        """Show what will be deleted; once the user submits, delete it.
+        """Show what the fix does; once the user submits, do it.
 
         The fix does nothing, and says why, when its timer is gone, deleted on its
         integration page while the repair stood open, or when its issue is no longer
-        open: the target is back, or the timer was unloaded since. A step that is
-        shown again then would only show blanks in place of the names of the timer and
-        the entity.
+        open: the problem went away by itself, or the timer was unloaded since. A step
+        that is shown again then would only show blanks in place of the names in it.
         """
         if self.hass.config_entries.async_get_entry(self._entry_id) is None:
             return self.async_abort(reason="timer_gone")
@@ -44,8 +46,30 @@ class DeleteTimerFlow(RepairsFlow):
                 data_schema=probatio.Schema({}),
                 description_placeholders=issue.translation_placeholders,
             )
-        await self.hass.config_entries.async_remove(self._entry_id)
+        await self._async_fix()
         return self.async_create_entry(data={})
+
+    @abstractmethod
+    async def _async_fix(self) -> None:
+        """Fix the problem, once the user has confirmed."""
+
+
+class DeleteTimerFlow(_ConfirmedFix):
+    """The fix of a timer whose target was deleted: it deletes the timer, with its
+    entities, intervals and stored files."""
+
+    async def _async_fix(self) -> None:
+        await self.hass.config_entries.async_remove(self._entry_id)
+
+
+class ResetStoredTimerFlow(_ConfirmedFix):
+    """The fix of a timer whose stored state cannot be read: it deletes the file and
+    loads the timer again, which starts idle. The timer, its intervals and its runtime
+    total stay."""
+
+    async def _async_fix(self) -> None:
+        await TimerStore(self.hass, self._entry_id).async_remove()
+        await self.hass.config_entries.async_reload(self._entry_id)
 
 
 async def async_create_fix_flow(
@@ -54,6 +78,9 @@ async def async_create_fix_flow(
     data: dict[str, str | int | float | None] | None,
 ) -> RepairsFlow:
     """The fix of a Timerify issue, picked by the `kind` in its data."""
-    if data is not None and data["kind"] == TARGET_DELETED:
-        return DeleteTimerFlow(str(data["entry_id"]))
+    if data is not None:
+        if data["kind"] == TARGET_DELETED:
+            return DeleteTimerFlow(str(data["entry_id"]))
+        if data["kind"] == STORED_TIMER_INVALID:
+            return ResetStoredTimerFlow(str(data["entry_id"]))
     raise ValueError(f"The issue {issue_id} has no fix: its data is {data}")

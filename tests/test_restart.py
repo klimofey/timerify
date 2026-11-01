@@ -510,7 +510,7 @@ async def test_file_that_contradicts_itself_is_refused(
     assert entry.error_reason_translation_domain == "timerify"
     assert entry.error_reason_translation_key == "stored_timer_invalid"
     assert entry.reason is not None
-    assert "Remove this timer and add it again" in entry.reason
+    assert "Reset it under Settings > System > Repairs" in entry.reason
     assert complaint in entry.reason
     assert complaint in caplog.text
     assert "ValueError" not in caplog.text

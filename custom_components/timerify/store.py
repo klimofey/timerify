@@ -144,6 +144,20 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
     }
 
 
+class StoredTimerInvalid(ConfigEntryError):
+    """The stored timer cannot be used. `reason` says what is wrong with it, in words
+    for the user: the set-up fails with it, and so does the repair that resets the
+    file."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            translation_domain=DOMAIN,
+            translation_key="stored_timer_invalid",
+            translation_placeholders={"reason": reason},
+        )
+        self.reason = reason
+
+
 class _TimerFile(Store[dict[str, Any]]):
     """The file of a timer, which reads what earlier versions wrote."""
 
@@ -201,8 +215,9 @@ class TimerStore:
         """The stored timer, migrated to the current version if need be; an idle one
         when nothing was stored yet.
 
-        Raises ConfigEntryError (`stored_timer_invalid`), saying what is wrong, for a
-        file that contradicts itself (see `_validated`) or holds a time that is not one.
+        Raises StoredTimerInvalid, saying what is wrong, for a file that contradicts
+        itself (see `_validated`), holds a time that is not one, lacks a field or holds
+        a field of a type that no timer writes.
         """
         data = await self._store.async_load()
         if data is None:
@@ -210,12 +225,14 @@ class TimerStore:
         else:
             try:
                 snapshot = self._read(data)
-            except ValueError as err:
-                raise ConfigEntryError(
-                    translation_domain=DOMAIN,
-                    translation_key="stored_timer_invalid",
-                    translation_placeholders={"reason": str(err)},
-                ) from None  # The reason says all there is to say of it.
+            except KeyError as err:
+                raise StoredTimerInvalid(
+                    f"the field {err.args[0]} is missing"
+                ) from None
+            except (ValueError, TypeError) as err:
+                # The reason says all there is to say of it; the cause would only add
+                # a traceback of Python's to the log.
+                raise StoredTimerInvalid(str(err)) from None
         self._saved = _payload(snapshot)
         return snapshot
 

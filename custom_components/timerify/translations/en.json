@@ -433,7 +433,7 @@
       "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."
     },
     "stored_timer_invalid": {
-      "message": "The stored timer of this entry cannot be used: {reason}. Remove this timer and add it again."
+      "message": "The stored timer of this entry cannot be used: {reason}. Reset it under Settings > System > Repairs."
     },
     "not_whole_minutes": {
       "message": "Run for takes a whole number of minutes; {minutes} is not one."
@@ -504,6 +504,21 @@
           "confirm": {
             "title": "Delete the timer {timer}",
             "description": "The entity {target} that the timer {timer} switches no longer exists in Home Assistant. Until it is back, the timer switches nothing. Its countdown and pending commands are kept. If you add the device again with the same entity ID, the timer works again by itself and this message goes away. Submit to delete the timer, with its entities, schedule intervals and pending commands."
+          }
+        },
+        "abort": {
+          "timer_gone": "This timer was already deleted.",
+          "issue_gone": "This problem is no longer open. Nothing needs to be done."
+        }
+      }
+    },
+    "stored_timer_invalid": {
+      "title": "The stored state of the timer {timer} cannot be read",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Reset the stored timer",
+            "description": "Timerify cannot read the file in which the timer {timer} keeps its countdown and pending commands: {reason}. The timer does not run until the file is reset. Resetting keeps the timer, its settings, its schedule intervals and its runtime total. It clears the countdown and the pending commands, and switches every schedule interval back on. Submit to reset it."
           }
         },
         "abort": {

@@ -17,10 +17,15 @@ from .card import async_register_card
 from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
 from .entity import remove_fallback_device
-from .issues import TARGET_DELETED, async_clear
+from .issues import (
+    STORED_TIMER_INVALID,
+    TARGET_DELETED,
+    async_clear,
+    async_raise_stored_timer_invalid,
+)
 from .runtime import RuntimeStore
 from .services import async_setup_services
-from .store import TimerStore
+from .store import StoredTimerInvalid, TimerStore
 from .voice import async_register_intents
 from .voice.files import (
     VoiceConfigEntry,
@@ -54,7 +59,14 @@ async def async_setup_entry(
     if is_voice_entry(entry):
         return await async_setup_voice_entry(hass, entry)
     store = TimerStore(hass, entry.entry_id)
-    controller = TargetController(hass, entry, store, await store.async_load())
+    try:
+        snapshot = await store.async_load()
+    except StoredTimerInvalid as err:
+        # The set-up fails with the reason; the repair offers to reset the file.
+        async_raise_stored_timer_invalid(hass, entry, err.reason)
+        raise
+    async_clear(hass, STORED_TIMER_INVALID, entry.entry_id)
+    controller = TargetController(hass, entry, store, snapshot)
     entry.runtime_data = controller
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
@@ -91,11 +103,12 @@ async def async_remove_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> None:
     """Delete the stored timer and the stored runtime total of a removed entry, take its
-    repair away, or delete the sentence files of the voice settings."""
+    repairs away, or delete the sentence files of the voice settings."""
     if is_voice_entry(entry):
         await async_remove_voice_entry(hass, entry)
         return
     async_clear(hass, TARGET_DELETED, entry.entry_id)
+    async_clear(hass, STORED_TIMER_INVALID, entry.entry_id)
     await TimerStore(hass, entry.entry_id).async_remove()
     await RuntimeStore(hass, entry.entry_id).async_remove()
 

@@ -1,10 +1,12 @@
-"""A timer whose target was deleted: the repair that says so, and the fix that deletes
-it.
+"""The repairs of a timer: one whose target was deleted, and one whose stored state
+cannot be read.
 
 The scenarios are the user's: the boiler's entity is deleted in its settings, or its
 whole device is, or Home Assistant starts without it. The timer stays loaded and
 switches nothing, the repair says so, and the user either adds the device again, with
-the same entity id, or submits the repair to delete the timer.
+the same entity id, or submits the repair to delete the timer. When the file in which
+the timer keeps its state is unreadable, the timer does not load, the repair says so,
+and the user submits it to reset the file.
 """
 
 from http import HTTPStatus
@@ -26,6 +28,7 @@ from custom_components.timerify.const import DOMAIN
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
     NUMBER,
+    RUNTIME,
     SENSOR,
     SUNDAY,
     TARGET_ID,
@@ -38,8 +41,11 @@ from .helpers import (
     iso,
     local,
     open_sunday,
+    payload,
     restart_after,
+    runtime_saved,
     set_number,
+    set_switch,
     start_set_number,
     state_of,
     storage_key,
@@ -67,6 +73,15 @@ def target_deleted_issue(
     """The repair of the timer's deleted target, if there is one."""
     return ir.async_get(hass).async_get_issue(
         DOMAIN, f"target_deleted_{entry.entry_id}"
+    )
+
+
+def stored_timer_invalid_issue(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> ir.IssueEntry | None:
+    """The repair of the timer's unreadable stored state, if there is one."""
+    return ir.async_get(hass).async_get_issue(
+        DOMAIN, f"stored_timer_invalid_{entry.entry_id}"
     )
 
 
@@ -414,18 +429,24 @@ async def test_the_repair_of_a_timer_deleted_meanwhile_does_nothing(
     assert done["reason"] == "timer_gone"
 
 
-async def open_repair_dialog(
-    hass: HomeAssistant, entry: ConfigEntry
+async def open_dialog(
+    hass: HomeAssistant, issue: ir.IssueEntry | None
 ) -> tuple[RepairsFlowManager, str]:
-    """Open the repair of the timer's deleted target as the dialog does; return the
-    manager of the fixes and the id of the flow, which shows the form."""
-    issue = target_deleted_issue(hass, entry)
+    """Open the repair `issue` as the dialog does; return the manager of the fixes and
+    the id of the flow, which shows the form."""
     assert issue is not None
     manager = repairs_flow_manager(hass)
     assert manager is not None
     flow = await manager.async_init(DOMAIN, context={"issue_id": issue.issue_id})
     assert flow["type"] == "form"
     return manager, flow["flow_id"]
+
+
+async def open_repair_dialog(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> tuple[RepairsFlowManager, str]:
+    """Open the repair of the timer's deleted target as the dialog does."""
+    return await open_dialog(hass, target_deleted_issue(hass, entry))
 
 
 async def test_a_repair_shown_again_after_its_timer_was_deleted_does_nothing(
@@ -466,3 +487,190 @@ async def test_a_repair_shown_again_after_the_boiler_is_back_does_nothing(
     assert shown_again["type"] == "abort"
     assert shown_again["reason"] == "issue_gone"
     assert hass.config_entries.async_get_entry(entry.entry_id) is not None
+
+
+# --- The repair resets a stored timer that cannot be read -----------------------------
+
+UNFINISHED = "the timer is scheduled by an interval but has no end"
+"""What the timer says of a file that names an interval but holds no end."""
+
+
+async def test_a_stored_timer_that_cannot_be_read_raises_a_repair(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The file of the timer contradicts itself, as after a fault: the timer does not
+    load, and the repair names the timer and says what is wrong."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_key == "stored_timer_invalid"
+    assert issue.translation_placeholders == {"timer": "Boiler", "reason": UNFINISHED}
+    assert issue.is_fixable
+    assert issue.severity == ir.IssueSeverity.ERROR
+
+
+async def test_a_stored_timer_missing_a_field_raises_the_same_repair(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A file that lacks a field is as unreadable as one that contradicts itself: the
+    same repair, saying which field, and no bare KeyError in the log."""
+    stored = payload()
+    del stored["commands"]
+
+    entry = await setup_target(stored=stored)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "stored_timer_invalid"
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_placeholders == {
+        "timer": "Boiler",
+        "reason": "the field commands is missing",
+    }
+    assert "KeyError" not in caplog.text
+
+
+async def test_a_stored_field_of_the_wrong_type_raises_the_same_repair(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A field that holds something else than the timer writes is unreadable too: the
+    same repair, with the reason Python gives, and no bare TypeError in the log."""
+    entry = await setup_target(stored={**payload(), "commands": 5})
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "stored_timer_invalid"
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_placeholders == {
+        "timer": "Boiler",
+        "reason": "'int' object is not iterable",
+    }
+    assert "TypeError" not in caplog.text
+
+
+async def test_resetting_the_stored_timer_keeps_the_entry_and_its_intervals(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    hass_storage: dict[str, Any],
+    freezer: FrozenDateTimeFactory,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The file of a timer with a switched-off interval and a runtime total is damaged
+    while Home Assistant is down. The user submits the repair: the timer loads again
+    with its interval, which is on, since the flag was in the file, no countdown, and
+    the runtime total as it was."""
+    entry = await setup_target(runtime=True, stored_runtime={"seconds": 600.0})
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    interval_switch = "switch.boiler_schedule_06_30_07_15_mon_sun"
+    await set_switch(hass, interval_switch, False)
+
+    def damage_the_file() -> None:
+        hass_storage[storage_key(entry)]["data"] = payload(scheduled_by=interval)
+
+    await restart_after(hass, freezer, entry, minutes=5, while_down=damage_the_file)
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    client = await hass_client()
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+
+    flow = await start_fix(client, issue.issue_id)
+
+    assert flow["type"] == "form"
+    assert flow["step_id"] == "confirm"
+    assert flow["description_placeholders"] == {"timer": "Boiler", "reason": UNFINISHED}
+
+    done = await submit_fix(client, flow["flow_id"])
+
+    assert done["type"] == "create_entry"
+    assert entry.state is ConfigEntryState.LOADED
+    assert set(entry.subentries) == {interval}
+    assert state_of(hass, interval_switch) == "on"
+    assert state_of(hass, NUMBER) == "0"
+    assert float(state_of(hass, RUNTIME)) == 10.0
+    assert runtime_saved(hass_storage, entry) == 600.0
+    assert stored_timer_invalid_issue(hass, entry) is None
+
+
+async def test_a_stored_timer_that_is_put_right_clears_the_repair(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The file is put right by hand and the timer is reloaded: it loads, and the
+    repair of a file that is fine again goes away."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    assert stored_timer_invalid_issue(hass, entry) is not None
+    hass_storage[storage_key(entry)]["data"] = payload()
+
+    await hass.config_entries.async_reload(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert stored_timer_invalid_issue(hass, entry) is None
+
+
+async def test_deleting_a_timer_whose_stored_timer_cannot_be_read_clears_the_repair(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user deletes the timer on its integration page instead of through the
+    repair: no repair is left for a timer that is not there."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    assert stored_timer_invalid_issue(hass, entry) is not None
+
+    await hass.config_entries.async_remove(entry.entry_id)
+
+    assert stored_timer_invalid_issue(hass, entry) is None
+
+
+async def test_the_reset_of_a_timer_deleted_meanwhile_does_nothing(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair, deletes the timer on its integration page, and then
+    submits the open repair: it says the timer was already deleted."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    client = await hass_client()
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    flow = await start_fix(client, issue.issue_id)
+    await hass.config_entries.async_remove(entry.entry_id)
+
+    done = await submit_fix(client, flow["flow_id"])
+
+    assert done["type"] == "abort"
+    assert done["reason"] == "timer_gone"
+
+
+async def test_a_reset_shown_again_after_the_file_was_put_right_does_nothing(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair, the file is put right and the timer is reloaded, and
+    the dialog asks for its step again: it says the problem is no longer open, and the
+    timer that loads is left as it is."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    manager, flow_id = await open_dialog(hass, stored_timer_invalid_issue(hass, entry))
+    hass_storage[storage_key(entry)]["data"] = payload()
+    await hass.config_entries.async_reload(entry.entry_id)
+
+    shown_again = await manager.async_configure(flow_id, None)
+
+    assert shown_again["type"] == "abort"
+    assert shown_again["reason"] == "issue_gone"
+    assert entry.state is ConfigEntryState.LOADED

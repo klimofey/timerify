@@ -92,6 +92,9 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 - A change you make while Home Assistant is still starting is kept and saved. This covers **Run for**, **Add time**, **Run** and the switch of a schedule interval. Timerify switches the device once Home Assistant has started.
 - Your change counts from the moment you make it. Timerify first applies what came due before it while Home Assistant was down. That can be a countdown that ended, a pending command or a schedule window. Then your change wins, as it does with Home Assistant running.
 - A pending command still runs at its own time. A command that came due while Home Assistant was down or still starting is handled at start-up.
+- Suppose the file in which Timerify keeps a timer's state cannot be read, for example after a fault. Then the timer does not start.
+- **Settings > System > Repairs** then shows "The stored state of the timer Boiler cannot be read". Timerify never resets the file by itself.
+- To fix it, open **Repairs**, choose the repair, then choose **Submit**. The timer keeps its settings, its schedule intervals and its runtime total. It loses its countdown and its pending commands. A schedule interval that you had switched off is on again.
 
 ## Which devices can have a timer
 

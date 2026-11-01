@@ -8,11 +8,17 @@ export type TimerLookup =
   | { status: "pending" }
   | { status: "found"; info: TimerInfo }
   | { status: "not_found" }
+  | { status: "incomplete" }
   | { status: "unauthorized" }
   | { status: "failed" };
 
 /** The error code Home Assistant's websocket answers when the number is no timer's. */
 const NOT_FOUND = "not_found";
+/**
+ * The one Timerify answers when the number is a timer's but the timer cannot be told of: its
+ * target or one of its sensors is not in the entity registry.
+ */
+const INCOMPLETE = "timer_incomplete";
 /** The one it answers when the user may not read what the answer would tell. */
 const UNAUTHORIZED = "unauthorized";
 
@@ -25,6 +31,9 @@ export async function lookupTimer(hass: HomeAssistant, entityId: string): Promis
     const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
     if (code === NOT_FOUND) {
       return { status: "not_found" };
+    }
+    if (code === INCOMPLETE) {
+      return { status: "incomplete" };
     }
     return { status: code === UNAUTHORIZED ? "unauthorized" : "failed" };
   }

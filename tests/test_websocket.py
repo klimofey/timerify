@@ -22,7 +22,6 @@ from pytest_homeassistant_custom_component.typing import (
 
 from custom_components.timerify.const import (
     CONF_KIND,
-    CONF_TARGET,
     DOMAIN,
     KIND_VOICE_SETTINGS,
     VOICE_UNIQUE_ID,
@@ -53,9 +52,6 @@ EVENING_SWITCH = "switch.boiler_schedule_18_00_19_00_mon_sun"
 time the scenarios start."""
 NIGHT_SWITCH = "switch.boiler_schedule_20_00_21_00_mon_sun"
 """The switch of the interval from 20:00 to 21:00 on every day."""
-
-GONE_FROM_REGISTRY = "0123456789abcdef0123456789abcdef"
-"""A registry id that belongs to no entity."""
 
 NO_OFFSET = "2026-01-05T07:00:00"
 """A time as a file that no timer wrote might hold it: no offset to tell it by."""
@@ -120,6 +116,12 @@ def not_a_timer(entity_id: str) -> dict[str, str]:
         "code": "not_found",
         "message": f"{entity_id} is not the Run for number of a Timerify timer",
     }
+
+
+def incomplete(message: str) -> dict[str, str]:
+    """The error for the "Run for" number of a timer that cannot be told of: the number
+    is a timer's, but something the card needs of it is not in the entity registry."""
+    return {"code": "timer_incomplete", "message": message}
 
 
 def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
@@ -369,6 +371,25 @@ async def test_user_who_may_not_read_the_entity_asked_about_is_refused(
     assert await refused(read_only_client, asked) == UNAUTHORIZED
 
 
+async def test_user_who_may_not_read_the_number_of_an_incomplete_timer_is_refused(
+    hass: HomeAssistant,
+    read_only_client: MockHAClientWebSocket,
+    hass_read_only_user: MockUser,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """That a number is a timer's is not told to a user who may not read it, even for
+    a timer that is incomplete."""
+    registry = er.async_get(hass)
+    target = registry.async_get(TARGET_ID)
+    assert target is not None
+    await setup_target(target=target.id)
+    registry.async_remove(TARGET_ID)
+    may_read_only(hass_read_only_user, SENSOR, NEXT)
+
+    assert await refused(read_only_client, NUMBER) == UNAUTHORIZED
+
+
 @pytest.mark.parametrize("denied", [TARGET_ID, SENSOR, NEXT])
 async def test_user_who_may_not_read_a_part_of_the_answer_is_refused(
     read_only_client: MockHAClientWebSocket,
@@ -423,6 +444,24 @@ async def test_anything_but_a_run_for_number_is_not_found(
     await setup_target()
 
     assert await refused(client, entity_id) == not_a_timer(entity_id)
+
+
+async def test_input_number_is_not_found(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A card pointed at a number of Home Assistant's own, a helper that has a state, is
+    told it is no timer's: only a timer's number can be incomplete."""
+    await setup_target()
+    assert await async_setup_component(
+        hass, "input_number", {"input_number": {"minutes": {"min": 0, "max": 100}}}
+    )
+
+    assert await refused(client, "input_number.minutes") == not_a_timer(
+        "input_number.minutes"
+    )
 
 
 async def test_number_of_another_integration_is_not_found(
@@ -539,34 +578,34 @@ async def test_timer_that_failed_to_set_up_is_still_found(
     assert await found(client, NUMBER) == told_about(entry)
 
 
-async def test_timer_whose_target_cannot_be_resolved_is_not_found(
+async def test_timer_whose_target_was_deleted_is_incomplete(
     hass: HomeAssistant,
     client: MockHAClientWebSocket,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """An entry that names its target by a registry id that is gone has no target to
-    tell the card of, so it is not answered as a timer."""
-    entry = await setup_target()
-    hass.config_entries.async_update_entry(
-        entry, options={**entry.options, CONF_TARGET: GONE_FROM_REGISTRY}
-    )
-    await hass.async_block_till_done()
+    """A timer names its target by registry id, so that it follows a rename. After the
+    target is deleted and Home Assistant starts again, the timer does not load and has
+    no target to tell the card of, but its number is still a timer's: the card is told
+    the timer is incomplete, which is not what it is told of a number that is no
+    timer's."""
+    registry = er.async_get(hass)
+    target = registry.async_get(TARGET_ID)
+    assert target is not None
+    entry = await setup_target(target=target.id)
+    registry.async_remove(TARGET_ID)
+    await hass.config_entries.async_reload(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_ERROR
 
-    assert await refused(client, NUMBER) == {
-        "code": "not_found",
-        "message": (
-            f"The target of the Timerify timer of {NUMBER}"
-            " is not in the entity registry"
-        ),
-    }
+    assert await refused(client, NUMBER) == incomplete(
+        f"The target of the Timerify timer of {NUMBER} is not in the entity registry"
+    )
 
 
 @pytest.mark.parametrize(
     ("sibling", "key"), [(SENSOR, "ends_at"), (NEXT, "next_command")]
 )
-async def test_missing_sibling_is_not_found(
+async def test_missing_sibling_is_incomplete(
     hass: HomeAssistant,
     client: MockHAClientWebSocket,
     fake_target: FakeTarget,
@@ -575,18 +614,15 @@ async def test_missing_sibling_is_not_found(
     key: str,
 ) -> None:
     """A timer that was set up has both sensors, so a number without one is not
-    answered with a timer the card cannot read, and the refusal says which is
-    missing: the number is a timer's."""
+    answered with a timer the card cannot read. The refusal says which is missing, and
+    that the number is a timer's."""
     entry = await setup_target()
     await hass.config_entries.async_unload(entry.entry_id)
     er.async_get(hass).async_remove(sibling)
 
-    assert await refused(client, NUMBER) == {
-        "code": "not_found",
-        "message": (
-            f"The Timerify timer of {NUMBER} has no {key} sensor in the entity registry"
-        ),
-    }
+    assert await refused(client, NUMBER) == incomplete(
+        f"The Timerify timer of {NUMBER} has no {key} sensor in the entity registry"
+    )
 
 
 # --- A timer that changes -----------------------------------------------------------

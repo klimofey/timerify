@@ -499,6 +499,7 @@
   "common": {
     "card_entity_not_found": "Entity not found: {entity}",
     "card_not_a_timer": "{entity} is not the Run for number of a Timerify timer",
+    "card_timer_incomplete": "The timer of {entity} cannot be shown: its target or one of its sensors is missing. Open the timer's page to see why.",
     "card_not_allowed": "You are not allowed to see the timer {entity}",
     "card_ends_at_disabled": "The Ends at sensor of this timer, {sensor}, is disabled. Enable it for the card to work",
     "card_error_entity": "Choose the Run for number of a timer",

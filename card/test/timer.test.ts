@@ -187,6 +187,13 @@ describe("asking Timerify for a timer", () => {
     }
   });
 
+  it("tells a timer that cannot be resolved from a number that is no timer's", async () => {
+    const hass = fakeHass();
+    hass.answerWith("timer_incomplete");
+
+    await expect(lookupTimer(hass, NUMBER)).resolves.toEqual({ status: "incomplete" });
+  });
+
   it("tells a user who may not read the timer from a failure", async () => {
     const hass = fakeHass();
     hass.answerWith("unauthorized");

@@ -150,6 +150,45 @@ describe("what it shows while it has no timer", () => {
     expect(textOf(card)).toBe(english.card_not_a_timer.replace("{entity}", NUMBER));
   });
 
+  it.each(["unavailable", "unknown", "45"])(
+    "tells a timer that cannot be shown, and not that its number is no timer's, while the number is %s",
+    async (state) => {
+      const hass = fakeHass({ states: { [NUMBER]: { state } } });
+      hass.answerWith("timer_incomplete");
+
+      const card = await mountCard(hass);
+
+      expect(warningOf(card)?.textContent?.trim()).toBe(
+        english.card_timer_incomplete.replace("{entity}", NUMBER),
+      );
+      expect(textOf(card)).not.toBe(english.card_not_a_timer.replace("{entity}", NUMBER));
+      expect(card.shadowRoot?.querySelector("timerify-card-popup")).toBeNull();
+    },
+  );
+
+  it("tells a timer that cannot be shown in the user's language", async () => {
+    const hass = fakeHass({ language: "ru" });
+    hass.answerWith("timer_incomplete");
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(russian.card_timer_incomplete.replace("{entity}", NUMBER));
+  });
+
+  it("shows the timer again when what was missing is back", async () => {
+    const hass = fakeHass();
+    hass.answerWith("timer_incomplete");
+    const card = await mountCard(hass);
+    expect(warningOf(card)).not.toBeNull();
+
+    hass.answerNormally();
+    card.hass = hass.with({ entities: { ...hass.entities } });
+    await card.updateComplete;
+
+    expect(warningOf(card)).toBeNull();
+    expect(nameOf(card)).toBe("Boiler");
+  });
+
   it.each(["unavailable", "unknown"])("does not warn while the number is %s", async (state) => {
     const hass = fakeHass({ states: { [NUMBER]: { state } } });
     hass.answerWith("not_found");

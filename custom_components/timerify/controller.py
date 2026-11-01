@@ -10,7 +10,6 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import replace
 from datetime import date, datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
@@ -53,6 +52,7 @@ from .const import (
     SERVICE_CALL_TIMEOUT,
     SUBENTRY_INTERVAL,
     WORKDAY_DOMAIN,
+    Settings,
     SettingValue,
     default_duration_minutes,
     freeze_settings,
@@ -242,10 +242,10 @@ class TargetController:
         self._workday_unanswered = False
         """Whether the last question to the Workday sensor went unanswered, so that an
         outage is logged once, not at every question."""
-        self._left_out: dict[str, frozenset[str]] = {}
-        """For each interval, the names of the settings that the target could not take
-        when its window was last worked out, so that they are said once, not at every
-        refresh."""
+        self._left_out = set[tuple[str, SettingValue]]()
+        """The settings, as (name, value), that the target could not take when they were
+        last sent, so that each is said once for as long as it is left out, not at every
+        call."""
         self._lock = asyncio.Lock()
         self._stopped = False
         self._started = False
@@ -681,10 +681,9 @@ class TargetController:
 
         windows: list[Window] = []
         unknown: set[str] = set()
-        for configured in self._intervals.values():
-            if configured.id in disabled:
+        for interval in self._intervals.values():
+            if interval.id in disabled:
                 continue
-            interval = self._with_settings_the_target_takes(configured)
             if interval.days == "weekdays":
                 window = weekday_window(interval, now, zone)
             elif unanswered:
@@ -700,42 +699,6 @@ class TargetController:
             if window is not None:
                 windows.append(window)
         return windows, frozenset(unknown)
-
-    def _with_settings_the_target_takes(self, interval: Interval) -> Interval:
-        """`interval` with only the settings the target can be turned on with now.
-
-        They were checked when the interval was saved, and what the target takes can
-        change after that: an update of its integration renames a mode, or the device
-        is replaced. A setting it no longer takes would fail its call, and the window
-        would turn nothing on. Each setting is judged alone, as the form offers them.
-        What is left out is said once, for as long as it is.
-        """
-        taken: dict[str, SettingValue] = {}
-        for name, value in interval.settings.items():
-            try:
-                validate_settings(self._hass, self.target_entity_id, {name: value})
-            except ServiceValidationError:
-                continue
-            taken[name] = value
-        left_out = frozenset(interval.settings) - frozenset(taken)
-        if left_out != self._left_out.get(interval.id, frozenset()):
-            if left_out:
-                self._left_out[interval.id] = left_out
-                # An interval deleted since the timer was loaded is named by its id:
-                # its title went with it, and the reload that follows lets it go.
-                subentry = self._entry.subentries.get(interval.id)
-                _LOGGER.warning(
-                    "The schedule interval %s of %s asks for settings that the target"
-                    " cannot take now (%s); it is turned on without them",
-                    interval.id if subentry is None else subentry.title,
-                    self.target_entity_id,
-                    ", ".join(sorted(left_out)),
-                )
-            else:
-                del self._left_out[interval.id]
-        return (
-            replace(interval, settings=freeze_settings(taken)) if left_out else interval
-        )
 
     async def _async_is_workday(self, day: date) -> bool:
         """Ask the Workday sensor whether `day` is a working day, as the sensor says it:
@@ -1012,15 +975,21 @@ class TargetController:
                 return  # Unloaded while an earlier effect was under way.
             match effect:
                 case TurnOn(settings):
+                    # Settings that were all left out count as delivered: the turn-on
+                    # is all there is to send, and nothing stays owed.
                     await self._carry_out(
                         "on",
-                        self._behaviour.turn_on_calls(settings),
+                        self._behaviour.turn_on_calls(
+                            self._settings_the_target_takes(settings)
+                        ),
                         with_settings=bool(settings),
                     )
                 case ApplySettings(settings):
                     await self._carry_out(
                         "settings",
-                        self._behaviour.apply_calls(settings),
+                        self._behaviour.apply_calls(
+                            self._settings_the_target_takes(settings)
+                        ),
                         with_settings=True,
                     )
                 case TurnOff():
@@ -1041,6 +1010,35 @@ class TargetController:
                     self._log_dropped(command)
                 case _:
                     assert_never(effect)
+
+    def _settings_the_target_takes(self, settings: Settings) -> Settings:
+        """The part of `settings` that the target can be turned on with now.
+
+        They were checked when the command was made or the interval was saved, and
+        what the target takes can change after that: an update of its integration
+        renames a mode, or the device is replaced. A setting it no longer takes would
+        fail its call, and nothing would be turned on. So it is judged when it is sent,
+        whoever owes it: a run, a pending command, a window or settings carried over.
+        Each setting is judged alone, as the form offers them, and one that is left out
+        is said once, for as long as it is.
+        """
+        taken: dict[str, SettingValue] = {}
+        for name, value in settings.items():
+            try:
+                validate_settings(self._hass, self.target_entity_id, {name: value})
+            except ServiceValidationError:
+                if (name, value) not in self._left_out:
+                    self._left_out.add((name, value))
+                    _LOGGER.warning(
+                        "%s cannot take the setting %s=%s now; it is left out",
+                        self.target_entity_id,
+                        name,
+                        value,
+                    )
+                continue
+            taken[name] = value
+            self._left_out -= {pair for pair in self._left_out if pair[0] == name}
+        return freeze_settings(taken)
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()

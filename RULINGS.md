@@ -496,24 +496,8 @@ only the final behaviour is written.
   within 7 days; a Workday-based one with no match is searched again when the sensor
   reports, daily. Cost if wrong: none found.
 - **A window carries only the settings of its interval that the target takes when the
-  window is worked out; the rest are left out and said once.** The form checks the
-  settings when the interval is saved, but a window is worked out from data that can be
-  months old, and what a target takes changes (an update of its integration renames a
-  mode, the device is replaced). A setting the target no longer takes fails its call, and
-  the window would turn nothing on, with a warning every morning, where a plain turn-on
-  would have worked. Each setting is judged alone, as the form offers them and as the next
-  edit keeps them (`_with_settings_the_target_takes`, through `validate_settings`), so the
-  rest of the settings are still used. The warning names the interval and the settings,
-  and is repeated only when what is left out changes, not at every refresh. Windows are
-  worked out at start-up, at every window end, when the Workday sensor reports, when the
-  zone changes and when an interval is switched, so a change of capabilities is noticed by
-  the next of those, and a window worked out before it keeps the settings it had until
-  then. A window that is kept because its occurrence could not be worked out keeps the
-  settings it was worked out with. Cost if wrong: a setting that the target takes again is
-  missing from the window that was worked out while it did not, until the next refresh.
-  Pending commands are not covered (issue #18). Tests:
-  `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
-  `test_setting_that_comes_back_and_goes_again_is_said_again`.
+  window is worked out; the rest are left out and said once.** Changed in 1.1.0: see "The
+  settings are filtered when they are sent, whoever owes them" under Release 1.1.0.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
   callbacks use `_refresh_windows`, which takes the lock; after every await the controller
   re-checks that it is still loaded and takes `now` afresh.** `asyncio.Lock` is not
@@ -1752,9 +1736,9 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
 - **A deleted interval is still worked out until the timer reloads.** Deleting an interval
   reloads the timer at once, which lets it go; only a reload that waits behind another set-up
   leaves the loaded timer with it, and for that time a window of it can be worked out and
-  opened. The commands that name an interval and the warning about its settings treat it as
-  gone already (`async_set_schedule_enabled`, `_with_settings_the_target_takes`), and the
-  reload drops its window (`TimerCore.set_windows`, `configured`). Why: the window is short,
+  opened. The commands that name an interval treat it as gone already
+  (`async_set_schedule_enabled`), and the reload drops its window
+  (`TimerCore.set_windows`, `configured`). Why: the window is short,
   and closing it would need a second judgement of which intervals exist beside the entry.
   Cost if wrong: for as long as a reload waits, a deleted interval can still open a window.
 
@@ -1857,8 +1841,7 @@ in `docs/followups.md`.
   while Home Assistant starts. Then the interval keeps its stored window, as at any time
   the sensor does not answer, and the warning is logged once. If that window is not the one
   that is open now, start-up merges the right one after the change, and it may start then
-  (S1). The settings of a window are judged from what the registry remembers of a target
-  whose integration is not up yet. A change that waits for its turn, behind another change
+  (S1). A change that waits for its turn, behind another change
   or a slow Workday answer, catches up to the moment it
   runs, not the moment it was given, so it also wins over what fell due in between (#42).
   A report of the target before start-up is answered a few seconds later, at start-up.
@@ -1906,3 +1889,35 @@ in `docs/followups.md`.
   then turns out to be unavailable, the log does not mention it, though the target is
   switched all the same when it is back. Home Assistant starts within minutes, and a
   change made meanwhile is rare.
+- **The settings are filtered when they are sent, whoever owes them.** `_execute` judges the
+  settings of every `TurnOn` and `ApplySettings` against what the target takes at that
+  moment (`_settings_the_target_takes`, through `validate_settings`), each setting alone, as
+  the form offers them, and sends the ones it takes. That holds for settings of every
+  origin: a `run`, a pending command, a window, and settings carried over from the file. A
+  window carries the settings of its interval as saved, and nothing filters them when it is
+  worked out. `async_run` and `async_add_command` still refuse, at once, the settings that
+  the target does not take when the request is made.
+  A setting that is left out is said once, as a warning that names the target and the
+  setting: "climate.ac cannot take the setting hvac_mode=cool now; it is left out". The
+  controller remembers the pair of name and value while it stays left out. A later call that
+  carries the name and finds it taken forgets the pair, so it is said again if it is left
+  out again. It names no interval or command, since any origin may owe it.
+  Settings that were all left out count as delivered. The turn-on goes out plain, or an
+  `ApplySettings` with nothing left makes no call, and the core is told `settings_applied`
+  as for any delivery: it clears what is owed and touches no allowance. A setting that
+  nobody can send must not be owed, sent again and given up on.
+  Why: #18. Only a window was filtered, and when it was worked out, not when it was sent.
+  A pending command whose mode was renamed failed its call every time. A window worked out
+  while the target showed no modes (its integration was still connecting, as at start-up)
+  lost the settings for good, until the next window refresh. Sending is the one place all
+  settings pass through, and the moment at which what the target takes is what matters.
+  Cost if wrong: a setting that comes and goes between two calls is warned about again, and
+  a target that shows incomplete capabilities at the moment of sending (an integration
+  still connecting) gets its turn-on without the setting, which is not sent again later:
+  it counts as delivered.
+  Tests: `test_a_due_command_whose_mode_was_renamed_turns_on_without_it`,
+  `test_a_running_ac_that_lost_the_only_setting_of_a_command_gets_no_call`,
+  `test_a_setting_left_out_is_said_once_when_the_turn_on_is_sent_again`,
+  `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
+  `test_setting_that_comes_back_and_goes_again_is_said_again`,
+  `test_a_climate_without_capabilities_keeps_the_settings_of_its_window`.

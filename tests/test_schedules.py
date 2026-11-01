@@ -939,8 +939,7 @@ async def test_setting_the_ac_no_longer_takes_is_left_out_and_said_once(
     await advance_to(hass, freezer, local(MONDAY, "06:30"))
     assert fake_climate.call_data[-2:] == [("turn_on", {}), SET_24]
     assert timerify_warnings(caplog) == [
-        "The schedule interval 06:30–07:15, Mon–Sun of climate.ac asks for settings"
-        " that the target cannot take now (hvac_mode); it is turned on without them"
+        "climate.ac cannot take the setting hvac_mode=cool now; it is left out"
     ]
 
 
@@ -954,8 +953,9 @@ async def test_a_switch_flipped_before_a_deleted_interval_unloads_is_not_broken_
     """The cooling interval is deleted and the reload of the timer waits for its turn.
     Meanwhile the AC's integration took the cooling mode away, and the evening
     interval is switched on. The windows are worked out for the timer as it is loaded,
-    the deleted interval among them, and the warning about its setting must not fail
-    the switch for an interval that the entry no longer has."""
+    the deleted interval among them, and that must not fail the switch for an interval
+    that the entry no longer has. Nothing is said about the setting: no window has
+    sent it."""
     await open_sunday(hass, freezer)
     entry = await setup_target(target=AC_ID)
     cooling = await add_interval(
@@ -972,9 +972,7 @@ async def test_a_switch_flipped_before_a_deleted_interval_unloads_is_not_broken_
     await hass.async_block_till_done()
 
     assert state_of(hass, "switch.ac_schedule_18_00_19_00_mon_sun") == "on"
-    (warning,) = timerify_warnings(caplog)
-    assert cooling in warning
-    assert "cannot take now (hvac_mode)" in warning
+    assert timerify_warnings(caplog) == []
 
 
 async def test_setting_that_comes_back_and_goes_again_is_said_again(
@@ -994,23 +992,52 @@ async def test_setting_that_comes_back_and_goes_again_is_said_again(
     fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
     fake_climate.write("off")
     await restart(hass, entry)
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_climate.call_data == [("turn_on", {}), SET_24]
     assert len(timerify_warnings(caplog)) == 1
 
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     fake_climate.capability_attributes["hvac_modes"] = offered
     fake_climate.write("off")
-    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
-    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     await advance_to(hass, freezer, local(MONDAY, "06:30"))
 
     assert fake_climate.call_data[-2:] == [SET_COOL, SET_24]
     assert len(timerify_warnings(caplog)) == 1
+    await advance_to(hass, freezer, local(MONDAY, "07:15"))
     fake_climate.capability_attributes["hvac_modes"] = ["off", "heat", "fan_only"]
     fake_climate.write("off")
-    await advance_to(hass, freezer, local(MONDAY, "07:15"))
     await advance_to(hass, freezer, local(SUNDAY + timedelta(days=2), "06:30"))
 
-    assert len(timerify_warnings(caplog)) == 2
     assert fake_climate.call_data[-2:] == [("turn_on", {}), SET_24]
+    assert len(timerify_warnings(caplog)) == 2
+
+
+async def test_a_climate_without_capabilities_keeps_the_settings_of_its_window(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Home Assistant starts while the AC is still connecting: it is unavailable and
+    offers no modes yet. The window is worked out then, and it must keep its cooling
+    at 24 degrees. The AC has its modes back when the window starts, and gets them."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    kept = fake_climate.capability_attributes
+    fake_climate.capability_attributes = {}
+    fake_climate.write("unavailable")
+    await restart(hass, entry)
+    await advance_to(hass, freezer, local(SUNDAY, "06:10"))
+
+    fake_climate.capability_attributes = kept
+    await fake_climate.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert fake_climate.call_data == [SET_COOL, SET_24]
+    assert state_of(hass, AC_ID) == "cool"
+    assert timerify_warnings(caplog) == []
 
 
 # --- What the log says ----------------------------------------------------------------

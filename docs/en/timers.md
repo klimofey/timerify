@@ -108,7 +108,7 @@ It can also switch any other entity of a kind that has turn-on and turn-off acti
 
 A command that turns the device on can say how. It can set the mode and temperature of an air conditioner, the brightness of a light or the speed of a fan. These are the device's settings.
 
-Timerify offers only what the device says it can do. It checks a request when you make it. A wrong request is refused at once with a message, not when the device is already waiting for it.
+Timerify offers only what the device says it can do. It checks a request when you make it. A wrong request is refused at once with a message, not when the device is already waiting for it. A device can stop offering a setting later, for example when an update of its integration renames a mode. Then Timerify leaves that setting out when the command or the schedule interval runs. The device gets the rest, and the log names the setting.
 
 Settings are applied in these cases:
 

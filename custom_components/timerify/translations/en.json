@@ -542,6 +542,10 @@
           "reload_failed": "The stored timer was reset, but the timer could not be loaded again. Open the timer's page to see why."
         }
       }
+    },
+    "settings_not_taken": {
+      "title": "A schedule interval of the timer {timer} has settings the device does not take",
+      "description": "The schedule interval {interval} of the timer {timer} turns the device on with settings that the device does not take now: {settings}. Timerify keeps them, and leaves them out when the interval turns the device on. If the device takes them again, they are used again and this message goes away. If the form of the interval shows a setting, pick a value the device takes. To drop a setting the form no longer shows, delete the interval and add it again."
     }
   },
   "common": {

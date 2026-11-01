@@ -61,6 +61,11 @@ AC_ATTRS: Final[dict[str, Any]] = {
 }
 """The capability attributes and supported features of an air conditioner that Home
 Assistant keeps on its state, also while it is unavailable."""
+AC_WITHOUT_FAN_MODE: Final = int(AC_ATTRS["supported_features"]) & ~int(
+    ClimateEntityFeature.FAN_MODE
+)
+"""The supported features of that air conditioner once its integration stops offering
+the fan modes, as an update of the integration may."""
 AC_NUMBER = "number.ac_run_for"
 AC_ENDS_AT = "sensor.ac_ends_at"
 AC_NEXT = "sensor.ac_next_command"

@@ -1,12 +1,14 @@
-"""The repairs of a timer: one whose target was deleted, and one whose stored state
-cannot be read.
+"""The repairs of a timer: one whose target was deleted, one whose stored state cannot
+be read, and a warning for a schedule interval whose settings the target does not take.
 
 The scenarios are the user's: the boiler's entity is deleted in its settings, or its
 whole device is, or Home Assistant starts without it. The timer stays loaded and
 switches nothing, the repair says so, and the user either adds the device again, with
 the same entity id, or submits the repair to delete the timer. When the file in which
 the timer keeps its state is unreadable, the timer does not load, the repair says so,
-and the user submits it to reset the file.
+and the user submits it to reset the file. When the air conditioner stops offering a
+setting that an interval turns it on with, a warning names the interval and the setting
+for as long as the air conditioner does not take it; it has nothing to submit.
 """
 
 from http import HTTPStatus
@@ -21,6 +23,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
@@ -29,6 +32,9 @@ from custom_components.timerify.repairs import async_create_fix_flow
 
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
+    AC_ATTRS,
+    AC_ID,
+    AC_WITHOUT_FAN_MODE,
     NUMBER,
     RUNTIME,
     SENSOR,
@@ -42,10 +48,12 @@ from .helpers import (
     advance_to,
     at,
     command_json,
+    edit_interval,
     iso,
     local,
     open_sunday,
     payload,
+    reload_held_back,
     restart_after,
     runtime_saved,
     saved,
@@ -846,3 +854,342 @@ async def test_an_issue_with_no_known_kind_has_no_fix(
     no kind of ours is refused in one way, not with a KeyError for a missing kind."""
     with pytest.raises(ValueError, match="has no fix"):
         await async_create_fix_flow(hass, "issue", data)
+
+
+# --- The warning for settings the device no longer takes ------------------------------
+
+COOL24 = {"hvac_mode": "cool", "temperature": 24}
+COOL24_LOW = {**COOL24, "fan_mode": "low"}
+NO_COOLING = ["off", "heat"]
+"""The modes of an air conditioner whose integration stopped offering cooling."""
+
+
+def settings_not_taken_issue(
+    hass: HomeAssistant, entry: ConfigEntry, subentry_id: str
+) -> ir.IssueEntry | None:
+    """The warning of the interval, if there is one."""
+    return ir.async_get(hass).async_get_issue(
+        DOMAIN, f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    )
+
+
+def open_issues(hass: HomeAssistant) -> set[str]:
+    """The ids of every issue Timerify has open."""
+    return {
+        issue.issue_id
+        for issue in ir.async_get(hass).issues.values()
+        if issue.domain == DOMAIN
+    }
+
+
+async def stop_offering_cooling(fake_climate: FakeTarget) -> None:
+    """The air conditioner's integration is updated and no longer offers cooling."""
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    await fake_climate.set_state("off")
+
+
+async def test_an_interval_setting_the_ac_no_longer_takes_raises_a_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The AC stops offering cooling: Repairs shows a warning with nothing to submit,
+    which names the interval and the setting."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+
+    await stop_offering_cooling(fake_climate)
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.severity == ir.IssueSeverity.WARNING
+    assert not issue.is_fixable
+    assert issue.translation_key == "settings_not_taken"
+    assert issue.translation_placeholders == {
+        "timer": "Boiler",
+        "interval": entry.subentries[subentry_id].title,
+        "settings": "HVAC mode",
+    }
+
+
+async def test_the_warning_names_every_setting_the_ac_does_not_take(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Cooling and the fan modes are both gone: the one warning of the interval names
+    both settings, in the order the form lists them, and not the temperature."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "HVAC mode, Fan mode"
+
+
+async def test_the_warning_follows_the_settings_the_ac_does_not_take(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The AC loses one setting, then another, then takes the first back: the warning
+    names the ones it does not take at each moment."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+
+    async def named() -> str:
+        issue = settings_not_taken_issue(hass, entry, subentry_id)
+        assert issue is not None
+        assert issue.translation_placeholders is not None
+        return issue.translation_placeholders["settings"]
+
+    await stop_offering_cooling(fake_climate)
+    assert await named() == "HVAC mode"
+
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+    assert await named() == "HVAC mode, Fan mode"
+
+    fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
+    await fake_climate.set_state("off")
+    assert await named() == "Fan mode"
+
+
+async def test_a_value_the_ac_no_longer_accepts_raises_the_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The AC still has a temperature but takes a narrower range: 24 degrees is out of
+    it, and the window would leave it out, so the warning names it."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+
+    fake_climate.capability_attributes["max_temp"] = 22
+    await fake_climate.set_state("off")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "Temperature"
+
+
+async def test_only_the_interval_that_has_the_lost_setting_is_named(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Each interval has its own warning, and an interval whose settings the AC still
+    takes has none."""
+    entry = await setup_target(target=AC_ID)
+    cooling = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    heating = await add_interval(
+        hass,
+        entry,
+        start="18:00",
+        end="19:00",
+        settings={"hvac_mode": "heat", "temperature": 22},
+    )
+    plain = await add_interval(hass, entry, start="12:00", end="13:00")
+
+    await stop_offering_cooling(fake_climate)
+
+    assert settings_not_taken_issue(hass, entry, cooling) is not None
+    assert settings_not_taken_issue(hass, entry, heating) is None
+    assert settings_not_taken_issue(hass, entry, plain) is None
+
+
+async def test_the_warning_names_the_settings_in_the_language_of_the_house(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The settings are called what the form calls them in the house's language."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    hass.config.language = "ru"
+    texts = await async_get_translations(hass, "ru", "config_subentries", [DOMAIN])
+    prefix = f"component.{DOMAIN}.config_subentries.interval.step.user"
+    names = [
+        texts[f"{prefix}.sections.settings.data.{n}"] for n in ("hvac_mode", "fan_mode")
+    ]
+    assert names != ["HVAC mode", "Fan mode"]
+
+    fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == ", ".join(names)
+
+
+async def test_the_warning_clears_when_the_ac_takes_the_setting_again(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The integration offers cooling again: the interval is used as it was, and the
+    warning goes away by itself."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+
+    fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
+    await fake_climate.set_state("off")
+
+    assert settings_not_taken_issue(hass, entry, subentry_id) is None
+
+
+async def test_the_warning_clears_when_the_interval_no_longer_holds_it(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user opens the interval and picks a mode the AC takes: the warning goes."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+
+    await edit_interval(
+        hass, entry, subentry_id, settings={"hvac_mode": "heat", "temperature": 24}
+    )
+
+    assert settings_not_taken_issue(hass, entry, subentry_id) is None
+
+
+async def test_the_warning_stands_after_editing_an_interval_it_does_not_concern(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The edit reloads the timer, and the start-up judges the interval again: a
+    setting the form does not show is kept by the edit, and still warned about."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "Fan mode"
+
+
+async def test_deleting_the_interval_clears_its_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Deleting the interval drops a setting the form no longer shows, and its
+    warning with it."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+
+    hass.config_entries.async_remove_subentry(entry, subentry_id)
+    await hass.async_block_till_done()
+
+    assert settings_not_taken_issue(hass, entry, subentry_id) is None
+
+
+async def test_a_report_before_the_reload_raises_no_warning_for_a_deleted_interval(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user deletes an interval, and the AC stops offering cooling before the timer
+    has reloaded: the interval that is gone gets no warning, the one that is left
+    does."""
+    entry = await setup_target(target=AC_ID)
+    gone = await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    left = await add_interval(hass, entry, start="18:00", end="19:00", settings=COOL24)
+
+    async with reload_held_back(entry):
+        hass.config_entries.async_remove_subentry(entry, gone)
+        fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+        fake_climate.write("off")
+
+        assert open_issues(hass) == {f"settings_not_taken_{entry.entry_id}_{left}"}
+
+
+async def test_a_setting_lost_while_down_raises_the_warning_at_start_up(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The AC's integration is updated while Home Assistant is down: the timer that is
+    set up again warns at once, without waiting for the AC to report."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+
+    def update_the_ac() -> None:
+        fake_climate.capability_attributes["hvac_modes"] = NO_COOLING
+        fake_climate.write("off")
+
+    await restart_after(hass, freezer, entry, minutes=5, while_down=update_the_ac)
+
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+
+
+async def test_an_unavailable_ac_raises_no_settings_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """An AC that is away still says what it can do, and takes the settings: nothing
+    is wrong with the interval."""
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+
+    await fake_climate.set_state("unavailable")
+
+    assert open_issues(hass) == set()
+
+
+async def test_a_deleted_ac_raises_no_settings_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """With the AC deleted only the repair of the deleted device speaks for the timer;
+    the warning is back when the AC is."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+
+    await fake_climate.delete()
+
+    assert open_issues(hass) == {f"target_deleted_{entry.entry_id}"}
+
+    await fake_climate.restore("off")
+
+    assert settings_not_taken_issue(hass, entry, subentry_id) is not None
+    assert target_deleted_issue(hass, entry) is None
+
+
+async def test_the_warnings_of_a_timer_go_with_it(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Deleting the timer takes every warning of its intervals away."""
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    await add_interval(hass, entry, start="18:00", end="19:00", settings=COOL24)
+    await stop_offering_cooling(fake_climate)
+    assert len(open_issues(hass)) == 2
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert open_issues(hass) == set()

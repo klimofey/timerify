@@ -578,7 +578,8 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         edit titles an interval whose title is still that one again, in the language of
         the house now, and keeps any other title, the user's own. An interval that has
         no `CONF_GENERATED_TITLE` counts as titled by Timerify when its title equals the
-        one its data makes in the language of the house now.
+        one its data makes in the language of the house now. An edit keeps the settings
+        the form does not offer, as they are (`_interval_from`).
         """
         entry = self._get_entry()
         subentry = (
@@ -588,7 +589,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         )
         errors: dict[str, str] = {}
         if user_input is not None:
-            data, errors = self._interval_from(entry, user_input)
+            data, errors = self._interval_from(
+                entry, user_input, subentry.data[CONF_SETTINGS] if subentry else {}
+            )
             if not errors:
                 labels = await async_title_labels(self.hass, self.hass.config.language)
                 title = interval_title(data, labels)
@@ -615,23 +618,27 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
-                self._interval_schema(entry, opened=bool(shown.get(CONF_SETTINGS))),
+                self._interval_schema(entry, shown.get(CONF_SETTINGS) or {}),
                 shown,
             ),
             errors=errors,
         )
 
-    def _interval_schema(self, entry: ConfigEntry, *, opened: bool) -> probatio.Schema:
+    def _interval_schema(
+        self, entry: ConfigEntry, shown_settings: Mapping[str, Any]
+    ) -> probatio.Schema:
         """The form: the kind of days, the weekdays, start, end and, when the target can
         be turned on with any, a section of its settings.
 
         The kind of days is the working days of the Workday sensor from the start when
         the timer has one: those are what a house with a sensor schedules by.
 
-        The section is open when the form shows settings, which are then not hidden
-        from the user nor the fields an error about them is about, and closed when it
-        shows none. It has no default: a default on a section makes the frontend skip
-        the settings inside it, and an edit would clear them.
+        The section is open when `shown_settings`, the settings the form is filled in
+        with, holds one that the section offers, so that it is not hidden from the user
+        nor the fields an error about it is about. It is closed otherwise: a setting
+        the target no longer offers is not shown, so it does not open the section. It
+        has no default: a default on a section makes the frontend skip the settings
+        inside it, and an edit would clear them.
         """
         has_sensor = CONF_WORKDAY_SENSOR in entry.options
         fields: dict[Any, Any] = {
@@ -658,6 +665,7 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             probatio.Required(CONF_END): selector.TimeSelector(),
         }
         if choices := supported_settings(self.hass, entry.options[CONF_TARGET]):
+            opened = any(choice.name in shown_settings for choice in choices)
             fields[probatio.Optional(CONF_SETTINGS)] = section(
                 probatio.Schema(
                     {
@@ -670,11 +678,20 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return probatio.Schema(fields)
 
     def _interval_from(
-        self, entry: ConfigEntry, user_input: dict[str, Any]
+        self,
+        entry: ConfigEntry,
+        user_input: dict[str, Any],
+        stored: Mapping[str, Any],
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """The data of the interval a filled-in form describes, and what is wrong
         with it by field, `base` for the settings as a whole; the data is whole only
-        when nothing is wrong."""
+        when nothing is wrong.
+
+        `stored` is the settings the interval has, none for a new one. The saved
+        settings are the ones of the form, which have the user's values, and then the
+        stored ones whose name the form does not offer: the target no longer takes
+        them, but may again, and the user cannot change what the form does not show.
+        """
         errors: dict[str, str] = {}
         days: DaysMode = user_input[CONF_DAYS]
         weekdays: list[str] = []
@@ -705,6 +722,13 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             errors["base"] = "settings_not_whole"
         except ServiceValidationError:
             errors["base"] = "settings_not_supported"
+        offered = {
+            choice.name
+            for choice in supported_settings(self.hass, entry.options[CONF_TARGET])
+        }
+        settings.update(
+            {name: value for name, value in stored.items() if name not in offered}
+        )
         data = {
             CONF_DAYS: days,
             CONF_WEEKDAYS: weekdays,

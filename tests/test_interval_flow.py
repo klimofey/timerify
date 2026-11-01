@@ -28,6 +28,7 @@ from .conftest import (
 )
 from .helpers import (
     AC_ID,
+    AC_WITHOUT_FAN_MODE,
     NUMBER,
     TURN_OFF,
     TURN_ON,
@@ -599,6 +600,24 @@ async def test_settings_are_open_when_the_form_shows_some(
     )
 
 
+async def test_an_interval_with_only_settings_not_offered_shows_them_closed(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The section opens to show settings, and the form shows none of this interval:
+    the one it has is a setting the AC no longer offers, so the section stays closed."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings={"fan_mode": "low"}
+    )
+    assert settings_are_open(await open_form(hass, entry, "reconfigure", subentry_id))
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+
+    assert not settings_are_open(form)
+
+
 async def test_editing_the_days_renames_the_interval(
     hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
 ) -> None:
@@ -734,6 +753,80 @@ async def test_editing_keeps_the_settings_it_is_not_asked_to_change(
         "temperature": 24,
         "fan_mode": "low",
     }
+
+
+async def test_editing_keeps_a_setting_the_ac_no_longer_offers(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """An update of the AC's integration drops its fan modes. The form no longer shows
+    the fan mode, and editing the interval does not lose the one it has: the AC may
+    offer it again."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass,
+        entry,
+        start="06:30",
+        end="07:15",
+        settings={"hvac_mode": "cool", "temperature": 24, "fan_mode": "low"},
+    )
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+    assert "fan_mode" not in settings_fields(form)
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    assert dict(entry.subentries[subentry_id].data["settings"]) == {
+        "hvac_mode": "cool",
+        "temperature": 24,
+        "fan_mode": "low",
+    }
+
+
+async def test_editing_changes_the_settings_shown_beside_a_kept_one(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A setting the form shows has the user's value, also when it is emptied; only the
+    one the form does not show is kept as it is."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass,
+        entry,
+        start="06:30",
+        end="07:15",
+        settings={"hvac_mode": "cool", "temperature": 24, "fan_mode": "low"},
+    )
+    fake_climate.capability_attributes["supported_features"] = AC_WITHOUT_FAN_MODE
+    await fake_climate.set_state("off")
+
+    await edit_interval(
+        hass, entry, subentry_id, settings={"hvac_mode": "heat", "temperature": 21}
+    )
+    assert dict(entry.subentries[subentry_id].data["settings"]) == {
+        "hvac_mode": "heat",
+        "temperature": 21,
+        "fan_mode": "low",
+    }
+
+    await edit_interval(hass, entry, subentry_id, settings={})
+    assert dict(entry.subentries[subentry_id].data["settings"]) == {"fan_mode": "low"}
+
+
+async def test_editing_keeps_every_setting_while_the_ac_is_gone(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """With the AC deleted the form offers no settings at all, and editing the times
+    of the interval still keeps all it has: the AC may be added again."""
+    entry = await setup_target(target=AC_ID)
+    settings = {"hvac_mode": "cool", "temperature": 24, "fan_mode": "low"}
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=settings
+    )
+    await fake_climate.delete()
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    assert dict(entry.subentries[subentry_id].data["settings"]) == settings
 
 
 async def test_editing_can_remove_the_settings(

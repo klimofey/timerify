@@ -38,6 +38,7 @@ from homeassistant.helpers.event import (
     async_track_state_report_event,
 )
 from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -73,8 +74,20 @@ from .core import (
     Window,
     remaining_minutes,
 )
-from .domains import TargetCall, actual_state, behaviour_for, validate_settings
-from .issues import TARGET_DELETED, async_clear, async_raise_target_deleted
+from .domains import (
+    TargetCall,
+    actual_state,
+    behaviour_for,
+    settings_not_taken,
+    validate_settings,
+)
+from .issues import (
+    TARGET_DELETED,
+    async_clear,
+    async_clear_settings_not_taken,
+    async_raise_settings_not_taken,
+    async_raise_target_deleted,
+)
 from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
 from .target import target_name
@@ -85,6 +98,12 @@ _REMEMBERED_CONTEXTS = 16
 """How many of our own service calls are still recognised when the target reports
 them. Commands run one at a time, so only the calls of the last few can have a report
 in flight."""
+
+_SETTING_LABELS = (
+    f"component.{DOMAIN}.config_subentries.interval.step.user.sections.settings.data"
+)
+"""The start of the translation keys that label the settings in the form of an
+interval, which the warning of an interval names its settings by."""
 
 type Label = Literal["on", "off", "settings"]
 """What a list of service calls is for: switching the target on or off, or setting
@@ -247,6 +266,9 @@ class TargetController:
         """The settings, as (name, value), that the target could not take when they were
         last sent, so that each is said once for as long as it is left out, not at every
         call."""
+        self._settings_warned = dict[str, tuple[str, ...]]()
+        """The names of the settings that the warning of each interval, by the id of its
+        subentry, was raised with (`_async_check_interval_settings`)."""
         self._lock = asyncio.Lock()
         self._stopped = False
         self._target_deleted = False
@@ -289,13 +311,15 @@ class TargetController:
     async def async_start(self) -> None:
         """Follow the target; once Home Assistant is running, take stock of it.
 
-        The repair of a deleted target lives with the loaded timer: it goes when the
-        timer is unloaded, and start-up raises it again if the target is still gone.
+        The repair of a deleted target and the warnings of the intervals live with the
+        loaded timer: they go when the timer is unloaded, and start-up raises them again
+        if they still stand.
         """
         self._entry.async_on_unload(self._stop)
         self._entry.async_on_unload(
             lambda: async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
         )
+        self._entry.async_on_unload(self._clear_settings_warnings)
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, self.target_entity_id, self._handle_state_change
@@ -857,6 +881,7 @@ class TargetController:
             effects += self._core.observe(now, actual_state(state), by_us=False)
             self._started = True  # reports are answered from here
             await self._execute_fold(before, now, effects)
+            await self._async_check_interval_settings()
 
     def _follow_workday_sensor(self) -> None:
         """Work the windows out again whenever the Workday sensor changes or reports.
@@ -893,6 +918,7 @@ class TargetController:
                 by_us=event.context.id in self._own_contexts,
             )
             await self._execute_fold(before, now, effects)
+            await self._async_check_interval_settings()
 
     def _target_exists(self) -> bool:
         """Whether the target is there: it has a registry entry or a state. Either is
@@ -929,6 +955,66 @@ class TargetController:
             _LOGGER.info(
                 "The entity %s of the timer %s is back", self.target_entity_id, title
             )
+
+    def _intervals_not_taken(self) -> dict[str, tuple[str, ...]]:
+        """The settings of each interval that the target does not take now, by the id of
+        the interval; an interval whose settings it takes is left out. The judgement is
+        the one the settings are filtered by when they are sent
+        (`_settings_the_target_takes`). There are none while the target is deleted,
+        which its repair speaks for."""
+        if not self._target_exists():
+            return {}
+        not_taken = {
+            interval.id: settings_not_taken(
+                self._hass, self.target_entity_id, interval.settings
+            )
+            for interval in self._intervals.values()
+        }
+        return {subentry_id: names for subentry_id, names in not_taken.items() if names}
+
+    async def _async_check_interval_settings(self) -> None:
+        """Warn about each interval that turns the target on with settings it does not
+        take, and take a warning away when the target takes them again.
+
+        There is one warning per interval, which names all its settings. It is raised
+        again only when the names change, so a report that changes nothing costs
+        nothing. The names are the labels of the interval form, in the language of the
+        house.
+        """
+        if self._intervals_not_taken() == self._settings_warned:
+            return
+        texts = await async_get_translations(
+            self._hass, self._hass.config.language, "config_subentries", [DOMAIN]
+        )
+        if self._stopped:
+            return
+        # The target may have changed while the texts were read, so it is judged again:
+        # nothing is awaited from here to the last warning.
+        not_taken = self._intervals_not_taken()
+        for subentry_id in self._settings_warned.keys() - not_taken.keys():
+            async_clear_settings_not_taken(
+                self._hass, self._entry.entry_id, subentry_id
+            )
+        for subentry_id, names in not_taken.items():
+            # An interval deleted since the timer loaded stays here until it reloads.
+            subentry = self._entry.subentries.get(subentry_id)
+            if subentry is not None and self._settings_warned.get(subentry_id) != names:
+                async_raise_settings_not_taken(
+                    self._hass,
+                    self._entry,
+                    subentry,
+                    ", ".join(texts[f"{_SETTING_LABELS}.{name}"] for name in names),
+                )
+        self._settings_warned = not_taken
+
+    @callback
+    def _clear_settings_warnings(self) -> None:
+        """Take every warning of an interval away: the timer is unloaded."""
+        for subentry_id in self._settings_warned:
+            async_clear_settings_not_taken(
+                self._hass, self._entry.entry_id, subentry_id
+            )
+        self._settings_warned.clear()
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
@@ -1083,14 +1169,14 @@ class TargetController:
         renames a mode, or the device is replaced. A setting it no longer takes would
         fail its call, and nothing would be turned on. So it is judged when it is sent,
         whoever owes it: a run, a pending command, a window or settings carried over.
-        Each setting is judged alone, as the form offers them, and one that is left out
-        is said once, for as long as it is.
+        Each setting is judged alone, as the form offers them, by `settings_not_taken`,
+        which the warnings of the intervals go by too. One that is left out is said
+        once, for as long as it is.
         """
+        not_taken = settings_not_taken(self._hass, self.target_entity_id, settings)
         taken: dict[str, SettingValue] = {}
         for name, value in settings.items():
-            try:
-                validate_settings(self._hass, self.target_entity_id, {name: value})
-            except ServiceValidationError:
+            if name in not_taken:
                 if (name, value) not in self._left_out:
                     self._left_out.add((name, value))
                     _LOGGER.warning(

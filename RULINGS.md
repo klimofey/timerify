@@ -2167,3 +2167,49 @@ in `docs/followups.md`.
   `test_a_title_the_user_chose_is_kept_in_an_entry_of_the_current_version`,
   `test_the_voice_settings_entry_is_migrated_too`,
   `test_the_translation_languages_are_the_files`.
+- **An interval keeps a setting the form no longer offers, and a warning stands while the
+  device does not take it.** An edit saves the settings of the form, which have the user's
+  values, then the stored settings whose name the form does not offer
+  (`supported_settings`), untouched. A name the form shows is the user's, also when it is
+  emptied. The section opens only when a shown setting is one the form offers, so an
+  interval whose settings are all hidden shows it closed.
+  The warning is judged as the run-time filter judges (`settings_not_taken`, through
+  `validate_settings`, which `_settings_the_target_takes` goes by too), so it stands
+  exactly while the window would leave the setting out. That includes a value that is no
+  longer accepted, which the form shows and the user can change.
+  There is one warning per interval, naming all its settings by the labels of the form in
+  the language of the house. It is a Repairs issue with severity warning, not fixable and
+  with no data, so it has no fix flow (spec). It is raised again only when the names
+  change. It lives with the loaded timer: a reload, which every change of an interval
+  makes, clears it and the start-up raises it again. There is none while the target is
+  deleted, whose repair speaks for it. It is judged after each report of the target and
+  after the start-up fold, so that reading the texts never delays what the timer owes the
+  target. An interval deleted but not yet reloaded gets no warning. Deleting the interval
+  drops a setting the form no longer shows.
+  A target that is unavailable and gives no capabilities, neither on its state nor in the
+  registry, takes no setting, as `validate_settings` judges it, so the warning stands
+  until it reports.
+  Why: #16. An edit dropped the settings the form did not offer, silently, and the window
+  left them out with only a line in the log.
+  Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
+  the log is the only other trace.
+  Tests: `test_editing_keeps_a_setting_the_ac_no_longer_offers`,
+  `test_editing_changes_the_settings_shown_beside_a_kept_one`,
+  `test_editing_keeps_every_setting_while_the_ac_is_gone`,
+  `test_an_interval_with_only_settings_not_offered_shows_them_closed`,
+  `test_settings_not_taken_are_named_one_by_one_in_their_order`,
+  `test_an_interval_setting_the_ac_no_longer_takes_raises_a_warning`,
+  `test_the_warning_names_every_setting_the_ac_does_not_take`,
+  `test_the_warning_follows_the_settings_the_ac_does_not_take`,
+  `test_a_value_the_ac_no_longer_accepts_raises_the_warning`,
+  `test_only_the_interval_that_has_the_lost_setting_is_named`,
+  `test_the_warning_names_the_settings_in_the_language_of_the_house`,
+  `test_the_warning_clears_when_the_ac_takes_the_setting_again`,
+  `test_the_warning_clears_when_the_interval_no_longer_holds_it`,
+  `test_the_warning_stands_after_editing_an_interval_it_does_not_concern`,
+  `test_deleting_the_interval_clears_its_warning`,
+  `test_a_report_before_the_reload_raises_no_warning_for_a_deleted_interval`,
+  `test_a_setting_lost_while_down_raises_the_warning_at_start_up`,
+  `test_an_unavailable_ac_raises_no_settings_warning`,
+  `test_a_deleted_ac_raises_no_settings_warning`,
+  `test_the_warnings_of_a_timer_go_with_it`.

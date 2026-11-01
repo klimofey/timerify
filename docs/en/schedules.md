@@ -29,7 +29,7 @@ The entry lists each interval with a menu to **Edit** or **Delete** it. The form
 - **Days**: the weekdays you pick, the working days, or the non-working days. See [Choose the days](#choose-the-days).
 - **Weekdays**: the days the interval starts on. All seven are picked to begin with. It matters only when **Days** is set to the weekdays.
 - **Start time** and **End time**, in whole minutes. The two must differ. An end earlier than the start carries the interval past midnight into the next day. For example, 22:00 to 06:00 runs the night. It belongs to the day it starts on.
-- **Settings**, for a device that has some. See [Settings of an interval](#settings-of-an-interval). The section is collapsed for a new interval. It is open when you edit an interval that has settings.
+- **Settings**, for a device that has some. See [Settings of an interval](#settings-of-an-interval). The section is collapsed for a new interval. It is open when you edit an interval that has settings the form shows.
 
 An interval is named by its times and days, in the language Home Assistant is set to. For example: `06:30–07:15, Sun–Thu`. A name that Timerify made follows the edit, in the language Home Assistant is set to at that time. You can rename the interval on the integration page with **Rename**. The name is then yours, and it is kept when you edit the interval.
 
@@ -113,6 +113,11 @@ An interval can turn the device on the way you want. It has the same settings as
 - Suppose the turn-on goes through and a settings call fails. The settings are sent again, with the same limits as for a rejected turn-on (see [When the device does not answer](timers.md#when-the-device-does-not-answer)). This holds if the device reports that it is on in response to Timerify's own call.
 - A device that only reports later, when it is polled, has the rest of the settings dropped. Timerify does not push settings onto a device that someone else may have set.
 - Editing an interval while its window is open does not push the new settings onto the running device. They are used from the next window.
+- Suppose a device stops offering a setting of an interval, for example after an update of its integration. Editing the interval keeps the setting as it is, though the form no longer shows it.
+- While the device does not take it, **Settings > System > Repairs** shows a warning. It names the interval and the setting. It has nothing to submit.
+- When the interval turns the device on, that setting is left out, and the log says so. The other settings go out.
+- The warning goes away when the device takes the setting again. It also goes when you pick a value the device takes, or delete the interval.
+- The form cannot drop a setting it no longer shows. To drop one, delete the interval and add it again.
 
 ## Restarts
 

@@ -431,7 +431,10 @@ async def test_entities_disabled_with_the_fallback_device_are_enabled_on_the_boi
     """The user disabled the device made for the boiler, and a sensor on its own before
     that. The boiler is on a device of its own when Home Assistant starts again: what
     went with the made device is enabled on the boiler's, as the registry does when a
-    device is enabled, and the sensor the user disabled stays disabled."""
+    device is enabled, and the sensor the user disabled stays disabled. Home Assistant
+    reloads the entry once more, 30 seconds after entities were enabled; a countdown
+    started meanwhile runs on, with the entities where they were and no call added to
+    the boiler."""
     entry = await setup_target()
     registry = er.async_get(hass)
     registry.async_update_entity(NEXT, disabled_by=er.RegistryEntryDisabler.USER)
@@ -466,3 +469,20 @@ async def test_entities_disabled_with_the_fallback_device_are_enabled_on_the_boi
     assert state_of(hass, NUMBER) == "0"
     assert state_of(hass, SENSOR) == "unknown"
     assert hass.states.get(NEXT) is None
+
+    await set_number(hass, NUMBER, 20)
+    await advance(hass, freezer, seconds=31)
+
+    assert fallback_device(hass, entry) is None
+    assert {e.entity_id: e.disabled_by for e in timer_entities(hass, entry)} == {
+        NUMBER: None,
+        SENSOR: None,
+        NEXT: er.RegistryEntryDisabler.USER,
+    }
+    assert {e.device_id for e in timer_entities(hass, entry)} == {boiler.id}
+    assert entry.state is ConfigEntryState.LOADED
+    assert state_of(hass, NUMBER) == "20"
+    assert fake_target.calls == [TURN_ON]
+    await advance(hass, freezer, minutes=20)
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, NUMBER) == "0"

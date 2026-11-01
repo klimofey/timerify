@@ -63,6 +63,7 @@ from .const import (
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_MODE,
+    CONF_OFF_BUTTON,
     CONF_RUN_FOR_MAX,
     CONF_RUNTIME,
     CONF_SETTINGS,
@@ -174,8 +175,9 @@ def _duration_selector() -> selector.NumberSelector:
 async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
     """The form that adds a timer, built for the domains on offer when it is shown.
 
-    The runtime box and the end of the Run for slider are on this form, not on steps of
-    their own, so that a timer that takes every default is still added in three clicks.
+    The runtime box, the end of the Run for slider and the Turn off box are on this
+    form, not on steps of their own, so that a timer that takes every default is still
+    added in three clicks.
     """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
@@ -187,6 +189,9 @@ async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
             probatio.Required(
                 CONF_RUN_FOR_MAX, default=MAX_MINUTES
             ): _duration_selector(),
+            probatio.Required(
+                CONF_OFF_BUTTON, default=False
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -437,13 +442,13 @@ _VOICE_STEP = SchemaFlowFormStep(
 async def _options_init_schema(
     handler: SchemaCommonFlowHandler,
 ) -> probatio.Schema | None:
-    """The first form of the options: a timer's mode, whether it counts the runtime and
-    where the Run for slider ends. The voice settings have none of them, and go to their
-    own form.
+    """The first form of the options: a timer's mode, whether it counts the runtime,
+    where the Run for slider ends and whether it has a Turn off button. The voice
+    settings have none of them, and go to their own form.
 
-    The form opens with the options the entry has. A timer made before the counter has
-    no such option, so the box has no suggested value and shows its default, unticked;
-    one made before the maximum of Run for shows a day.
+    The form opens with the options the entry has. A timer made before the counter or
+    before the Turn off box has no such option, so the box has no suggested value and
+    shows its default, unticked; one made before the maximum of Run for shows a day.
     """
     if is_voice_options(handler.options):
         return None
@@ -454,6 +459,9 @@ async def _options_init_schema(
             probatio.Required(
                 CONF_RUN_FOR_MAX, default=MAX_MINUTES
             ): _duration_selector(),
+            probatio.Required(
+                CONF_OFF_BUTTON, default=False
+            ): selector.BooleanSelector(),
         }
     )
 

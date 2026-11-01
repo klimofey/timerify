@@ -32,6 +32,7 @@ NUMBER = "number.boiler_run_for"
 SENSOR = "sensor.boiler_ends_at"
 NEXT = "sensor.boiler_next_command"
 RUNTIME = "sensor.boiler_runtime"
+BUTTON = "button.boiler_turn_off"
 TURN_ON = ("turn_on", TARGET_ID)
 TURN_OFF = ("turn_off", TARGET_ID)
 
@@ -255,6 +256,14 @@ async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
         "set_value",
         {"entity_id": entity_id, "value": value},
         blocking=True,
+    )
+    await hass.async_block_till_done()
+
+
+async def press_button(hass: HomeAssistant, entity_id: str) -> None:
+    """Press a button, as the dashboard does, and let everything that follows settle."""
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity_id}, blocking=True
     )
     await hass.async_block_till_done()
 

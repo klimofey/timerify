@@ -2091,3 +2091,29 @@ in `docs/followups.md`.
   `test_a_loose_timer_is_not_checked_until_it_turns_strict`,
   `test_a_window_longer_than_the_maximum_runs_in_full`,
   `test_a_run_by_voice_goes_past_the_maximum_of_run_for`.
+- **The Turn off button is the stop command, and only an option adds it.** Pressing is
+  `async_set_minutes(0)`, the stop that voice and Run for 0 use. So it ends a countdown,
+  turns off a loose device that runs without one, holds a started window until its next
+  occurrence (S4), and sends nothing to a device that is off.
+  The button has no entity category, because it switches the device. `button` is not
+  exposed to Assist by default, so it adds no phrase that competes with "turn off the
+  boiler". Its state is the time of the last press, which Home Assistant keeps, so the
+  controller's updates write nothing.
+  The option `off_button` is a box after the maximum of Run for on both first forms.
+  Absent or false: no button. Unticking removes the registry entry, as for the Runtime
+  sensor, and both use `remove_timer_entity`. The card option of #37 is part E.
+  Setting Run for to 0 by hand turns off a loose device that runs without a countdown,
+  whether it was switched on by hand or by `run` without a duration. Nothing pinned it
+  before.
+  Why: #37.
+  Cost if wrong: an automation that presses the button while a schedule window is open
+  stops the device until the next window.
+  Tests: `test_a_timer_has_no_turn_off_button_unless_asked`,
+  `test_ticking_the_box_puts_a_turn_off_button_on_the_device`,
+  `test_pressing_turn_off_stops_the_countdown_and_the_boiler`,
+  `test_pressing_turn_off_stops_a_loose_boiler_without_a_countdown`,
+  `test_pressing_turn_off_on_a_boiler_that_is_off_sends_nothing`,
+  `test_unticking_the_box_removes_the_button`,
+  `test_the_turn_off_box_is_on_both_first_forms`,
+  `test_run_for_zero_turns_off_a_loose_boiler_without_a_countdown`,
+  `test_the_turn_off_button_has_the_unique_id_of_its_key`.

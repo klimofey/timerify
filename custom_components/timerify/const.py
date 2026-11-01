@@ -20,6 +20,9 @@ or False: no counter, and no Runtime sensor; an entry of an earlier release has 
 CONF_RUN_FOR_MAX: Final = "run_for_max"
 """Option holding the end of the Run for slider in whole minutes. An entry of an earlier
 release has none."""
+CONF_OFF_BUTTON: Final = "off_button"
+"""Option holding whether the timer has a Turn off button, a `bool`. Absent or False: no
+button; an entry of an earlier release has none."""
 CONF_WORKDAY_SENSOR: Final = "workday_sensor"
 """Option holding the entity id of the target's Workday sensor, which the intervals of
 working days and of days off ask which days are which. Absent when there is none."""
@@ -125,8 +128,10 @@ KEY_RUN_FOR: Final = "run_for"
 KEY_ENDS_AT: Final = "ends_at"
 KEY_NEXT_COMMAND: Final = "next_command"
 KEY_RUNTIME: Final = "runtime"
-"""The keys of the entities a timer has one of, the last only if it counts its runtime:
-with the entry's id they make an entity's unique id (see `timer_unique_id`)."""
+KEY_TURN_OFF: Final = "turn_off"
+"""The keys of the entities a timer has one of, the last two only if it counts its
+runtime and if it has a Turn off button, in that order: with the entry's id they make
+an entity's unique id (see `timer_unique_id`)."""
 
 RUNTIME_TICK_SECOND: Final = 59
 """The second of every minute at which the Runtime sensor publishes its total: the last
@@ -138,7 +143,7 @@ half a second: the tick saves it before it writes the state."""
 
 def timer_unique_id(entry_id: str, key: str) -> str:
     """The unique id of the entity of a timer that has the key `key` (`KEY_RUN_FOR`,
-    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`, `KEY_RUNTIME`).
+    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`, `KEY_RUNTIME`, `KEY_TURN_OFF`).
 
     A unique id is an entity's identity in the registry: changing how it is made would
     leave every installed entity behind, with its entity id, its history and its place

@@ -26,7 +26,7 @@ from custom_components.timerify.const import (
 )
 
 from .conftest import FakeTarget, SetupTarget
-from .helpers import NEXT, NUMBER, RUNTIME, SENSOR, TARGET_ID, add_interval
+from .helpers import BUTTON, NEXT, NUMBER, RUNTIME, SENSOR, TARGET_ID, add_interval
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
 
@@ -68,6 +68,19 @@ async def test_the_runtime_sensor_has_the_unique_id_of_the_counter(
         RUNTIME: f"{entry.entry_id}_runtime",
         EVENING_SWITCH: f"{entry.entry_id}_interval_{interval}",
     }
+
+
+async def test_the_turn_off_button_has_the_unique_id_of_its_key(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The Turn off button of a timer is registered under the entry's id and
+    `turn_off`, spelled out here for the same reason as the others."""
+    entry = await setup_target(off_button=True)
+
+    registered = er.async_get(hass).async_get(BUTTON)
+
+    assert registered is not None
+    assert registered.unique_id == f"{entry.entry_id}_turn_off"
 
 
 async def test_timer_set_up_again_finds_its_entities_where_an_earlier_release_left_them(

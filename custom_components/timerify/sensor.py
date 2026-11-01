@@ -11,7 +11,6 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP, UnitOfTime
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -21,17 +20,15 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_RUNTIME,
-    DOMAIN,
     KEY_ENDS_AT,
     KEY_NEXT_COMMAND,
     KEY_RUNTIME,
     RUNTIME_TICK_SECOND,
-    timer_unique_id,
 )
 from .controller import TimerifyConfigEntry
 from .core import Command, Snapshot
 from .domains import actual_state
-from .entity import TimerifyEntity
+from .entity import TimerifyEntity, remove_timer_entity
 from .runtime import RuntimeCounter, RuntimeStore
 from .store import command_to_json
 
@@ -58,22 +55,7 @@ async def async_setup_entry(
         seconds = await store.async_load()
         async_add_entities([RuntimeSensor(hass, entry, store, seconds)])
     else:
-        _remove_runtime_entry(hass, entry)
-
-
-def _remove_runtime_entry(hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
-    """Remove the registry entry of the Runtime sensor of a timer that stopped counting.
-
-    Nothing else removes it: left there, it would come back at every start as an
-    unavailable entity. Counting again brings it back as it was, with its entity id and
-    its history, because the registry keeps a removed entry's identity.
-    """
-    registry = er.async_get(hass)
-    entity_id = registry.async_get_entity_id(
-        "sensor", DOMAIN, timer_unique_id(entry.entry_id, KEY_RUNTIME)
-    )
-    if entity_id is not None:
-        registry.async_remove(entity_id)
+        remove_timer_entity(hass, entry, "sensor", KEY_RUNTIME)
 
 
 class EndsAtSensor(TimerifyEntity, SensorEntity):

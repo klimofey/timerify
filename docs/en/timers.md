@@ -11,8 +11,9 @@ A timer attaches a countdown to an entity you already have. A plain switch, such
 3. Pick the entity and the mode, **Strict** or **Loose**. The [Modes](#modes) section explains both. The [entities you can pick](#which-devices-can-have-a-timer) are listed below.
 4. Turn on **Count runtime** if you want the timer to add up how long the device is on. It is off to begin with. The [Runtime page](runtime.md) tells more.
 5. Set **Maximum of Run for**, the end of the slider. It is 1440 minutes (one day) to begin with. If you rarely run the device for more than two hours, set 120.
-6. In Strict mode, set the default duration. It cannot be longer than the maximum.
-7. If your house has a Workday sensor, pick the one this timer follows, or leave it empty. Schedules use it.
+6. Turn on **Turn off button** if you want a button that turns the device off. It is off to begin with.
+7. In Strict mode, set the default duration. It cannot be longer than the maximum.
+8. If your house has a Workday sensor, pick the one this timer follows, or leave it empty. Schedules use it.
 
 ![The form that adds a timer: the entity, the mode and Count runtime](../screenshots/smoke-2-add-timer.png)
 
@@ -20,7 +21,7 @@ The timer appears on the device page of the entity. The **Add integration** butt
 
 ### Change a timer later
 
-Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode, the runtime counter, **Maximum of Run for**, the default duration and the Workday sensor.
+Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode, the runtime counter, **Maximum of Run for**, **Turn off button**, the default duration and the Workday sensor.
 
 You cannot change the entity. Add a timer for the other entity instead.
 
@@ -33,7 +34,7 @@ Set **Run for** to a number of minutes. The device turns on, and it turns off wh
 ![The device page of a timer: Run for and Ends at, with a countdown running](../screenshots/phase-1-device-page.png)
 
 - Set **Run for** to a new number while a countdown runs. The countdown restarts from that number.
-- Set **Run for** to 0. The device turns off.
+- Set **Run for** to 0. The device turns off. This also turns off a device that runs without a countdown, in Loose mode.
 - While a countdown runs, **Run for** shows the minutes left, rounded up.
 - **Ends at** shows the moment the countdown ends. It is unknown while no countdown runs.
 - A countdown is a whole number of minutes, from 1 minute up to one day.
@@ -63,6 +64,7 @@ All the entities of a timer sit on the device's own page in Home Assistant. If t
 | **Next command** (a sensor) | The moment the next pending command is due. It is unknown while there is none. See [Pending commands](pending-commands.md#the-next-command-sensor). |
 | `Schedule 06:30–07:15, Sun–Thu` (a switch) | One for each schedule interval. It is on while the interval is in use, and off to skip it. See [Schedules](schedules.md#switch-an-interval-on-or-off). |
 | **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The [Runtime page](runtime.md) tells more. |
+| **Turn off** (a button) | Only when you ask for it. Pressing it stops the countdown and turns the device off. It also turns off a device that runs without a countdown, in Loose mode. On the device page it has a **Press** button. |
 
 ## When something else switches the device
 

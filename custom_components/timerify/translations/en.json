@@ -16,13 +16,15 @@
           "target": "Entity",
           "mode": "Mode",
           "runtime": "Count runtime",
-          "run_for_max": "Maximum of Run for"
+          "run_for_max": "Maximum of Run for",
+          "off_button": "Turn off button"
         },
         "data_description": {
           "target": "The switch, light, fan or other entity to run on a timer.",
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
           "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
-          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day."
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day.",
+          "off_button": "Adds a Turn off button to the device page. Pressing it stops the countdown and turns the device off. It also turns off a device that runs without a countdown."
         }
       },
       "voice_settings": {
@@ -71,12 +73,14 @@
         "data": {
           "mode": "Mode",
           "runtime": "Count runtime",
-          "run_for_max": "Maximum of Run for"
+          "run_for_max": "Maximum of Run for",
+          "off_button": "Turn off button"
         },
         "data_description": {
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
           "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
-          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day."
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day.",
+          "off_button": "Adds a Turn off button to the device page. Pressing it stops the countdown and turns the device off. It also turns off a device that runs without a countdown."
         }
       },
       "voice_settings": {
@@ -266,6 +270,11 @@
     }
   },
   "entity": {
+    "button": {
+      "turn_off": {
+        "name": "Turn off"
+      }
+    },
     "number": {
       "run_for": {
         "name": "Run for"

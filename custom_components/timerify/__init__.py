@@ -36,7 +36,12 @@ from .voice.files import (
 )
 from .websocket import async_register_websocket_commands
 
-PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
+PLATFORMS: Final = (
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+)
 
 CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 

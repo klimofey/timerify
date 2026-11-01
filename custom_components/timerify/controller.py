@@ -195,7 +195,9 @@ class TargetController:
     `async_add_command`, `async_turn_off_in`, `async_cancel_command`,
     `async_cancel_commands`, `async_set_interval_enabled`,
     `async_set_schedule_enabled`) waits for its turn and raises HomeAssistantError
-    (`timer_unloaded`) if the timer was unloaded meanwhile.
+    (`timer_unloaded`) if the timer was unloaded meanwhile. While Home Assistant is
+    still starting, a command first folds what fell due before it, without the target
+    (`_async_catch_up_while_starting_locked`).
     """
 
     def __init__(
@@ -248,9 +250,10 @@ class TargetController:
         self._stopped = False
         self._started = False
         """Whether start-up has taken stock of the target (`_handle_started`). Until it
-        has, the timer only records what it is told and saves it: nothing is folded,
-        no alarm is armed and no report of the target is answered, because the target
-        has not been seen and the fresh windows are not merged yet."""
+        has, nothing is sent to the target, no alarm is armed and no report of the
+        target is answered, because the target has not been seen. A command given
+        meanwhile still takes effect at its own moment, after what fell due before it
+        (`_async_catch_up_while_starting_locked`), and its outcome is saved."""
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
@@ -476,11 +479,13 @@ class TargetController:
         the window is known, which may mean waiting for the Workday sensor. A timer that
         is unloaded meanwhile changes nothing and says so. An interval that is on
         already is left as it is: nothing is worked out and nobody is asked. While Home
-        Assistant is still starting, only the flag is kept and saved, and start-up
-        works the window out.
+        Assistant is still starting, the switch comes after what fell due before it
+        (`_async_catch_up_while_starting_locked`), and the target is switched at
+        start-up.
         """
         async with self._lock:
             self._raise_if_unloaded()
+            await self._async_catch_up_while_starting_locked()
             await self._async_set_interval_enabled_locked(interval_id, enabled)
 
     async def async_set_schedule_enabled(
@@ -529,6 +534,7 @@ class TargetController:
                 }
                 if not titles:
                     raise self._unknown_interval(interval, every_title.values())
+            await self._async_catch_up_while_starting_locked()
             for interval_id in titles:
                 self._raise_if_unloaded()
                 await self._async_set_interval_enabled_locked(interval_id, enabled)
@@ -579,18 +585,11 @@ class TargetController:
         self, interval_id: str, enabled: bool
     ) -> None:
         """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
-        the caller holds the lock and has seen that the timer is not unloaded.
-
-        Until start-up has taken stock, only the flag is recorded and saved: no window
-        is worked out and nothing is folded. Start-up works out the window of every
-        interval that is on."""
+        the caller holds the lock, has seen that the timer is not unloaded and, while
+        Home Assistant is still starting, has folded what fell due before the switch
+        (`_async_catch_up_while_starting_locked`)."""
         now = dt_util.utcnow()
         if enabled and interval_id not in self.snapshot.disabled_intervals:
-            return
-        if not self._started:
-            await self._execute(
-                self._core.set_interval_enabled(now, interval_id, enabled)
-            )
             return
         if enabled:
             effects = self._core.set_interval_enabled(now, interval_id, True)
@@ -615,7 +614,9 @@ class TargetController:
         return remove
 
     async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
-        """Run `command` with the time now and carry out its effects.
+        """Run `command` with the time now and carry out its effects; while Home
+        Assistant is still starting, after what fell due before it
+        (`_async_catch_up_while_starting_locked`).
 
         Raises HomeAssistantError, having done nothing, if the timer was unloaded
         before its turn came: the call reached the timer, so returning as if the
@@ -623,7 +624,28 @@ class TargetController:
         """
         async with self._lock:
             self._raise_if_unloaded()
+            await self._async_catch_up_while_starting_locked()
             await self._execute(command(dt_util.utcnow()))
+
+    async def _async_catch_up_while_starting_locked(self) -> None:
+        """Before start-up has taken stock, bring the timer up to now as start-up
+        would, so that a command given now comes after what fell due before it, as it
+        would with Home Assistant running: the windows are worked out and merged, and
+        the stored end, the commands and the windows that fell due while Home Assistant
+        was down are folded in, in the order they fell due. Once start-up has taken
+        stock, the alarms do that, and this does nothing.
+
+        The fold changes the timer only. The target has not been seen, so nothing is
+        sent to it (`TimerCore` treats it as away), and no alarm is armed (`_arm`):
+        the target is switched at start-up, once. The caller holds the lock and has
+        seen that the timer is not unloaded. Raises HomeAssistantError
+        (`timer_unloaded`) if it was unloaded while the windows were worked out: the
+        command is not made.
+        """
+        if self._started:
+            return
+        await self._async_refresh_windows_locked()
+        self._raise_if_unloaded()
 
     def _raise_if_unloaded(self) -> None:
         """Raise HomeAssistantError (`timer_unloaded`) if the timer was unloaded: a call
@@ -816,8 +838,9 @@ class TargetController:
 
         The windows come first: the stored ones are merged with the ones worked out
         now, so that the first observation folds both in one catch-up (§5.7). Until
-        then the timer has only recorded (`_started`), so the target is read here, not
-        from the reports it made on the way.
+        then no report of the target was answered (`_started`), so the target is read
+        here, not from the reports it made on the way. A command given meanwhile has
+        already folded what fell due before it; this folds what fell due since.
         """
         async with self._lock:
             if self._stopped:
@@ -837,9 +860,10 @@ class TargetController:
             now = dt_util.utcnow()
             # Merging the windows arms the alarm for the next thing the timer waits for,
             # which the observation does not do for a timer restored unchanged. Nothing
-            # is armed earlier (`_arm` waits for `_started`): a stored end, command or
-            # window that has long passed would switch a target that has not been seen
-            # yet, and the first observation folds it in.
+            # is armed earlier (`_arm` waits for `_started`): an alarm would fold a
+            # stored end, command or window that has long passed without the windows of
+            # now. A command given meanwhile folds them after working the windows out,
+            # and the first observation folds the rest.
             effects = self._set_windows(now, windows, unknown)
             self._schedule_refresh()
             before = self.snapshot

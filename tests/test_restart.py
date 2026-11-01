@@ -52,6 +52,7 @@ from .helpers import (
 )
 
 MONDAY = SUNDAY + timedelta(days=1)
+OFF_AT_MINUS_10: Final = command_json(at(-10), "off")
 
 
 async def test_running_timer_survives_reload(
@@ -946,25 +947,27 @@ async def test_adding_time_while_starting_to_a_countdown_that_ended_while_down(
     assert fake_target.calls == [TURN_OFF]
 
 
-async def test_a_command_while_starting_does_not_fold_what_came_due_while_down(
+async def test_a_command_added_while_starting_comes_after_what_came_due_while_down(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
     hass_storage: dict[str, Any],
 ) -> None:
-    """A countdown that ended while Home Assistant was down is folded once, by the
-    first look at the target: a command given before it does not fold it earlier, to
-    a target that has not been seen. The command itself still runs at its own time."""
+    """A countdown ended while Home Assistant was down. A pending command added while
+    it is still starting comes after that end, which is folded first but sent to a
+    target that has not been seen only at start-up, once. The command itself runs at
+    its own time."""
     entry = await set_up_while_starting(
         hass, setup_target, payload(end=at(-10), started_at=at(-40))
     )
 
     await add_command(hass, NUMBER, action="on", delay=60, minutes=5)
-    await advance(hass, freezer, seconds=0)  # an alarm for a moment that is past
 
     assert fake_target.calls == []
-    assert saved(hass_storage, entry)["end"] == at(-10)
+    stored = saved(hass_storage, entry)
+    assert (stored["end"], stored["pending"]) == (None, "off")
+    assert len(stored["commands"]) == 1
 
     await finish_start_up(hass, fake_target, "before_started")
 
@@ -976,16 +979,16 @@ async def test_a_command_while_starting_does_not_fold_what_came_due_while_down(
     assert fake_target.calls == [TURN_OFF, TURN_ON, TURN_OFF]
 
 
-async def test_switching_an_interval_while_starting_only_records_the_flag(
+async def test_switching_an_interval_while_starting_changes_the_timer_only(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
     hass_storage: dict[str, Any],
 ) -> None:
-    """An interval switched off and on while Home Assistant is starting changes only
-    the flag it is saved with. Its window is worked out once, when Home Assistant has
-    started."""
+    """An interval switched off and on while Home Assistant is starting changes the
+    timer as it would with Home Assistant running: the flag goes and comes back, and
+    so does the window. Nothing is sent to the target."""
     await open_sunday(hass, freezer)
     entry = await set_up_while_starting(hass, setup_target, payload())
     interval = await add_interval(hass, entry, start="08:00", end="09:00")
@@ -998,7 +1001,9 @@ async def test_switching_an_interval_while_starting_only_records_the_flag(
 
     await set_switch(hass, interval_switch, True)
 
-    assert saved(hass_storage, entry) == payload()
+    assert saved(hass_storage, entry) == payload(
+        windows=[window_json(interval, local(SUNDAY, "08:00"), local(SUNDAY, "09:00"))]
+    )
     assert fake_target.calls == []
 
     await finish_start_up(hass, fake_target, "before_started")
@@ -1017,9 +1022,9 @@ async def test_switching_off_the_interval_that_carries_the_countdown_while_start
     hass_storage: dict[str, Any],
 ) -> None:
     """The window of an interval carries the countdown when Home Assistant stops. The
-    interval is switched off while Home Assistant is still starting: only the flag is
-    recorded, and the countdown and the target are left as they were. Start-up follows
-    the window that is gone, and turns the target off once."""
+    interval is switched off while Home Assistant is still starting: the countdown
+    follows the window that is gone at once, as with Home Assistant running. The
+    target, which has not been seen, is turned off at start-up, once."""
     await open_sunday(hass, freezer)
     entry = await setup_target()
     interval = await add_interval(hass, entry, start="06:30", end="07:15")
@@ -1034,10 +1039,7 @@ async def test_switching_off_the_interval_that_carries_the_countdown_while_start
     await set_switch(hass, "switch.boiler_schedule_06_30_07_15_mon_sun", False)
 
     assert saved(hass_storage, entry) == payload(
-        end=iso(SUNDAY, "07:15"),
-        started_at=iso(SUNDAY, "06:30"),
-        scheduled_by=interval,
-        disabled_intervals=[interval],
+        pending="off", disabled_intervals=[interval]
     )
     assert fake_target.calls == [TURN_ON]
 
@@ -1148,3 +1150,218 @@ async def test_settings_given_while_starting_wait_for_the_ac_and_go_out_once(
     assert saved(hass_storage, entry) == payload(end=at(30), started_at=at(0))
     await advance(hass, freezer, minutes=1)
     assert len(fake_climate.call_data) == 2
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+@pytest.mark.parametrize(
+    ("command", "stored"),
+    [
+        (
+            "run_for",
+            payload(end=at(20), started_at=at(-10), commands=[OFF_AT_MINUS_10]),
+        ),
+        (
+            "add_time",
+            payload(end=at(-40), started_at=at(-70), commands=[OFF_AT_MINUS_10]),
+        ),
+    ],
+    ids=["run_for_on_a_running_countdown", "add_time_on_an_ended_countdown"],
+)
+async def test_a_command_while_starting_wins_over_what_came_due_while_down(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    command: CommandWhileStarting,
+    stored: dict[str, Any],
+    target_appears: TargetAppears,
+) -> None:
+    """A pending "off" came due while Home Assistant was down. A command given while it
+    is still starting comes after it, as it would with Home Assistant running: the
+    "off" is spent, and the target runs for the 30 minutes of the command."""
+    entry = await set_up_while_starting(hass, setup_target, stored)
+
+    await give_command(hass, command)
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=at(30), started_at=at(0), pending="on"
+    )
+
+    await finish_start_up(hass, fake_target, target_appears)
+
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "30"
+    assert saved(hass_storage, entry) == payload(end=at(30), started_at=at(0))
+    await advance(hass, freezer, minutes=29)
+    assert fake_target.calls == []
+    await advance(hass, freezer, minutes=1)
+    assert fake_target.calls == [TURN_OFF]
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+async def test_stopping_while_starting_overrides_a_window_that_opened_while_down(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    target_appears: TargetAppears,
+) -> None:
+    """A schedule window opened while Home Assistant was down. "Run for 0" while it is
+    still starting stops the timer as it would with Home Assistant running: the window
+    counts as stopped by hand, so start-up turns the target off and the window does not
+    turn it on again."""
+    await open_sunday(hass, freezer)
+    entry = await set_up_while_starting(hass, setup_target, payload())
+    interval = await add_interval(hass, entry, start="05:30", end="06:30")
+    stopped_window = window_json(
+        interval,
+        local(SUNDAY, "05:30"),
+        local(SUNDAY, "06:30"),
+        started=True,
+        suppressed=True,
+    )
+
+    await set_number(hass, NUMBER, 0)
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        pending="off", windows=[stopped_window]
+    )
+
+    await finish_start_up(hass, fake_target, target_appears)
+
+    assert fake_target.calls == [TURN_OFF]
+    assert saved(hass_storage, entry) == payload(windows=[stopped_window])
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_OFF]
+    assert saved(hass_storage, entry)["windows"] == [
+        window_json(interval, local(MONDAY, "05:30"), local(MONDAY, "06:30"))
+    ]
+
+
+async def test_commands_while_starting_apply_in_order_with_what_came_due_between(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Home Assistant takes a while to start. "Run for 30" is given, a pending "off"
+    comes due, and then "Run for 10" is given. Each applies at its own moment, as with
+    Home Assistant running: the last word is the second command's."""
+    entry = await set_up_while_starting(
+        hass, setup_target, payload(commands=[command_json(at(5), "off")])
+    )
+
+    await set_number(hass, NUMBER, 30)
+    await advance(hass, freezer, minutes=10)
+    await set_number(hass, NUMBER, 10)
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=at(20), started_at=at(10), pending="on"
+    )
+
+    await finish_start_up(hass, fake_target, "before_started")
+
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "10"
+    await advance(hass, freezer, minutes=9)
+    assert fake_target.calls == []
+    await advance(hass, freezer, minutes=1)
+    assert fake_target.calls == [TURN_OFF]
+
+
+@pytest.mark.parametrize("target_appears", TARGET_APPEARS)
+async def test_a_command_while_starting_survives_a_restart_before_start_up_ends(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    target_appears: TargetAppears,
+) -> None:
+    """A pending "off" came due while Home Assistant was down, and "Run for 30" is
+    given while it is starting. Home Assistant restarts again before it has started.
+    The saved timer holds the command's outcome, so it is still in force after the
+    second start-up."""
+    entry = await set_up_while_starting(
+        hass,
+        setup_target,
+        payload(end=at(20), started_at=at(-10), commands=[OFF_AT_MINUS_10]),
+    )
+    await set_number(hass, NUMBER, 30)
+
+    await hass.config_entries.async_unload(entry.entry_id)
+    await advance(hass, freezer, minutes=1)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == []
+    assert saved(hass_storage, entry) == payload(
+        end=at(30), started_at=at(0), pending="on"
+    )
+
+    await finish_start_up(hass, fake_target, target_appears)
+
+    assert fake_target.calls == []
+    assert state_of(hass, NUMBER) == "29"
+    await advance(hass, freezer, minutes=29)
+    assert fake_target.calls == [TURN_OFF]
+
+
+async def test_adding_time_while_starting_after_a_countdown_by_hand_ended_while_down(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A countdown set by hand inside a schedule window ended while Home Assistant was
+    down, which stopped that window. "Add time 30" while starting comes after that end:
+    the window stays stopped, and a later window carries the timer to its own end, as
+    with Home Assistant running."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    first = await add_interval(hass, entry, start="06:05", end="08:00")
+    second = await add_interval(hass, entry, start="06:50", end="07:20")
+    await advance_to(hass, freezer, local(SUNDAY, "06:05"))
+    await set_number(hass, NUMBER, 15)
+    assert fake_target.calls == [TURN_ON]
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    freezer.move_to(local(SUNDAY, "06:40"))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=30)
+
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "07:10"),
+        started_at=iso(SUNDAY, "06:40"),
+        pending="on",
+        windows=[
+            window_json(
+                first,
+                local(SUNDAY, "06:05"),
+                local(SUNDAY, "08:00"),
+                started=True,
+                suppressed=True,
+            ),
+            window_json(second, local(SUNDAY, "06:50"), local(SUNDAY, "07:20")),
+        ],
+    )
+
+    await finish_start_up(hass, fake_target, "before_started")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:20")
+
+    await advance_to(hass, freezer, local(SUNDAY, "07:20"))
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]

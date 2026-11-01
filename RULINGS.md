@@ -584,7 +584,8 @@ only the final behaviour is written.
   update listener is added after the controller is built, so fixing the file does not
   reload the entry: the user reloads it. Cost if wrong: a manual reload.
 - **A change before Home Assistant has started is not held back.** Changed in 1.1.0: see
-  "Until start-up has taken stock, the timer only records." under Release 1.1.0.
+  "Until start-up has taken stock, nothing reaches the target, and a change made
+  meanwhile first folds what fell due before it." under Release 1.1.0.
 
 ### The entry, the intervals and the entities
 
@@ -1807,37 +1808,68 @@ in `docs/followups.md`.
   Cost if wrong: a device that refused four times, and then works again after a reconnect,
   is not sent the command until it is asked again. A media player whose turn-on failed is
   turned on only when asked again.
-- **Until start-up has taken stock, the timer only records.** Before `_handle_started` has
-  merged the fresh windows and observed the target, a command is recorded and saved, and
-  nothing is sent or folded. Three gates keep it so. The core treats a target it has never
+- **Until start-up has taken stock, nothing reaches the target, and a change made
+  meanwhile first folds what fell due before it.** Before `_handle_started` has merged the
+  fresh windows and observed the target, nothing is sent, no alarm is armed and no report
+  of the target is answered. Three gates keep it so. The core treats a target it has never
   observed (`last_actual is None`) as away, as `"unavailable"`: `_want` records a wish as
   unsent and sends nothing, and `_deliver_settings` holds the owed settings back, also when
   a wish restored from the file counts as in flight. The first `observe` delivers the wish
   and the settings, free of the allowance, once. The controller arms no alarm (`_arm`), so
-  a stored end, command or window that has long passed is folded by the first observation
-  and not by a tick; a pending command that is not due yet is armed by start-up and runs
-  at its own time. Switching an interval only records the flag (`_started`); no window is
-  worked out and nothing is ticked, and start-up works out the windows of every interval
-  that is on and follows a removed window once. A report of the target before start-up is
-  not observed either (`_handle_state_change`): `_handle_started` reads the state itself,
-  under the lock, and only then sets `_started`. The issue names commands only. A report
-  would fold the stored items without the fresh windows, which start-up merges first, and
-  could switch the target twice.
-  Why: #12, and §5.7's single catch-up: one fold of the stored items and the fresh windows,
-  with the target seen, switches the target at most once. Before this a command made while
-  Home Assistant was starting could send a call to a target that was not there yet, or fold
-  a countdown that ended during downtime without the windows.
-  Cost if wrong: a report of the target before start-up is answered a few seconds later,
-  at start-up.
+  a stored end, command or window that has long passed is never folded by a tick, which
+  would fold it without the windows of now; a pending command that is not due yet is armed
+  by start-up and runs at its own time. A report of the target before start-up is not
+  observed (`_handle_state_change`): `_handle_started` reads the state itself, under the
+  lock, and only then sets `_started`. A report would fold the stored items without the
+  fresh windows, and could switch the target twice.
+  A change made meanwhile takes effect at its own moment, as with Home Assistant running.
+  That is every command: the "Run for" number, `add_time`, `run`, `add_command`,
+  `turn_off_in`, the cancels, and the switch of an interval or of the whole schedule. It
+  first does what start-up does, without the target
+  (`_async_catch_up_while_starting_locked`): the windows are worked out now and merged,
+  and what fell due while Home Assistant was down is folded in the order it fell due, in
+  the core only. That is the stored end (with
+  the S4 suppression of a started window), the pending commands, and the windows that
+  opened or closed. Then the change is applied, and it wins. Its outcome is saved, so it
+  survives a restart before start-up has finished. Several changes apply in the order they
+  were given, each after what fell due before it. An interval's switch is such a change
+  too: its flag (`disabled_intervals`) and the window it removes or brings are applied as
+  with Home Assistant running, after the catch-up. Start-up then folds what fell due since
+  the last change and switches the target once. Changes after start-up are unchanged.
+  Why: #12 and "the user's last word wins". Before this, a command made while starting was
+  recorded on the timer as it was stored, and start-up folded the stored items after it: a
+  pending "off" that came due while Home Assistant was down turned the target off after
+  "Run for 30", and a countdown set by hand that ended while it was down left its window
+  unsuppressed for "Add time". §5.7's single catch-up holds: start-up switches the target
+  at most once. Folding with only the stored windows is not enough: the file holds the
+  current or next window of each interval as it was when Home Assistant stopped, so after
+  a long downtime, or for an interval added while starting, the window that is open now is
+  not in it, and "Run for 0" would come before it and be undone by it at start-up. Holding
+  the changes back and replaying them at start-up would need each command stored as data
+  next to the timer it applies to, to survive a restart before start-up has finished; the
+  windows of now are what start-up would work out at that moment, so working them out at
+  the change gives the same outcome without a second form of the file.
+  Cost if wrong: the catch-up asks the Workday sensor, whose integration may not be up yet
+  while Home Assistant starts. Then the interval keeps its stored window, as at any time
+  the sensor does not answer, and the warning is logged once. If that window is not the one
+  that is open now, start-up merges the right one after the change, and it may start then
+  (S1). The settings of a window are judged from what the registry remembers of a target
+  whose integration is not up yet. A report of the target before start-up is answered a
+  few seconds later, at start-up.
 - **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
   end as `wanted_running` does: an end at or before now is over, whether or not it was
   folded. The timer is then idle, and the rule for an idle timer applies (R7 and the
   documented "adding to a timer that is not running starts it"): a positive delta runs the
-  target for the added time, counted from now, and a negative one changes nothing. The
-  stored end is folded at start-up as before.
-  Why: #12 makes this the normal case for a countdown that ended during downtime, because
-  nothing folds it before start-up. Extending the old end would turn the target off at
-  start-up, or run it for less than the added time, where Home Assistant running would have
-  run it for the whole of it.
+  target for the added time, counted from now, and a negative one changes nothing. Before
+  start-up, the catch-up of the change folds a passed end first (see the ruling above),
+  with the S4 suppression of a started window, so `add` never meets one there. After
+  start-up it meets one only when the command waited for its turn behind a slow call until
+  after the end, and got the lock before the alarm of the end. Then a positive delta
+  replaces the passed end, which is never folded: a started window is not suppressed (S4),
+  and a later window that opens may hand the timer back to it (`_realign`). A negative
+  delta leaves the end to the alarm, which folds it as usual.
+  Why: an end that has passed is over for every other judgement (`wanted_running`,
+  `run_open`, a pending command that falls due). Extending it would run the target for
+  less than the added time.
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
-  the next fold instead of being stopped at once.
+  the next fold instead of being stopped at once. The S4 case above, after start-up only.

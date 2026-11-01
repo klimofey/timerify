@@ -18,6 +18,10 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import (
+    CONF_DEFAULT_DURATION,
+    CONF_MODE,
+    CONF_RUN_FOR_MAX,
+    CONF_RUNTIME,
     LIST_HVAC_MODE,
     LIST_MODE,
     MAX_MINUTES,
@@ -43,6 +47,7 @@ from ..helpers import (
     TURN_ON,
     add_interval,
     advance_to,
+    change_options,
     edit_interval,
     iso,
     local,
@@ -138,6 +143,27 @@ async def test_a_day_is_the_longest_run(
 
     assert state_of(hass, NUMBER) == str(MAX_MINUTES)
     assert speech(response) == "Boiler runs for 24 hours, until 09:00 tomorrow."
+
+
+async def test_a_run_by_voice_goes_past_the_maximum_of_run_for(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The maximum is the end of the slider, not a limit on the timer: after the user
+    cuts the slider to two hours, "for 3 hours" is still heard and runs in full."""
+    await change_options(
+        hass,
+        boiler,
+        {CONF_MODE: "strict", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 120},
+        {CONF_DEFAULT_DURATION: 45},
+    )
+
+    response = await converse(hass, "turn on the boiler for 3 hours")
+
+    assert reached(response) == RUN, speech(response)
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert state_of(hass, NUMBER) == "180"
+    assert fake_target.calls == [TURN_ON]
+    assert speech(response) == "Boiler runs for 3 hours, until 12:00."
 
 
 async def test_run_longer_than_a_day_is_refused(

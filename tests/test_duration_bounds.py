@@ -32,12 +32,17 @@ from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     NUMBER,
     START,
+    SUNDAY,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
+    add_interval,
     advance,
+    advance_to,
     call_service,
     change_options,
+    local,
+    open_sunday,
     set_number,
     state_of,
 )
@@ -203,6 +208,8 @@ async def test_the_slider_ends_at_the_maximum_of_the_timer(
     run_for_max: int | None,
     slider_ends: int,
 ) -> None:
+    """The slider of the number runs from zero to the maximum the timer was given, and
+    to a day for a timer of an earlier release, which has none."""
     await setup_target(run_for_max=run_for_max)
 
     number = hass.states.get(NUMBER)
@@ -283,3 +290,32 @@ async def test_lowering_the_maximum_keeps_a_longer_countdown_running(
     await advance(hass, freezer, minutes=180)
     assert state_of(hass, NUMBER) == "0"
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_a_window_longer_than_the_maximum_runs_in_full(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A schedule interval of four hours on a timer whose slider ends at two: the
+    window turns the device on for all four, shows the hours it has left above the end
+    of the slider, and turns it off at its own end."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(run_for_max=120)
+    await add_interval(hass, entry, start="06:30", end="10:30")
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, NUMBER) == "240"
+
+    await advance_to(hass, freezer, local(SUNDAY, "08:30"))
+
+    assert state_of(hass, NUMBER) == "120"
+    assert fake_target.calls == [TURN_ON]
+
+    await advance_to(hass, freezer, local(SUNDAY, "10:30"))
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, NUMBER) == "0"

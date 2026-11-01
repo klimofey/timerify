@@ -2086,4 +2086,8 @@ in `docs/followups.md`.
   `test_the_slider_ends_at_the_maximum_of_the_timer`,
   `test_setting_run_for_above_the_maximum_is_refused`,
   `test_actions_and_commands_run_past_the_maximum`,
-  `test_lowering_the_maximum_keeps_a_longer_countdown_running`.
+  `test_lowering_the_maximum_keeps_a_longer_countdown_running`,
+  `test_the_settings_reopen_at_the_maximum_the_timer_has`,
+  `test_a_loose_timer_is_not_checked_until_it_turns_strict`,
+  `test_a_window_longer_than_the_maximum_runs_in_full`,
+  `test_a_run_by_voice_goes_past_the_maximum_of_run_for`.

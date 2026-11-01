@@ -328,15 +328,17 @@ async def test_settings_change_the_maximum_of_run_for(
     is the end of the slider once the timer has loaded again."""
     entry = await setup_target()
     assert CONF_RUN_FOR_MAX not in entry.options
-    form = await change_options(hass, entry)
+    form = await hass.config_entries.options.async_init(entry.entry_id)
     assert default_value(form, CONF_RUN_FOR_MAX) == MAX_MINUTES
 
-    result = await change_options(
-        hass,
-        entry,
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
         {CONF_MODE: "strict", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 120},
-        {CONF_DEFAULT_DURATION: 45},
     )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 45}
+    )
+    await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_RUN_FOR_MAX] == 120
@@ -372,6 +374,72 @@ async def test_lowering_the_maximum_below_the_default_duration_asks_to_lower_it(
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_RUN_FOR_MAX] == 30
+    assert entry.options[CONF_DEFAULT_DURATION] == 30
+
+
+async def test_the_settings_reopen_at_the_maximum_the_timer_has(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The box shows the maximum set earlier, not a day, so that a user who opens the
+    settings for something else and accepts every form as it is keeps it."""
+    entry = await setup_target(run_for_max=120)
+
+    form = await change_options(hass, entry)
+    assert prefilled(form["data_schema"])[CONF_RUN_FOR_MAX] == 120
+
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], prefilled(form["data_schema"])
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], prefilled(result["data_schema"])
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUN_FOR_MAX] == 120
+    number = hass.states.get(NUMBER)
+    assert number is not None
+    assert number.attributes["max"] == 120
+
+
+async def test_a_loose_timer_is_not_checked_until_it_turns_strict(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A loose timer has no duration form, so a maximum below the default duration it
+    keeps is accepted as it is. The default is checked once the timer turns strict, as
+    it is for a timer that was strict all along."""
+    entry = await setup_target(mode="loose", default_duration=45)
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "loose", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 30},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUN_FOR_MAX] == 30
+    assert entry.options[CONF_DEFAULT_DURATION] == 45
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "strict", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 30},
+    )
+    assert result["step_id"] == "duration"
+    assert suggested_value(result, CONF_DEFAULT_DURATION) == 45
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 45}
+    )
+    assert result["step_id"] == "duration"
+    assert result["errors"] == {"base": "duration_above_maximum"}
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 30}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_DEFAULT_DURATION] == 30
 
 

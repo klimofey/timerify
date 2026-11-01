@@ -70,6 +70,7 @@ from .helpers import (
     storage_key,
     timerify_info,
     timerify_warnings,
+    window_json,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -979,6 +980,57 @@ async def test_stopping_while_starting_comes_after_a_window_only_the_sensor_know
     assert fake_target.calls == []
     await advance_to(hass, freezer, local(MONDAY, "07:15"))
     assert fake_target.calls == []
+
+
+async def test_a_command_while_starting_before_the_sensor_is_up_keeps_the_stored_window(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Home Assistant restarts across the start of the working-day window, and the
+    Workday sensor is not up yet when "Run for 30" is given while starting. The command
+    is carried out with the window the file holds, which has opened: the warning about
+    the sensor is logged once. At start-up the sensor answers, and the boiler is turned
+    on once, for the 30 minutes of the command."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    interval = await add_interval(
+        hass, entry, days="workdays", start="06:30", end="07:15"
+    )
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.not_running)
+    hass.states.async_remove(TARGET_ID)
+    await fake_workday.set_available(False)
+    freezer.move_to(local(SUNDAY, "06:40"))
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    await set_number(hass, NUMBER, 30)
+
+    assert [w.startswith(NOT_ASKED) for w in timerify_warnings(caplog)] == [True]
+    assert fake_target.calls == []
+    stored = saved(hass_storage, entry)
+    assert (stored["end"], stored["scheduled_by"]) == (iso(SUNDAY, "07:10"), None)
+    assert stored["windows"] == [
+        window_json(
+            interval, local(SUNDAY, "06:30"), local(SUNDAY, "07:15"), started=True
+        )
+    ]
+
+    await fake_workday.set_available(True)
+    await fake_target.set_state("off")
+    await hass.async_start()
+    await hass.async_block_till_done()
+
+    assert fake_target.calls == [TURN_ON]
+    assert len(timerify_warnings(caplog)) == 1
+    await advance_to(hass, freezer, local(SUNDAY, "07:10"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
 async def test_timer_unloaded_while_a_command_given_while_starting_waits_for_the_sensor(

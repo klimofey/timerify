@@ -1365,3 +1365,30 @@ async def test_adding_time_while_starting_after_a_countdown_by_hand_ended_while_
     await advance_to(hass, freezer, local(SUNDAY, "07:20"))
 
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_a_countdown_given_while_starting_runs_out_while_still_starting(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """Home Assistant takes long to start. "Run for 30" is given while it is starting,
+    and the 30 minutes run out before it has started. The countdown ends at its time,
+    as with Home Assistant running, though the target, not seen yet, is sent nothing.
+    Start-up turns it off, once."""
+    entry = await set_up_while_starting(hass, setup_target, payload())
+    await set_number(hass, NUMBER, 30)
+
+    await advance(hass, freezer, minutes=30)
+
+    assert fake_target.calls == []
+    assert state_of(hass, SENSOR) == "unknown"
+    assert saved(hass_storage, entry) == payload(pending="off")
+
+    await finish_start_up(hass, fake_target, "before_started")
+
+    assert fake_target.calls == [TURN_OFF]
+    await advance(hass, freezer, hours=1)
+    assert fake_target.calls == [TURN_OFF]

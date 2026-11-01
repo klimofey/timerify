@@ -1810,32 +1810,35 @@ in `docs/followups.md`.
   turned on only when asked again.
 - **Until start-up has taken stock, nothing reaches the target, and a change made
   meanwhile first folds what fell due before it.** Before `_handle_started` has merged the
-  fresh windows and observed the target, nothing is sent, no alarm is armed and no report
-  of the target is answered. Three gates keep it so. The core treats a target it has never
-  observed (`last_actual is None`) as away, as `"unavailable"`: `_want` records a wish as
-  unsent and sends nothing, and `_deliver_settings` holds the owed settings back, also when
-  a wish restored from the file counts as in flight. The first `observe` delivers the wish
-  and the settings, free of the allowance, once. The controller arms no alarm (`_arm`), so
-  a stored end, command or window that has long passed is never folded by a tick, which
-  would fold it without the windows of now; a pending command that is not due yet is armed
-  by start-up and runs at its own time. A report of the target before start-up is not
+  fresh windows and observed the target, nothing is sent and no report of the target is
+  answered. Two gates keep it so. The core treats a target it has never observed
+  (`last_actual is None`) as away, as `"unavailable"`: `_want` records a wish as unsent and
+  sends nothing, and `_deliver_settings` holds the owed settings back, also when a wish
+  restored from the file counts as in flight. The first `observe` delivers the wish and
+  the settings, free of the allowance, once. A report of the target before start-up is not
   observed (`_handle_state_change`): `_handle_started` reads the state itself, under the
   lock, and only then sets `_started`. A report would fold the stored items without the
-  fresh windows, and could switch the target twice.
+  fresh windows, and could switch the target twice. No alarm needs a gate: a restored timer
+  arms nothing at set-up, so a stored end, command or window that has long passed is never
+  folded by a tick without the windows of now. The first alarm comes from start-up, or
+  from a change made meanwhile once it has caught up (below). Such an alarm folds what
+  falls due at its own time, as with Home Assistant running, and sends nothing either.
+  Task 3 kept `_arm` from arming before start-up; after the catch-up that gate kept
+  nothing out, so it is gone.
   A change made meanwhile takes effect at its own moment, as with Home Assistant running.
   That is every command: the "Run for" number, `add_time`, `run`, `add_command`,
   `turn_off_in`, the cancels, and the switch of an interval or of the whole schedule. It
   first does what start-up does, without the target
   (`_async_catch_up_while_starting_locked`): the windows are worked out now and merged,
   and what fell due while Home Assistant was down is folded in the order it fell due, in
-  the core only. That is the stored end (with
-  the S4 suppression of a started window), the pending commands, and the windows that
-  opened or closed. Then the change is applied, and it wins. Its outcome is saved, so it
-  survives a restart before start-up has finished. Several changes apply in the order they
-  were given, each after what fell due before it. An interval's switch is such a change
-  too: its flag (`disabled_intervals`) and the window it removes or brings are applied as
-  with Home Assistant running, after the catch-up. Start-up then folds what fell due since
-  the last change and switches the target once. Changes after start-up are unchanged.
+  the core only. That is the stored end (with the S4 suppression of a started window), the
+  pending commands, and the windows that opened or closed. Then the change is applied, and
+  it wins. Its outcome is saved, so it survives a restart before start-up has finished.
+  Several changes apply in the order they were given, each after what fell due before it.
+  An interval's switch is such a change too: its flag (`disabled_intervals`) and the
+  window it removes or brings are applied as with Home Assistant running, after the
+  catch-up. Start-up then folds what fell due since the last change and switches the
+  target once. Changes after start-up are unchanged.
   Why: #12 and "the user's last word wins". Before this, a command made while starting was
   recorded on the timer as it was stored, and start-up folded the stored items after it: a
   pending "off" that came due while Home Assistant was down turned the target off after
@@ -1854,22 +1857,27 @@ in `docs/followups.md`.
   the sensor does not answer, and the warning is logged once. If that window is not the one
   that is open now, start-up merges the right one after the change, and it may start then
   (S1). The settings of a window are judged from what the registry remembers of a target
-  whose integration is not up yet. A report of the target before start-up is answered a
-  few seconds later, at start-up.
+  whose integration is not up yet. A change that waits for its turn, behind another change
+  or a slow Workday answer (at most `SERVICE_CALL_TIMEOUT`), catches up to the moment it
+  runs, not the moment it was given, so it also wins over what fell due in between (#42).
+  A report of the target before start-up is answered a few seconds later, at start-up.
 - **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
   end as `wanted_running` does: an end at or before now is over, whether or not it was
   folded. The timer is then idle, and the rule for an idle timer applies (R7 and the
   documented "adding to a timer that is not running starts it"): a positive delta runs the
-  target for the added time, counted from now, and a negative one changes nothing. Before
-  start-up, the catch-up of the change folds a passed end first (see the ruling above),
-  with the S4 suppression of a started window, so `add` never meets one there. After
-  start-up it meets one only when the command waited for its turn behind a slow call until
-  after the end, and got the lock before the alarm of the end. Then a positive delta
-  replaces the passed end, which is never folded: a started window is not suppressed (S4),
-  and a later window that opens may hand the timer back to it (`_realign`). A negative
-  delta leaves the end to the alarm, which folds it as usual.
+  target for the added time, counted from now, and a negative one changes nothing. A
+  change made while starting catches up first (see the ruling above), so `add` never meets
+  a passed end there. It meets one only in a race: `add` was given while the countdown
+  still ran, and waited for the lock behind a slow call until after the end. The lock wakes
+  its waiters in the order they came, so the alarm of the end, queued later, runs after
+  `add`: nothing that the end would fold is missed, and no S4 suppression either. The
+  difference is the time. The added minutes count from when the command ran (up to
+  `SERVICE_CALL_TIMEOUT` late), not from the old end, and the countdown's beginning
+  (`started_at`) starts again. #42 tracks carrying out a command at the moment it was
+  given, which settles this race.
   Why: an end that has passed is over for every other judgement (`wanted_running`,
-  `run_open`, a pending command that falls due). Extending it would run the target for
-  less than the added time.
+  `run_open`, a pending command that falls due).
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
-  the next fold instead of being stopped at once. The S4 case above, after start-up only.
+  the next fold instead of being stopped at once. In the race above, the target runs up to
+  `SERVICE_CALL_TIMEOUT` longer than with the command dated when it was given, and the
+  card's progress starts again.

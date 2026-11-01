@@ -380,8 +380,8 @@ class TimerCore:
         """Move the end by `delta`; on an idle timer only a positive delta starts it.
 
         An end that is not ahead is no countdown, as `wanted_running` judges it, though
-        nothing folded it yet (a timer restored before start-up has taken stock): the
-        timer is idle.
+        nothing folded it yet (a command that waited for its turn until after the end,
+        #42): the timer is idle.
         """
         now = _utc(now)
         end = self._snapshot.end

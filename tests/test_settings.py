@@ -1,7 +1,6 @@
 """Turning a target on with settings: what `run` sends, what the device does with
 it, and what happens when it does not take them."""
 
-import asyncio
 from typing import Any
 
 import probatio
@@ -20,6 +19,7 @@ from .helpers import (
     TURN_ON,
     call_service,
     set_number,
+    start_call_service,
     state_of,
     timerify_warnings,
 )
@@ -313,8 +313,13 @@ async def test_restart_during_a_slow_call_still_delivers_the_settings(
     leaves the rest undone; they are sent when the timer is back."""
     entry = await setup_target(target=AC_ID)
     slow = fake_climate.hold_next_call()
-    start = asyncio.ensure_future(
-        entry.runtime_data.async_run(60, {"hvac_mode": "cool", "temperature": 24})
+    start = start_call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=60,
+        hvac_mode="cool",
+        temperature=24,
     )
     await slow.reached.wait()
     await hass.config_entries.async_unload(entry.entry_id)

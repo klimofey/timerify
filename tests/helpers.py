@@ -1,5 +1,6 @@
 """Helpers shared by the scenario tests: the entities, the calls and the clock."""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
@@ -12,7 +13,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
 from homeassistant.data_entry_flow import FlowResultType, section
 from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
@@ -71,6 +72,30 @@ async def call_service(
     """Call a Timerify service the way an automation or the UI does."""
     await hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
     await hass.async_block_till_done()
+
+
+def start_call_service(
+    hass: HomeAssistant, service: str, target: dict[str, Any], **data: Any
+) -> asyncio.Task[ServiceResponse]:
+    """Start a Timerify service call and leave it running, as a call is while a slow
+    device answers: the task ends when the call does, and nothing is settled before."""
+    return hass.async_create_task(
+        hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
+    )
+
+
+def start_set_number(
+    hass: HomeAssistant, entity_id: str, value: float
+) -> asyncio.Task[ServiceResponse]:
+    """Start moving the slider and leave the call running, as `start_call_service`."""
+    return hass.async_create_task(
+        hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": entity_id, "value": value},
+            blocking=True,
+        )
+    )
 
 
 async def add_command(

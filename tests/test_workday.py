@@ -40,7 +40,14 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.schedule import Interval, workday_window
 
-from .conftest import NO_ENTITY_MATCHED, FakeTarget, FakeWorkday, SetupTarget
+from .conftest import (
+    NO_ENTITY_MATCHED,
+    SWITCH_SERVICES,
+    FakeTarget,
+    FakeWorkday,
+    ProvideTarget,
+    SetupTarget,
+)
 from .helpers import (
     JERUSALEM,
     NUMBER,
@@ -1135,6 +1142,43 @@ async def test_renaming_the_workday_sensor_keeps_an_open_window(
     await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     assert fake_target.calls == [TURN_ON, TURN_OFF]
     assert fake_target.state == "off"
+
+
+async def test_one_workday_sensor_shared_by_two_timers_follows_a_rename(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The boiler and the attic fan ask the same Workday sensor and the user renames it
+    once: both timers keep the new id in their options and stay loaded, and the
+    working-day window of each still opens on Sunday and ends at its time."""
+    fan = provide_target("fan.attic", SWITCH_SERVICES, name="Attic fan")
+    boiler = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    fan_timer = await setup_target(
+        target=fan.entity_id, workday_sensor=fake_workday.entity_id
+    )
+    await add_interval(hass, boiler, days="workdays", start="06:30", end="07:15")
+    await add_interval(hass, fan_timer, days="workdays", start="06:30", end="07:15")
+
+    await fake_workday.rename(RENAMED_SENSOR)
+
+    assert boiler.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert fan_timer.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert boiler.state is ConfigEntryState.LOADED
+    assert fan_timer.state is ConfigEntryState.LOADED
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+    assert fan.calls == [("turn_on", fan.entity_id)]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, "sensor.attic_fan_ends_at") == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert fan.calls == [("turn_on", fan.entity_id), ("turn_off", fan.entity_id)]
+    assert timerify_warnings(caplog) == []
 
 
 async def test_a_removed_workday_sensor_is_not_followed(

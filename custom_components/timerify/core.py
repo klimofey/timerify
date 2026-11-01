@@ -339,8 +339,8 @@ class TimerCore:
         persisted: a core starts with a new one, and the first report that finds a
         stored wish unsent makes its free first delivery."""
         self._settings_allowance = _Allowance(automatic_resends)
-        """The same for the owed settings: new settings, and a command that sends the
-        ones owed, start a new one."""
+        """The same for the owed settings: new settings, a command that sends the ones
+        owed, and a new wish to turn on while they are owed start a new one."""
 
     @property
     def snapshot(self) -> Snapshot:

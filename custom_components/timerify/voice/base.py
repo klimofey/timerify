@@ -248,11 +248,11 @@ def timer_slots(
 ) -> dict[str, Any]:
     """What an answer says about a timer: `target` is its name, `state` is `counting`
     while the countdown runs, `open` while the target is on without one, `unavailable`
-    while it is not wanted on and the target is away, and `off` otherwise; the time left
-    as `left_total` minutes, rounded up, and as `left_hours` and `left_minutes`; and
-    while it counts, `ends_at` and `ends_in_days` (see `clock_slots`). Whether the
-    target is on without a countdown is what the controller's `wanted_running` says, as
-    for "turn off in N"."""
+    while it is not wanted on and the target is away (unavailable, unknown or missing,
+    as `actual_state` judges it), and `off` otherwise; the time left as `left_total`
+    minutes, rounded up, and as `left_hours` and `left_minutes`; and while it counts,
+    `ends_at` and `ends_in_days` (see `clock_slots`). Whether the target is on without a
+    countdown is what the controller's `wanted_running` says, as for "turn off in N"."""
     controller = entry.runtime_data
     snapshot = controller.snapshot
     left_total = remaining_minutes(snapshot, now)

@@ -927,6 +927,28 @@ async def test_stopping_an_idle_timer_changes_nothing_more(
     assert speech(response) == "Boiler is off."
 
 
+async def test_stopping_an_unavailable_target_is_answered_with_the_wish(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """R10: a boiler out of reach is not known to be off, but the answer to a command
+    gives the wish it set, as it does for a run: the boiler is off, nothing is sent to
+    it while it is away, and it is turned off the moment it is back."""
+    await set_number(hass, NUMBER, 30)
+    await fake_target.set_state("unavailable")
+
+    response = await converse(hass, "stop the boiler timer")
+
+    assert reached(response) == STOP
+    assert speech(response) == "Boiler is off."
+    assert state_of(hass, NUMBER) == "0"
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_target.set_state("on")
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 # --- The rules of the timer hold after a voice command -----------------------------
 
 
@@ -1137,6 +1159,26 @@ async def test_llm_run_add_and_stop(
     assert stopped["speech_slots"]["state"] == "off"
     assert fake_target.calls == [TURN_ON, TURN_OFF]
     assert state_of(hass, NUMBER) == "0"
+
+
+async def test_llm_stop_on_an_unavailable_target_tells_the_agent_it_is_unavailable(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The agent is told the boiler is out of reach, so that it can say so: the spoken
+    answer to the same stop says the boiler is off, which is the wish it set."""
+    await set_number(hass, NUMBER, 30)
+    await fake_target.set_state("unavailable")
+    api = await assist_api(hass)
+
+    stopped = await call_tool(api, "timerify__stop", {"name": "Boiler"})
+
+    assert stopped["speech_slots"]["state"] == "unavailable"
+    assert stopped["speech_slots"]["left_total"] == 0
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_target.set_state("on")
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
 async def test_llm_run_takes_hours_and_minutes_together(

@@ -43,4 +43,3 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#27](https://github.com/klimofey/timerify/issues/27) Pin the Russian plural forms of voice answers with rendered fixtures
 - [#28](https://github.com/klimofey/timerify/issues/28) Pin happy-dom 21.0.4 (advisory GHSA-834v-8h66-3h79) on or after 2026-11-03
-- [#31](https://github.com/klimofey/timerify/issues/31) Test harness: a FakeTarget takes the service calls of every other entity of its domain

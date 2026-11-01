@@ -292,14 +292,7 @@ async def test_entities_show_the_new_timer_while_the_device_is_still_answering(
     move at once, the target follows when it has switched."""
     await setup_target()
     slow = fake_target.hold_next_call()
-    setting = hass.async_create_task(
-        hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": NUMBER, "value": 10},
-            blocking=True,
-        )
-    )
+    setting = start_set_number(hass, NUMBER, 10)
     await slow.reached.wait()
 
     assert state_of(hass, NUMBER) == "10"

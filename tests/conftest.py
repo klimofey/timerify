@@ -275,7 +275,9 @@ class FakeTarget:
 
         A domain has one set of services for all its entities, so a call for an entity
         of Timerify's own (the switch of an interval) goes on to the service that was
-        there before, which is the domain's own.
+        there before, which is the domain's own. For the same reason the fake that
+        provided its services last takes the calls of every other entity of its
+        domain, so a test with two targets uses two domains.
         """
         domain, _ = split_entity_id(self.entity_id)
         for service, obey in services.items():

@@ -47,10 +47,10 @@ What 1.0.0 was checked with before release:
   in the middle of a countdown. One test records the known issue on 2026.10 as an expected
   failure.
 - `hassfest`, Home Assistant's own validation of an integration, reports no problems.
-- A smoke test in a real Home Assistant 2026.10.4 container (see
-  [Smoke test](#smoke-test)): the page that Home Assistant serves loads the card's module at the address that carries the version of the
-  bundle, that address serves the bundle byte for byte, and the card's websocket command
-  tells the first timer's entities; the timer is
+- A smoke test in a real Home Assistant 2026.10.4 container (see [Smoke test](#smoke-test)):
+  the page that Home Assistant serves loads the card's module at the address that carries
+  the version of the bundle, that address serves the bundle byte for byte, and the card's
+  websocket command tells the first timer's entities; the timer is
   added through the config flow, "Run for" 2 minutes turns the target on and off on time,
   and a 3 minute countdown survives a restart of the container and still ends on time. A
   pending command turns a switch that sits on a device on at its time and off a minute

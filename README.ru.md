@@ -23,7 +23,7 @@ Timerify добавляет отсчёт к объекту, который у в
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=timerify)
 
-Первая кнопка открывает Timerify в HACS. Вторая добавляет таймер, когда Timerify уже установлен. Нужен Home Assistant 2026.10.4 или новее.
+Первая кнопка открывает Timerify в HACS. Вторая открывает меню Timerify, где вы выбираете **Добавить таймер**. Она работает, когда Timerify уже установлен. Нужен Home Assistant 2026.10.4 или новее.
 
 ### Home Assistant 2026.10: HACS
 
@@ -47,7 +47,7 @@ Timerify добавляет отсчёт к объекту, который у в
 
 Перезапустите Home Assistant. Добавьте таймер второй кнопкой или в разделе **Настройки > Устройства и службы > Вспомогательное**: нажмите **Создать вспомогательный объект**, затем выберите **Timerify**. Шаги описаны на странице [«Таймеры»](https://github.com/klimofey/timerify/blob/main/docs/ru/timers.md#добавьте-таймер-к-устройству).
 
-Карточка для панели поставляется вместе с Timerify. Один раз обновите страницу в браузере после установки или обновления.
+Карточка для панели поставляется вместе с Timerify. Один раз обновите страницу в браузере после установки или обновления Timerify.
 
 ![Страница устройства с таймером: «Включить на» и «Выключится в», отсчёт идёт](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/phase-1-device-page.png)
 

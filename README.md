@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  English | <a href="https://github.com/klimofey/timerify/blob/main/README.ru.md">&#1056;&#1091;&#1089;&#1089;&#1082;&#1080;&#1081;</a>
+  English | <a href="https://github.com/klimofey/timerify/blob/main/README.ru.md">Russian</a>
 </p>
 
 Timers for any Home Assistant entity, without writing automations.
@@ -23,7 +23,7 @@ Timerify attaches a countdown to an entity you already have, the way Powercalc a
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=timerify)
 
-The first button opens Timerify in HACS. The second adds a timer, once Timerify is installed. Home Assistant 2026.10.4 or newer is required.
+The first button opens Timerify in HACS. The second opens the Timerify menu, where you choose **Add a timer**. It works once Timerify is installed. Home Assistant 2026.10.4 or newer is required.
 
 ### Home Assistant 2026.10: HACS
 
@@ -47,7 +47,7 @@ Copy the `custom_components/timerify` folder of this repository into the `custom
 
 Restart Home Assistant. Add a timer with the second button, or under **Settings > Devices & services > Helpers**: choose **Create helper**, then **Timerify**. The [Timers page](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md#add-a-timer-to-a-device) has the steps.
 
-The dashboard card comes with Timerify. Refresh your browser once after you install or update it.
+The dashboard card comes with Timerify. Refresh your browser once after you install or update Timerify.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/phase-1-device-page.png)
 

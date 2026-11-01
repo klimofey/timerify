@@ -236,9 +236,10 @@ export class TimerifyCard extends LitElement {
       return t(hass, "card_not_allowed", { entity: config.entity });
     }
     // Said whatever the number's state is: a sensor of the timer is missing from the registry
-    // only while the entry is not set up, and then its number is unavailable, which is also
-    // what a timer that is starting looks like. The answer is read from the registry and does
-    // not change until the registry does, and the card asks again then.
+    // only for a moment while a new timer is set up for the first time, when the number may
+    // still look like a timer that is starting, and after the sensor was deleted from the
+    // registry, until the timer is set up again. The answer is read from the registry and
+    // does not change until the registry does, and the card asks again then.
     if (lookup.status === "incomplete") {
       return t(hass, "card_timer_incomplete", { entity: config.entity });
     }

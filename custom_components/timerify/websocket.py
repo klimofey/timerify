@@ -24,9 +24,12 @@ and tells the user which one it misses instead of staying silent.
 A number that is not a timer's is answered `not_found`. A number that is a timer's, but
 whose timer cannot be told of, is answered `timer_incomplete`: either its target was
 stored by registry id and that id is gone, or one of its two sensors is not in the
-entity registry, which happens while the entry is not set up. The card must not tell the
-user that a number is no timer's when it is. A target stored as an entity id resolves
-whether or not the entity exists, so a timer with such a target is told of as usual.
+entity registry. The registry keeps a timer's entities across restarts and reloads, so a
+sensor is missing only for a moment while a new timer is set up for the first time, and
+after it was deleted from the entity registry, until the timer is set up again. The card
+must not tell the user that a number is no timer's when it is. A target stored as an
+entity id resolves whether or not the entity exists, so a timer with such a target is
+told of as usual.
 """
 
 from typing import Any, Final, Literal, TypedDict

@@ -140,7 +140,7 @@ def _follow_target_gaining_a_device(
     `target` option brings: scheduled reloads do not merge, each one runs. A target that
     is on a device needs nothing, as the helper reloads for a move.
     """
-    target = entry.options[CONF_TARGET]
+    target = entry.runtime_data.target_entity_id
     if async_entity_id_to_device_id(hass, target) is not None:
         return
 

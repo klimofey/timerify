@@ -1,12 +1,18 @@
 """The Runtime sensor of a timer: how long the target was on, counted once a minute."""
 
 import copy
+import logging
 from datetime import timedelta
 from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import (
+    EVENT_HOMEASSISTANT_FINAL_WRITE,
+    EVENT_HOMEASSISTANT_STOP,
+)
+from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import CONF_RUNTIME, DOMAIN, Mode
@@ -15,8 +21,10 @@ from .conftest import FakeTarget, SetupTarget
 from .helpers import (
     AC_ID,
     AC_RUNTIME,
+    NEXT,
     NUMBER,
     RUNTIME,
+    SENSOR,
     START,
     TARGET_ID,
     add_command,
@@ -34,6 +42,7 @@ from .helpers import (
 )
 
 RENAMED_ID = "switch.water_heater"
+RENAMED_RUNTIME = "sensor.boiler_on_time"
 
 
 def runtime_of(hass: HomeAssistant, entity_id: str = RUNTIME) -> float:
@@ -199,6 +208,46 @@ async def test_a_reload_between_two_ticks_loses_no_seconds(
     assert runtime_of(hass) == 11.0
 
 
+async def test_a_stop_between_two_ticks_loses_no_seconds(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Home Assistant is stopped half a minute after a tick, as an update or a restart
+    from the settings does. A stop unloads no timer, yet the half minute the boiler has
+    been on since is in the file when it has stopped, and the timer started again from
+    it shows it."""
+    entry = await setup_target(mode="loose", runtime=True)
+    await fake_target.set_state("on")
+    await advance(hass, freezer, minutes=10)
+    await advance(hass, freezer, seconds=30)
+    assert runtime_saved(hass_storage, entry) == 600.0
+
+    # What Home Assistant does: it is stopping when the integrations are told to stop,
+    # and the final write follows.
+    hass.set_state(CoreState.stopping)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+    hass.set_state(CoreState.final_write)
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)
+    await hass.async_block_till_done()
+
+    assert runtime_saved(hass_storage, entry) == 630.0
+    # The next start finds the file as the stop left it.
+    key = runtime_storage_key(entry)
+    left_by_the_stop = copy.deepcopy(hass_storage[key])
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass.set_state(CoreState.running)
+    hass_storage[key] = left_by_the_stop
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert runtime_of(hass) == 10.5
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
 async def test_downtime_is_not_counted(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -303,8 +352,11 @@ async def test_clock_going_back_never_lowers_the_value(
     setup_target: SetupTarget,
 ) -> None:
     """The clock is corrected five minutes back while the boiler is on. The figure
-    stays where it was while the clock repeats those minutes, and goes on once it has
-    passed them: it never goes down, and the repeated minutes are not counted twice."""
+    stays at 10 while the clock repeats those five minutes, and goes on once it has
+    passed them: it never goes down, and the repeated minutes are counted once, on the
+    corrected clock, so the count ends at 15 where the boiler was on for 20 minutes by
+    the clocks together. The sensor cannot tell a correction from time, so it
+    undercounts the five minutes and never counts them twice."""
     await setup_target(mode="loose", runtime=True)
     await fake_target.set_state("on")
     await count_minutes(hass, freezer, 10)
@@ -313,10 +365,7 @@ async def test_clock_going_back_never_lowers_the_value(
     await advance_to(hass, freezer, START + timedelta(minutes=5))
     shown = await count_minutes(hass, freezer, 10)
 
-    assert shown == sorted(shown)
-    assert shown[0] == 10.0
-    assert shown[:5] == [10.0] * 5
-    assert 10.0 < shown[-1] <= 20.0
+    assert shown == [10.0, 10.0, 10.0, 10.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0]
 
 
 async def test_renaming_the_target_mid_run_keeps_the_counter(
@@ -350,6 +399,29 @@ async def test_renaming_the_target_mid_run_keeps_the_counter(
     hass.states.async_set(RENAMED_ID, "off")
     await advance(hass, freezer, minutes=1)
     assert runtime_of(hass) == 20.0
+
+
+async def test_renaming_the_runtime_sensor_keeps_its_total(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user gives the Runtime sensor another entity id after 10 minutes on: Home
+    Assistant takes the entity out and adds it again, and the figure stays at 10 and
+    goes on, instead of going back to what was stored when the timer was set up."""
+    await setup_target(mode="loose", runtime=True)
+    await fake_target.set_state("on")
+    await advance(hass, freezer, minutes=10)
+    assert runtime_of(hass) == 10.0
+
+    er.async_get(hass).async_update_entity(RUNTIME, new_entity_id=RENAMED_RUNTIME)
+    await hass.async_block_till_done()
+
+    assert hass.states.get(RUNTIME) is None
+    assert runtime_of(hass, RENAMED_RUNTIME) == 10.0
+    await advance(hass, freezer, minutes=1)
+    assert runtime_of(hass, RENAMED_RUNTIME) == 11.0
 
 
 async def test_two_timers_count_on_their_own(
@@ -431,6 +503,39 @@ async def test_disabling_the_counter_removes_its_entity(
     assert runtime_of(hass) == 10.0
     await advance(hass, freezer, minutes=1)
     assert runtime_of(hass) == 11.0
+
+
+async def test_a_runtime_file_of_a_newer_release_fails_only_its_sensor(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """After a downgrade the file of the count was written by a release that Timerify
+    does not know. Starting from zero would write over its total, so the Runtime sensor
+    is not set up, and Home Assistant says why in the log; the timer's other sensors
+    are there, and the file is as it was."""
+    written_by_the_next_release = {"seconds": 900.0, "also": "something new"}
+
+    entry = await setup_target(
+        runtime=True,
+        stored_runtime=written_by_the_next_release,
+        stored_runtime_version=2,
+    )
+    file = copy.deepcopy(hass_storage[runtime_storage_key(entry)])
+
+    assert hass.states.get(RUNTIME) is None
+    assert hass.states.get(SENSOR) is not None
+    assert hass.states.get(NEXT) is not None
+    assert hass.states.get(NUMBER) is not None
+    assert entry.state is ConfigEntryState.LOADED
+    assert "UnsupportedStorageVersionError" in caplog.text
+    assert "Error while setting up timerify platform for sensor" in caplog.text
+    await hass.config_entries.async_unload(entry.entry_id)
+    assert hass_storage[runtime_storage_key(entry)] == file
+    assert file["version"] == 2
+    assert file["data"] == written_by_the_next_release
 
 
 async def test_removing_the_timer_deletes_the_runtime_file(

@@ -143,7 +143,8 @@ class RuntimeStore:
         """Write the total out at once, not after a delay: a value is published only
         after the file holds at least as much, so that a crash cannot lose it. While
         Home Assistant is stopping, the write is queued for its final write, which
-        comes before it has stopped."""
+        comes before it has stopped. A write that fails is logged by Home Assistant and
+        not raised, so the caller cannot tell."""
         await self._store.async_save({"seconds": seconds})
 
     async def async_remove(self) -> None:

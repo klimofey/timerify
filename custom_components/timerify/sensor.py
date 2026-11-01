@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, UnitOfTime
 from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -167,8 +167,10 @@ class RuntimeSensor(TimerifyEntity, SensorEntity):
     only when the figure moved; never at a change of the target or a notice of the
     controller. The total is saved to its file before the figure that shows it is
     published, so a restart or a crash can never bring the figure back down, which the
-    statistics would take for a counter that was reset. The sensor does not turn
-    unavailable when its target does: it is a total, which cards and automations read.
+    statistics would take for a counter that was reset. The seconds since the last tick
+    are saved when the sensor is removed and when Home Assistant stops, which removes
+    no entity. The sensor does not turn unavailable when its target does: it is a
+    total, which cards and automations read.
     """
 
     entity_description = SensorEntityDescription(
@@ -212,10 +214,21 @@ class RuntimeSensor(TimerifyEntity, SensorEntity):
                 self.hass, self._async_tick, second=RUNTIME_TICK_SECOND
             )
         )
+        # Not `async_listen_once`: its listener removes itself when it fires, and
+        # removing it again, as the sensor's removal after a stop would, logs an error.
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_HOMEASSISTANT_STOP, self._async_flush)
+        )
 
     async def async_will_remove_from_hass(self) -> None:
         """Save the total as of now: an unload for any change of the timer, or its
-        removal, must not lose the minutes counted since the last tick."""
+        removal, must not lose the seconds counted since the last tick."""
+        await self._async_flush()
+
+    async def _async_flush(self, _stop: Event | None = None) -> None:
+        """Save the total as of now, which is also what the stop of Home Assistant asks
+        for: it unloads no entry, so nothing else would save the seconds since the last
+        tick. While it is stopping, the store keeps the data for the final write."""
         await self._store.async_save(self._counter.seconds_to_store(dt_util.utcnow()))
 
     @callback

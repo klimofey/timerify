@@ -20,7 +20,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.timerify.const import DOMAIN
 
 from ..conftest import FakeTarget, SetupTarget
-from ..helpers import NEXT, NUMBER, SENSOR, TARGET_ID, add_interval
+from ..helpers import BUTTON, NEXT, NUMBER, SENSOR, TARGET_ID, add_interval
 from .helpers import ASSISTANT
 
 EVERY_TIMER_HAS = {NUMBER, SENSOR, NEXT}
@@ -65,6 +65,22 @@ async def test_timerify_entities_are_not_exposed_by_default(
         entity_id: async_should_expose(hass, ASSISTANT, entity_id)
         for entity_id in entities
     } == dict.fromkeys(entities, False)
+    assert async_should_expose(hass, ASSISTANT, TARGET_ID)
+
+
+async def test_the_turn_off_button_is_not_exposed_by_default(
+    hass: HomeAssistant,
+    assist: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A timer with a Turn off button still has one way to be driven by voice: the
+    boiler, by name. Home Assistant does not expose buttons by default, so Assist is
+    not told about "Boiler Turn off" next to it."""
+    await setup_target(off_button=True)
+
+    assert hass.states.get(BUTTON) is not None
+    assert not async_should_expose(hass, ASSISTANT, BUTTON)
     assert async_should_expose(hass, ASSISTANT, TARGET_ID)
 
 

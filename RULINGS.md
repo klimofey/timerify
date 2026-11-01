@@ -2116,4 +2116,5 @@ in `docs/followups.md`.
   `test_unticking_the_box_removes_the_button`,
   `test_the_turn_off_box_is_on_both_first_forms`,
   `test_run_for_zero_turns_off_a_loose_boiler_without_a_countdown`,
-  `test_the_turn_off_button_has_the_unique_id_of_its_key`.
+  `test_the_turn_off_button_has_the_unique_id_of_its_key`,
+  `test_the_turn_off_button_is_not_exposed_by_default`.

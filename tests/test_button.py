@@ -25,6 +25,8 @@ from .helpers import (
     state_of,
 )
 
+RENAMED_BUTTON = "button.boiler_stop"
+
 
 def settings(*, off_button: bool) -> dict[str, str | bool | int]:
     """What the first form of the settings of a loose timer submits."""
@@ -113,24 +115,23 @@ async def test_unticking_the_box_removes_the_button(
 ) -> None:
     """A timer that loses its button loses the entry in the registry too, so that no
     unavailable entity is left on the device. Ticking the box again brings the button
-    back under the same entity id."""
+    back as the user had it: the registry keeps the entity id the user gave it."""
     entry = await setup_target(mode="loose", off_button=True)
     registry = er.async_get(hass)
     assert state_of(hass, BUTTON) == "unknown"
+    registered = registry.async_update_entity(BUTTON, new_entity_id=RENAMED_BUTTON)
+    await hass.async_block_till_done()
+    assert state_of(hass, RENAMED_BUTTON) == "unknown"
 
-    await change_options(
-        hass,
-        entry,
-        settings(off_button=False),
-    )
+    await change_options(hass, entry, settings(off_button=False))
 
+    assert hass.states.get(RENAMED_BUTTON) is None
+    assert registry.async_get(RENAMED_BUTTON) is None
+
+    await change_options(hass, entry, settings(off_button=True))
+
+    assert state_of(hass, RENAMED_BUTTON) == "unknown"
     assert hass.states.get(BUTTON) is None
-    assert registry.async_get(BUTTON) is None
-
-    await change_options(
-        hass,
-        entry,
-        settings(off_button=True),
-    )
-
-    assert state_of(hass, BUTTON) == "unknown"
+    restored = registry.async_get(RENAMED_BUTTON)
+    assert restored is not None
+    assert restored.id == registered.id

@@ -161,11 +161,23 @@ async def test_a_title_the_user_chose_is_not_marked(
 
 
 @pytest.mark.parametrize(
-    ("odd", "change"),
+    ("odd", "change", "state"),
     [
-        pytest.param({"weekdays": ["mon", "someday"]}, {}, id="a-day-that-is-not-one"),
-        pytest.param({"days": "fortnightly"}, {}, id="days-that-are-no-kind"),
-        pytest.param({}, {"end"}, id="a-time-that-is-missing"),
+        pytest.param(
+            {"weekdays": ["mon", "someday"]},
+            {},
+            ConfigEntryState.LOADED,
+            id="a-day-that-is-not-one",
+        ),
+        pytest.param(
+            {"days": "fortnightly"},
+            {},
+            ConfigEntryState.LOADED,
+            id="days-that-are-no-kind",
+        ),
+        pytest.param(
+            {}, {"end"}, ConfigEntryState.SETUP_ERROR, id="a-time-that-is-missing"
+        ),
     ],
 )
 async def test_an_interval_no_title_can_be_made_of_is_left_unmarked(
@@ -174,9 +186,12 @@ async def test_an_interval_no_title_can_be_made_of_is_left_unmarked(
     fake_workday: FakeWorkday,
     odd: dict[str, Any],
     change: set[str],
+    state: ConfigEntryState,
 ) -> None:
     """Data that was edited by hand to something that is no interval costs that
-    interval its mark and no more: the others are marked and the entry moves on."""
+    interval its mark and no more: the migration does not fail, and the others are
+    marked. Whether the timer then loads is for the data of the interval, as it is
+    without a migration: a time that is missing keeps the timer from setting up."""
     broken = {k: v for k, v in {**interval_data(), **odd}.items() if k not in change}
 
     entry = await set_up_timer(
@@ -189,6 +204,7 @@ async def test_an_interval_no_title_can_be_made_of_is_left_unmarked(
     assert entry.minor_version == 2
     assert entry.subentries["whole"].data["generated_title"] == "06:30–07:15, Mon–Sun"
     assert "generated_title" not in entry.subentries["odd"].data
+    assert entry.state is state
 
 
 async def test_an_interval_without_the_mark_is_named_again_by_an_edit(

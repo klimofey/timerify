@@ -11,6 +11,9 @@
       },
       "next_command": {
         "default": "mdi:calendar-clock"
+      },
+      "runtime": {
+        "default": "mdi:timer-sand-complete"
       }
     },
     "switch": {

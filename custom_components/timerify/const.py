@@ -14,6 +14,9 @@ updating the option (see `_follow_target` in `__init__`), not by a registry id."
 CONF_MODE: Final = "mode"
 CONF_DEFAULT_DURATION: Final = "default_duration"
 """Option holding the default duration in whole minutes."""
+CONF_RUNTIME: Final = "runtime"
+"""Option holding whether the timer counts how long its target was on, a `bool`. Absent
+or False: no counter, and no Runtime sensor; an entry of an earlier release has none."""
 CONF_WORKDAY_SENSOR: Final = "workday_sensor"
 """Option holding the entity id of the target's Workday sensor, which the intervals of
 working days and of days off ask which days are which. Absent when there is none."""
@@ -116,13 +119,20 @@ MANAGED_HEADER: Final = (
 KEY_RUN_FOR: Final = "run_for"
 KEY_ENDS_AT: Final = "ends_at"
 KEY_NEXT_COMMAND: Final = "next_command"
-"""The keys of the entities a timer has one of: with the entry's id they make an
-entity's unique id (see `timer_unique_id`)."""
+KEY_RUNTIME: Final = "runtime"
+"""The keys of the entities a timer has one of, the last only if it counts its runtime:
+with the entry's id they make an entity's unique id (see `timer_unique_id`)."""
+
+RUNTIME_TICK_SECOND: Final = 59
+"""The second of every minute at which the Runtime sensor publishes its total: the last
+one. A listener fires up to half a second after its second, so a run that crosses an
+hour or midnight is credited to the right side of it to within a second, which a tick
+at second 0 would credit to the wrong side."""
 
 
 def timer_unique_id(entry_id: str, key: str) -> str:
     """The unique id of the entity of a timer that has the key `key` (`KEY_RUN_FOR`,
-    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`).
+    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`, `KEY_RUNTIME`).
 
     A unique id is an entity's identity in the registry: changing how it is made would
     leave every installed entity behind, with its entity id, its history and its place

@@ -26,7 +26,7 @@ from custom_components.timerify.const import (
 )
 
 from .conftest import FakeTarget, SetupTarget
-from .helpers import NEXT, NUMBER, SENSOR, TARGET_ID, add_interval
+from .helpers import NEXT, NUMBER, RUNTIME, SENSOR, TARGET_ID, add_interval
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
 
@@ -47,6 +47,25 @@ async def test_entities_of_a_timer_have_the_unique_ids_of_every_release(
         NUMBER: f"{entry.entry_id}_run_for",
         SENSOR: f"{entry.entry_id}_ends_at",
         NEXT: f"{entry.entry_id}_next_command",
+        EVENING_SWITCH: f"{entry.entry_id}_interval_{interval}",
+    }
+
+
+async def test_the_runtime_sensor_has_the_unique_id_of_the_counter(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The Runtime sensor of a timer that counts is registered under the entry's id
+    and `runtime`, spelled out here for the same reason as the others."""
+    entry = await setup_target(runtime=True)
+    interval = await add_interval(hass, entry, start="18:00", end="19:00")
+
+    registered = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+
+    assert {e.entity_id: e.unique_id for e in registered} == {
+        NUMBER: f"{entry.entry_id}_run_for",
+        SENSOR: f"{entry.entry_id}_ends_at",
+        NEXT: f"{entry.entry_id}_next_command",
+        RUNTIME: f"{entry.entry_id}_runtime",
         EVENING_SWITCH: f"{entry.entry_id}_interval_{interval}",
     }
 

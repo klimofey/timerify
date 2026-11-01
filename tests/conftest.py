@@ -38,6 +38,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
+    CONF_RUNTIME,
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
     DOMAIN,
@@ -611,8 +612,9 @@ async def setup_target(
 
     `stored` is what an earlier run left in the entry's storage file, in the form
     of `stored_version`; the entry then starts the way it does after a restart.
-    `workday_sensor` is the Workday sensor the timer asks about the days. A test that
-    sets up a target provides it first, through one of the `fake_*` fixtures.
+    `workday_sensor` is the Workday sensor the timer asks about the days, and `runtime`
+    makes the timer count how long its target is on. A test that sets up a target
+    provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -622,6 +624,7 @@ async def setup_target(
         stored: dict[str, Any] | None = None,
         stored_version: int = TimerStore.STORAGE_VERSION,
         workday_sensor: str | None = None,
+        runtime: bool = False,
     ) -> MockConfigEntry:
         options: dict[str, Any] = {
             CONF_TARGET: target,
@@ -630,6 +633,8 @@ async def setup_target(
         }
         if workday_sensor is not None:
             options[CONF_WORKDAY_SENSOR] = workday_sensor
+        if runtime:
+            options[CONF_RUNTIME] = True
         entry = MockConfigEntry(
             domain=DOMAIN, version=1, title="Boiler", options=options
         )

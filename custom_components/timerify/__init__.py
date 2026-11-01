@@ -13,6 +13,7 @@ from homeassistant.helpers.typing import ConfigType
 from .card import async_register_card
 from .const import CONF_TARGET, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
+from .runtime import RuntimeStore
 from .services import async_setup_services
 from .store import TimerStore
 from .voice import async_register_intents
@@ -79,12 +80,13 @@ async def async_unload_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> None:
-    """Delete the stored timer of a removed entry, or the sentence files of the voice
-    settings."""
+    """Delete the stored timer and the stored runtime total of a removed entry, or the
+    sentence files of the voice settings."""
     if is_voice_entry(entry):
         await async_remove_voice_entry(hass, entry)
         return
     await TimerStore(hass, entry.entry_id).async_remove()
+    await RuntimeStore(hass, entry.entry_id).async_remove()
 
 
 def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_TYPE:

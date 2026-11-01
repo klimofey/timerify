@@ -277,6 +277,9 @@
             "name": "Commands"
           }
         }
+      },
+      "runtime": {
+        "name": "Runtime"
       }
     },
     "switch": {

@@ -3,6 +3,7 @@
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .conftest import (
     SWITCH_SERVICES,
@@ -58,3 +59,69 @@ async def test_a_call_for_an_entity_no_fake_owns_fails_loudly(
 
     assert services.strays == ["switch.turn_on switch.stray"]
     assert boiler.calls == []
+
+
+async def test_one_call_for_two_fakes_and_two_strays_is_split_between_them(
+    hass: HomeAssistant, clock_at_start: None
+) -> None:
+    """One call names a boiler, a pump and two entities no fake owns: each fake takes
+    the call for its own entity and nothing else, and the call fails once, naming both
+    strays, which the harness remembers."""
+    services = FakeServices(hass)
+    boiler = provide_fake(hass, services, TARGET_ID, SWITCH_SERVICES, name="Boiler")
+    pump = provide_fake(hass, services, "switch.pump", SWITCH_SERVICES, name="Pump")
+
+    with pytest.raises(AssertionError, match=r"switch\.stray, switch\.ghost"):
+        await hass.services.async_call(
+            "switch",
+            "turn_on",
+            {"entity_id": ["switch.stray", TARGET_ID, "switch.pump", "switch.ghost"]},
+            blocking=True,
+        )
+
+    assert boiler.calls == [TURN_ON]
+    assert pump.calls == [("turn_on", "switch.pump")]
+    assert services.strays == [
+        "switch.turn_on switch.stray",
+        "switch.turn_on switch.ghost",
+    ]
+
+
+async def test_a_target_deleted_and_restored_with_the_same_unique_id_is_owned_again(
+    hass: HomeAssistant, clock_at_start: None
+) -> None:
+    """While the user's boiler is deleted nobody owns it, so a call for it fails. When
+    its integration restores it under the same unique id, its fake takes calls again."""
+    services = FakeServices(hass)
+    boiler = provide_fake(hass, services, TARGET_ID, SWITCH_SERVICES, name="Boiler")
+    registry = er.async_get(hass)
+    entry = registry.async_get(TARGET_ID)
+    assert entry is not None
+    provider = hass.config_entries.async_get_entry(entry.config_entry_id or "")
+    assert provider is not None
+
+    registry.async_remove(TARGET_ID)
+    hass.states.async_remove(TARGET_ID)  # so that the restore gets its entity id back
+
+    with pytest.raises(AssertionError, match=r"switch\.boiler"):
+        await hass.services.async_call(
+            "switch", "turn_on", {"entity_id": TARGET_ID}, blocking=True
+        )
+    assert boiler.calls == []
+
+    restored = registry.async_get_or_create(
+        "switch",
+        entry.platform,
+        entry.unique_id,
+        config_entry=provider,
+        suggested_object_id="boiler",
+    )
+    boiler.write("off")
+    assert (restored.id, restored.entity_id) == (entry.id, TARGET_ID)
+
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": TARGET_ID}, blocking=True
+    )
+
+    assert boiler.calls == [TURN_ON]
+    assert services.strays == ["switch.turn_on switch.boiler"]

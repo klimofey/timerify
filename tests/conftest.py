@@ -21,6 +21,7 @@ from homeassistant.const import (
 from homeassistant.core import (
     Context,
     HomeAssistant,
+    Service,
     ServiceCall,
     ServiceResponse,
     SupportsResponse,
@@ -313,7 +314,8 @@ class FakeServices:
     each entity of a call to the fake that owns the entity. An entity of Timerify's own
     (the switch of an interval) goes on to the service that was there before, which is
     the domain's own. A call for any other entity fails: it is the test that is wrong,
-    not the fake that happens to be of the same domain.
+    not the fake that happens to be of the same domain. The entities of that call which
+    have an owner still get their call, and the failure names every other one.
     """
 
     hass: HomeAssistant
@@ -357,35 +359,49 @@ class FakeServices:
             data = dict(call.data)
             entity_ids: list[str] = cv.ensure_list(data.pop("entity_id"))
             ours: list[str] = []
-            if elsewhere is not None:
-                ours = [e for e in entity_ids if self._is_timerify_entity(e)]
-                if ours:
-                    forwarded = ServiceCall(
-                        self.hass,
-                        call.domain,
-                        call.service,
-                        {**data, "entity_id": ours},
-                        call.context,
-                    )
-                    if (
-                        running := self.hass.async_run_hass_job(
-                            elsewhere.job, forwarded
-                        )
-                    ) is not None:
-                        await running
+            owned: list[tuple[str, FakeTarget, Obey]] = []
+            strays: list[str] = []
             for entity_id in entity_ids:
-                if entity_id in ours:
-                    continue
-                owner = self._owners[domain, service].get(self._key(entity_id))
-                if owner is None:
-                    self.strays.append(f"{domain}.{service} {entity_id}")
-                    raise AssertionError(
-                        f"no fake target owns {entity_id} ({domain}.{service})"
-                    )
-                target, obey = owner
+                if elsewhere is not None and self._is_timerify_entity(entity_id):
+                    ours.append(entity_id)
+                elif (
+                    owner := self._owners[domain, service].get(self._key(entity_id))
+                ) is not None:
+                    owned.append((entity_id, *owner))
+                else:
+                    strays.append(entity_id)
+            self.strays.extend(f"{domain}.{service} {stray}" for stray in strays)
+            if elsewhere is not None and ours:
+                await self._forward(elsewhere, call, data, ours)
+            for entity_id, target, obey in owned:
                 await target.take(service, obey, call, entity_id, data)
+            if strays:
+                raise AssertionError(
+                    f"no fake target owns {', '.join(strays)} ({domain}.{service})"
+                )
 
         self.hass.services.async_register(domain, service, handle)
+
+    async def _forward(
+        self,
+        elsewhere: Service,
+        call: ServiceCall,
+        data: dict[str, Any],
+        entity_ids: list[str],
+    ) -> None:
+        """Hand the call for `entity_ids`, entities of Timerify's own, on to the service
+        that was there before."""
+        forwarded = ServiceCall(
+            self.hass,
+            call.domain,
+            call.service,
+            {**data, "entity_id": entity_ids},
+            call.context,
+        )
+        if (
+            running := self.hass.async_run_hass_job(elsewhere.job, forwarded)
+        ) is not None:
+            await running
 
 
 NO_ENTITY_MATCHED: Final = (

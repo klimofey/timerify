@@ -1124,8 +1124,8 @@ What 1.0.0 was checked with before release:
   meant to and leave the switch in the state the REST API reports. The first timer is
   added with the runtime counter ticked, and after its 2 minute run its Runtime sensor
   reads 2 minutes, in minutes, as a total that only goes up.
-- A manual walk-through in a real Home Assistant 2026.10.4 container, through the browser,
-  done before release; its screenshots are in `docs/screenshots/smoke-*.png`. It covered the
+- A manual walk-through in a real Home Assistant 2026.10.4 container, through the browser;
+  its screenshots are in `docs/screenshots/smoke-*.png`. It covered the
   integration page at 1.0.0 with its icon, adding a timer with the runtime counter, a
   countdown running, and a countdown kept across a restart of Home Assistant (the target
   was an `input_boolean`, which restores its state; a demo switch does not, and the timer

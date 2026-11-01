@@ -1,6 +1,7 @@
 """Schedule intervals as the user manages them on the integration page: added, edited
 and deleted one by one, each change reloading the timer without disturbing it."""
 
+from dataclasses import dataclass
 from typing import Any
 
 import probatio
@@ -845,6 +846,197 @@ async def test_editing_can_remove_the_settings(
     await edit_interval(hass, entry, subentry_id, settings={})
 
     assert dict(entry.subentries[subentry_id].data["settings"]) == {}
+
+
+@dataclass(frozen=True)
+class LostValue:
+    """A value an interval holds and the AC then stops taking: the mode it no longer
+    lists, a temperature above its narrower range."""
+
+    held: dict[str, Any]
+    """What the interval turns the AC on with."""
+    listed: dict[str, Any]
+    """What the AC's integration lists after an update."""
+    taken: dict[str, Any]
+    """A value of the same setting that the AC takes then."""
+    field: dict[str, Any]
+    """What the field of the setting offers meanwhile: the values the AC lists and the
+    one the interval holds, nothing beyond."""
+
+
+LOST_VALUES = [
+    pytest.param(
+        LostValue(
+            held={"hvac_mode": "cool"},
+            listed={"hvac_modes": ["off", "heat"]},
+            taken={"hvac_mode": "heat"},
+            field={"options": ["heat", "cool"]},
+        ),
+        id="a-mode-the-ac-dropped",
+    ),
+    pytest.param(
+        LostValue(
+            held={"temperature": 24},
+            listed={"max_temp": 22},
+            taken={"temperature": 22},
+            field={"min": 16, "max": 24},
+        ),
+        id="a-temperature-above-the-new-maximum",
+    ),
+]
+
+
+async def hold_a_value_the_ac_no_longer_lists(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    lost: LostValue,
+) -> tuple[ConfigEntry, str]:
+    """An interval that turns the AC on with the value, then an update of the AC's
+    integration that lists less: the entry and the id of the interval."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=lost.held
+    )
+    fake_climate.capability_attributes.update(lost.listed)
+    await fake_climate.set_state("off")
+    return entry, subentry_id
+
+
+@pytest.mark.parametrize("lost", LOST_VALUES)
+async def test_the_form_shows_a_value_the_ac_no_longer_lists(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    lost: LostValue,
+) -> None:
+    """The warning sends the user to the form of the interval. The setting there holds
+    what the interval holds, and its field takes that value, so that the user sees it
+    and changes it."""
+    entry, subentry_id = await hold_a_value_the_ac_no_longer_lists(
+        hass, fake_climate, setup_target, lost
+    )
+
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+
+    (name,) = lost.held
+    assert prefilled(form["data_schema"])["settings"] == lost.held
+    assert settings_are_open(form)
+    selector = settings_fields(form)[name]
+    assert {key: selector.config[key] for key in lost.field} == lost.field
+    selector(lost.held[name])
+
+
+@pytest.mark.parametrize("lost", LOST_VALUES)
+async def test_submitting_a_value_the_ac_no_longer_lists_is_refused_in_words(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    lost: LostValue,
+) -> None:
+    """The form as it is shown is submitted unchanged: the user is told in words that
+    the AC cannot take the setting, the form shows the value still, and nothing is
+    saved."""
+    entry, subentry_id = await hold_a_value_the_ac_no_longer_lists(
+        hass, fake_climate, setup_target, lost
+    )
+    before = entry.subentries[subentry_id].as_dict()
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+
+    result = await hass.config_entries.subentries.async_configure(
+        form["flow_id"], prefilled(form["data_schema"])
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "settings_not_supported"}
+    assert prefilled(result["data_schema"])["settings"] == lost.held
+    assert settings_are_open(result)
+    assert entry.subentries[subentry_id].as_dict() == before
+
+
+@pytest.mark.parametrize("lost", LOST_VALUES)
+async def test_a_value_the_ac_takes_replaces_one_it_no_longer_lists(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    lost: LostValue,
+) -> None:
+    """After the refusal the user picks a value the AC takes, and the interval is
+    saved with it."""
+    entry, subentry_id = await hold_a_value_the_ac_no_longer_lists(
+        hass, fake_climate, setup_target, lost
+    )
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+    refused = await hass.config_entries.subentries.async_configure(
+        form["flow_id"], prefilled(form["data_schema"])
+    )
+    assert refused["errors"] == {"base": "settings_not_supported"}
+
+    result = await hass.config_entries.subentries.async_configure(
+        form["flow_id"], {**prefilled(refused["data_schema"]), "settings": lost.taken}
+    )
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.subentries[subentry_id].data["settings"]) == lost.taken
+
+
+@pytest.mark.parametrize("lost", LOST_VALUES)
+async def test_clearing_a_value_the_ac_no_longer_lists_drops_the_setting(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    lost: LostValue,
+) -> None:
+    """The setting is shown, so emptying its field is the user's choice to drop it,
+    and the interval turns the AC on as it is."""
+    entry, subentry_id = await hold_a_value_the_ac_no_longer_lists(
+        hass, fake_climate, setup_target, lost
+    )
+
+    result = await edit_interval(hass, entry, subentry_id, settings={})
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
+    assert dict(entry.subentries[subentry_id].data["settings"]) == {}
+
+
+@pytest.mark.parametrize(
+    ("held", "field"),
+    [
+        pytest.param({"hvac_mode": 5}, {"options": ["heat"]}, id="a-number-for-a-mode"),
+        pytest.param(
+            {"temperature": "warm"}, {"min": 16, "max": 22}, id="text-for-a-number"
+        ),
+    ],
+)
+async def test_a_value_of_the_wrong_kind_opens_the_form_without_a_wider_field(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    held: dict[str, Any],
+    field: dict[str, Any],
+) -> None:
+    """A hand edit of the stored interval leaves a number where a mode belongs, or
+    text where a temperature does. The form still opens, with the field as the AC
+    lists it: a field that takes what is no value of its kind cannot be made."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+    hass.config_entries.async_update_subentry(
+        entry,
+        entry.subentries[subentry_id],
+        data={**entry.subentries[subentry_id].data, "settings": held},
+    )
+    fake_climate.capability_attributes.update(
+        {"hvac_modes": ["off", "heat"], "max_temp": 22}
+    )
+    await fake_climate.set_state("off")
+
+    form = await open_form(hass, entry, "reconfigure", subentry_id)
+
+    (name,) = held
+    selector = settings_fields(form)[name]
+    assert {key: selector.config[key] for key in field} == field
 
 
 async def test_editing_with_invalid_input_changes_nothing(

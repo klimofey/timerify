@@ -517,21 +517,34 @@ _SETTING_TYPES: Final = probatio.Schema(SETTINGS_SCHEMA)
 
 
 def _setting_selector(
-    choice: SettingChoice,
+    choice: SettingChoice, held: Any = None
 ) -> selector.SelectSelector | selector.NumberSelector:
     """The field for one setting: a list of the values the entity lists, or a number
-    in the range it accepts."""
+    in the range it accepts.
+
+    `held` is the value the form is filled in with, if there is one. The entity may no
+    longer list it, and the field takes it all the same: the form then shows what the
+    interval holds, and the user changes or empties it. A selector that refused it
+    would answer in Home Assistant's own words, or the frontend would drop it without
+    a word; `validate_settings` refuses it with a translated error instead.
+    """
     if choice.low is not None and choice.high is not None:
+        low, high = choice.low, choice.high
+        if isinstance(held, int | float) and not isinstance(held, bool):
+            low, high = min(low, held), max(high, held)
         return selector.NumberSelector(
             selector.NumberSelectorConfig(
-                min=choice.low,
-                max=choice.high,
+                min=low,
+                max=high,
                 step=0.5 if choice.name == "temperature" else 1,
                 mode=selector.NumberSelectorMode.BOX,
             )
         )
+    options = list(choice.options)
+    if isinstance(held, str) and held not in options:
+        options.append(held)
     config = selector.SelectSelectorConfig(
-        options=list(choice.options), mode=selector.SelectSelectorMode.DROPDOWN
+        options=options, mode=selector.SelectSelectorMode.DROPDOWN
     )
     if choice.name == "hvac_mode":
         config["translation_key"] = "hvac_mode"
@@ -579,7 +592,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         the house now, and keeps any other title, the user's own. An interval that has
         no `CONF_GENERATED_TITLE` counts as titled by Timerify when its title equals the
         one its data makes in the language of the house now. An edit keeps the settings
-        the form does not offer, as they are (`_interval_from`).
+        the form does not offer, as they are (`_interval_from`), and shows one it offers
+        with the value it holds, though the target no longer takes that value; the
+        input is then refused in words, with the setting still shown.
         """
         entry = self._get_entry()
         subentry = (
@@ -639,6 +654,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         the target no longer offers is not shown, so it does not open the section. It
         has no default: a default on a section makes the frontend skip the settings
         inside it, and an edit would clear them.
+
+        A field also takes the value that `shown_settings` holds for it when the target
+        does not list that value now (see `_setting_selector`).
         """
         has_sensor = CONF_WORKDAY_SENSOR in entry.options
         fields: dict[Any, Any] = {
@@ -669,7 +687,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             fields[probatio.Optional(CONF_SETTINGS)] = section(
                 probatio.Schema(
                     {
-                        probatio.Optional(choice.name): _setting_selector(choice)
+                        probatio.Optional(choice.name): _setting_selector(
+                            choice, shown_settings.get(choice.name)
+                        )
                         for choice in choices
                     }
                 ),

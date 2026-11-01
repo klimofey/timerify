@@ -43,10 +43,12 @@ not repeated beside its successor.
 - **Climate without `TURN_ON` stays unsupported**, although `set_hvac_mode` (which needs
   no feature) could turn it on: a plain run without a mode would have nothing to send.
   Such thermostats wait for a later "turn on with a default mode" option.
-- **A target missing at setup fails the entry** with `ConfigEntryError`
-  (`target_not_found`), so Home Assistant shows the entry as failed and retries on reload.
-  A target deleted later raises a repair: see "A timer whose target was deleted stays loaded
-  and switches nothing, with a repair that deletes it" under Release 1.1.0.
+- **A target whose registry id does not resolve at setup fails the entry** with
+  `ConfigEntryError` (`target_not_found`), so Home Assistant shows the entry as failed and
+  retries on reload. Changed in 1.1.0: a target entity that is gone at start-up or later
+  raises a repair instead, and the timer stays loaded: see "A timer whose target was
+  deleted stays loaded and switches nothing, with a repair that deletes it" under Release
+  1.1.0.
 
 ### The timer
 
@@ -58,8 +60,9 @@ not repeated beside its successor.
   switch out of range, a cloud integration that only acknowledges) is sent it again. This
   is how "pending commands are firm promises" holds. Cost if wrong: a device that confirms
   its state only after the call returns may get one duplicate, idempotent command.
-  Reports that merely repeat the target's state send an unsent wish at most
-  `automatic_resends` times, a field of the domain row: `MAX_AUTOMATIC_RESENDS` (three)
+  Reports send an unsent wish again at most `automatic_resends` times (changed in 1.1.0:
+  reports of any kind count, after a free first delivery; see "Engine and reliability"
+  under Release 1.1.0), a field of the domain row: `MAX_AUTOMATIC_RESENDS` (three)
   for every row except `remote` and `media_player`, which get none. Then one warning is
   logged and nothing more is sent (per piece of work since 1.1.0, see Release 1.1.0).
   Without the bound, a device that refuses a command and answers it with a report of its
@@ -131,9 +134,9 @@ not repeated beside its successor.
   window that was over, and one that was handed over to a later window wanted nothing,
   so they log nothing. The lines are written by every fold that goes through
   `_fold_due`: the alarm, the refresh of the windows and the switching off of an
-  interval. The fold of start-up and of a report of the target writes none (issue
-  #13). A command dropped because the run it asked for is over is an
-  effect of the core (`CommandDropped`) that the controller logs at info level; the core
+  interval. Changed in 1.1.0 (#13): the folds of start-up and of a report of the target
+  write them too, through `_execute_fold`; see "Engine and reliability". A command
+  dropped because the run it asked for is over is an effect of the core (`CommandDropped`) that the controller logs at info level; the core
   stays pure and emits no other signal. Cost if wrong: none.
 
 ### Restarts and storage
@@ -1861,7 +1864,8 @@ in `docs/followups.md`.
   Why: an end that has passed is over for every other judgement (`wanted_running`,
   `run_open`, a pending command that falls due).
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
-  the next fold instead of being stopped at once. In the race above, the target runs longer, by the wait for the lock, than with the command dated when it was given, and the
+  the next fold instead of being stopped at once. In the race above, the target runs
+  longer, by the wait for the lock, than with the command dated when it was given, and the
   card's progress starts again.
 - **Every fold says what came due while the target is away, and a fold says it only about
   a target that has reported "unavailable".** `_execute_fold(before, now, effects)` logs it

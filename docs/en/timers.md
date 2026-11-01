@@ -80,7 +80,7 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 ## When the device is deleted
 
-- If the entity of a timer is deleted, for example with its device, Home Assistant shows a repair: "The device of timer Boiler was deleted". You see it at the top of **Settings** and under **Settings > System > Repairs**.
+- Say you delete the device or entity that a timer switches. Home Assistant then shows a repair: "The device of timer Boiler was deleted". You see it at the top of **Settings** and under **Settings > System > Repairs**.
 - Until you act, the timer switches nothing. It keeps its countdown and its pending commands. What comes due meanwhile is applied when the device is back, as it is for a [device that does not answer](#when-the-device-does-not-answer).
 - Add the device again with the same entity ID, and the timer works again by itself. The repair goes away.
 - To delete the timer instead, open **Repairs**, choose the repair, then choose **Submit**. The timer goes with its entities, schedule intervals and pending commands. Deleting the timer on its integration page does the same, and takes the repair away.
@@ -89,7 +89,7 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 - A countdown survives a Home Assistant restart. Timerify stores it on every change. At start-up it checks the end time against the clock.
 - A countdown that ended while Home Assistant was down turns the device off.
-- A change you make while Home Assistant is still starting is kept and saved. This covers **Run for**, **Add time**, **Run** and the switch of a schedule interval. Timerify switches the device once Home Assistant has started.
+- A change you make while Home Assistant is still starting is kept and saved. This covers **Run for**, **Add time**, **Run** and pending commands. It also covers the switch of a schedule interval and of the whole schedule. Timerify switches the device once Home Assistant has started.
 - Your change counts from the moment you make it. Timerify first applies what came due before it while Home Assistant was down. That can be a countdown that ended, a pending command or a schedule window. Then your change wins, as it does with Home Assistant running.
 - A pending command still runs at its own time. A command that came due while Home Assistant was down or still starting is handled at start-up.
 - Timerify keeps a timer's state in a file. If that file is not valid JSON, Home Assistant renames it and shows its own repair about it. The timer then starts with no countdown and no pending commands, and every schedule interval is on.

@@ -6,19 +6,20 @@ entities, the way Powercalc attaches virtual power sensors to existing devices. 
 pending commands, a weekly schedule and a remaining-time sensor — plus Assist voice
 intents ("turn on the boiler for 10 minutes", "how long is left on the boiler").
 
-Status: phases 1 to 5 (the core timer: countdown, `number` and `sensor` entities, config and
-options flow, restarts, services; settings for turning on, pending commands and the "Next command"
-sensor; weekly schedules: intervals as config subentries by weekday or by a Workday sensor, an
-enable `switch` per interval, windows folded into the timer; voice: Assist sentences for the
-built-in agent in English and Russian, written by a "Voice settings" entry or copied by hand, and
-`timerify__` tools for LLM agents; the dashboard card: `custom:timerify-card` in a pill and a round
-layout with a pop-up, a long press on the round one and a visual editor, written in TypeScript in
-`card/`, built into the committed `custom_components/timerify/frontend/timerify-card.js` and loaded
-on every dashboard by the integration, with the `timerify/timer` websocket command and the
-`started_at` attribute of "Ends at" behind it) are built; the later phases follow section 7 of the
-spec. Specs live in `docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes
-in `docs/research/`, decisions made where the spec was silent in `RULINGS.md`, and open items in
-`docs/followups.md`.
+Status: phases 1 to 6, all of section 7 of the spec, are built (the core timer: countdown, `number`
+and `sensor` entities, config and options flow, restarts, services; settings for turning on, pending
+commands and the "Next command" sensor; weekly schedules: intervals as config subentries by weekday
+or by a Workday sensor, an enable `switch` per interval, windows folded into the timer; voice: Assist
+sentences for the built-in agent in English and Russian, written by a "Voice settings" entry or copied
+by hand, and `timerify__` tools for LLM agents; the dashboard card: `custom:timerify-card` in a pill
+and a round layout with a pop-up, a long press on the round one and a visual editor, written in
+TypeScript in `card/`, built into the committed `custom_components/timerify/frontend/timerify-card.js`
+and loaded on every dashboard by the integration, with the `timerify/timer` websocket command and the
+`started_at` attribute of "Ends at" behind it; the runtime counter: an optional "Runtime" `sensor`,
+switched on by a checkbox on the first form of a timer and of its settings, that adds up in minutes how
+long the target was on, kept in a file of its own and written at most once a minute). Specs live in
+`docs/superpowers/specs/`, plans in `docs/superpowers/plans/`, research notes in `docs/research/`,
+decisions made where the spec was silent in `RULINGS.md`, and open items in `docs/followups.md`.
 
 ## Repository rules (non-negotiable)
 

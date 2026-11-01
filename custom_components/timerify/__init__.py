@@ -30,6 +30,7 @@ from .issues import (
     STORED_TIMER_INVALID,
     TARGET_DELETED,
     async_clear,
+    async_clear_settings_warnings,
     async_raise_stored_timer_invalid,
 )
 from .runtime import RuntimeStore
@@ -150,12 +151,14 @@ async def async_remove_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> None:
     """Delete the stored timer and the stored runtime total of a removed entry, take its
-    repairs away, or delete the sentence files of the voice settings."""
+    repairs and the warnings of its intervals away, or delete the sentence files of the
+    voice settings."""
     if is_voice_entry(entry):
         await async_remove_voice_entry(hass, entry)
         return
     async_clear(hass, TARGET_DELETED, entry.entry_id)
     async_clear(hass, STORED_TIMER_INVALID, entry.entry_id)
+    async_clear_settings_warnings(hass, entry.entry_id)
     await TimerStore(hass, entry.entry_id).async_remove()
     await RuntimeStore(hass, entry.entry_id).async_remove()
 

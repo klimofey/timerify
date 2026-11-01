@@ -694,12 +694,13 @@ async def test_settings_the_entity_supports_are_accepted(
     assert validate_settings(hass, entity_id, values) == values
 
 
-async def test_settings_not_taken_are_named_one_by_one_in_their_order(
+async def test_settings_not_taken_are_named_one_by_one_in_the_order_of_the_form(
     hass: HomeAssistant,
 ) -> None:
     """An AC that lost cooling and its fan modes, and tops out at 22 degrees. Each
     setting is judged alone, so the ones it still takes are not named with the others;
-    a value out of its range is named too."""
+    a value out of its range is named too. The names come in the order of the form,
+    whatever order the settings were stored in."""
     hass.states.async_set(
         AC_ID,
         "off",
@@ -710,15 +711,15 @@ async def test_settings_not_taken_are_named_one_by_one_in_their_order(
             "max_temp": 22,
         },
     )
-    cool_and_low: dict[str, Any] = {"hvac_mode": "cool", "fan_mode": "low"}
+    cool_and_low: dict[str, Any] = {"fan_mode": "low", "hvac_mode": "cool"}
 
     assert settings_not_taken(hass, AC_ID, {**cool_and_low, "temperature": 20}) == (
         "hvac_mode",
         "fan_mode",
     )
     assert settings_not_taken(hass, AC_ID, {"temperature": 24, **cool_and_low}) == (
-        "temperature",
         "hvac_mode",
+        "temperature",
         "fan_mode",
     )
     assert settings_not_taken(hass, AC_ID, {"hvac_mode": "heat"}) == ()

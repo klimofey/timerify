@@ -2176,19 +2176,35 @@ in `docs/followups.md`.
   The warning is judged as the run-time filter judges (`settings_not_taken`, through
   `validate_settings`, which `_settings_the_target_takes` goes by too), so it stands
   exactly while the window would leave the setting out. That includes a value that is no
-  longer accepted, which the form shows and the user can change.
+  longer accepted, which the form shows and the user can change. The names come in the
+  order of the form (the row of the domain), whatever order they are stored in.
   There is one warning per interval, naming all its settings by the labels of the form in
-  the language of the house. It is a Repairs issue with severity warning, not fixable and
-  with no data, so it has no fix flow (spec). It is raised again only when the names
-  change. It lives with the loaded timer: a reload, which every change of an interval
-  makes, clears it and the start-up raises it again. There is none while the target is
-  deleted, whose repair speaks for it. It is judged after each report of the target and
-  after the start-up fold, so that reading the texts never delays what the timer owes the
-  target. An interval deleted but not yet reloaded gets no warning. Deleting the interval
-  drops a setting the form no longer shows.
-  A target that is unavailable and gives no capabilities, neither on its state nor in the
-  registry, takes no setting, as `validate_settings` judges it, so the warning stands
-  until it reports.
+  the language of the house. Its title carries the interval, so that two warnings of a
+  timer differ in the Repairs list. It is a Repairs issue with severity warning, not
+  fixable and with no data, so it has no fix flow (spec). It is raised again only when
+  the names change, and it is judged after each report of the target and after the
+  start-up fold, so that reading the texts never delays what the timer owes the target.
+  An interval deleted but not yet reloaded gets no warning. Deleting the interval drops a
+  setting the form no longer shows.
+  While the target is deleted there is none, whose repair speaks for it. While it is
+  unavailable or unknown, the warnings stay as they are: none is raised and none is
+  cleared. An integration may drop its modes and features with the connection, which
+  would make every setting "not taken" for the length of an outage, and nothing is sent
+  then. They are judged again when the target reports a real state.
+  The warning outlives the unload, unlike the repair of a deleted target. That repair is
+  cleared on unload and raised again at start-up: it asks the user to delete the timer,
+  and an Ignore of it has nothing to keep. The user may knowingly accept this warning
+  and choose Ignore, and every change of an interval reloads the timer. Home Assistant
+  keeps `dismissed_version` when an issue is created again under its id
+  (`IssueRegistry.async_get_or_create` replaces the other fields), and forgets it when
+  the issue is deleted, so deleting on unload would show the warning again after every
+  edit. A warning is deleted when its check finds nothing missing, when the load finds
+  its interval gone (`_reconcile_settings_warnings`, by the id prefix in the issue
+  registry), when the entry is removed (`async_remove_entry`), and when the entry is
+  disabled, since it is not loaded again. The load remembers the warnings of the earlier
+  one with no names, so that its first judgement of a real state raises them again or
+  takes them away. A warning that went away and comes back is new, not ignored.
+  A timer that does not load (a setup error) keeps its warnings until it does.
   Why: #16. An edit dropped the settings the form did not offer, silently, and the window
   left them out with only a line in the log.
   Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
@@ -2197,7 +2213,7 @@ in `docs/followups.md`.
   `test_editing_changes_the_settings_shown_beside_a_kept_one`,
   `test_editing_keeps_every_setting_while_the_ac_is_gone`,
   `test_an_interval_with_only_settings_not_offered_shows_them_closed`,
-  `test_settings_not_taken_are_named_one_by_one_in_their_order`,
+  `test_settings_not_taken_are_named_one_by_one_in_the_order_of_the_form`,
   `test_an_interval_setting_the_ac_no_longer_takes_raises_a_warning`,
   `test_the_warning_names_every_setting_the_ac_does_not_take`,
   `test_the_warning_follows_the_settings_the_ac_does_not_take`,
@@ -2212,4 +2228,14 @@ in `docs/followups.md`.
   `test_a_setting_lost_while_down_raises_the_warning_at_start_up`,
   `test_an_unavailable_ac_raises_no_settings_warning`,
   `test_a_deleted_ac_raises_no_settings_warning`,
-  `test_the_warnings_of_a_timer_go_with_it`.
+  `test_the_warnings_of_a_timer_go_with_it`,
+  `test_an_ac_that_goes_offline_without_capabilities_raises_no_warning`,
+  `test_the_warning_stands_while_the_ac_is_offline_until_it_reports`,
+  `test_the_titles_of_two_warnings_of_a_timer_tell_the_intervals_apart`,
+  `test_renaming_an_interval_renames_its_warning`,
+  `test_the_warning_names_the_settings_in_the_order_of_the_form`,
+  `test_an_ignored_warning_stays_ignored_after_a_reload`,
+  `test_a_warning_that_went_away_comes_back_unignored`,
+  `test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up`,
+  `test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up`,
+  `test_disabling_the_timer_takes_its_warnings_away`.

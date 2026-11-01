@@ -85,8 +85,10 @@ from .issues import (
     TARGET_DELETED,
     async_clear,
     async_clear_settings_not_taken,
+    async_clear_settings_warnings,
     async_raise_settings_not_taken,
     async_raise_target_deleted,
+    async_warned_intervals,
 )
 from .schedule import Interval, title_key, weekday_window, workday_window
 from .store import TimerStore
@@ -268,7 +270,9 @@ class TargetController:
         call."""
         self._settings_warned = dict[str, tuple[str, ...]]()
         """The names of the settings that the warning of each interval, by the id of its
-        subentry, was raised with (`_async_check_interval_settings`)."""
+        subentry, was raised with (`_async_check_interval_settings`). A warning that an
+        earlier load raised is here with no names, until this load judges the interval
+        (`_reconcile_settings_warnings`)."""
         self._lock = asyncio.Lock()
         self._stopped = False
         self._target_deleted = False
@@ -311,15 +315,16 @@ class TargetController:
     async def async_start(self) -> None:
         """Follow the target; once Home Assistant is running, take stock of it.
 
-        The repair of a deleted target and the warnings of the intervals live with the
-        loaded timer: they go when the timer is unloaded, and start-up raises them again
-        if they still stand.
+        The repair of a deleted target lives with the loaded timer: it goes when the
+        timer is unloaded, and start-up raises it again if the target is still gone. The
+        warnings of the intervals outlive the unload (`_release_settings_warnings`).
         """
         self._entry.async_on_unload(self._stop)
         self._entry.async_on_unload(
             lambda: async_clear(self._hass, TARGET_DELETED, self._entry.entry_id)
         )
-        self._entry.async_on_unload(self._clear_settings_warnings)
+        self._reconcile_settings_warnings()
+        self._entry.async_on_unload(self._release_settings_warnings)
         self._entry.async_on_unload(
             async_track_state_change_event(
                 self._hass, self.target_entity_id, self._handle_state_change
@@ -956,14 +961,20 @@ class TargetController:
                 "The entity %s of the timer %s is back", self.target_entity_id, title
             )
 
-    def _intervals_not_taken(self) -> dict[str, tuple[str, ...]]:
+    def _intervals_not_taken(self) -> dict[str, tuple[str, ...]] | None:
         """The settings of each interval that the target does not take now, by the id of
         the interval; an interval whose settings it takes is left out. The judgement is
         the one the settings are filtered by when they are sent
-        (`_settings_the_target_takes`). There are none while the target is deleted,
-        which its repair speaks for."""
+        (`_settings_the_target_takes`).
+
+        There are none while the target is deleted, which its repair speaks for. None
+        while it is unavailable or unknown: it may say nothing of what it takes then,
+        and sends wait for it, so the warnings stay as they are until it reports.
+        """
         if not self._target_exists():
             return {}
+        if actual_state(self._hass.states.get(self.target_entity_id)) == "unavailable":
+            return None
         not_taken = {
             interval.id: settings_not_taken(
                 self._hass, self.target_entity_id, interval.settings
@@ -981,7 +992,8 @@ class TargetController:
         nothing. The names are the labels of the interval form, in the language of the
         house.
         """
-        if self._intervals_not_taken() == self._settings_warned:
+        not_taken = self._intervals_not_taken()
+        if not_taken is None or not_taken == self._settings_warned:
             return
         texts = await async_get_translations(
             self._hass, self._hass.config.language, "config_subentries", [DOMAIN]
@@ -990,7 +1002,8 @@ class TargetController:
             return
         # The target may have changed while the texts were read, so it is judged again:
         # nothing is awaited from here to the last warning.
-        not_taken = self._intervals_not_taken()
+        if (not_taken := self._intervals_not_taken()) is None:
+            return
         for subentry_id in self._settings_warned.keys() - not_taken.keys():
             async_clear_settings_not_taken(
                 self._hass, self._entry.entry_id, subentry_id
@@ -1007,14 +1020,31 @@ class TargetController:
                 )
         self._settings_warned = not_taken
 
+    def _reconcile_settings_warnings(self) -> None:
+        """Take the warnings of an earlier load into this one.
+
+        A warning outlives the unload, so that an Ignore the user chose survives the
+        reload that every change of an interval makes. Home Assistant keeps the Ignore
+        of an issue that is raised again, and forgets it when the issue is deleted. The
+        warning of an interval that is gone is taken away now. The others are
+        remembered with no names, so that the first judgement of this load raises them
+        again, or takes them away if the interval no longer needs one.
+        """
+        for subentry_id in async_warned_intervals(self._hass, self._entry.entry_id):
+            if subentry_id in self._intervals:
+                self._settings_warned[subentry_id] = ()
+            else:
+                async_clear_settings_not_taken(
+                    self._hass, self._entry.entry_id, subentry_id
+                )
+
     @callback
-    def _clear_settings_warnings(self) -> None:
-        """Take every warning of an interval away: the timer is unloaded."""
-        for subentry_id in self._settings_warned:
-            async_clear_settings_not_taken(
-                self._hass, self._entry.entry_id, subentry_id
-            )
-        self._settings_warned.clear()
+    def _release_settings_warnings(self) -> None:
+        """Leave the warnings of the intervals in place as the timer is unloaded, for
+        the load that follows a reload. A disabled timer is not loaded again, so its
+        warnings go."""
+        if self._entry.disabled_by is not None:
+            async_clear_settings_warnings(self._hass, self._entry.entry_id)
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:

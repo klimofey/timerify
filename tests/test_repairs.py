@@ -18,14 +18,23 @@ from typing import Any
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.repairs import RepairsFlowManager, repairs_flow_manager
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryDisabler,
+    ConfigEntryState,
+    ConfigSubentry,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
+from pytest_homeassistant_custom_component.typing import (
+    ClientSessionGenerator,
+    MockHAClientWebSocket,
+    WebSocketGenerator,
+)
 
 from custom_components.timerify.const import DOMAIN
 from custom_components.timerify.repairs import async_create_fix_flow
@@ -55,6 +64,7 @@ from .helpers import (
     payload,
     reload_held_back,
     restart_after,
+    retitle_interval,
     runtime_saved,
     saved,
     set_number,
@@ -1190,6 +1200,264 @@ async def test_the_warnings_of_a_timer_go_with_it(
     assert len(open_issues(hass)) == 2
 
     await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert open_issues(hass) == set()
+
+
+async def listed_warnings(client: MockHAClientWebSocket) -> dict[str, bool]:
+    """What the Repairs page lists of the warnings of intervals, by issue id: whether
+    the user ignored it."""
+    await client.send_json_auto_id({"type": "repairs/list_issues"})
+    listed = (await client.receive_json())["result"]["issues"]
+    return {
+        issue["issue_id"]: issue["ignored"]
+        for issue in listed
+        if issue["domain"] == DOMAIN
+        and issue["translation_key"] == "settings_not_taken"
+    }
+
+
+async def ignore_issue(client: MockHAClientWebSocket, issue_id: str) -> None:
+    """Choose "Ignore" on an issue of the Repairs page."""
+    await client.send_json_auto_id(
+        {
+            "type": "repairs/ignore_issue",
+            "domain": DOMAIN,
+            "issue_id": issue_id,
+            "ignore": True,
+        }
+    )
+    assert (await client.receive_json())["success"]
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown"])
+async def test_an_ac_that_goes_offline_without_capabilities_raises_no_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget, state: str
+) -> None:
+    """The AC drops its modes and features with its connection. They are unknown, not
+    lost: nothing is sent to it meanwhile, so the interval gets no warning."""
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+
+    fake_climate.capability_attributes = {}
+    await fake_climate.set_state(state)
+
+    assert open_issues(hass) == set()
+
+
+async def test_the_warning_stands_while_the_ac_is_offline_until_it_reports(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A warning is neither cleared nor changed by an AC that is away without its
+    capabilities. It is judged again when the AC reports, and goes if the AC takes the
+    setting."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    warned = settings_not_taken_issue(hass, entry, subentry_id)
+    assert warned is not None
+
+    fake_climate.capability_attributes = {}
+    await fake_climate.set_state("unavailable")
+    assert settings_not_taken_issue(hass, entry, subentry_id) == warned
+
+    fake_climate.capability_attributes = dict(AC_ATTRS)
+    await fake_climate.set_state("off")
+    assert settings_not_taken_issue(hass, entry, subentry_id) is None
+
+
+async def test_the_titles_of_two_warnings_of_a_timer_tell_the_intervals_apart(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The Repairs page lists the titles, so each names its interval."""
+    entry = await setup_target(target=AC_ID)
+    morning = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    evening = await add_interval(
+        hass, entry, start="18:00", end="19:00", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    texts = await async_get_translations(hass, "en", "issues", [DOMAIN])
+
+    titles = []
+    for subentry_id in (morning, evening):
+        issue = settings_not_taken_issue(hass, entry, subentry_id)
+        assert issue is not None
+        assert issue.translation_placeholders is not None
+        titles.append(
+            texts[f"component.{DOMAIN}.issues.settings_not_taken.title"].format(
+                **issue.translation_placeholders
+            )
+        )
+
+    assert titles == [
+        "The schedule interval 06:30–07:15, Mon–Sun of the timer Boiler"
+        " has settings the device does not take",
+        "The schedule interval 18:00–19:00, Mon–Sun of the timer Boiler"
+        " has settings the device does not take",
+    ]
+
+
+async def test_renaming_an_interval_renames_its_warning(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The user renames the interval on the integration page: the timer reloads, and
+    the warning names the interval as it is called now."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+
+    await retitle_interval(hass, entry, subentry_id, "Morning cooling")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["interval"] == "Morning cooling"
+
+
+async def test_the_warning_names_the_settings_in_the_order_of_the_form(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The AC stops offering the HVAC modes, and an edit stores the setting the form no
+    longer shows after the ones it shows. The AC then stops taking the fan mode too.
+    The warning lists them as the form does, the HVAC mode first, not as they are
+    stored."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24_LOW
+    )
+    del fake_climate.capability_attributes["hvac_modes"]
+    await fake_climate.set_state("off")
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+    assert list(entry.subentries[subentry_id].data["settings"]) == [
+        "temperature",
+        "fan_mode",
+        "hvac_mode",
+    ]
+
+    fake_climate.capability_attributes["fan_modes"] = ["auto", "high"]
+    await fake_climate.set_state("off")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "HVAC mode, Fan mode"
+
+
+async def test_an_ignored_warning_stays_ignored_after_a_reload(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user keeps the lost setting on purpose and chooses Ignore. Any change of an
+    interval, an options change or a reload reloads the timer, and the warning stays
+    ignored through it."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    await ignore_issue(client, key)
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert await listed_warnings(client) == {key: True}
+
+
+async def test_a_warning_that_went_away_comes_back_unignored(
+    hass: HomeAssistant,
+    hass_ws_client: WebSocketGenerator,
+    repairs: None,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """An ignored warning is for the setting being lost. The AC takes it back, and when
+    it loses it again the user is told again."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    await stop_offering_cooling(fake_climate)
+    client = await hass_ws_client(hass)
+    key = f"settings_not_taken_{entry.entry_id}_{subentry_id}"
+    await ignore_issue(client, key)
+
+    fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
+    await fake_climate.set_state("off")
+    assert await listed_warnings(client) == {}
+    await stop_offering_cooling(fake_climate)
+
+    assert await listed_warnings(client) == {key: False}
+
+
+async def test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The warning outlives the unload. The interval is deleted while the timer is not
+    loaded, so no reload follows: the next load takes its warning away and keeps the
+    other."""
+    entry = await setup_target(target=AC_ID)
+    gone = await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    left = await add_interval(hass, entry, start="18:00", end="19:00", settings=COOL24)
+    await stop_offering_cooling(fake_climate)
+    assert len(open_issues(hass)) == 2
+
+    def delete_the_interval() -> None:
+        hass.config_entries.async_remove_subentry(entry, gone)
+
+    await restart_after(hass, freezer, entry, minutes=5, while_down=delete_the_interval)
+
+    assert open_issues(hass) == {f"settings_not_taken_{entry.entry_id}_{left}"}
+
+
+async def test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The AC's integration is updated while Home Assistant is down and offers cooling
+    again: the warning that outlived the unload is taken away at start-up."""
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    await stop_offering_cooling(fake_climate)
+    assert len(open_issues(hass)) == 1
+
+    def update_the_ac() -> None:
+        fake_climate.capability_attributes["hvac_modes"] = AC_ATTRS["hvac_modes"]
+        fake_climate.write("off")
+
+    await restart_after(hass, freezer, entry, minutes=5, while_down=update_the_ac)
+
+    assert open_issues(hass) == set()
+
+
+async def test_disabling_the_timer_takes_its_warnings_away(
+    hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A disabled timer is not loaded again, so its warnings do not outlive it."""
+    entry = await setup_target(target=AC_ID)
+    await add_interval(hass, entry, start="06:30", end="07:15", settings=COOL24)
+    await stop_offering_cooling(fake_climate)
+    assert len(open_issues(hass)) == 1
+
+    await hass.config_entries.async_set_disabled_by(
+        entry.entry_id, ConfigEntryDisabler.USER
+    )
     await hass.async_block_till_done()
 
     assert open_issues(hass) == set()

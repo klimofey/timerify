@@ -1881,3 +1881,28 @@ in `docs/followups.md`.
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
   the next fold instead of being stopped at once. In the race above, the target runs longer, by the wait for the lock, than with the command dated when it was given, and the
   card's progress starts again.
+- **Every fold says what came due while the target is away, and a fold says it only about
+  a target that has reported "unavailable".** `_execute_fold(before, now, effects)` logs it
+  (`_log_due_while_unavailable`) and then carries out the effects. All folds pass through
+  it: a tick (`_fold_due`: the alarm, the refresh of the windows, the switching off of an
+  interval, and the catch-up of a change made while starting), the first observation of the
+  target at start-up (`_handle_started`) and each report of it (`_handle_state_change`),
+  with the `now` the fold observed at. Before, only the tick logged, so a countdown or a
+  command that came due while Home Assistant was down, and a command that fell due as the
+  target dropped off, went unsaid. The three texts are unchanged.
+  A fold before start-up says nothing. The catch-up of a change made while starting is
+  such a fold, and so is an alarm that fires before start-up: the target has not been
+  seen (`last_actual is None`), so it is not known to be unavailable, and "while it is
+  unavailable" would be a guess. Start-up logs what it folds itself, once: whatever fell
+  due since the last change made while starting, judged by the state it observes. What an
+  earlier fold took is not logged again, since it is no longer there to be found due.
+  Why: #13, and a log that stays true. Nothing else shows that a switch waits for the
+  target to come back (R10). A fold before start-up cannot tell the user that the target is
+  away. What it folds is also overridden by the change that comes after it, so "the timer
+  ended; it is turned off when it is back" could be false by the time start-up knows the
+  target is unavailable: "Run for 30" came after the end, and the target is turned on.
+  Cost if wrong: a countdown or a command that falls due after the first change made while
+  starting, but before start-up, is folded by its alarm in the core only. If the target
+  then turns out to be unavailable, the log does not mention it, though the target is
+  switched all the same when it is back. Home Assistant starts within minutes, and a
+  change made meanwhile is rare.

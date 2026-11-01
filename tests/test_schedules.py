@@ -77,6 +77,10 @@ WINDOW_STARTED_WHILE_UNAVAILABLE = (
     "A schedule window of switch.boiler started while it is unavailable;"
     " it is turned on when it is back, if the window is still open then"
 )
+CAME_DUE_WHILE_UNAVAILABLE = (
+    "A pending command for switch.boiler came due while it is unavailable;"
+    " it is applied when it is back, if it is still relevant then"
+)
 
 
 # --- The boiler's window ------------------------------------------------------------
@@ -1036,6 +1040,64 @@ async def test_window_start_while_unavailable_is_logged(
 
     assert fake_target.calls == [TURN_ON]
     assert timerify_info(caplog) == [WINDOW_STARTED_WHILE_UNAVAILABLE]
+
+
+async def test_a_window_started_while_down_is_logged_at_start_up_if_the_target_is_away(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The window began while Home Assistant was down, and the boiler is away when it
+    starts again. The log says, as for a window that starts while the boiler is away,
+    that it is turned on when it is back."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=40,
+        while_down=lambda: fake_target.write("unavailable"),
+    )
+
+    assert timerify_info(caplog) == [WINDOW_STARTED_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
+
+    await fake_target.set_state("off")
+
+    assert fake_target.calls == [TURN_ON]
+    assert timerify_info(caplog) == [WINDOW_STARTED_WHILE_UNAVAILABLE]
+
+
+async def test_a_command_due_as_the_target_drops_off_is_logged_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The command falls due, and the alarm for it has not fired yet, when the boiler
+    reports that it is away. That report folds the command, so the log says so then,
+    and the alarm that follows finds nothing due and says nothing."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=10, minutes=30)
+    freezer.tick(timedelta(minutes=10))
+
+    await fake_target.set_state("unavailable")
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
 
 
 async def test_window_start_that_leaves_the_timer_alone_is_not_logged(

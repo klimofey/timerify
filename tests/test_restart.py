@@ -4,6 +4,7 @@ A restart is simulated the two ways it shows: the storage file an earlier run le
 is there before the entry is set up, or the entry is unloaded and set up again.
 """
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo
@@ -13,6 +14,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import CoreState, HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import freeze_settings
 from custom_components.timerify.core import Command
@@ -41,6 +43,7 @@ from .helpers import (
     open_sunday,
     payload,
     restart,
+    restart_after,
     saved,
     set_number,
     set_switch,
@@ -48,11 +51,20 @@ from .helpers import (
     start_set_number,
     state_of,
     storage_key,
+    timerify_info,
     window_json,
 )
 
 MONDAY = SUNDAY + timedelta(days=1)
 OFF_AT_MINUS_10: Final = command_json(at(-10), "off")
+TIMER_ENDED_WHILE_UNAVAILABLE: Final = (
+    "The timer of switch.boiler ended while it is unavailable;"
+    " it is turned off when it is back"
+)
+CAME_DUE_WHILE_UNAVAILABLE: Final = (
+    "A pending command for switch.boiler came due while it is unavailable;"
+    " it is applied when it is back, if it is still relevant then"
+)
 
 
 async def test_running_timer_survives_reload(
@@ -737,6 +749,134 @@ async def test_expiry_while_unavailable_turns_off_when_back(
     assert saved(hass_storage, entry) == payload()
 
 
+async def test_a_countdown_ended_while_down_is_logged_at_start_up_if_the_target_is_away(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The countdown ended while Home Assistant was down, and the target is away when
+    it starts again. The log says, as for a countdown that ends while the target is
+    away, that it is turned off when it is back."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    entry = await setup_target()
+    await set_number(hass, NUMBER, 10)
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=20,
+        while_down=lambda: fake_target.write("unavailable"),
+    )
+
+    assert timerify_info(caplog) == [TIMER_ENDED_WHILE_UNAVAILABLE]
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_target.set_state("on")
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert timerify_info(caplog) == [TIMER_ENDED_WHILE_UNAVAILABLE]
+
+
+async def test_a_command_due_while_down_is_logged_at_start_up_if_the_target_is_away(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A pending command came due while Home Assistant was down, and the target is away
+    when it starts again. The log says it is applied when the target is back."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    entry = await setup_target()
+    await add_command(hass, NUMBER, action="on", delay=10, minutes=30)
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=20,
+        while_down=lambda: fake_target.write("unavailable"),
+    )
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
+
+    await fake_target.set_state("off")
+
+    assert fake_target.calls == [TURN_ON]
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+
+
+async def test_a_change_while_starting_says_nothing_of_a_target_that_has_not_been_seen(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A countdown ended and a command came due while Home Assistant was down. "Run
+    for 30" is given while it is still starting, and folds both first. The target has
+    not been seen, so it is not known to be unavailable: the log does not say that
+    anything came due while it is. The target is not unavailable when it appears."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await set_up_while_starting(
+        hass,
+        setup_target,
+        payload(end=at(-10), started_at=at(-40), commands=[OFF_AT_MINUS_10]),
+    )
+
+    await set_number(hass, NUMBER, 30)
+
+    assert state_of(hass, NUMBER) == "30"
+    assert timerify_info(caplog) == []
+
+    await finish_start_up(hass, fake_target, "after_started")
+
+    assert timerify_info(caplog) == []
+    assert fake_target.calls == []
+
+
+async def test_start_up_logs_what_came_due_since_the_last_change_while_starting_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A countdown ended while Home Assistant was down, and a command is due ten
+    minutes into the start. A command given while it is starting folds the countdown
+    first, which says nothing, as the target has not been seen. Start-up finds the
+    target unavailable and folds the due command: the log mentions that command once,
+    and the countdown, which start-up did not fold, not at all."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await set_up_while_starting(
+        hass,
+        setup_target,
+        payload(
+            end=at(-10), started_at=at(-40), commands=[command_json(at(10), minutes=30)]
+        ),
+    )
+    await add_command(hass, NUMBER, action="on", delay=60, minutes=5)
+    assert timerify_info(caplog) == []
+    freezer.tick(timedelta(minutes=10))  # the alarm of the due command has not fired
+
+    await finish_start_up(hass, fake_target, "before_started", "unavailable")
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+
+    await fake_target.set_state("off")
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert fake_target.calls == [TURN_ON]
+
+
 async def test_timer_is_saved_before_a_slow_service_call_ends(
     hass: HomeAssistant,
     fake_target: FakeTarget,
@@ -809,17 +949,20 @@ async def set_up_while_starting(
 
 
 async def finish_start_up(
-    hass: HomeAssistant, fake_target: FakeTarget, target_appears: TargetAppears
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    target_appears: TargetAppears,
+    target_state: str = "on",
 ) -> None:
     """Let Home Assistant announce that it is running. The target's integration comes
-    up, with the target switched on, before or after that."""
+    up, with the target in `target_state`, before or after that."""
     if target_appears == "before_started":
-        await fake_target.set_state("on")
+        await fake_target.set_state(target_state)
     await hass.async_start()
     await hass.async_block_till_done()
     assert hass.state is CoreState.running
     if target_appears == "after_started":
-        await fake_target.set_state("on")
+        await fake_target.set_state(target_state)
 
 
 @pytest.mark.parametrize("target_appears", TARGET_APPEARS)

@@ -871,7 +871,7 @@ class TargetController:
             state = self._hass.states.get(self.target_entity_id)
             effects += self._core.observe(now, actual_state(state), by_us=False)
             self._started = True  # reports are answered from here
-            await self._execute_fold(before, effects)
+            await self._execute_fold(before, now, effects)
 
     def _follow_workday_sensor(self) -> None:
         """Work the windows out again whenever the Workday sensor changes or reports.
@@ -895,12 +895,13 @@ class TargetController:
             if self._stopped or not self._started:
                 return  # `_handle_started` reads the state itself
             before = self.snapshot
+            now = dt_util.utcnow()
             effects = self._core.observe(
-                dt_util.utcnow(),
+                now,
                 actual_state(event.data["new_state"]),
                 by_us=event.context.id in self._own_contexts,
             )
-            await self._execute_fold(before, effects)
+            await self._execute_fold(before, now, effects)
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
         async with self._lock:
@@ -910,17 +911,21 @@ class TargetController:
 
     async def _fold_due(self, now: datetime, effects: list[Effect]) -> None:
         """Carry out `effects`, which the caller has just made the core produce, and
-        whatever falls due at `now` on top of them, and say what came due while the
-        target is unavailable. Every event that folds what is due goes through here:
-        the alarm, the refresh of the windows and the switching off of an interval."""
+        whatever falls due at `now` on top of them. Every event that folds what is due
+        by a tick goes through here: the alarm, the refresh of the windows (also the
+        catch-up of a change made while starting) and the switching off of an
+        interval."""
         before = self.snapshot
         effects = effects + self._core.tick(now)
-        self._log_due_while_unavailable(before, now, effects)
-        await self._execute_fold(before, effects)
+        await self._execute_fold(before, now, effects)
 
-    async def _execute_fold(self, before: Snapshot, effects: list[Effect]) -> None:
-        """Carry out the effects of a fold of what fell due, which `tick` and `observe`
-        make; the snapshot before it is `before`.
+    async def _execute_fold(
+        self, before: Snapshot, now: datetime, effects: list[Effect]
+    ) -> None:
+        """Carry out the effects of a fold of what fell due at `now`, which `tick` and
+        `observe` make, and say what came due while the target is away. Every fold
+        goes through here: a tick, the first observation of the target at start-up and
+        each later report of it. The snapshot before the fold is `before`.
 
         A window the fold found over is replaced by the next one of its interval. That
         goes for whichever event folds it: a report of the target may get the lock
@@ -931,6 +936,7 @@ class TargetController:
         ended = {w.interval_id for w in before.windows} - {
             w.interval_id for w in self.snapshot.windows
         }
+        self._log_due_while_unavailable(before, now, effects)
         await self._execute(effects)
         if ended and not self._stopped:
             await self._async_refresh_windows_locked()
@@ -939,7 +945,12 @@ class TargetController:
         self, before: Snapshot, now: datetime, effects: list[Effect]
     ) -> None:
         """Say what came due while the target is away, worded by what it was: nothing
-        else shows that a switch waits for the target to come back (R10)."""
+        else shows that a switch waits for the target to come back (R10).
+
+        Only a target that reports "unavailable" is away. One that has not been seen
+        (`last_actual is None`, until start-up observes it) is not known to be, so a
+        fold before start-up says nothing; start-up says what it folds itself.
+        """
         after = self.snapshot
         if after.last_actual != "unavailable":
             return

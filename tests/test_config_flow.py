@@ -693,7 +693,9 @@ async def test_options_change_mode_keeps_running_timer(
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """Saving the settings reloads the entry; the countdown carries on."""
+    """Saving the settings reloads the entry; the countdown carries on. A timer made
+    before the counter existed, saved without touching the box, does not start
+    counting: it gains no Runtime sensor, in the states or in the registry."""
     entry = await setup_target()
     await set_number(hass, NUMBER, 30)
     await advance(hass, freezer, minutes=10)
@@ -703,6 +705,8 @@ async def test_options_change_mode_keeps_running_timer(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_MODE] == "loose"
     assert entry.state is ConfigEntryState.LOADED
+    assert hass.states.get(RUNTIME) is None
+    assert er.async_get(hass).async_get(RUNTIME) is None
     assert state_of(hass, NUMBER) == "20"
     await advance(hass, freezer, minutes=20)
     assert fake_target.calls == [TURN_ON, TURN_OFF]
@@ -769,28 +773,32 @@ async def test_options_show_the_current_settings(
 
 
 @pytest.mark.parametrize(
-    ("counting", "shown"),
-    [(True, True), (False, False)],
-    ids=["a timer that counts", "a timer made before the counter, with no such option"],
+    ("stored", "shown"),
+    [
+        ({CONF_RUNTIME: True}, True),
+        ({CONF_RUNTIME: False}, False),
+        ({}, False),
+    ],
+    ids=["ticked", "unticked", "no such option, as in a timer of an earlier release"],
 )
 async def test_settings_show_whether_the_runtime_is_counted(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
-    counting: bool,
+    stored: dict[str, bool],
     shown: bool,
 ) -> None:
-    """The box opens ticked for a timer that counts, and unticked for one that does
-    not, an entry of an earlier release among them, whose options have no such key."""
-    entry = await setup_target(runtime=counting)
-    assert (CONF_RUNTIME in entry.options) is counting
+    """The box opens as the timer has it: ticked for a timer that counts, unticked for
+    one that does not, and unticked for one whose options have no such key."""
+    entry = await setup_target()
+    hass.config_entries.async_update_entry(entry, options={**entry.options, **stored})
+    await hass.async_block_till_done()
+    assert entry.options.get(CONF_RUNTIME) is stored.get(CONF_RUNTIME)
 
     result = await change_options(hass, entry)
 
     assert result["step_id"] == "init"
     assert prefilled(result["data_schema"])[CONF_RUNTIME] is shown
-    if counting:
-        assert suggested_value(result, CONF_RUNTIME) is True
 
 
 async def test_enabling_the_counter_mid_countdown_keeps_it_and_counts_from_now(
@@ -822,6 +830,7 @@ async def test_enabling_the_counter_mid_countdown_keeps_it_and_counts_from_now(
     assert entry.state is ConfigEntryState.LOADED
     assert float(state_of(hass, RUNTIME)) == 0.0
     assert state_of(hass, NUMBER) == "35"
+    assert fake_target.calls == [TURN_ON]
     ends_at = hass.states.get(SENSOR)
     assert ends_at is not None
     assert ends_at.state == countdown.state

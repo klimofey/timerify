@@ -634,9 +634,9 @@ class TargetController:
         would, so that a command given now comes after what fell due before it, as it
         would with Home Assistant running: the windows are worked out and merged, and
         the stored end, the commands and the windows that fell due while Home Assistant
-        was down are folded in, in the order they fell due. Once start-up has taken
-        stock, or a command before has, the alarms do that, and this finds little or
-        nothing to fold.
+        was down are folded in, in the order they fell due. After start-up has taken
+        stock this returns at once; after an earlier command while starting, the alarms
+        it armed have folded what came due since, and this finds little to fold.
 
         The fold changes the timer only, and so do the alarms it arms: the target has
         not been seen, so nothing is sent to it (`TimerCore` treats it as away), and

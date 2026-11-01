@@ -173,8 +173,9 @@ not repeated beside its successor.
   returns the alarm for the merged snapshot, the earliest of the stored end, the first
   stored command and the start and end of every window, and it is the first effect of the
   one `_execute` that also carries the first observation; an unchanged snapshot produces
-  no new alarm from the core otherwise. Nothing is armed earlier, because a stored end,
-  command or window that has long passed would switch a target that has not been seen.
+  no new alarm from the core otherwise. A restored timer arms nothing earlier. Changed in
+  1.1.0: a change made while starting first catches up and may arm its own alarm (see
+  "Until start-up has taken stock" under Release 1.1.0).
 
 ### Services
 
@@ -1858,7 +1859,7 @@ in `docs/followups.md`.
   that is open now, start-up merges the right one after the change, and it may start then
   (S1). The settings of a window are judged from what the registry remembers of a target
   whose integration is not up yet. A change that waits for its turn, behind another change
-  or a slow Workday answer (at most `SERVICE_CALL_TIMEOUT`), catches up to the moment it
+  or a slow Workday answer, catches up to the moment it
   runs, not the moment it was given, so it also wins over what fell due in between (#42).
   A report of the target before start-up is answered a few seconds later, at start-up.
 - **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
@@ -1871,13 +1872,12 @@ in `docs/followups.md`.
   still ran, and waited for the lock behind a slow call until after the end. The lock wakes
   its waiters in the order they came, so the alarm of the end, queued later, runs after
   `add`: nothing that the end would fold is missed, and no S4 suppression either. The
-  difference is the time. The added minutes count from when the command ran (up to
-  `SERVICE_CALL_TIMEOUT` late), not from the old end, and the countdown's beginning
+  difference is the time. The added minutes count from when the command ran (late by the
+  wait for the lock), not from the old end, and the countdown's beginning
   (`started_at`) starts again. #42 tracks carrying out a command at the moment it was
   given, which settles this race.
   Why: an end that has passed is over for every other judgement (`wanted_running`,
   `run_open`, a pending command that falls due).
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
-  the next fold instead of being stopped at once. In the race above, the target runs up to
-  `SERVICE_CALL_TIMEOUT` longer than with the command dated when it was given, and the
+  the next fold instead of being stopped at once. In the race above, the target runs longer, by the wait for the lock, than with the command dated when it was given, and the
   card's progress starts again.

@@ -1901,8 +1901,8 @@ in `docs/followups.md`.
   away. What it folds is also overridden by the change that comes after it, so "the timer
   ended; it is turned off when it is back" could be false by the time start-up knows the
   target is unavailable: "Run for 30" came after the end, and the target is turned on.
-  Cost if wrong: a countdown or a command that falls due after the first change made while
-  starting, but before start-up, is folded by its alarm in the core only. If the target
+  Cost if wrong: a countdown, a command or a window start that falls due after the first
+  change made while starting, but before start-up, is folded by its alarm in the core only. If the target
   then turns out to be unavailable, the log does not mention it, though the target is
   switched all the same when it is back. Home Assistant starts within minutes, and a
   change made meanwhile is rare.

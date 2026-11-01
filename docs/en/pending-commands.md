@@ -34,7 +34,7 @@ What a command does at its time:
 
 - Commands are stored on every change, and they survive a restart.
 - A command that came due while Home Assistant was down is carried out at start-up for what is left of its run. Say you asked at 07:00 for a run of 60 minutes, and Home Assistant is back at 07:20. The device then runs for 40 more minutes.
-- If nothing is left of the run, the command is dropped and the log says so.
+- If nothing is left of the run, the command is dropped and the log says so. This is an info line: to see it, choose **Enable debug logging** on the Timerify integration page.
 - A command to turn off is carried out however late. So is a command to turn on without a countdown in Loose mode.
 - If several commands came due, they are applied in time order. Only the final state reaches the device. An "on" and the "off" after it that both came due switch nothing.
 - A command that comes due while the device is unavailable changes the countdown at once. The device is switched when it reports again, if the command still matters by then. A run that is already over is never started.

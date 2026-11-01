@@ -72,7 +72,7 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 
 ## When the device does not answer
 
-- A device that drops off Wi-Fi keeps its countdown. Whatever came due meanwhile is applied when it reports again. For example, a countdown that ended turns it off. The log says what came due while the device was unavailable. It says so also when Home Assistant starts while the device is unavailable.
+- A device that drops off Wi-Fi keeps its countdown. Whatever came due meanwhile is applied when it reports again. For example, a countdown that ended turns it off. The log says what came due while the device was unavailable. It also says so when Home Assistant starts while the device is unavailable. These are info lines, which Home Assistant hides by default. To see them, open the Timerify integration page and choose **Enable debug logging**.
 - A command that the device rejects, or accepts without doing anything, is not forgotten. Timerify sends it again when the device next reports its state. It also sends it again when you ask for the same thing again.
 - A device that rejects a command gets at most 3 repeats of it, however often it reports or reconnects.
 - Then Timerify writes one warning in the log and stops sending that command. It sends it again when you ask again. It also sends it again when the timer itself switches the device: a countdown ends, or a schedule interval starts.

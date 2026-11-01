@@ -89,10 +89,11 @@ README.md, RULINGS.md, docs/followups.md, CLAUDE.md, manifest.json, pyproject.to
     - `observe(self, at: datetime, on: bool) -> None` — the target is on or not from `at`. On→on and off→off change nothing. Off→on opens a run at `at`. On→off closes it and adds `max(0, at − since)`;
     - `total(self, now: datetime) -> float` — seconds counted up to `now`. The open run adds `max(0, now − since)`;
     - `minutes(self, now: datetime) -> float` — `max(self.shown, round(self.total(now) / 60, 2))`;
+    - `seconds_to_store(self, now: datetime) -> float` — `max(self.total(now), self.shown * 60)`: what every save writes, so that a counter rebuilt from the file never shows less than was shown (amended after the Task 1 review: a clock set back and a flush of `total` alone would make the value drop);
     - `shown: float` — the last value published, which `mark_shown(value: float) -> None` records.
   - `class RuntimeStore`:
     - `__init__(self, hass, entry_id)`;
-    - `async_load(self) -> float` — the stored seconds, or 0.0 for no file; a file that fails validation logs a warning and gives 0.0, as `TimerStore` does;
+    - `async_load(self) -> float` — the stored seconds, or 0.0 for no file; a file that fails validation logs a warning and gives 0.0 (a record, unlike `TimerStore`, which refuses the entry); a file of a newer major version raises `UnsupportedStorageVersionError` and is left alone;
     - `async_save(self, seconds: float) -> None` — immediate, not delayed;
     - `async_remove(self) -> None`.
   - The payload is `{"seconds": <float >= 0>}`.
@@ -146,15 +147,15 @@ async def test_removing_the_store_deletes_the_file(hass, hass_storage)
 
 Behaviour of `RuntimeSensor`:
 - **`async_added_to_hass`.**
-  - Load the store into a `RuntimeCounter`.
+  - Build a `RuntimeCounter` from the seconds that `sensor.async_setup_entry` loaded (the load happens there, so that a file from a newer release fails the platform visibly instead of dropping the entity in silence).
   - Observe `actual_state(hass.states.get(target)) == "on"` at `dt_util.utcnow()`, where the target is `entry.options[CONF_TARGET]`.
   - Set `native_value = counter.minutes(now)`, then `mark_shown` it.
   - Subscribe to `async_track_state_change_event(target)`. Each event's `new_state` is observed at `event.time_fired`.
   - Subscribe to `async_track_utc_time_change(second=RUNTIME_TICK_SECOND)`.
   - Release both with `async_on_remove`.
-- **The tick.** Compute `value = counter.minutes(now)`. If it equals `shown`, return. Otherwise `await store.async_save(counter.total(now))`, then set the value, write the state, and `mark_shown`.
+- **The tick.** Compute `value = counter.minutes(now)`. If it equals `shown`, return. Otherwise `await store.async_save(counter.seconds_to_store(now))`, then set the value, write the state, and `mark_shown`.
 - **`_handle_controller_update`** is a no-op.
-- **`async_will_remove_from_hass`** saves `counter.total(utcnow())`, the flush (R§2).
+- **`async_will_remove_from_hass`** saves `counter.seconds_to_store(utcnow())`, the flush (R§2).
 - **The sensor never turns unavailable because the target does.** Only an unload makes it unavailable.
 
 - [ ] **Step 1: Write the failing tests.** They are user scenarios with `clock_at_start`, `fake_target` (`switch.boiler`), `setup_target(runtime=True)` and `record_writes(hass, RUNTIME)`. The sensor's state is read as `float(state_of(hass, RUNTIME))`.
@@ -167,7 +168,7 @@ async def test_a_manual_run_outside_timerify_is_counted()     # loose: wall swit
 async def test_a_flapping_target_is_written_once_a_minute()   # Review Focus 1: within 30 s five on/off pairs, a timerify.add_time and a controller refresh → no write before the tick; one write after it, with the exact seconds on, rounded
 async def test_a_restart_while_on_continues_and_never_goes_down()   # 10 min on, restart(hass, entry) → value ≥ 10.0 at once, 11.0 one minute later
 async def test_downtime_is_not_counted()                       # 10 min on, restart_after(minutes=30) with the target still on → 10.0 right after; 11.0 one minute later (spec §5.7 applied to a record)
-async def test_stored_total_is_never_behind_what_was_shown()  # Review Focus 2: after every tick, runtime_saved(...) / 60 ≥ the shown value; a new entry started from that file shows at least the last value
+async def test_stored_total_is_never_behind_what_was_shown()  # Review Focus 2: after every tick and after a clock set back and a reload, round(runtime_saved(...) / 60, 2) ≥ the shown value, and the entry started again from that file shows at least the last value
 async def test_an_unavailable_target_pauses_the_count()       # 5 min on, unavailable 10 min, unknown 5 min, on 5 min → 10.0; the sensor stays available with its value throughout
 async def test_clock_going_back_never_lowers_the_value()      # Review Focus 3: 10 min on, freezer.move_to(5 minutes earlier), 10 more minutes → never below 10.0; ends at 20.0 at most, never counting the repeated minutes twice
 async def test_renaming_the_target_mid_run_keeps_the_counter()  # Review Focus 5: 10 min on, rename switch.boiler's entity id (the test_source_changes pattern) → same sensor entity id, value ≥ 10.0, continues counting the new id

@@ -37,7 +37,7 @@ Set **Run for** to a number of minutes. The device turns on, and it turns off wh
 - **Ends at** shows the moment the countdown ends. It is unknown while no countdown runs.
 - A countdown is a whole number of minutes, from 1 minute up to one day.
 
-You can also start, extend and stop a timer from a dashboard card, by voice, or with services. A [schedule](schedules.md) starts it by itself at set times.
+You can also start, extend and stop a timer from a dashboard card, by voice, or with actions. A [schedule](schedules.md) starts it by itself at set times.
 
 ## Modes
 
@@ -55,7 +55,7 @@ All the entities of a timer sit on the device's own page in Home Assistant. If t
 | Entity | What it shows |
 | --- | --- |
 | **Run for** (a number) | The minutes left, rounded up. Setting it starts, changes or stops the countdown. |
-| **Ends at** (a sensor) | The moment the countdown ends. It is unknown while no countdown runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began. The dashboard card uses that to draw its fill. |
+| **Ends at** (a sensor) | The moment the countdown ends. It is unknown while no countdown runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began, which is empty while no countdown runs. The dashboard card uses it to draw its fill. |
 | **Next command** (a sensor) | The moment the next pending command is due. It is unknown while there is none. See [Pending commands](pending-commands.md#the-next-command-sensor). |
 | `Schedule 06:30–07:15, Sun–Thu` (a switch) | One for each schedule interval. It is on while the interval is in use, and off to skip it. See [Schedules](schedules.md#switch-an-interval-on-or-off). |
 | **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The Runtime page tells more. |
@@ -92,12 +92,12 @@ A timer can switch these kinds of entities:
 - climate entities and water heaters;
 - groups.
 
-It can also switch any other entity of a kind that has turn-on and turn-off services, such as an automation. Timerify switches groups and these other entities with Home Assistant's `homeassistant.turn_on` and `homeassistant.turn_off`.
+It can also switch any other entity of a kind that has turn-on and turn-off actions, such as an automation. Timerify switches groups and these other entities with the Home Assistant actions `homeassistant.turn_on` and `homeassistant.turn_off`.
 
 - Fans, media players, sirens and climate entities must say that they can be turned on and off. Water heaters must say that they support on and off. A device that works but does not say so is not offered, because Home Assistant itself refuses to switch it.
 - Groups and the other entities must report "on" or "off" when you add the timer. A group of covers or locks reports "open" or "locked". Timerify cannot tell whether it is running, so it answers that the entity does not report on or off.
 - An entity that is unavailable at that moment gets the same answer. Try again once it is back.
-- The picker lists every entity of a kind with both services, so it also shows cameras. A camera reports "idle" or "streaming", which is not on or off. Adding one is refused with the same answer.
+- The picker lists every entity of a kind with both actions, so it also shows cameras. A camera reports "idle" or "streaming", which is not on or off. Adding one is refused with the same answer.
 - Vacuum cleaners have no turn-on and turn-off in Home Assistant 2026.10, so they are not offered.
 
 ## Settings for turning on
@@ -108,7 +108,7 @@ Timerify offers only what the device says it can do. It checks a request when yo
 
 Settings are applied in these cases:
 
-- The Run service with settings turns the device on with them. If the device is already running, it gets them anyway: you asked for them.
+- The **Run** action with settings turns the device on with them. If the device is already running, it gets them anyway: you asked for them.
 - A pending command that turns the device on carries its settings the same way. It applies them at its time, whether the device is running then or not.
 - Settings that have not reached the device yet go out with the next turn-on of any kind, whatever causes it. Setting **Run for** does it. So does adding time to a timer that is not running. So does a command that gives no settings of its own. If the device is found running instead, even when you turned it on by hand, they are set then.
 - The settings of a schedule interval go out only with the turn-on that the interval makes. They are never pushed onto a device that is already running. See [Settings of an interval](schedules.md#settings-of-an-interval).

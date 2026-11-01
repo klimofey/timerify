@@ -11,7 +11,7 @@ A pending command says "at this time, do this". It can turn the device on, or it
 - Each command is at most 7 days ahead.
 - Each command can be cancelled on its own.
 
-You make a command with the **Add command** service, or by voice, for example "turn on the boiler in 15 minutes". You cancel one with the **Cancel command** service, by voice, or in the pop-up of the dashboard card. The Services, Voice and Card pages describe these.
+You make a command with the **Add command** action. By voice, the built-in agent's sentences plan a command to turn on, for example "turn on the boiler in 15 minutes". Its "turn off in 20 minutes" sets the countdown instead. You cancel a command with the **Cancel command** action, by voice, or in the pop-up of the dashboard card. The pages about actions, voice and the dashboard card describe these.
 
 ## How a pending command behaves
 
@@ -47,7 +47,7 @@ The sensor also lists all the pending commands, the earliest first, for dashboar
 
 ```yaml
 commands:
-  - id: 0f5c1e2a7d9b4c3e8a6b1d2c3e4f5a6b # What the Cancel command service takes.
+  - id: 0f5c1e2a7d9b4c3e8a6b1d2c3e4f5a6b # What the Cancel command action takes.
     at: "2026-01-05T07:15:00+00:00" # The time, in UTC.
     action: "on"
     minutes: 60 # Null when the command gives no minutes.

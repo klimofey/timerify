@@ -15,6 +15,7 @@ from homeassistant.helpers.typing import ConfigType
 from .card import async_register_card
 from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
+from .entity import remove_fallback_device
 from .runtime import RuntimeStore
 from .services import async_setup_services
 from .store import TimerStore
@@ -55,6 +56,7 @@ async def async_setup_entry(
     entry.runtime_data = controller
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
+    remove_fallback_device(hass, entry)
     if CONF_WORKDAY_SENSOR in entry.options:
         _follow_workday_sensor_rename(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

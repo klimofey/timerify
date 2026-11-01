@@ -1,12 +1,18 @@
-"""Base class of the entities Timerify adds to a target's device."""
+"""The base class of a timer's entities, and the device they are on."""
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device import async_entity_id_to_device
 from homeassistant.helpers.entity import Entity
 
 from .const import DOMAIN, timer_unique_id
 from .controller import TimerifyConfigEntry
+
+
+def _fallback_identifier(entry: TimerifyConfigEntry) -> tuple[str, str]:
+    """The identifier of the device made for a timer whose target is on no device."""
+    return (DOMAIN, entry.entry_id)
 
 
 def timer_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> dr.AnyDeviceEntry:
@@ -26,9 +32,36 @@ def timer_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> dr.AnyDevic
         return device
     return dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
+        identifiers={_fallback_identifier(entry)},
         name=controller.device_name,
     )
+
+
+@callback
+def remove_fallback_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+    """Remove the device made for the timer once its target is on a device of its own.
+
+    The target's integration can link it to a device while Home Assistant is down, and
+    nothing follows that: the entities move to the target's device when they are added,
+    but the device made for the timer stays behind, empty. The entities are moved here
+    first, because the registry removes the entities of a device it removes, and they
+    would vanish for the automations that watch them and then come back.
+
+    A target that is still on no device keeps the device made for it.
+    """
+    device = async_entity_id_to_device(hass, entry.runtime_data.target_entity_id)
+    devices = dr.async_get(hass)
+    fallback = devices.async_get_device_by_identifier(
+        _fallback_identifier(entry), entry.entry_id
+    )
+    if device is None or fallback is None:
+        return
+    entities = er.async_get(hass)
+    for entity in er.async_entries_for_device(
+        entities, fallback.id, include_disabled_entities=True
+    ):
+        entities.async_update_entity(entity.entity_id, device_id=device.id)
+    devices.async_remove_device(fallback.id)
 
 
 class TimerifyEntity(Entity):

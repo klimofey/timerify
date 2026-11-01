@@ -1,7 +1,7 @@
 """Helpers shared by the scenario tests: the entities, the calls and the clock."""
 
 import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Final, Literal
@@ -285,11 +285,20 @@ async def restart_after(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     entry: ConfigEntry,
+    *,
+    while_down: Callable[[], None] | None = None,
     **delta: float,
 ) -> None:
     """Stop the entry, let `delta` pass with nobody listening, and start it again: a
-    Home Assistant that was down meanwhile. Nothing fires while it is down."""
+    Home Assistant that was down meanwhile. Nothing fires while it is down.
+
+    `while_down` is what happens to the registries in that time, as when the user links
+    a device to the target by hand or an update of the target's integration does; it
+    runs once the entry has stopped, so nothing follows it.
+    """
     await hass.config_entries.async_unload(entry.entry_id)
+    if while_down is not None:
+        while_down()
     freezer.tick(timedelta(**delta))
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

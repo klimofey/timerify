@@ -23,3 +23,7 @@ The runtime counter has no reset. The dashboard card does not show the runtime. 
 Known faults and requests are listed as [GitHub issues](https://github.com/klimofey/timerify/issues).
 
 One fault is worth knowing about before you start. On Home Assistant 2026.10, the dashboard card can be missing the first time a browser loads it. Refresh the page once. See [Known issue on Home Assistant 2026.10](card.md#known-issue-on-home-assistant-202610).
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

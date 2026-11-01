@@ -56,3 +56,7 @@ A run that crosses midnight is split between the two days, to within a second. T
 
 - There is no reset. Deleting the timer deletes the total. A timer that you add again counts from zero.
 - The dashboard card does not show the runtime. Use Home Assistant's own cards, as above.
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

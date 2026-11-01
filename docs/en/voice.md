@@ -115,7 +115,7 @@ The Russian column is transliterated because this page is in English. The real s
 
 A few things work the way Home Assistant does, not the way Timerify does.
 
-- "Turn it off" and "them", after a question or a command about a device, are answered by Home Assistant's own commands. They switch the device, and the timer follows. But the answer is Home Assistant's. A device that is unavailable is not given what you asked for.
+- "Turn it off" and "them", after a question or a command about a device, are answered by Home Assistant's own commands. They switch the device, and the timer follows. But the answer is Home Assistant's. A device that is unavailable is not switched. Timerify keeps nothing of what you asked.
 - Suppose a sentence of Timerify's names something that is not a device with a timer. Home Assistant then answers "not aware of any device". An example is "what is planned for the fan".
 - Home Assistant can take a wording that Timerify does not have for a plain turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off scheduling for the boiler" and "turn off the boiler in 2 days". Home Assistant then turns the device off at once. Use the wordings above.
 - Say two entities have the same name, and one of them has a timer. Then "turn off the boiler" and the other sentences above mean the one with the timer. Likewise, "turn off the boiler schedule" means the schedule of the timer called Boiler. This holds even when another exposed entity is called "Boiler schedule". That entity is reached by other wordings, and by the interface.
@@ -220,3 +220,7 @@ An agent can plan a command at a clock time, which the built-in agent's sentence
 - **An interval by the title it is made with.** Rename it first.
 - **The modes that a device names in Latin letters**, such as "eco" or "high", in Russian. They are said as written. The HVAC modes have Russian words.
 - **Two thermostats with different HVAC modes.** The words are the modes of all of them. So if you say a mode that only one of them has to the other, it is refused. The answer lists the modes that thermostat has.
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

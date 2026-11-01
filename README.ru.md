@@ -23,7 +23,7 @@ Timerify добавляет отсчёт к объекту, который у в
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=timerify)
 
-Первая кнопка открывает Timerify в HACS. Вторая открывает меню Timerify, где вы выбираете **Добавить таймер**. Она работает, когда Timerify уже установлен. Нужен Home Assistant 2026.10.4 или новее.
+Первая кнопка открывает Timerify в HACS, а в Home Assistant 2026.11 и новее в Marketplace. Вторая открывает меню Timerify, где вы выбираете **Добавить таймер**. Она работает, когда Timerify уже установлен. Нужен Home Assistant 2026.10.4 или новее.
 
 ### Home Assistant 2026.10: HACS
 

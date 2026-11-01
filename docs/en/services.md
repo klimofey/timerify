@@ -159,3 +159,7 @@ The dashboard card asks Timerify which entities belong to its timer. It does so 
 - The command is open to every user. It tells a user only what the user may read.
 
 See [What the card does](card.md#what-the-card-does).
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

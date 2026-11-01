@@ -121,3 +121,7 @@ An interval can turn the device on the way you want. It has the same settings as
 - Suppose a window began while Home Assistant was down, and was not applied yet. At start-up it is applied for the rest of the window. The boiler turns on when Home Assistant is back.
 - A countdown that ended while Home Assistant was down turns the device off, as on the [Timers](timers.md#when-home-assistant-restarts) page. Suppose one window ended and the next began during a long outage. Then the device is not switched off and on for it.
 - An interval you switched off stays off.
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

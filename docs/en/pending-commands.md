@@ -55,3 +55,7 @@ commands:
       hvac_mode: cool
       temperature: 24.0
 ```
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

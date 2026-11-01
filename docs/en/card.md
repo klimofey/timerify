@@ -38,7 +38,7 @@ The round tile has no chip. You can long-press it. See [The long press of the ro
 - A device that is on with no countdown shows a full fill and a full ring. **Loose** mode allows this. The [Modes](timers.md#modes) section explains it. The pill says the state of the device in words. The round tile has the words for screen readers only. An idle timer shows an empty fill and an empty ring.
 - A timer whose number is unavailable shows that. Its chip, presets, plus, minus, Stop and cancel buttons are off. See [The pop-up](#the-pop-up).
 - Suppose the entity of the card does not exist, or is not the **Run for** number of a Timerify timer. The card says so and names it. It finds its timer again by itself when the entity is back. After you rename the number, point the card at its new entity id.
-- Sometimes the number is a timer's, but the timer cannot be shown. The device or one of the two sensors is then missing from the registry. The card says that and sends you to the timer's page to see why. It does so whatever the state of the number. Right after you add a timer, the line can show for a moment. It goes away by itself.
+- Sometimes the number is a timer's, but the timer cannot be shown. That happens when the device or one of the two sensors is missing from the registry. The card says that and sends you to the timer's page to see why. It does so whatever the state of the number. Right after you add a timer, the line can show for a moment. It goes away by itself.
 - The card never goes quiet when it cannot work. A user who may not see the timer is told so. See [Permissions](#permissions).
 - The card needs the timer's two sensors, **Ends at** and **Next command**. It tells you when you have disabled one of them.
   - With **Ends at** disabled, the card has no countdown to show. It shows only a warning that names the sensor and says to enable it.
@@ -145,3 +145,7 @@ The card's module is served to everyone, because the browser loads it before any
 ## Languages
 
 The card's own words, its buttons and messages, are in English and Russian, in the language of your profile. For any other language they are in English. Times, durations and numbers are written by the browser for your language, so they are right in every language. The names and states of entities are Home Assistant's.
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

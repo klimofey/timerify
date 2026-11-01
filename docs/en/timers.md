@@ -141,3 +141,7 @@ Timerify trusts what the device accepts. A settings call that returns without an
 | Water heater | Operation mode | One of the entity's operation modes, except off. The heater must support operation modes. |
 
 Other kinds of devices have no settings. If you ask for a setting that the device does not have, Timerify refuses. Timerify does not check the temperature step that the entity reports. A device may round 22.3 to 22.5. The names of these settings in YAML are on the [Actions](services.md#settings) page.
+
+---
+
+[All pages](README.md) · [Back to the README](../../README.md)

@@ -23,7 +23,7 @@ Timerify attaches a countdown to an entity you already have, the way Powercalc a
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)
 [![Add integration](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=timerify)
 
-The first button opens Timerify in HACS. The second opens the Timerify menu, where you choose **Add a timer**. It works once Timerify is installed. Home Assistant 2026.10.4 or newer is required.
+The first button opens Timerify in HACS, or in the Marketplace on Home Assistant 2026.11 and later. The second opens the Timerify menu, where you choose **Add a timer**. It works once Timerify is installed. Home Assistant 2026.10.4 or newer is required.
 
 ### Home Assistant 2026.10: HACS
 

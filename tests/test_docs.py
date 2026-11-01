@@ -2,6 +2,7 @@
 Russian, links that resolve, README links that survive HACS and the Marketplace, and
 the style rules."""
 
+import html
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -17,6 +18,9 @@ SECTION_SIGN = chr(0xA7)
 CYRILLIC = "".join(map(chr, range(0x430, 0x43A)))
 """Ten Cyrillic letters, built from code points, as the sources hold no Cyrillic."""
 CYRILLIC_HEADING = f"{CYRILLIC.capitalize()} {CYRILLIC[::-1]}"
+RUSSIAN_IN_RUSSIAN = "".join(
+    map(chr, (0x420, 0x443, 0x441, 0x441, 0x43A, 0x438, 0x439))
+)
 FENCE = "`" * 3
 RAW = "https://raw.githubusercontent.com/klimofey/timerify/main"
 BLOB = "https://github.com/klimofey/timerify/blob/main"
@@ -290,6 +294,32 @@ def test_a_tree_without_user_docs_has_no_problems(
     tmp_path: Path, check: Callable[[Path], list[str]]
 ) -> None:
     assert check(tmp_path) == []
+
+
+def test_both_readmes_exist() -> None:
+    assert (ROOT / "README.md").is_file()
+    assert (ROOT / "README.ru.md").is_file()
+
+
+@pytest.mark.parametrize("name", README_NAMES)
+def test_the_readmes_offer_both_install_buttons(name: str) -> None:
+    text = (ROOT / name).read_text("utf-8")
+
+    assert (
+        "my.home-assistant.io/redirect/hacs_repository/"
+        "?owner=klimofey&repository=timerify&category=integration"
+    ) in text
+    assert "my.home-assistant.io/redirect/config_flow_start/?domain=timerify" in text
+
+
+def test_each_readme_links_to_the_other_one_by_the_name_of_its_language() -> None:
+    # README.md holds no Cyrillic, which the pre-commit hook enforces, so it spells the
+    # Russian name with character references; a reader sees the name in Russian.
+    english = html.unescape((ROOT / "README.md").read_text("utf-8"))
+    russian = html.unescape((ROOT / "README.ru.md").read_text("utf-8"))
+
+    assert f'<a href="{BLOB}/README.ru.md">{RUSSIAN_IN_RUSSIAN}</a>' in english
+    assert f'<a href="{BLOB}/README.md">English</a>' in russian
 
 
 def test_every_english_page_has_a_russian_page_and_back() -> None:

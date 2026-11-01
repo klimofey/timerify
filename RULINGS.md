@@ -2137,9 +2137,11 @@ in `docs/followups.md`.
   generated, and the next edit renames it. A subentry that no title can be made of (a
   missing key, days that are no kind of days, a weekday that is not one) is checked for
   explicitly (`stored_interval_title`) and left unmarked, so that one odd interval does
-  not fail the entry. The voice settings entry only moves to minor version 2.
-  `interval_title` and `async_title_labels` take the language as an argument, so that the
-  voice part can ask for the title of an interval in another language.
+  not fail the migration. Whether the timer then loads is for the data of that interval,
+  as without a migration: one that lacks a time keeps the timer from setting up, one with
+  an unknown day or kind of days loads. The voice settings entry only moves to minor
+  version 2. `async_title_labels(hass, language)` takes the language, so that the
+  migration can compare a title in every shipped language, not only the house's.
   Minor version 2 keeps a downgrade to 1.0.0 loading: that release has no
   `async_migrate_entry`, so Home Assistant accepts the entry (checked by loading an entry
   of minor version 2 with the code of the `v1.0.0` tag). It ignores the key, and its edit
@@ -2177,7 +2179,21 @@ in `docs/followups.md`.
   `validate_settings`, which `_settings_the_target_takes` goes by too), so it stands
   exactly while the window would leave the setting out. That includes a value that is no
   longer accepted, which the form shows and the user can change. The names come in the
-  order of the form (the row of the domain), whatever order they are stored in.
+  order of the form (the row of the domain), whatever order they are stored in. A name the
+  form has no label for, which only a hand edit of the stored interval leaves, is shown as
+  the name it has.
+  The form shows a setting it offers with the value the interval holds, also when the
+  device no longer lists that value (`_setting_selector`). A list gets the held value
+  added to the values the device lists, a number field widens its range to take it, and
+  nothing else widens. Without that, the selector refuses the held value in Home
+  Assistant's own words, before `validate_settings` is reached, and a frontend that drops
+  a value its list does not hold would make the edit lose the setting without a word.
+  With it, saving the form unchanged is refused by `validate_settings` with the
+  translated base error `settings_not_supported`, and nothing is saved. A value the
+  device takes saves, and an emptied field drops the setting. A held value of another
+  kind than its field takes (a number where a mode belongs, which only a hand edit
+  leaves) widens nothing. A refused form is shown again with the value typed, so a value
+  just refused stays in its field.
   There is one warning per interval, naming all its settings by the labels of the form in
   the language of the house. Its title carries the interval, so that two warnings of a
   timer differ in the Repairs list, and both are quoted in the texts, because a generated
@@ -2234,13 +2250,21 @@ in `docs/followups.md`.
   `IssueRegistry.async_delete` does not tell them apart. The names stay in the data of
   the issue, not in the store of the timer: that would change the format of the store
   for what the issue registry keeps through public API.
+  The labels and the title in a warning are in the language of the house as of the last
+  load of the timer. A change of the house language shows in them after the next reload or
+  restart of Home Assistant, the way a generated interval title follows the language only
+  on an edit (#15 above). The warning is not raised again for it: its names, the only
+  thing the check compares, have not changed.
   Why: #16. An edit dropped the settings the form did not offer, silently, and the window
   left them out with only a line in the log.
   Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
   the log is the only other trace. A persistent warning is taken away only by the timer
   that raised it: if the files of the integration are deleted from `custom_components`
   without removing the entry, its warnings stay visible in Repairs, because no code of
-  Timerify is left to take them away.
+  Timerify is left to take them away. A downgrade to 1.0.0 does the same: that release
+  loads the entry (minor version 2, see #15) but has neither the texts of the warning nor
+  any code that deletes it, so the warnings are listed in Repairs without readable texts
+  until 1.1.0 is back. The release notes of 1.1.0 should say so.
   Tests: `test_editing_keeps_a_setting_the_ac_no_longer_offers`,
   `test_editing_changes_the_settings_shown_beside_a_kept_one`,
   `test_editing_keeps_every_setting_while_the_ac_is_gone`,
@@ -2250,6 +2274,12 @@ in `docs/followups.md`.
   `test_the_warning_names_every_setting_the_ac_does_not_take`,
   `test_the_warning_follows_the_settings_the_ac_does_not_take`,
   `test_a_value_the_ac_no_longer_accepts_raises_the_warning`,
+  `test_a_setting_no_form_knows_is_named_by_its_own_name`,
+  `test_the_form_shows_a_value_the_ac_no_longer_lists`,
+  `test_submitting_a_value_the_ac_no_longer_lists_is_refused_in_words`,
+  `test_a_value_the_ac_takes_replaces_one_it_no_longer_lists`,
+  `test_clearing_a_value_the_ac_no_longer_lists_drops_the_setting`,
+  `test_a_value_of_the_wrong_kind_opens_the_form_without_a_wider_field`,
   `test_only_the_interval_that_has_the_lost_setting_is_named`,
   `test_the_warning_names_the_settings_in_the_language_of_the_house`,
   `test_the_warning_clears_when_the_ac_takes_the_setting_again`,

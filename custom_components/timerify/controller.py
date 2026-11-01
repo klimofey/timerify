@@ -246,6 +246,11 @@ class TargetController:
         refresh."""
         self._lock = asyncio.Lock()
         self._stopped = False
+        self._started = False
+        """Whether start-up has taken stock of the target (`_handle_started`). Until it
+        has, the timer only records what it is told and saves it: nothing is folded,
+        no alarm is armed and no report of the target is answered, because the target
+        has not been seen and the fresh windows are not merged yet."""
         self._own_contexts = deque[str](maxlen=_REMEMBERED_CONTEXTS)
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
@@ -470,7 +475,9 @@ class TargetController:
         Switching on is one change: the flag is recorded and shown with the window, once
         the window is known, which may mean waiting for the Workday sensor. A timer that
         is unloaded meanwhile changes nothing and says so. An interval that is on
-        already is left as it is: nothing is worked out and nobody is asked.
+        already is left as it is: nothing is worked out and nobody is asked. While Home
+        Assistant is still starting, only the flag is kept and saved, and start-up
+        works the window out.
         """
         async with self._lock:
             self._raise_if_unloaded()
@@ -572,11 +579,20 @@ class TargetController:
         self, interval_id: str, enabled: bool
     ) -> None:
         """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
-        the caller holds the lock and has seen that the timer is not unloaded."""
+        the caller holds the lock and has seen that the timer is not unloaded.
+
+        Until start-up has taken stock, only the flag is recorded and saved: no window
+        is worked out and nothing is folded. Start-up works out the window of every
+        interval that is on."""
         now = dt_util.utcnow()
+        if enabled and interval_id not in self.snapshot.disabled_intervals:
+            return
+        if not self._started:
+            await self._execute(
+                self._core.set_interval_enabled(now, interval_id, enabled)
+            )
+            return
         if enabled:
-            if interval_id not in self.snapshot.disabled_intervals:
-                return
             effects = self._core.set_interval_enabled(now, interval_id, True)
             if not await self._async_refresh_windows_locked(effects):
                 raise _unloaded_error()
@@ -799,7 +815,9 @@ class TargetController:
         """Take stock of the target once, with Home Assistant fully started.
 
         The windows come first: the stored ones are merged with the ones worked out
-        now, so that the first observation folds both in one catch-up (§5.7).
+        now, so that the first observation folds both in one catch-up (§5.7). Until
+        then the timer has only recorded (`_started`), so the target is read here, not
+        from the reports it made on the way.
         """
         async with self._lock:
             if self._stopped:
@@ -819,14 +837,15 @@ class TargetController:
             now = dt_util.utcnow()
             # Merging the windows arms the alarm for the next thing the timer waits for,
             # which the observation does not do for a timer restored unchanged. Nothing
-            # is armed earlier: a stored end, command or window that has long passed
-            # would switch a target that has not been seen yet, and the first
-            # observation folds it in.
+            # is armed earlier (`_arm` waits for `_started`): a stored end, command or
+            # window that has long passed would switch a target that has not been seen
+            # yet, and the first observation folds it in.
             effects = self._set_windows(now, windows, unknown)
             self._schedule_refresh()
             before = self.snapshot
             state = self._hass.states.get(self.target_entity_id)
             effects += self._core.observe(now, actual_state(state), by_us=False)
+            self._started = True  # the alarms in `effects` are armed from here
             await self._execute_fold(before, effects)
 
     def _follow_workday_sensor(self) -> None:
@@ -848,8 +867,8 @@ class TargetController:
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
         async with self._lock:
-            if self._stopped:
-                return
+            if self._stopped or not self._started:
+                return  # `_handle_started` reads the state itself
             before = self.snapshot
             effects = self._core.observe(
                 dt_util.utcnow(),
@@ -1141,8 +1160,10 @@ class TargetController:
         await self._execute(self._core.call_failed(dt_util.utcnow()))
 
     def _arm(self, at: datetime) -> None:
-        """Wake up at `at` to carry out what is due, replacing any earlier alarm."""
-        if self._stopped:
+        """Wake up at `at` to carry out what is due, replacing any earlier alarm.
+
+        Nothing is armed until start-up has taken stock; it arms the first alarm."""
+        if self._stopped or not self._started:
             return
         self._disarm()
         self._wakeup_alarm = async_track_point_in_utc_time(

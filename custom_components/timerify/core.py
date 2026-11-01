@@ -92,7 +92,8 @@ class Snapshot:
     """The intervals the user switched off. Only intervals that exist stay in it; an
     interval is on until it is named here."""
     last_actual: Actual | None = None
-    """The target's last observed state; None until it has been observed."""
+    """The target's last observed state; None until it has been observed, and until
+    then it is treated as away, like "unavailable"."""
 
 
 @dataclass(frozen=True)
@@ -896,6 +897,9 @@ class TimerCore:
         is already where the new wish wants it. Settings go with the turn-on this
         causes; a target that needs none, because it is on or its turn-on is on its
         way, gets them alone, unless they may only go with a turn-on.
+
+        A target that is away, or has not been seen yet, is sent nothing: the wish is
+        recorded as unsent, and the report that shows the target sends it.
         """
         state = self._snapshot
         self._correction = None  # a new wish ends the permission given by the last
@@ -915,9 +919,9 @@ class TimerCore:
             # delivered with this turn-on, or on the target's return if it is away.
             self._settings_allowance.renew()
         self._owe(settings)  # they ride with the turn-on this causes
-        if state.last_actual == "unavailable":
+        if state.last_actual in (None, "unavailable"):
             self._unsent = True
-            return []  # applied when the target is back
+            return []  # applied when the target is seen, or back
         return self._send(target)
 
     def _settings_for_running_target(self, settings: Settings) -> list[Effect]:

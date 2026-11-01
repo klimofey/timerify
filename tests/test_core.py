@@ -1371,6 +1371,20 @@ def test_restored_owed_settings_wait_for_an_unavailable_target() -> None:
     ]
 
 
+def test_a_command_before_the_first_report_is_sent_by_that_report() -> None:
+    """Nothing is known of a target that has not reported yet, so it is treated as one
+    that is away: the wish and its settings are recorded, and go out with the first
+    report."""
+    c = TimerCore("strict", minutes(45), Snapshot())
+
+    fx = c.set_duration(NOW, minutes(30), COOL24)
+
+    assert not [e for e in fx if isinstance(e, TurnOn | TurnOff | ApplySettings)]
+    assert c.snapshot.pending == "on"
+    assert c.snapshot.owed_settings == COOL24
+    assert TurnOn(COOL24) in c.observe(NOW + minutes(1), "off", by_us=False)
+
+
 def test_refused_settings_are_resent_a_limited_number_of_times() -> None:
     """Reports that repeat the target's state send refused settings 3 times, say so
     once, and then leave the target alone."""

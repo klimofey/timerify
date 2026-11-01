@@ -583,13 +583,8 @@ only the final behaviour is written.
   hand-edited file gets there, and asking a sensor that is not there would only fail. The
   update listener is added after the controller is built, so fixing the file does not
   reload the entry: the user reloads it. Cost if wrong: a manual reload.
-- **A change before Home Assistant has started is not held back.** The flip of an interval
-  runs its tick or its refresh, and a phase-2 command arms the alarm of a stored end,
-  command or window that has long passed, before the first observation of the target. The
-  wish goes out to a target that may not be there yet, fails, is marked unsent, and the
-  first observation sends it again, so the state converges, as it does for a restart. One
-  rule for every command (record and save, arm nothing, let `_handle_started` fold) is
-  issue #12. Cost if wrong: one failed call at start-up.
+- **A change before Home Assistant has started is not held back.** Changed in 1.1.0: see
+  "Until start-up has taken stock, the timer only records." under Release 1.1.0.
 
 ### The entry, the intervals and the entities
 
@@ -1812,3 +1807,22 @@ in `docs/followups.md`.
   Cost if wrong: a device that refused four times, and then works again after a reconnect,
   is not sent the command until it is asked again. A media player whose turn-on failed is
   turned on only when asked again.
+- **Until start-up has taken stock, the timer only records.** Before `_handle_started` has
+  merged the fresh windows and observed the target, a command is recorded and saved, and
+  nothing folds. Three gates keep it so. The core treats a target it has never observed
+  (`last_actual is None`) as away, as `"unavailable"`: a wish is recorded as unsent and
+  sends nothing, and the first `observe` delivers it, free of the allowance. The controller
+  arms no alarm (`_arm`), so a stored end, command or window that has long passed is
+  folded by the first observation and not by a tick. Switching an interval only records
+  the flag; no window is worked out and nothing is ticked, and start-up works out the
+  windows of every interval that is on. A report of the target before start-up is not
+  observed either (`_handle_state_change`): `_handle_started` reads the state itself, under
+  the lock, and only then sets `_started`. The issue names commands only. A report would
+  fold the stored items without the fresh windows, which start-up merges first, and could
+  switch the target twice.
+  Why: #12, and §5.7's single catch-up: one fold of the stored items and the fresh windows,
+  with the target seen, switches the target at most once. Before this a command made while
+  Home Assistant was starting could send a call to a target that was not there yet, or fold
+  a countdown that ended during downtime without the windows.
+  Cost if wrong: a report of the target before start-up is answered a few seconds later,
+  at start-up.

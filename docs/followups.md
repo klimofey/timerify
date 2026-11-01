@@ -15,7 +15,6 @@ One line per issue: its number and its title, under the area it belongs to.
 ## Engine
 
 - [#10](https://github.com/klimofey/timerify/issues/10) A timer whose target entity was deleted keeps loading and drives nothing, with no message
-- [#12](https://github.com/klimofey/timerify/issues/12) Commands before HA has started should record and save, not fold against an unseen target
 - [#13](https://github.com/klimofey/timerify/issues/13) Log what came due while the target was unavailable on start-up and on target reports
 - [#17](https://github.com/klimofey/timerify/issues/17) Offer a repairs fix "reset the stored timer" for stored_timer_invalid
 - [#18](https://github.com/klimofey/timerify/issues/18) Filter settings the target no longer takes in _execute, for commands and windows alike

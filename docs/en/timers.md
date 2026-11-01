@@ -9,13 +9,13 @@ A timer attaches a countdown to an entity you already have. A plain switch, such
 1. Open **Settings > Devices & services > Helpers**. Choose **Create helper**, then **Timerify**.
 2. In the menu, choose **Add a timer**.
 3. Pick the entity and the mode, **Strict** or **Loose**. The [Modes](#modes) section explains both. The [entities you can pick](#which-devices-can-have-a-timer) are listed below.
-4. Turn on **Count runtime** if you want the timer to add up how long the device is on. It is off to begin with. The Runtime page tells more.
+4. Turn on **Count runtime** if you want the timer to add up how long the device is on. It is off to begin with. The [Runtime page](runtime.md) tells more.
 5. In Strict mode, set the default duration.
 6. If your house has a Workday sensor, pick the one this timer follows, or leave it empty. Schedules use it.
 
 ![The form that adds a timer: the entity, the mode and Count runtime](../screenshots/smoke-2-add-timer.png)
 
-The timer appears on the device page of the entity. The **Add integration** button on the Integrations tab lists Timerify too, as "Timerify (Helper)". The other item of the menu, **Voice settings**, sets up the voice sentences for Assist. The Voice page describes it.
+The timer appears on the device page of the entity. The **Add integration** button on the Integrations tab lists Timerify too, as "Timerify (Helper)". The other item of the menu, **Voice settings**, sets up the voice sentences for Assist. The [Voice page](voice.md#use-the-voice-settings-entry) describes it.
 
 ### Change a timer later
 
@@ -37,7 +37,7 @@ Set **Run for** to a number of minutes. The device turns on, and it turns off wh
 - **Ends at** shows the moment the countdown ends. It is unknown while no countdown runs.
 - A countdown is a whole number of minutes, from 1 minute up to one day.
 
-You can also start, extend and stop a timer from a dashboard card, by voice, or with actions. A [schedule](schedules.md) starts it by itself at set times.
+You can also start, extend and stop a timer from a [dashboard card](card.md), [by voice](voice.md), or with [actions](services.md). A [schedule](schedules.md) starts it by itself at set times.
 
 ## Modes
 
@@ -58,7 +58,7 @@ All the entities of a timer sit on the device's own page in Home Assistant. If t
 | **Ends at** (a sensor) | The moment the countdown ends. It is unknown while no countdown runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began, which is empty while no countdown runs. The dashboard card uses it to draw its fill. |
 | **Next command** (a sensor) | The moment the next pending command is due. It is unknown while there is none. See [Pending commands](pending-commands.md#the-next-command-sensor). |
 | `Schedule 06:30–07:15, Sun–Thu` (a switch) | One for each schedule interval. It is on while the interval is in use, and off to skip it. See [Schedules](schedules.md#switch-an-interval-on-or-off). |
-| **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The Runtime page tells more. |
+| **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The [Runtime page](runtime.md) tells more. |
 
 ## When something else switches the device
 
@@ -108,7 +108,7 @@ Timerify offers only what the device says it can do. It checks a request when yo
 
 Settings are applied in these cases:
 
-- The **Run** action with settings turns the device on with them. If the device is already running, it gets them anyway: you asked for them.
+- The [**Run** action](services.md#run) with settings turns the device on with them. If the device is already running, it gets them anyway: you asked for them.
 - A pending command that turns the device on carries its settings the same way. It applies them at its time, whether the device is running then or not.
 - Settings that have not reached the device yet go out with the next turn-on of any kind, whatever causes it. Setting **Run for** does it. So does adding time to a timer that is not running. So does a command that gives no settings of its own. If the device is found running instead, even when you turned it on by hand, they are set then.
 - The settings of a schedule interval go out only with the turn-on that the interval makes. They are never pushed onto a device that is already running. See [Settings of an interval](schedules.md#settings-of-an-interval).
@@ -140,4 +140,4 @@ Timerify trusts what the device accepts. A settings call that returns without an
 | Water heater | Temperature | From the entity's minimum to its maximum temperature. The heater must be able to set a target temperature. |
 | Water heater | Operation mode | One of the entity's operation modes, except off. The heater must support operation modes. |
 
-Other kinds of devices have no settings. If you ask for a setting that the device does not have, Timerify refuses. Timerify does not check the temperature step that the entity reports. A device may round 22.3 to 22.5.
+Other kinds of devices have no settings. If you ask for a setting that the device does not have, Timerify refuses. Timerify does not check the temperature step that the entity reports. A device may round 22.3 to 22.5. The names of these settings in YAML are on the [Actions](services.md#settings) page.

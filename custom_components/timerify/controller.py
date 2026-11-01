@@ -1019,11 +1019,12 @@ class TargetController:
         take, and take a warning away when the target takes them again.
 
         There is one warning per interval, which names all its settings by the labels
-        of the interval form, in the language of the house. It is changed only when its
-        names or its interval do, so a report that changes nothing costs nothing. It is
-        updated in place, which keeps an Ignore of the user, unless the interval gained
-        a setting that the warning does not name: that one is raised as new, so that
-        the Ignore does not hide it.
+        of the interval form, in the language of the house; a name the form has no
+        label for, which a hand edit of the stored interval can leave, stands for
+        itself. It is changed only when its names or its interval do, so a report that
+        changes nothing costs nothing. It is updated in place, which keeps an Ignore of
+        the user, unless the interval gained a setting that the warning does not name:
+        that one is raised as new, so that the Ignore does not hide it.
         """
         if self._settings_judged():
             return
@@ -1057,7 +1058,9 @@ class TargetController:
                 self._entry,
                 subentry,
                 names,
-                ", ".join(texts[f"{_SETTING_LABELS}.{name}"] for name in names),
+                ", ".join(
+                    texts.get(f"{_SETTING_LABELS}.{name}", name) for name in names
+                ),
             )
             self._settings_warned[subentry_id] = names
 

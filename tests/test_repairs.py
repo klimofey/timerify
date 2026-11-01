@@ -11,6 +11,7 @@ setting that an interval turns it on with, a warning names the interval and the 
 for as long as the air conditioner does not take it; it has nothing to submit.
 """
 
+import logging
 from http import HTTPStatus
 from types import MappingProxyType
 from typing import Any
@@ -1013,6 +1014,36 @@ async def test_only_the_interval_that_has_the_lost_setting_is_named(
     assert settings_not_taken_issue(hass, entry, cooling) is not None
     assert settings_not_taken_issue(hass, entry, heating) is None
     assert settings_not_taken_issue(hass, entry, plain) is None
+
+
+async def test_a_setting_no_form_knows_is_named_by_its_own_name(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A hand edit of the stored interval leaves a setting that no form has a label
+    for. The AC cannot be turned on with it, so the warning names it as it is called,
+    and the log has no error."""
+    entry = await setup_target(target=AC_ID)
+    subentry_id = await add_interval(
+        hass, entry, start="06:30", end="07:15", settings=COOL24
+    )
+    subentry = entry.subentries[subentry_id]
+
+    hass.config_entries.async_update_subentry(
+        entry,
+        subentry,
+        data={**subentry.data, "settings": {**COOL24, "swing_mode": "on"}},
+    )
+    await hass.async_block_till_done()
+    await fake_climate.set_state("off")
+
+    issue = settings_not_taken_issue(hass, entry, subentry_id)
+    assert issue is not None
+    assert issue.translation_placeholders is not None
+    assert issue.translation_placeholders["settings"] == "swing_mode"
+    assert [r.getMessage() for r in caplog.records if r.levelno >= logging.ERROR] == []
 
 
 async def test_the_warning_names_the_settings_in_the_language_of_the_house(

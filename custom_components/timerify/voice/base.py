@@ -24,7 +24,7 @@ from homeassistant.util import language as language_util
 from ..const import DOMAIN, VOICE_LANGUAGES, is_voice_options
 from ..controller import TimerifyConfigEntry
 from ..core import remaining_minutes
-from ..domains import SETTING_KINDS, voice_settings
+from ..domains import SETTING_KINDS, actual_state, voice_settings
 from ..target import target_name
 
 DEFAULT_LANGUAGE = "en"
@@ -247,11 +247,12 @@ def timer_slots(
     hass: HomeAssistant, entry: TimerifyConfigEntry, now: datetime
 ) -> dict[str, Any]:
     """What an answer says about a timer: `target` is its name, `state` is `counting`
-    while the countdown runs, `open` while the target is on without one and `off`
-    otherwise; the time left as `left_total` minutes, rounded up, and as
-    `left_hours` and `left_minutes`; and while it counts, `ends_at` and
-    `ends_in_days` (see `clock_slots`). Whether the target is on without a countdown is
-    what the controller's `wanted_running` says, as for "turn off in N"."""
+    while the countdown runs, `open` while the target is on without one, `unavailable`
+    while it is not wanted on and the target is away (unavailable, unknown or missing,
+    as `actual_state` judges it), and `off` otherwise; the time left as `left_total`
+    minutes, rounded up, and as `left_hours` and `left_minutes`; and while it counts,
+    `ends_at` and `ends_in_days` (see `clock_slots`). Whether the target is on without a
+    countdown is what the controller's `wanted_running` says, as for "turn off in N"."""
     controller = entry.runtime_data
     snapshot = controller.snapshot
     left_total = remaining_minutes(snapshot, now)
@@ -273,8 +274,11 @@ def timer_slots(
     # The target is on without a timer when it is wanted on, as the timer judges it: a
     # turn-on that the target has not shown yet counts, and a turn-off that it has not
     # shown yet does not.
-    on = controller.wanted_running(now)
-    return {**slots, "state": "open" if on else "off"}
+    if controller.wanted_running(now):
+        return {**slots, "state": "open"}
+    # Nothing is wanted on, but a target that does not answer is not known to be off.
+    away = actual_state(hass.states.get(controller.target_entity_id)) == "unavailable"
+    return {**slots, "state": "unavailable" if away else "off"}
 
 
 class TimerifyIntentHandler(intent.IntentHandler):

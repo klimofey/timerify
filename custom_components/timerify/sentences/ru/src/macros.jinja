@@ -42,7 +42,10 @@
 {%- endmacro -%}
 
 {#- Where a timer stands after it was run, extended or stopped, from the slots a handler
-    gives: counting, on without a timer, or off. The name goes first, since it cannot be
+    gives: counting, on without a timer, or off. A command's answer gives the wish it
+    set, whatever the target shows, so a target that is unavailable after a stop (state
+    "unavailable") is answered off on purpose; the answer to a question about the timer
+    is the one that says unavailable. The name goes first, since it cannot be
     declined. -#}
 {%- macro timer_now(slots) -%}
   {%- if slots.state == "counting" -%}

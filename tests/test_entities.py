@@ -31,6 +31,7 @@ from .helpers import (
     payload,
     record_writes,
     set_number,
+    start_set_number,
     state_of,
     storage_key,
 )
@@ -245,11 +246,11 @@ async def test_stopping_while_the_target_is_still_switching_on(
     setup_target: SetupTarget,
 ) -> None:
     """A slow device is not overtaken: the stop waits, then the target ends up off."""
-    controller = (await setup_target()).runtime_data
+    await setup_target()
     slow = fake_target.hold_next_call()
-    start = asyncio.ensure_future(controller.async_set_minutes(30))
+    start = start_set_number(hass, NUMBER, 30)
     await slow.reached.wait()
-    stop = asyncio.ensure_future(controller.async_set_minutes(0))
+    stop = start_set_number(hass, NUMBER, 0)
     hass.loop.call_soon(slow.release.set)  # after `stop` has queued behind `start`
 
     await asyncio.gather(start, stop)
@@ -268,12 +269,12 @@ async def test_starting_again_while_the_target_is_still_switching_off(
     setup_target: SetupTarget,
 ) -> None:
     """The report of our own turn_off does not cancel a timer started after it."""
-    controller = (await setup_target()).runtime_data
+    await setup_target()
     await set_number(hass, NUMBER, 10)
     slow = fake_target.hold_next_call()
-    stop = asyncio.ensure_future(controller.async_set_minutes(0))
+    stop = start_set_number(hass, NUMBER, 0)
     await slow.reached.wait()
-    start = asyncio.ensure_future(controller.async_set_minutes(30))
+    start = start_set_number(hass, NUMBER, 30)
     hass.loop.call_soon(slow.release.set)  # after `start` has queued behind `stop`
 
     await asyncio.gather(stop, start)
@@ -291,14 +292,7 @@ async def test_entities_show_the_new_timer_while_the_device_is_still_answering(
     move at once, the target follows when it has switched."""
     await setup_target()
     slow = fake_target.hold_next_call()
-    setting = hass.async_create_task(
-        hass.services.async_call(
-            "number",
-            "set_value",
-            {"entity_id": NUMBER, "value": 10},
-            blocking=True,
-        )
-    )
+    setting = start_set_number(hass, NUMBER, 10)
     await slow.reached.wait()
 
     assert state_of(hass, NUMBER) == "10"
@@ -456,7 +450,7 @@ async def test_unloaded_entry_stays_quiet_after_a_slow_call_ends(
     entry = await setup_target()
     key = storage_key(entry)
     slow = fake_target.hold_next_call()
-    start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(30))
+    start = start_set_number(hass, NUMBER, 30)
     await slow.reached.wait()
     hass.states.async_set(TARGET_ID, "on")  # a report queued behind the slow call
     await hass.config_entries.async_unload(entry.entry_id)
@@ -566,9 +560,9 @@ async def test_hung_turn_on_is_given_up_and_retried(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A device that never answers is given up on like one that rejects the call."""
-    controller = (await setup_target()).runtime_data
+    await setup_target()
     slow = fake_target.hold_next_call()
-    start = asyncio.ensure_future(controller.async_set_minutes(10))
+    start = start_set_number(hass, NUMBER, 10)
     await slow.reached.wait()
 
     freezer.tick(timedelta(seconds=30))

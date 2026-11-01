@@ -137,8 +137,13 @@ describe("a setting of a pending command", () => {
       `${attribute} of ${entity.entity_id}: ${value}`;
     return hass;
   }
-  const settingOf = (hass: FakeHass, key: string, value: unknown) =>
-    settingText(hass, hass.states[AC], key, value);
+  /** `percentSettings` is what the timer's answer lists as percentages: nothing, for the AC. */
+  const settingOf = (
+    hass: FakeHass,
+    key: string,
+    value: unknown,
+    percentSettings: readonly string[] = [],
+  ) => settingText(hass, hass.states[AC], percentSettings, key, value);
 
   it("names a mode as the target names its states", () => {
     const hass = formattingHass();
@@ -146,20 +151,35 @@ describe("a setting of a pending command", () => {
     expect(settingOf(hass, "hvac_mode", "cool")).toBe("state of climate.ac: cool");
   });
 
-  it("writes a percentage as the user's language writes percentages", () => {
+  it("writes a percentage the timer lists as the user's language writes percentages", () => {
     for (const language of ["en", "ru"] as const) {
       const hass = formattingHass(language);
       const percent = new Intl.NumberFormat(language, { style: "percent" });
 
       for (const key of ["brightness_pct", "percentage", "humidity"]) {
-        expect(settingOf(hass, key, 80), `${key} in ${language}`).toBe(percent.format(0.8));
+        expect(settingOf(hass, key, 80, [key]), `${key} in ${language}`).toBe(percent.format(0.8));
       }
     }
-    expect(settingOf(formattingHass(), "brightness_pct", 80)).toBe("80%");
+    expect(settingOf(formattingHass(), "brightness_pct", 80, ["brightness_pct"])).toBe("80%");
   });
 
   it("keeps the fraction of a brightness that was not a whole number", () => {
-    expect(settingOf(formattingHass(), "brightness_pct", 37.5)).toBe("37.5%");
+    expect(settingOf(formattingHass(), "brightness_pct", 37.5, ["brightness_pct"])).toBe("37.5%");
+  });
+
+  it("writes a percentage only for what the timer lists, whatever the setting is called", () => {
+    const hass = formattingHass();
+
+    // Not a name the card has ever heard of: only the timer's answer makes it one.
+    expect(settingOf(hass, "level", 40, ["level"])).toBe("40%");
+    // The names of the percentages of a light, a fan and a humidifier mean nothing to the
+    // card of a timer that does not list them.
+    for (const key of ["brightness_pct", "percentage", "humidity"]) {
+      expect(settingOf(hass, key, 40), key).toBe(`${key} of climate.ac: 40`);
+    }
+    expect(settingOf(hass, "brightness_pct", 40, ["percentage"])).toBe(
+      "brightness_pct of climate.ac: 40",
+    );
   });
 
   it("leaves every other setting to Home Assistant's way of writing the attribute", () => {
@@ -179,9 +199,10 @@ describe("a setting of a pending command", () => {
   it("says the value as it is when the target has no state to write it with", () => {
     const hass = formattingHass();
 
-    expect(settingText(hass, undefined, "hvac_mode", "cool")).toBe("cool");
-    expect(settingText(hass, undefined, "temperature", 24)).toBe("24");
-    expect(settingText(hass, undefined, "humidity", 55)).toBe(
+    expect(settingText(hass, undefined, [], "hvac_mode", "cool")).toBe("cool");
+    expect(settingText(hass, undefined, [], "temperature", 24)).toBe("24");
+    expect(settingText(hass, undefined, [], "brightness_pct", 40)).toBe("40");
+    expect(settingText(hass, undefined, ["humidity"], "humidity", 55)).toBe(
       new Intl.NumberFormat("en", { style: "percent" }).format(0.55),
     );
   });

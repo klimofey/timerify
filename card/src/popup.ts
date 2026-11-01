@@ -539,7 +539,7 @@ export class TimerifyCardPopup extends LitElement {
         <ul>
           ${commands.map((command, index) => {
             const settings = command.settings.map(([key, value]) =>
-              settingText(hass, view.target, key, value),
+              settingText(hass, view.target, info.percent_settings, key, value),
             );
             return html`
               <li>

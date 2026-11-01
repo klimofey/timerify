@@ -581,7 +581,7 @@ describe("the pending commands", () => {
     const info = acTimer().info;
     const turnOn: Command = { ...TURN_ON, settings: { preset_mode: "sleep", percentage: 40 } };
     const hass = fakeHass({
-      timers: [{ ...acTimer(), info: { ...info, target: fan } }],
+      timers: [{ ...acTimer(), info: { ...info, target: fan, percent_settings: ["percentage"] } }],
       timeFormat: "24",
       states: { [fan]: { state: "off", attributes: { friendly_name: "Fan" } } },
     }).state(AC_NEXT_COMMAND, TURN_ON.at, { commands: [turnOn] });

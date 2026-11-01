@@ -91,23 +91,22 @@ export function formatMinutes(hass: Locale, minutes: number): string {
   return parts.join(" ");
 }
 
-/** The settings that are a share of something, given as a number from 0 to 100. */
-const PERCENT_SETTINGS = new Set(["brightness_pct", "percentage", "humidity"]);
-
 /**
  * One setting of a pending command, as the user reads it. Home Assistant knows how to say
  * the rest: a thermostat's mode in the words of its states, a temperature with its unit, a
  * fan's or humidifier's mode in the words the integration gives it. Only a share of
- * something is written here, as the user's language writes percentages. A target that has no
- * state has nothing to say them with, and the value is told as it is.
+ * something is written here, as the user's language writes percentages; which settings are
+ * one, the timer says (`percentSettings`). A target that has no state has nothing to say
+ * them with, and the value is told as it is.
  */
 export function settingText(
   hass: HomeAssistant,
   target: HassEntity | undefined,
+  percentSettings: readonly string[],
   key: string,
   value: unknown,
 ): string {
-  if (PERCENT_SETTINGS.has(key) && typeof value === "number") {
+  if (percentSettings.includes(key) && typeof value === "number") {
     return new Intl.NumberFormat(hass.locale.language, {
       style: "percent",
       // A brightness may be given to a tenth of a percent.

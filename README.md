@@ -9,7 +9,7 @@ off when the countdown ends.
 
 ![The device page of a timer: Run for and Ends at, with a countdown running](docs/screenshots/phase-1-device-page.png)
 
-> **Status:** version 0.6.0, the sixth phase. The core timer, settings for turning on
+> **Status:** version 1.0.0, the first release. The core timer, settings for turning on
 > ("cooling, 24 degrees"), pending commands ("turn on in 15 minutes"), weekly schedules
 > ("working days 06:30 to 07:15"), voice control through Assist ("turn on the boiler for
 > 10 minutes", "how long is left on the boiler"), a dashboard card and a runtime counter
@@ -79,12 +79,13 @@ those other entities, and groups, on and off through `homeassistant.turn_on` and
 ### Entities
 
 All of them sit on the target's device. A target that is on no device gets a device named
-after it.
+after it; if the target is linked to a device later, the entities move to that device with
+their names and entity ids, and the device that was made for them is removed.
 
 | Entity | What it shows |
 | --- | --- |
 | `number` Run for | Minutes left, rounded up. Writing it starts, changes or stops the countdown. |
-| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs, or when the countdown began before version 0.5.0); the card's fill is drawn from it. |
+| `sensor` Ends at | The moment the countdown ends; unknown while no countdown runs. The dashboard shows it as "in 7 minutes" by itself. Its attribute `started_at` is the moment the countdown began (empty while none runs); the card's fill is drawn from it. |
 | `sensor` Next command | The moment the next pending command is due; unknown while there is none. See [Next command sensor](#next-command-sensor). |
 | `switch` Schedule *06:30–07:15, Sun–Thu* | One per schedule interval: on while the interval is in use, off to skip it. See [The switch of an interval](#the-switch-of-an-interval). |
 | `sensor` Runtime | Only when you ask for it: the minutes the target was on, a total that only goes up. See [Runtime counter](#runtime-counter). |
@@ -254,7 +255,10 @@ The Workday sensor belongs to the timer. If your house has one, the last step of
 timer asks for it, and the first interval you add then offers working days from the start.
 To set it, change it or take it away later, open the timer's entry and choose **Configure**;
 the sensor is the last step. It is optional, and a timer without one has weekday intervals
-only.
+only. If you rename the sensor, the timer follows it to the new entity id and reloads, and
+a window that is open stays open. If you delete the sensor, the timer keeps its id and
+waits as it does for a sensor that is away (below) until you pick another one in
+**Configure**.
 
 - **Use a sensor with a days offset of 0**, the default of the Workday integration. Timerify
   asks the sensor about the day an interval starts on and takes its answer as it is: a
@@ -274,10 +278,6 @@ only.
   that says which sensor and why. Timerify tries again whenever the sensor changes or
   reports, which the Workday integration does at every midnight; when it answers, a window
   that is open is run for its remainder. Intervals of weekdays do not depend on the sensor.
-- **A renamed Workday sensor is not followed.** Timerify keeps the sensor by its entity id,
-  and unlike the target it does not follow a rename. After renaming the sensor the working-day
-  intervals wait and the log says the sensor could not be asked; open **Configure** on the
-  timer and pick the sensor again.
 
 ### Windows
 
@@ -525,7 +525,8 @@ a colon.
 What each does:
 
 - **How long is left** says the time left and when the target turns off, or that it is
-  off, or on without a timer.
+  off or unavailable, or on without a timer. It says "unavailable" for a target that
+  does not answer (unavailable or unknown) when no timer wants it on.
 - **Run for a time** is the same as setting "Run for": the countdown is that long, from
   one minute to 24 hours, and replaces the one that runs. Said longer, as far as a week
   ("for 30 hours"; minutes beyond a day in digits, "for 2000 minutes"), the sentence is
@@ -592,7 +593,8 @@ The answers are in the language of the request: a regional language such as `en-
 the sentences of its language, and one Timerify has no texts for is answered in English.
 An answer says what the timer is set to do: while a command waits for an unavailable
 target, or a device has ignored one, the answer still gives the wish, and the log has the
-rest.
+rest. The question about the time left is the exception when nothing is wanted on: then
+it says what the target shows, off or unavailable.
 
 A few things work the way Home Assistant does, not Timerify:
 
@@ -718,9 +720,7 @@ about the exposed ones.
 
 Timerify's own entities, the `number`, the sensors and the interval switches, are not
 exposed by default: the switch of an interval is an entity of the configuration category,
-which Home Assistant leaves out. An interval switch that Home Assistant already decided
-to expose before version 0.4.0 stays exposed; take it away under **Settings > Voice
-assistants > Expose**.
+which Home Assistant leaves out.
 
 ### LLM agents
 
@@ -731,7 +731,7 @@ refusal comes back as text in the language of the request.
 
 | Tool | What it does |
 | --- | --- |
-| `timerify__time_left` | How long is left, and when the device turns off. |
+| `timerify__time_left` | How long is left, and when the device turns off; or that it is off, unavailable, or on without a timer. |
 | `timerify__run` | Turn on for `hours` and `minutes` (neither: a device that is off runs for the usual time, and one that is running keeps its countdown), with settings. |
 | `timerify__add_time` | Add `hours` and `minutes` to the countdown. |
 | `timerify__stop` | Stop the timer and turn the device off. |
@@ -781,7 +781,9 @@ Refresh the page once more and the card is there. This is a fault of Home Assist
 ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890)) that
 every such card meets. It is fixed in the frontend from version 20261028.0 on
 ([pull request #54444](https://github.com/home-assistant/frontend/pull/54444)), which Home
-Assistant 2026.11 is expected to carry. Timerify does not work around it.
+Assistant 2026.11 is expected to carry. Timerify does not work around it. Version 1.0.0
+still needs only Home Assistant 2026.10.4; raising the minimum to 2026.11 would remove the
+problem ([issue #7](https://github.com/klimofey/timerify/issues/7)).
 
 ### The two layouts
 
@@ -806,13 +808,15 @@ below. The round tile has no chip, and it can be long-pressed; see
   shows a full fill and a full ring; the pill says the state of the target in words, and the
   round tile has them for screen readers only. An idle timer shows an empty fill and an empty
   ring.
-- A countdown that began before Timerify was updated to 0.5.0 has no recorded beginning: its
-  fill stays full until the countdown ends or is set again.
 - A timer whose number is unavailable shows that, and its chip, presets, plus, minus, Stop and
   cancel buttons are off (see [The pop-up](#the-pop-up)). If the
   entity of the card does not exist, or is not the "Run for" number of a Timerify timer, the card
   says so and names it, and finds its timer again by itself when the entity is back. After you
-  rename the number, point the card at its new entity id.
+  rename the number, point the card at its new entity id. If the number is a timer's but the
+  timer cannot be shown, because its target or one of its two sensors is missing from the
+  registry, the card says that and sends you to the timer's page to see why, whatever the
+  state of the number. Right after you add a timer the line can show for a moment, and it
+  goes away by itself.
 - The card never goes quiet when it cannot work. A user who may not see the timer is told so
   (see [Permissions](#permissions)). The card needs the timer's two sensors, **Ends at** and
   **Next command**, and tells you when you have disabled one of them. With **Ends at**
@@ -944,7 +948,9 @@ entities, and everything it does is a call to a service or an entity of Timerify
 
 To tell which entities belong to its timer, the card asks Timerify through a websocket command,
 `timerify/timer`, which answers from the entry and the registry alone, so it gets an answer even
-while the timer is starting. Nothing counts down on the server for the card. The card counts
+while the timer is starting. The answer also names the settings of the target that are
+percentages, so that the card writes a brightness or a fan speed of 40 as a percentage and not
+as a bare number. Nothing counts down on the server for the card. The card counts
 once a second, only while a countdown runs and the card is on the page, with the browser's clock
 against the end time that the server reports. A clock that is wrong therefore changes the time
 left, never below 0:00, and the fill stays between empty and full; the end time shown, such as
@@ -1061,11 +1067,14 @@ default duration or the Workday sensor later, open the timer on the Timerify int
 and choose **Configure**. The entity itself cannot be changed: add a timer for the other entity
 instead. Schedule intervals are added on the same page; see [Schedules](#schedules).
 
-Renaming the target, or moving it to another device, is followed: the timer keeps running.
+Renaming the target, moving it to another device, or giving it a device when it had none is
+followed: the timer keeps running.
 
 ## What is not here yet
 
-Every feature planned for Timerify is built. What cannot be said to Assist is listed under
+Every feature planned for Timerify is built. Known faults and wishes are
+[GitHub issues](https://github.com/klimofey/timerify/issues), and `docs/followups.md` lists
+them by area. What cannot be said to Assist is listed under
 [What is not by voice](#what-is-not-by-voice), what the card leaves to the timer's page
 (creating and editing schedule intervals) under [The pop-up](#the-pop-up), and what the
 runtime counter leaves out (a reset, and a place on the card) under
@@ -1073,11 +1082,12 @@ runtime counter leaves out (a reset, and a place on the card) under
 
 ## Verification
 
-What 0.6.0 was checked with before release:
+What 1.0.0 was checked with before release:
 
 - The test suite (`uv run pytest`): every rule above is a scenario, with time moved
   explicitly, among them the days the clock changes, Home Assistant down overnight, a
-  Workday sensor that is away, and the real Workday integration for the Israeli week. The
+  Workday sensor that is away or renamed, a target that is given a device while Home
+  Assistant runs or is down, and the real Workday integration for the Israeli week. The
   voice sentences are said to Home Assistant's real built-in agent, in both languages, and
   the LLM tools are called through the real Assist API; the sentence files are generated
   from their sources and checked against the shipped ones. The beginning of a countdown
@@ -1114,6 +1124,14 @@ What 0.6.0 was checked with before release:
   meant to and leave the switch in the state the REST API reports. The first timer is
   added with the runtime counter ticked, and after its 2 minute run its Runtime sensor
   reads 2 minutes, in minutes, as a total that only goes up.
+- A manual walk-through in a real Home Assistant 2026.10.4 container, through the browser;
+  its screenshots are in `docs/screenshots/smoke-*.png`. It covered the
+  integration page at 1.0.0 with its icon, adding a timer with the runtime counter, a
+  countdown running, and a countdown kept across a restart of Home Assistant (the target
+  was an `input_boolean`, which restores its state; a demo switch does not, and the timer
+  clears the countdown of a target that is no longer on). It went on to a schedule interval
+  that turned the target on at its start, two Assist sentences said to the built-in agent,
+  and the card in the pill and in the round layout.
 
 ## Development
 

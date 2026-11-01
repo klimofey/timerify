@@ -1,7 +1,5 @@
 """What Home Assistant's long-term statistics make of the Runtime sensor."""
 
-import logging
-from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
@@ -14,8 +12,8 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
     statistics_during_period,
 )
 
-from .conftest import FakeTarget, SetupTarget
-from .helpers import (
+from ..conftest import FakeTarget, SetupTarget
+from ..helpers import (
     RUNTIME,
     SUNDAY,
     advance,
@@ -25,25 +23,6 @@ from .helpers import (
 )
 
 MONDAY = SUNDAY + timedelta(days=1)
-
-
-@pytest.fixture(autouse=True)
-def auto_enable_custom_integrations(
-    recorder_db_url: str, enable_custom_integrations: None
-) -> None:
-    """Let Home Assistant load integrations from custom_components/, after the
-    recorder's database is ready; see `tests/test_recorder.py`."""
-
-
-@pytest.fixture(autouse=True)
-def quiet_sql_engine() -> Iterator[None]:
-    """Keep the SQL the recorder runs out of the test output; see
-    `tests/test_recorder.py`."""
-    engine = logging.getLogger("sqlalchemy.engine")
-    level = engine.level
-    engine.setLevel(logging.WARNING)
-    yield
-    engine.setLevel(level)
 
 
 async def test_a_run_across_midnight_is_split_between_the_days(

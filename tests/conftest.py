@@ -275,7 +275,9 @@ class FakeTarget:
 
         A domain has one set of services for all its entities, so a call for an entity
         of Timerify's own (the switch of an interval) goes on to the service that was
-        there before, which is the domain's own.
+        there before, which is the domain's own. For the same reason the fake that
+        provided its services last takes the calls of every other entity of its
+        domain, so a test with two targets uses two domains.
         """
         domain, _ = split_entity_id(self.entity_id)
         for service, obey in services.items():
@@ -416,6 +418,27 @@ class FakeWorkday:
         """Rewrite the state of the sensor as it is, and let everything that follows
         settle."""
         self.write()
+        await self.hass.async_block_till_done()
+
+    async def rename(self, new_entity_id: str) -> None:
+        """Give the sensor another entity id, as the user does in its settings: the
+        registry entry moves, the entity takes its state to the new id and answers the
+        service for it, and everything that follows settles."""
+        old_entity_id, self.entity_id = self.entity_id, new_entity_id
+        er.async_get(self.hass).async_update_entity(
+            old_entity_id, new_entity_id=new_entity_id
+        )
+        self.hass.states.async_remove(old_entity_id)
+        self.write()
+        await self.hass.async_block_till_done()
+
+    async def remove(self) -> None:
+        """Delete the sensor, as the user does in its settings: the registry entry and
+        the state go, and the service, which stays, finds no entity to answer for.
+        Everything that follows settles."""
+        er.async_get(self.hass).async_remove(self.entity_id)
+        self._available = False
+        self.hass.states.async_remove(self.entity_id)
         await self.hass.async_block_till_done()
 
     def fail_next_call(self, error: Exception | None = None) -> None:

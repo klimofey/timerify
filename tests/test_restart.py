@@ -4,7 +4,6 @@ A restart is simulated the two ways it shows: the storage file an earlier run le
 is there before the entry is set up, or the entry is unloaded and set up again.
 """
 
-import asyncio
 from datetime import datetime, timedelta
 from typing import Any, Final, Literal
 from zoneinfo import ZoneInfo
@@ -40,6 +39,8 @@ from .helpers import (
     restart,
     saved,
     set_number,
+    start_call_service,
+    start_set_number,
     state_of,
     storage_key,
     window_json,
@@ -552,8 +553,13 @@ async def test_owed_settings_are_stored_until_the_ac_confirms_them(
     meanwhile applies them again."""
     entry = await setup_target(target=AC_ID)
     slow = fake_climate.hold_next_call()
-    start = asyncio.ensure_future(
-        entry.runtime_data.async_run(60, {"hvac_mode": "cool", "temperature": 24})
+    start = start_call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=60,
+        hvac_mode="cool",
+        temperature=24,
     )
     await slow.reached.wait()
 
@@ -734,7 +740,7 @@ async def test_timer_is_saved_before_a_slow_service_call_ends(
     """A timer is stored as soon as it is set, not when the device finally answers."""
     entry = await setup_target()
     slow = fake_target.hold_next_call()
-    start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(45))
+    start = start_set_number(hass, NUMBER, 45)
     await slow.reached.wait()
 
     assert saved(hass_storage, entry) == payload(
@@ -761,7 +767,7 @@ async def test_timer_set_during_a_slow_call_survives_a_restart(
     """
     entry = await setup_target()
     slow = fake_target.hold_next_call()
-    start = asyncio.ensure_future(entry.runtime_data.async_set_minutes(30))
+    start = start_set_number(hass, NUMBER, 30)
     await slow.reached.wait()
     await hass.config_entries.async_unload(entry.entry_id)
     slow.release.set()  # the device switches on although nobody is listening

@@ -175,6 +175,8 @@ responses:
           {{ slots.target }}: {{ verb }} {{ parts | join(" и ") }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
         {%- elif slots.state == "open" -%}
           {{ slots.target }}: включено без таймера.
+        {%- elif slots.state == "unavailable" -%}
+          {{ slots.target }}: недоступно, таймера нет.
         {%- else -%}
           {{ slots.target }}: выключено, таймера нет.
         {%- endif -%}

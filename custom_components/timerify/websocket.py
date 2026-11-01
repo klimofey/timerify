@@ -20,6 +20,16 @@ It also says which of the two sensors are disabled. A disabled entity has no sta
 which looks like an entity that has not started yet, and only the registry tells them
 apart; the card draws the countdown from one and the pending commands from the other,
 and tells the user which one it misses instead of staying silent.
+
+A number that is not a timer's is answered `not_found`. A number that is a timer's, but
+whose timer cannot be told of, is answered `timer_incomplete`: either its target was
+stored by registry id and that id is gone, or one of its two sensors is not in the
+entity registry. The registry keeps a timer's entities across restarts and reloads, so a
+sensor is missing only for a moment while a new timer is set up for the first time, and
+after it was deleted from the entity registry, until the timer is set up again. The card
+must not tell the user that a number is no timer's when it is. A target stored as an
+entity id resolves whether or not the entity exists, so a timer with such a target is
+told of as usual.
 """
 
 from typing import Any, Final, Literal, TypedDict
@@ -56,6 +66,8 @@ from .const import (
 from .domains import behaviour_for
 
 COMMAND: Final = "timerify/timer"
+ERR_TIMER_INCOMPLETE: Final = "timer_incomplete"
+"""The error code for a timer's number whose timer cannot be told of."""
 
 
 class IntervalInfo(TypedDict):
@@ -90,6 +102,10 @@ class TimerInfo(TypedDict):
     """The intervals in the order they were added; one with no switch in the registry
     is left out."""
     target_on: OnRuleInfo
+    percent_settings: list[str]
+    """The settings of the target's domain that are a share of something, from 0 to
+    100, which the card writes with a percent sign, whether or not this entity takes
+    them; none for a switch or a thermostat."""
     disabled_sensors: list[str]
     """The entity ids of the two sensors that are disabled in the registry; none when
     both are enabled. A disabled sensor has no state, so the card cannot tell it from
@@ -127,6 +143,9 @@ def _handle_timer(
     except _TimerNotFound as err:
         connection.send_error(msg["id"], ERR_NOT_FOUND, str(err))
         return
+    except _TimerIncomplete as err:
+        connection.send_error(msg["id"], ERR_TIMER_INCOMPLETE, str(err))
+        return
     for told in (info["target"], info["ends_at"], info["next_command"]):
         _require_read(user, told)
     readable = set(
@@ -145,7 +164,12 @@ def _require_read(user: User, entity_id: str) -> None:
 
 
 class _TimerNotFound(Exception):
-    """There is no timer to tell of; the message says why."""
+    """The entity is not a timer's number; the message says so."""
+
+
+class _TimerIncomplete(Exception):
+    """The entity is a timer's number, but the timer cannot be told of: what the card
+    needs of it is not in the entity registry. The message says what."""
 
 
 def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
@@ -153,8 +177,9 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
     the registry and the entry alone, whatever state the entry is in.
 
     Raises `_TimerNotFound` when `entity_id` is not such a number (the voice settings
-    have none), or when the timer cannot be told of: it has no target to resolve, or one
-    of its two sensors is not in the registry. A timer that was set up has both sensors.
+    have none). Raises `_TimerIncomplete` when it is one but the timer cannot be told
+    of: it has no target to resolve, or one of its two sensors is not in the registry.
+    A timer that was set up has both sensors.
     """
     registry = er.async_get(hass)
     if (entry := _entry_of_number(hass, registry, entity_id)) is None:
@@ -163,14 +188,15 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
         )
     target = er.async_resolve_entity_id(registry, entry.options[CONF_TARGET])
     if target is None:
-        raise _TimerNotFound(
+        raise _TimerIncomplete(
             f"The target of the Timerify timer of {entity_id}"
             " is not in the entity registry"
         )
     ends_at = _sensor(registry, entry, entity_id, KEY_ENDS_AT)
     next_command = _sensor(registry, entry, entity_id, KEY_NEXT_COMMAND)
     mode: Mode = entry.options[CONF_MODE]
-    on_rule = behaviour_for(target).on_rule
+    behaviour = behaviour_for(target)
+    on_rule = behaviour.on_rule
     return TimerInfo(
         entry_id=entry.entry_id,
         target=target,
@@ -182,6 +208,7 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
         next_command=next_command.entity_id,
         intervals=_intervals(registry, entry),
         target_on=OnRuleInfo(match=on_rule.match, states=sorted(on_rule.states)),
+        percent_settings=sorted(behaviour.percent_setting_names),
         disabled_sensors=[
             sensor.entity_id for sensor in (ends_at, next_command) if sensor.disabled
         ],
@@ -209,14 +236,14 @@ def _sensor(
     """The registry entry of the sensor of the timer that has the key `key`, which every
     timer that was set up has.
 
-    Raises `_TimerNotFound` when the registry has none; `number` is the timer's, for
+    Raises `_TimerIncomplete` when the registry has none; `number` is the timer's, for
     the message.
     """
     entity_id = registry.async_get_entity_id(
         Platform.SENSOR, DOMAIN, timer_unique_id(entry.entry_id, key)
     )
     if entity_id is None or (sensor := registry.async_get(entity_id)) is None:
-        raise _TimerNotFound(
+        raise _TimerIncomplete(
             f"The Timerify timer of {number} has no {key} sensor in the entity registry"
         )
     return sensor

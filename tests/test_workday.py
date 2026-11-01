@@ -21,6 +21,7 @@ from homeassistant.components import workday
 from homeassistant.config_entries import ConfigEntryState, ConfigSubentryData
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.util.json import json_loads_object
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -31,6 +32,7 @@ from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
     CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
     DOMAIN,
     WINDOW_SEARCH_DAYS,
     DaysMode,
@@ -38,7 +40,14 @@ from custom_components.timerify.const import (
 )
 from custom_components.timerify.schedule import Interval, workday_window
 
-from .conftest import NO_ENTITY_MATCHED, FakeTarget, FakeWorkday, SetupTarget
+from .conftest import (
+    NO_ENTITY_MATCHED,
+    SWITCH_SERVICES,
+    FakeTarget,
+    FakeWorkday,
+    ProvideTarget,
+    SetupTarget,
+)
 from .helpers import (
     JERUSALEM,
     NUMBER,
@@ -74,6 +83,9 @@ WORKING_DAYS_SWITCH = "switch.boiler_schedule_06_30_07_15_working_days"
 
 NOT_ASKED = "Could not ask binary_sensor.workday_sensor whether"
 """How the warning about a day the sensor could not answer for begins."""
+
+RENAMED_SENSOR = "binary_sensor.workday"
+"""The entity id the user gives the Workday sensor in the scenarios of a rename."""
 
 WINDOW_STARTED_WHILE_UNAVAILABLE = (
     "A schedule window of switch.boiler started while it is unavailable;"
@@ -1073,6 +1085,132 @@ async def test_switching_on_while_the_sensor_is_slow(
         assert len(saved(hass_storage, entry)["windows"]) == 1
 
 
+# --- The sensor is renamed or removed -----------------------------------------------
+
+
+async def test_renaming_the_workday_sensor_follows_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The user renames the sensor on Sunday morning: the timer keeps the new id in its
+    options, asks about Monday when Sunday's window is over, and starts Monday's window
+    at its time, with nothing in the log about a sensor that cannot be found."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+
+    await fake_workday.rename(RENAMED_SENSOR)
+
+    assert entry.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert entry.state is ConfigEntryState.LOADED
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    await advance_to(hass, freezer, local(MONDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert state_of(hass, SENSOR) == iso(MONDAY, "07:15")
+    assert timerify_warnings(caplog) == []
+    assert "did not match any entities" not in caplog.text
+
+
+async def test_renaming_the_workday_sensor_keeps_an_open_window(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler is running its morning window when the sensor is renamed: the timer
+    reloads, the boiler stays on, nothing is sent to it, and the window ends at its
+    time."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    assert fake_target.calls == [TURN_ON]
+
+    await fake_workday.rename(RENAMED_SENSOR)
+
+    assert entry.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert entry.state is ConfigEntryState.LOADED
+    assert fake_target.calls == [TURN_ON]
+    assert fake_target.state == "on"
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert fake_target.state == "off"
+
+
+async def test_one_workday_sensor_shared_by_two_timers_follows_a_rename(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The boiler and the attic fan ask the same Workday sensor and the user renames it
+    once: both timers keep the new id in their options and stay loaded, and the
+    working-day window of each still opens on Sunday and ends at its time."""
+    fan = provide_target("fan.attic", SWITCH_SERVICES, name="Attic fan")
+    boiler = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    fan_timer = await setup_target(
+        target=fan.entity_id, workday_sensor=fake_workday.entity_id
+    )
+    await add_interval(hass, boiler, days="workdays", start="06:30", end="07:15")
+    await add_interval(hass, fan_timer, days="workdays", start="06:30", end="07:15")
+
+    await fake_workday.rename(RENAMED_SENSOR)
+
+    assert boiler.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert fan_timer.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert boiler.state is ConfigEntryState.LOADED
+    assert fan_timer.state is ConfigEntryState.LOADED
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+    assert fan.calls == [("turn_on", fan.entity_id)]
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, "sensor.attic_fan_ends_at") == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert fan.calls == [("turn_on", fan.entity_id), ("turn_off", fan.entity_id)]
+    assert timerify_warnings(caplog) == []
+
+
+async def test_a_removed_workday_sensor_is_not_followed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The user deletes the sensor: there is no new id to follow, so the option keeps
+    the old one and the timer stays loaded. It behaves as for a sensor that is away,
+    with one line in the log, and the windows it has worked out stay."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    controller = entry.runtime_data
+    caplog.clear()
+
+    await fake_workday.remove()
+
+    assert entry.options[CONF_WORKDAY_SENSOR] == fake_workday.entity_id
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.runtime_data is controller  # It was not reloaded.
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+    (warning,) = timerify_warnings(caplog)
+    assert warning.startswith(NOT_ASKED)
+    assert "did not match any entities" in warning
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON]
+    assert len(timerify_warnings(caplog)) == 1
+
+
 # --- The search for a window --------------------------------------------------------
 
 
@@ -1280,6 +1418,33 @@ async def test_timer_follows_the_real_workday_integration(
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, SENSOR) == iso(holiday, "09:00")
     assert state_of(hass, TARGET_ID) == "on"
+
+
+async def test_real_workday_sensor_that_is_renamed_is_followed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The integration itself takes its sensor to the new entity id when the user
+    renames it, which is what `FakeWorkday.rename` models: the timer follows, and asks
+    the sensor under its new name without a word in the log."""
+    sensor = await real_workday(hass)
+    await open_sunday(hass, freezer)
+    entry = await setup_target(workday_sensor=sensor)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+
+    er.async_get(hass).async_update_entity(sensor, new_entity_id=RENAMED_SENSOR)
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_WORKDAY_SENSOR] == RENAMED_SENSOR
+    assert hass.states.get(sensor) is None
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(MONDAY, "06:30"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF, TURN_ON]
+    assert timerify_warnings(caplog) == []
 
 
 async def test_day_offset_of_the_sensor_shifts_the_days_as_it_answers(

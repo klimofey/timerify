@@ -45,7 +45,7 @@ not repeated beside its successor.
   Such thermostats wait for a later "turn on with a default mode" option.
 - **A target missing at setup fails the entry** with `ConfigEntryError`
   (`target_not_found`), so Home Assistant shows the entry as failed and retries on reload.
-  A target deleted later is not noticed yet; see `docs/followups.md`.
+  A target deleted later is not noticed yet (issue #10).
 
 ### The timer
 
@@ -131,8 +131,8 @@ not repeated beside its successor.
   window that was over, and one that was handed over to a later window wanted nothing,
   so they log nothing. The lines are written by every fold that goes through
   `_fold_due`: the alarm, the refresh of the windows and the switching off of an
-  interval. The fold of start-up and of a report of the target writes none; see
-  `docs/followups.md`. A command dropped because the run it asked for is over is an
+  interval. The fold of start-up and of a report of the target writes none (issue
+  #13). A command dropped because the run it asked for is over is an
   effect of the core (`CommandDropped`) that the controller logs at info level; the core
   stays pure and emits no other signal. Cost if wrong: none.
 
@@ -359,8 +359,8 @@ not repeated beside its successor.
 ### Deferred
 
 - **A deleted target still gives no sign.** The spec is silent and it changes no
-  spec-defined behaviour, so it stays in `docs/followups.md`, under "Later". Cost if wrong:
-  timers of deleted targets stay silent until a later phase.
+  spec-defined behaviour, so it is left to issue #10. Cost if wrong: timers of deleted
+  targets stay silent until it is done.
 
 ## Phase 3: schedules
 
@@ -491,8 +491,8 @@ only the final behaviour is written.
   `check_date` answers a date deterministically, and computing ahead keeps the core pure
   and the alarm single. A Workday configuration changed between computing and the start is
   noticed only when the sensor reports, which it does, since its entry reloads. A time zone
-  changed in YAML and applied with "reload core configuration" fires no such event; see
-  `docs/followups.md`. Cost if wrong: windows in the old zone until the next refresh.
+  changed in YAML and applied with "reload core configuration" fires no such event (issue
+  #14). Cost if wrong: windows in the old zone until the next refresh.
 - **The search horizon is `WINDOW_SEARCH_DAYS = 14`.** A weekday interval always matches
   within 7 days; a Workday-based one with no match is searched again when the sensor
   reports, daily. Cost if wrong: none found.
@@ -512,7 +512,7 @@ only the final behaviour is written.
   then. A window that is kept because its occurrence could not be worked out keeps the
   settings it was worked out with. Cost if wrong: a setting that the target takes again is
   missing from the window that was worked out while it did not, until the next refresh.
-  Pending commands are not covered; see `docs/followups.md`. Tests:
+  Pending commands are not covered (issue #18). Tests:
   `test_setting_the_ac_no_longer_takes_is_left_out_and_said_once`,
   `test_setting_that_comes_back_and_goes_again_is_said_again`.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
@@ -590,13 +590,14 @@ only the final behaviour is written.
   command or window that has long passed, before the first observation of the target. The
   wish goes out to a target that may not be there yet, fails, is marked unsent, and the
   first observation sends it again, so the state converges, as it does for a restart. One
-  rule for every command (record and save, arm nothing, let `_handle_started` fold) is in
-  `docs/followups.md`. Cost if wrong: one failed call at start-up.
+  rule for every command (record and save, arm nothing, let `_handle_started` fold) is
+  issue #12. Cost if wrong: one failed call at start-up.
 
 ### The entry, the intervals and the entities
 
 - **One update listener reloads the entry on any change (`async_schedule_reload`, which
-  also collapses repeated changes); `options_flow_reloads = False`; `_follow_target` no
+  does not merge repeated changes: each call runs a reload, and the reloads wait for one
+  another on the entry's lock); `options_flow_reloads = False`; `_follow_target` no
   longer reloads itself.** In 2026.10.4 a subentry add
   (`ConfigSubentryFlowManager.async_finish_flow` → `async_add_subentry`), edit
   (`async_update_subentry`) and delete (`async_remove_subentry`) only fire update
@@ -616,7 +617,8 @@ only the final behaviour is written.
   (`timer_device`).** In 2026.10.4 an entity of a subentry that brings the shared
   `DeviceInfo` moves the device into the subentry (deprecated, an error from 2027.8); the
   registry then drops the number and the sensors, and deleting the interval deletes the
-  device. Cost if wrong: none.
+  device. The made device goes once the target has a device of its own (see "Release
+  1.0.0"). Cost if wrong: none.
 - **The switch is named "Schedule {interval}" with the subentry title.** The title
   identifies the interval and follows edits after the reload; entity ids keep the first
   title. Cost if wrong: a dashboard that matches on the name.
@@ -634,7 +636,7 @@ only the final behaviour is written.
 - **Titles are generated in Home Assistant's configured language from the selector labels;
   a title the user renamed survives edits.** Subentry titles are plain strings, so a title
   stays in the language of its creation. Cost if wrong: an old title stays in the old
-  language after the house language changes; see `docs/followups.md`.
+  language after the house language changes (issue #15).
 - **The Workday step appears only when a Workday sensor exists in the house (or is set, in
   the options); its schema function returns `None` to skip it, and `duration`'s
   `next_step` is a function too.** §6.2's "three clicks for the common case"; the order of
@@ -646,11 +648,11 @@ only the final behaviour is written.
   form refuses to clear the sensor while an interval uses it (`workday_in_use`), and a
   sensor whose integration is gone stays on offer so that it can be removed. Cost if
   wrong: a user who adds a Workday sensor later picks it in the options.
-- **A renamed Workday sensor is not followed.** The option holds the entity id; after a
-  rename `check_date` answers "did not match any entities", the intervals wait with a
-  warning, and the listeners sit on the old id. It is in `docs/followups.md` for the
-  `_follow_target` pattern, to be done before release. Cost if wrong: the schedules of
-  working-day intervals stop until the user picks the sensor again.
+- **A renamed Workday sensor is followed, and a removed one is not.** The option holds
+  the entity id, and the entry keeps it in step with the registry as it does for the
+  target; see "Release 1.0.0". A removed sensor leaves the option as it is, and the
+  intervals wait with a warning, as for a sensor that is away. Cost if wrong: the
+  schedules of working-day intervals stop until the user picks another sensor.
 
 ### Verification
 
@@ -796,7 +798,7 @@ those of the spec.
   agent takes "turn off the schedule for the boiler" for a turn off of the boiler, so the
   near misses that were found are sentences. The set is open ended: a phrasing with a
   device's name that Timerify does not have, and "turn on" or "turn off" in it, can still be
-  matched by core's gazetteer (English only), which `docs/followups.md` carries. Cost if
+  matched by core's gazetteer (English only), which is issue #21. Cost if
   wrong: the boiler is switched off by a sentence meant for its schedule.
 - **There is no sentence for subtracting time.** §6.4 lists set, add and stop, and setting
   the countdown to the new length covers shortening. "10 minutes less" has no match.
@@ -853,7 +855,7 @@ those of the spec.
   parser as the service's (`command_time`), with exactly one of a delay and `at`
   (`command_when`), through the same controller path. The built-in agent's sentences take
   delays: core has no clock-time shapes to mirror, and §6.4's example is a delay. Cost if
-  wrong: "turn on the boiler at 7:30" has no match (`docs/followups.md`).
+  wrong: "turn on the boiler at 7:30" has no match (issue #19).
 - **Every setting of §5.4 that a target supports can be said, with one word per
   meaning.** The HVAC mode and the temperature have their own words, and "percent" and
   "mode" are single slots that each domain row declares the meaning of (brightness,
@@ -912,7 +914,7 @@ those of the spec.
   conditioners with different modes, one without "auto": a bare "auto" said of the one that
   lacks it is understood and refused truthfully, naming the modes that AC has ("fan auto"
   and "in auto mode" still reach the fan mode). One block of sentences per distinct set of
-  modes would close it and is its own step (`docs/followups.md`). Cost if wrong: that
+  modes would close it and is its own step (issue #25). Cost if wrong: that
   refusal.
 - **Pending commands are cancelled by voice as "all" (the default) or "the next one",
   which repeats; an LLM may also cancel by id.** A voice cannot say an id. The tool that
@@ -977,8 +979,9 @@ those of the spec.
   given up after its repeats, the answer still gives the wish ("Boiler is on", "Boiler
   is off"), and the log has the rest. It is the desired state of R10 and spec goal 1, one
   source of truth for whether the target should run; the words "is on" can be read as the
-  device's state, which is the price. An unavailable target with no timer is answered "off"
-  (`docs/followups.md`). Cost if wrong: a user is told "off" of a device that is still on.
+  device's state, which is the price. The one exception is the answer to a question about
+  a timer that wants nothing on (see "Release 1.0.0"). Cost if wrong: a user is told "off"
+  of a device that is still on.
 - **Russian answers start with the name of the target in the nominative, followed by a
   colon.** A name that the user chose cannot be declined, and a name in a sentence would
   need a case. Cost if wrong: none.
@@ -1042,7 +1045,7 @@ those of the spec.
   during it schedules another. The first write happens before set-up returns when Home
   Assistant is running, and at start otherwise. A new mode that a device
   reports later (a firmware update) and a changed friendly name of a target that is not in
-  the registry are picked up at the next trigger (`docs/followups.md`). Cost if wrong: such
+  the registry are picked up at the next trigger (issue #20). Cost if wrong: such
   a name or mode is missing from the file until then.
 - **The names are listed as the built-in agent lists them: every alias with the computed
   name, with punctuation removed, an empty name left out; `in` is escaped only when hassil
@@ -1106,10 +1109,10 @@ those of the spec.
   timer's schedule, so the category fits: it moves to the configuration section of the
   device page, leaves the auto-generated dashboards, and is skipped by a service call that
   targets its device or area. The category changes no unique id and no name. Home Assistant
-  decides once, when it first sees an entity, and keeps the decision, so a switch that it
-  already exposed under 0.3.0 stays exposed after the upgrade (the README says how to take
-  it away; a repair issue is in `docs/followups.md`). A test pins what each entity is.
-  Cost if wrong: an upgraded house exposes its interval switches until the user unexposes
+  decides once, when it first sees an entity, and keeps the decision, so a switch that
+  version 0.3.0 made an ordinary one would stay exposed after an upgrade; that version
+  was never published (see "Release 1.0.0"). A test pins what each entity is. Cost if
+  wrong: a house that ran 0.3.0 exposes its interval switches until the user unexposes
   them.
 
 ### Verification
@@ -1200,15 +1203,16 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   1.64.1 and @types/node 26.6.5, on Node 26.** The same rule holds for every package, checked
   with `npm view`. Cost if wrong: a bump is a reviewed change of the lockfile; happy-dom 21.0.4,
   which fixes an advisory in a package that only runs the tests, becomes two weeks old on
-  2026-11-03 and is due before 1.0.0.
+  2026-11-03 and is pinned then (issue #28).
 
 ### Finding the timer
 
 - **The card is configured with the timer's "Run for" number, and Timerify tells it the rest
   through a websocket command, `timerify/timer {entity_id}`.** The answer holds the entry id,
   the target, the mode, the default duration, the entity ids of "Ends at" and "Next command",
-  the list of those two that are disabled in the registry (`disabled_sensors`) and each
-  interval's switch with its title. The number is the one handle that names exactly one
+  the settings of the target's domain that are percentages (`percent_settings`, see "Release
+  1.0.0"), the list of those two that are disabled in the registry (`disabled_sensors`) and
+  each interval's switch with its title. The number is the one handle that names exactly one
   timer: the display registry the frontend keeps carries neither the config entry nor the unique
   id of an entity, and two timers can share a device. The answer is configuration, read from
   the entity registry and the entry and never from the running timer, and it is given for any
@@ -1233,11 +1237,14 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
 - **The lookup is asked again on a new configured entity, a new `hass.entities` (an interval
   added or deleted shows up there), the connection coming back and the number's state becoming
   available. A `not_found` shows a warning only while the number is missing or has a value,
-  never while it is `unavailable`; a refusal (`unauthorized`) shows its own warning; any other
-  failure (a lost connection, an error code the card does not know) shows the card as
-  unavailable until the next trigger and says nothing.** An unavailable number may be a timer
-  that is still starting, and a warning would flash at every restart or every dropped
-  connection; the card asks again when the number has a value. Cost if wrong: a failure that is
+  never while it is `unavailable`; a refusal (`unauthorized`) shows its own warning; a
+  `timer_incomplete` shows its own neutral line in every state of the number (see "Release
+  1.0.0"); any other failure (a lost connection, an error code the card does not know) shows
+  the card as unavailable until the next trigger and says nothing.** An unavailable number may
+  be a timer that is still starting, and a warning would flash at every restart or every
+  dropped connection; the card asks again when the number has a value. A `timer_incomplete`
+  is read from the registry, which keeps a timer's entities across a restart, so it does not
+  flash at one. Cost if wrong: a failure that is
   not one of the two named stays silent until the card asks again.
 
 ### What the card shows
@@ -1268,7 +1275,7 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   server's clock. The time left never goes below 0:00 and the fill stays between empty and full
   when the browser's clock runs ahead or behind; the end time shown is the server's; every
   action goes to the server. Cost if wrong: a device with a wrong clock shows a time left that
-  is wrong by as much; a server offset is in `docs/followups.md`.
+  is wrong by as much; a server offset is issue #8.
 - **Clock times: the same local day shows the time, the next six days the short weekday and the
   time, later ones the date and the time.** They honour `locale.time_zone` (`server` is
   `hass.config.time_zone`) and `time_format` (`12`, `24`, `system`, which is the browser's
@@ -1298,17 +1305,18 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   cancel button, the pill's chip and the round tile's long press do nothing, and the buttons
   and the chip are disabled.** Home Assistant leaves an unavailable entity out of a service
   call without a word, and a press would seem to do nothing. Cost if wrong: none.
-- **The card never goes quiet when it cannot work: a missing Ends at, a hidden Next command and
-  a refused user each say so in words.** With **Ends at** disabled the card shows, in its body
+- **The card never goes quiet when it cannot work: a missing Ends at, a hidden Next command, a
+  refused user and a timer that cannot be told of each say so in words.** With **Ends at** disabled the card shows, in its body
   and in the style of its other warnings (a `role="alert"`), the translated line that names the
   sensor and tells the user to enable it, because without it there is no countdown to draw. With
   **Next command** disabled the card works, and the pop-up puts one translated line naming the
   sensor in the place of the pending commands, because an empty list would claim that nothing is
   pending. A user the server refuses gets the line "You are not allowed to see the timer" with
-  the entity id of the number. A lookup that fails otherwise (a lost connection) stays silent:
-  see "Finding the timer". Why: a card that draws an idle timer, or nothing, with no word is
-  taken for a broken card, and these three are the states where the cause is known and the
-  remedy is the user's. The card learns that a sensor is disabled from the server
+  the entity id of the number. A timer that cannot be told of gets a neutral line that sends
+  the user to the timer's page (see "Release 1.0.0"). A lookup that fails otherwise (a lost
+  connection) stays silent: see "Finding the timer". Why: a card that draws an idle timer, or
+  nothing, with no word is taken for a broken card, and these are the states where the cause
+  is known and the remedy is the user's. The card learns that a sensor is disabled from the server
   (`disabled_sensors` in the `timerify/timer` answer, read from the registry's `disabled_by`,
   whoever disabled it) and never from a missing state: a sensor that is enabled but not loaded
   yet has a restored `unavailable` state, and one that has no state at all may as well be
@@ -1425,7 +1433,7 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   frontend's own `localize`, and everything else the card's own `hass.localize`. A misspelt key
   fails `tsc`, a stale bundle fails `build:check`, and a page whose first card is invalid shows
   that error in English. Cost if wrong: the editor's option labels and helper come from the last
-  strings a card loaded, and are English when none has (a follow-up).
+  strings a card loaded, and are English when none has (issue #9).
 
 ### The editor and the picker
 
@@ -1535,8 +1543,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   `card/e2e/first-load.spec.ts` records the behaviour as an expected failure that Playwright
   reports when the problem goes away. That expected failure rests on a race the card's module
   wins against the application's bundle on the machine it was written on, so a machine on which
-  the application wins can see it pass on 2026.10 as well (`docs/followups.md`). Raising the
-  minimum Home Assistant to 2026.11 would remove the problem, and is a question for 1.0.0.
+  the application wins can see it pass on 2026.10 as well. Raising the minimum Home Assistant
+  to 2026.11 would remove the problem; it is not done at 1.0.0 (see "Release 1.0.0") and is
+  issue #7.
   Cost if wrong: a user's first load in a fresh browser shows an error card until a refresh.
 
 ## Phase 6: runtime counter
@@ -1626,3 +1635,151 @@ in the form they have now. Section numbers (§) are those of the spec; "research
   and of the end-to-end tests are added as before and have no counter. The statistics
   themselves are proved by pytest with the recorder, not in the container. Cost if wrong: the
   container shows the unit, the class and the figure of one run, not a day's split.
+
+## Release 1.0.0
+
+The decisions of the 1.0.0 release (`docs/superpowers/plans/2026-11-01-release-1.0.0.md`), in
+the form they have now. What is still open is a GitHub issue of klimofey/timerify, listed in
+`docs/followups.md`; a number such as #10 below is one of those issues.
+
+### The card and the websocket command
+
+- **`timerify/timer` answers `timer_incomplete` when the number is a timer's and the timer
+  cannot be told of, and the card says so in a neutral line.** There are two cases: the
+  timer's target was stored by registry id and that entry is gone, or one of its two sensors is
+  not in the entity registry. The registry keeps a timer's entities across restarts and
+  reloads, so that happens only for a moment while a new timer is set up for the first time
+  (below), and after a sensor was deleted from the entity registry, until the timer is set up
+  again. `not_found` keeps its meaning, "this is no timer's number", and the check that the
+  user may read the number still runs first, so the code tells a user who may not read an
+  entity nothing. The card shows `card_timer_incomplete` ("The timer of {entity} cannot be
+  shown: its target or one of its sensors is missing. Open the timer's page to see why.") in
+  every state of the number.
+  Why: the one wording for all of these, "is not the Run for number of a Timerify timer", was
+  false for a number that is a timer's. A target stored as an entity id, which every flow
+  writes, resolves whether or not the entity exists, so a timer whose target was deleted still
+  answers `found` and drives nothing, until #10. Right after a timer is added the line can show
+  for a moment, because the platforms are set up together, the number first; it clears on the
+  next registry change, when the card asks again. Cost if wrong: that moment on a card that
+  points at a brand-new timer, and no word on the card for a deleted target stored as an
+  entity id.
+- **`timerify/timer` sends `percent_settings`, the settings the card writes with a percent
+  sign, and the card keeps no list of its own.** The keys are those of the target's domain row
+  with `voice == "percent"`, taken from the row as `target_on` is and not from what this entity
+  can do: a light that cannot dim still lists `brightness_pct`, and the card formats only keys
+  that a command carries. Why: the card held a copy of three names, so a percentage setting
+  added to `domains.py` would have been written raw until the copy changed; as for `target_on`,
+  the browser keeps no copy of the domain table (§2). `voice == "percent"` now has two
+  meanings, the setting that "at 40 percent" names in voice and every setting the card writes
+  with a percent sign. They coincide while each row has at most one percentage setting; a row
+  with a second one could not give it `voice == "percent"` (a row has at most one setting for
+  each meaning), and it would need a field of its own. Cost if wrong: that field. A bundle that
+  is newer than the server's answer, between a HACS update and the restart, has no key to read
+  (#30).
+- **`card/src/popup.ts` stays one element while it does not grow.** It is about 600 lines,
+  about 200 of them the styles, and it has one job; splitting it now adds files that must
+  agree on one state, and removes nothing. If it grows, the order is: move the styles out
+  first, then the parser of the commands that the "Next command" sensor lists, and give the
+  schedule and the commands their own elements last. Cost if wrong: a reader meets a long
+  file, and the feature that makes it longer does the move first.
+
+### The entry
+
+- **A renamed Workday sensor is followed, and a removed one is not.** When the registry
+  renames the sensor, the `workday_sensor` option is updated to the new entity id and the
+  entry's update listener reloads the entry, so the controller asks about the new id and
+  listens to it; a window that is open stays open across the reload. A removed sensor
+  changes nothing: the option keeps the id, the windows already worked out stay, and no new
+  one is worked out, with the one warning an unavailable sensor gets, until the user picks
+  another sensor in **Configure**. Why: a rename is a fact about the same sensor, and the
+  option is a copy of its id; after a removal there is nothing to follow, and which sensor
+  to use instead is the user's choice. The subscription is Timerify's own, because
+  `async_handle_source_entity_changes` also moves devices, and the entities follow the
+  target's device, not the sensor's. Cost if wrong: as for the target, two renames inside
+  one event-loop tick (A to B to A) miss the second one.
+- **The device made for a target that had none is removed at set-up once the target has a
+  device, and the entities stay.** The entities are moved to the target's device first,
+  disabled ones and the interval switches included, and then the made device is removed, so
+  the registry, which deletes the entities of a device it removes, deletes none of them; they
+  would otherwise vanish from the state machine for a moment and come back. An entity that was
+  disabled with the made device (`disabled_by` is the device) is enabled on the target's, as
+  the registry does when a device is enabled, unless that device is disabled; one the user
+  disabled stays disabled. The device is removed with `async_remove_device`, because
+  `async_update_device(remove_config_entry_id=...)` is deprecated and an error from 2027.8. A
+  target that is on no device is tracked in the registry, so one that gains its first device
+  while Home Assistant runs (a user picks a device in the settings of a helper, its
+  integration links it after Timerify set up, or it is registered later with a device) reloads
+  the entry once, and the reload runs the same step. The one case with a second reload is a
+  made device that the user had disabled: enabling its entities changes their `disabled_by`,
+  and Home Assistant's own `EntityRegistryDisabledHandler` reloads the entry 30 seconds
+  later (`RELOAD_AFTER_UPDATE_DELAY`). That reload is Home Assistant's, not Timerify's, and
+  it is harmless: state survives a reload, and no call is added to the target. A rename is
+  left to `_follow_target`, whose update of the `target` option reloads, because
+  `async_schedule_reload` does not merge: two calls for one registry update would reload
+  twice. Why: a target's integration can link its entity to a device after the timer's
+  device was made, and the made one would stay behind, empty. Cost if wrong: a start-up in
+  which the target's integration links its entity late costs the timer one more reload.
+  Test: `test_entities_disabled_with_the_fallback_device_are_enabled_on_the_boilers`
+  moves time past the 30 seconds and finds the entities enabled on the boiler's device and
+  a countdown that was started meanwhile still running.
+
+### Voice
+
+- **A command's answer gives the wish it set, whatever the device shows; the answer to a
+  question about the timer gives the wish while there is one, and otherwise says what the
+  target shows.** "How long is left" is answered with the time left while a countdown runs,
+  and "on without a timer" while the timer wants the target on; when nothing is wanted on, it
+  says "off", or "unavailable" when the target is unavailable, unknown or has no state (R10):
+  "Boiler is unavailable and has no timer." In the slots of the answer `state` is
+  `unavailable` then, for the `timerify__time_left` tool and for Stop alike. Stop's spoken
+  answer stays "is off", because it gives the wish it set: the target is turned off when it
+  is back. Why: a wish is on or off, and "off" said of a target that does not answer was a
+  claim about the device that nothing known supports. Cost if wrong: for an unavailable target
+  the words of Stop ("off") and of the question ("unavailable") differ, and the tool tells
+  the agent "unavailable" for Stop.
+
+### Forms and services
+
+- **A default duration kept through loose mode is the prefill for strict.** Switching a timer
+  from strict to loose leaves `default_duration` in the options, and switching back offers it
+  in the duration form; a timer made in loose mode has none yet, and the form offers the
+  usual 30 minutes. Why: loose mode ignores the value (`timerify/timer` says `null` for it),
+  so keeping it harms nothing, and a user who tries loose mode and goes back does not type
+  again what was chosen. Cost if wrong: a number in the options that nothing reads. Test:
+  `test_options_offer_the_default_duration_kept_through_loose_mode`.
+- **`services.yaml` repeats the limits.** The ranges of `add_time` (plus and minus 1440), of
+  the minutes of `run` and `add_command` (1 to 1440) and of the delay of `add_command` (1 to
+  10080) are written there as well as in `const.MAX_MINUTES` and `const.MAX_DELAY_MINUTES`,
+  and `test_services_are_described_for_the_ui` in `tests/test_services.py` fails when they
+  drift. Why: Home Assistant reads `services.yaml` as data and cannot name a constant in it,
+  and generating the file or patching the descriptions at run time is more machinery than
+  five numbers need. Cost if wrong: a limit changes in two places, and the test says which.
+- **A deleted interval is still worked out until the timer reloads.** Deleting an interval
+  reloads the timer at once, which lets it go; only a reload that waits behind another set-up
+  leaves the loaded timer with it, and for that time a window of it can be worked out and
+  opened. The commands that name an interval and the warning about its settings treat it as
+  gone already (`async_set_schedule_enabled`, `_with_settings_the_target_takes`), and the
+  reload drops its window (`TimerCore.set_windows`, `configured`). Why: the window is short,
+  and closing it would need a second judgement of which intervals exist beside the entry.
+  Cost if wrong: for as long as a reload waits, a deleted interval can still open a window.
+
+### The release
+
+- **No repairs issue for interval switches exposed under 0.3.0.** Version 0.3.0 made the
+  switch of an interval an ordinary entity, and Home Assistant exposed it to Assist the first
+  time it saw it; from 0.4.0 it is an entity of the configuration category, which is not
+  exposed by default, but the decision stored for the entity stays. 0.3.0 was never published,
+  so no house has switches exposed that way, and a repair that names and unexposes them would
+  serve nobody. The README does not tell how to take them away. Cost if wrong: a house that
+  ran 0.3.0 exposes its interval switches to voice and to an LLM agent until the user
+  unexposes them under **Settings > Voice assistants > Expose**.
+- **The minimum Home Assistant stays 2026.10.4 at 1.0.0; raising it to 2026.11 is #7.**
+  2026.11 carries the frontend that removes the first-load error ("Custom element doesn't
+  exist"), but 2026.11.0 was in beta when 1.0.0 was prepared (2026-11-01) and was due on
+  2026-11-04, so a minimum of it would have kept Timerify from every house that was still on
+  2026.10, and the error is cured by a refresh, which the README says. Raising it moves
+  `hacs.json`, the `pytest-homeassistant-custom-component` pin in `pyproject.toml` and the
+  image in `scripts/harness/compose.yaml` together; then `card/e2e/first-load.spec.ts` passes
+  unexpectedly, and its `test.fail` and the extra reload after `primeServiceWorker` in
+  `card/e2e/fixtures.ts` go. Cost if wrong: a user's first load in a fresh browser shows an
+  error card until a refresh (see "Known issue" in phase 5).

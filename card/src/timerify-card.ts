@@ -226,13 +226,22 @@ export class TimerifyCard extends LitElement {
 
   /**
    * What the user is told when the card has no timer to show, if anything. The card never
-   * goes dead without saying why: a timer the user may not see, and a timer that lacks a
-   * sensor the card cannot work without, are told. Only a timer that is starting is quiet.
+   * goes dead without saying why: a timer the user may not see, a timer that lacks a target
+   * or a sensor the card cannot work without, and a timer whose "Ends at" sensor is disabled
+   * are told. Only a timer that is starting is quiet.
    */
   #warning(hass: HomeAssistant, config: CardConfig): string | undefined {
     const lookup = this._lookup;
     if (lookup.status === "unauthorized") {
       return t(hass, "card_not_allowed", { entity: config.entity });
+    }
+    // Said whatever the number's state is: a sensor of the timer is missing from the registry
+    // only for a moment while a new timer is set up for the first time, when the number may
+    // still look like a timer that is starting, and after the sensor was deleted from the
+    // registry, until the timer is set up again. The answer is read from the registry and
+    // does not change until the registry does, and the card asks again then.
+    if (lookup.status === "incomplete") {
+      return t(hass, "card_timer_incomplete", { entity: config.entity });
     }
     if (lookup.status === "found" && isDisabled(lookup.info, lookup.info.ends_at)) {
       return t(hass, "card_ends_at_disabled", { sensor: lookup.info.ends_at });

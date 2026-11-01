@@ -3,16 +3,20 @@
 from typing import Final
 
 from homeassistant.const import Platform
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device import async_entity_id_to_device_id
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_registry import EventEntityRegistryUpdatedData
+from homeassistant.helpers.event import async_track_entity_registry_updated_event
 from homeassistant.helpers.helper_integration import async_handle_source_entity_changes
 from homeassistant.helpers.typing import ConfigType
 
 from .card import async_register_card
-from .const import CONF_TARGET, DOMAIN, SIGNAL_TIMERS_CHANGED
+from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
+from .entity import remove_fallback_device
 from .runtime import RuntimeStore
 from .services import async_setup_services
 from .store import TimerStore
@@ -53,6 +57,10 @@ async def async_setup_entry(
     entry.runtime_data = controller
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
+    _follow_target_gaining_a_device(hass, entry)
+    remove_fallback_device(hass, entry)
+    if CONF_WORKDAY_SENSOR in entry.options:
+        _follow_workday_sensor_rename(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await controller.async_start()
     async_dispatcher_send(hass, SIGNAL_TIMERS_CHANGED)
@@ -95,7 +103,8 @@ def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_
     A renamed target is followed by updating the `target` option, which reloads the
     entry through its update listener; a target that moves to another device, or off
     its device, takes the entities along; the entities of a removed target are left
-    on no device.
+    on no device. A target that is on no device and gets one is left to
+    `_follow_target_gaining_a_device`, since the helper does nothing for it.
     """
 
     def set_target(entity_id: str) -> None:
@@ -109,4 +118,73 @@ def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_
         set_source_entity_id_or_uuid=set_target,
         source_device_id=async_entity_id_to_device_id(hass, entry.options[CONF_TARGET]),
         source_entity_id_or_uuid=entry.options[CONF_TARGET],
+    )
+
+
+def _follow_target_gaining_a_device(
+    hass: HomeAssistant, entry: TimerifyConfigEntry
+) -> None:
+    """Reload the entry when a target that is on no device gets one.
+
+    `async_handle_source_entity_changes`, which `_follow_target` uses, follows a target
+    only from the device it is on, so one that gets its first device while Home
+    Assistant runs would leave the timer's entities on the device made for them until
+    the next start. That happens when the user picks a device in the settings of a
+    helper, and at start-up when the target's integration links its entity after
+    Timerify has set up; an entity that is registered with a device after that counts
+    as well. The reload sets the timer up again, which moves the entities to the
+    target's device and removes the made one (`remove_fallback_device`); they are not
+    moved from here, since the loaded ones would keep the device they were added with.
+
+    A rename, which carries the old entity id, is left to the reload that updating the
+    `target` option brings: scheduled reloads do not merge, each one runs. A target that
+    is on a device needs nothing, as the helper reloads for a move.
+    """
+    target = entry.runtime_data.target_entity_id
+    if async_entity_id_to_device_id(hass, target) is not None:
+        return
+
+    @callback
+    def reload_when_on_a_device(
+        event: Event[EventEntityRegistryUpdatedData],
+    ) -> None:
+        data = event.data
+        if data["action"] == "remove" or "old_entity_id" in data:
+            return
+        registered = er.async_get(hass).async_get(data["entity_id"])
+        if registered is not None and registered.device_id is not None:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+
+    entry.async_on_unload(
+        async_track_entity_registry_updated_event(hass, target, reload_when_on_a_device)
+    )
+
+
+def _follow_workday_sensor_rename(
+    hass: HomeAssistant, entry: TimerifyConfigEntry
+) -> None:
+    """Keep the `workday_sensor` option in step with the sensor's entity id.
+
+    A renamed sensor is followed by updating the option, which reloads the entry
+    through its update listener, so that the controller asks about the new id and
+    listens to it. A removed sensor changes nothing: the option keeps its id and the
+    schedule waits, as it does for a sensor that is away, until the user picks another
+    one in the options. `async_handle_source_entity_changes` is not used, since it also
+    moves the entities between devices, and those follow the target's device, not the
+    sensor's.
+    """
+
+    @callback
+    def set_sensor(event: Event[EventEntityRegistryUpdatedData]) -> None:
+        data = event.data
+        if data["action"] != "update" or "entity_id" not in data["changes"]:
+            return
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_WORKDAY_SENSOR: data["entity_id"]}
+        )
+
+    entry.async_on_unload(
+        async_track_entity_registry_updated_event(
+            hass, entry.options[CONF_WORKDAY_SENSOR], set_sensor
+        )
     )

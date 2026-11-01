@@ -30,8 +30,8 @@ class TimeLeftHandler(TimerifyIntentHandler):
     title = "Time left on a timer"
     description = (
         "Tells how long a device's Timerify timer has left and when the device turns"
-        " off, or that the device is off, or on without a timer. 'name' is the name of"
-        " the device, as the prompt lists it."
+        " off, or that the device is off or unavailable, or on without a timer. 'name'"
+        " is the name of the device, as the prompt lists it."
     )
     read_only = True
     slot_schema: ClassVar[dict[Any, Any]] = {probatio.Required("name"): cv.string}

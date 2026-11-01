@@ -21,6 +21,7 @@ from homeassistant.setup import async_setup_component
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
     CONF_MODE,
+    CONF_RUNTIME,
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
     DEFAULT_DURATION_MINUTES,
@@ -39,11 +40,14 @@ from .conftest import (
 )
 from .helpers import (
     NUMBER,
+    RUNTIME,
+    SENSOR,
     TARGET_ID,
     TURN_OFF,
     TURN_ON,
     add_interval,
     advance,
+    prefilled,
     set_number,
     state_of,
     storage_key,
@@ -156,6 +160,7 @@ async def test_add_strict_target_in_two_steps(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
+        CONF_RUNTIME: False,
     }
     await hass.async_block_till_done()
     assert result["result"].state is ConfigEntryState.LOADED
@@ -171,7 +176,11 @@ async def test_add_loose_target_skips_duration(
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["options"] == {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    assert result["options"] == {
+        CONF_TARGET: TARGET_ID,
+        CONF_MODE: "loose",
+        CONF_RUNTIME: False,
+    }
 
 
 async def test_add_target_with_every_default_takes_three_clicks(
@@ -186,7 +195,36 @@ async def test_add_target_with_every_default_takes_three_clicks(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: DEFAULT_DURATION_MINUTES,
+        CONF_RUNTIME: False,
     }
+
+
+async def test_counting_runtime_is_one_tick_on_the_first_form(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """The checkbox sits with the entity and the mode, unticked, so the common case
+    stays three clicks; ticking it adds no step. The timer starts with a Runtime sensor
+    at zero."""
+    form = await start_flow(hass)
+    assert [str(field) for field in form["data_schema"].schema] == [
+        CONF_TARGET,
+        CONF_MODE,
+        CONF_RUNTIME,
+    ]
+    assert default_value(form, CONF_RUNTIME) is False
+
+    result = await submit(
+        hass, form, {CONF_TARGET: TARGET_ID, CONF_MODE: "loose", CONF_RUNTIME: True}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"] == {
+        CONF_TARGET: TARGET_ID,
+        CONF_MODE: "loose",
+        CONF_RUNTIME: True,
+    }
+    assert float(state_of(hass, RUNTIME)) == 0.0
 
 
 async def test_target_is_identified_by_its_registry_id(
@@ -707,6 +745,7 @@ async def test_options_switching_to_strict_asks_for_the_duration(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 20,
+        CONF_RUNTIME: False,
     }
     await fake_target.set_state("on")
     assert state_of(hass, NUMBER) == "20"
@@ -727,6 +766,112 @@ async def test_options_show_the_current_settings(
     )
     assert result["step_id"] == "duration"
     assert suggested_value(result, CONF_DEFAULT_DURATION) == 45
+
+
+@pytest.mark.parametrize(
+    ("counting", "shown"),
+    [(True, True), (False, False)],
+    ids=["a timer that counts", "a timer made before the counter, with no such option"],
+)
+async def test_settings_show_whether_the_runtime_is_counted(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    counting: bool,
+    shown: bool,
+) -> None:
+    """The box opens ticked for a timer that counts, and unticked for one that does
+    not, an entry of an earlier release among them, whose options have no such key."""
+    entry = await setup_target(runtime=counting)
+    assert (CONF_RUNTIME in entry.options) is counting
+
+    result = await change_options(hass, entry)
+
+    assert result["step_id"] == "init"
+    assert prefilled(result["data_schema"])[CONF_RUNTIME] is shown
+    if counting:
+        assert suggested_value(result, CONF_RUNTIME) is True
+
+
+async def test_enabling_the_counter_mid_countdown_keeps_it_and_counts_from_now(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Ticking the box while the boiler runs for 45 minutes does not touch the
+    countdown. The sensor appears at zero, not at the ten minutes the boiler has
+    already been on, and counts from the moment the box was ticked."""
+    entry = await setup_target()
+    await set_number(hass, NUMBER, 45)
+    await advance(hass, freezer, minutes=10)
+    countdown = hass.states.get(SENSOR)
+    assert countdown is not None
+    assert state_of(hass, NUMBER) == "35"
+    assert hass.states.get(RUNTIME) is None
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "strict", CONF_RUNTIME: True},
+        {CONF_DEFAULT_DURATION: 45},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUNTIME] is True
+    assert entry.state is ConfigEntryState.LOADED
+    assert float(state_of(hass, RUNTIME)) == 0.0
+    assert state_of(hass, NUMBER) == "35"
+    ends_at = hass.states.get(SENSOR)
+    assert ends_at is not None
+    assert ends_at.state == countdown.state
+    assert ends_at.attributes["started_at"] == countdown.attributes["started_at"]
+
+    await advance(hass, freezer, minutes=1)
+
+    assert float(state_of(hass, RUNTIME)) == 1.0
+    assert state_of(hass, NUMBER) == "34"
+
+
+async def test_disabling_the_counter_in_the_settings_removes_the_sensor(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Unticking the box takes the sensor away, not only its state, and leaves the
+    countdown as it was. Ticking it again brings the sensor back with the total it
+    had, without the minutes in between."""
+    entry = await setup_target(runtime=True)
+    registry = er.async_get(hass)
+    await set_number(hass, NUMBER, 45)
+    await advance(hass, freezer, minutes=10)
+    assert float(state_of(hass, RUNTIME)) == 10.0
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "strict", CONF_RUNTIME: False},
+        {CONF_DEFAULT_DURATION: 45},
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_RUNTIME] is False
+    assert hass.states.get(RUNTIME) is None
+    assert registry.async_get(RUNTIME) is None
+    assert state_of(hass, NUMBER) == "35"
+    await advance(hass, freezer, minutes=35)
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+    result = await change_options(
+        hass,
+        entry,
+        {CONF_MODE: "strict", CONF_RUNTIME: True},
+        {CONF_DEFAULT_DURATION: 45},
+    )
+
+    assert entry.options[CONF_RUNTIME] is True
+    assert float(state_of(hass, RUNTIME)) == 10.0
 
 
 async def test_options_change_default_duration(
@@ -790,6 +935,7 @@ async def test_workday_step_is_skipped_without_a_workday_sensor(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
+        CONF_RUNTIME: False,
     }
     entry = result["result"]
     result = await change_options(
@@ -827,6 +973,7 @@ async def test_workday_sensor_is_asked_after_the_duration(
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "strict",
         CONF_DEFAULT_DURATION: 45,
+        CONF_RUNTIME: False,
         CONF_WORKDAY_SENSOR: fake_workday.entity_id,
     }
     await hass.async_block_till_done()
@@ -867,6 +1014,7 @@ async def test_loose_mode_asks_for_the_workday_sensor_after_the_mode(
     assert result["options"] == {
         CONF_TARGET: TARGET_ID,
         CONF_MODE: "loose",
+        CONF_RUNTIME: False,
         CONF_WORKDAY_SENSOR: fake_workday.entity_id,
     }
 

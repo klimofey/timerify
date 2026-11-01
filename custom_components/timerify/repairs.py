@@ -32,26 +32,31 @@ class _ConfirmedFix(RepairsFlow, ABC):
 
         The fix does nothing, and says why, when its timer is gone, deleted on its
         integration page while the repair stood open, or when its issue is no longer
-        open: the problem went away by itself, or the timer was unloaded since. A step
-        that is shown again then would only show blanks in place of the names in it.
+        open: the problem went away by itself, was fixed in another window of the
+        repair, or the timer was unloaded since. That holds when the step is submitted
+        as well as when it is shown, so that a window left open does not delete or
+        reset a timer that is fine. A step that is shown again would only show blanks in
+        place of the names in it.
         """
         if self.hass.config_entries.async_get_entry(self._entry_id) is None:
             return self.async_abort(reason="timer_gone")
+        issue = ir.async_get(self.hass).async_get_issue(DOMAIN, self.issue_id)
+        if issue is None:
+            return self.async_abort(reason="issue_gone")
         if user_input is None:
-            issue = ir.async_get(self.hass).async_get_issue(DOMAIN, self.issue_id)
-            if issue is None:
-                return self.async_abort(reason="issue_gone")
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=probatio.Schema({}),
                 description_placeholders=issue.translation_placeholders,
             )
-        await self._async_fix()
+        if (failure := await self._async_fix()) is not None:
+            return self.async_abort(reason=failure)
         return self.async_create_entry(data={})
 
     @abstractmethod
-    async def _async_fix(self) -> None:
-        """Fix the problem, once the user has confirmed."""
+    async def _async_fix(self) -> str | None:
+        """Fix the problem, once the user has confirmed; the reason of the abort if it
+        could not be fixed."""
 
 
 class DeleteTimerFlow(_ConfirmedFix):
@@ -67,9 +72,11 @@ class ResetStoredTimerFlow(_ConfirmedFix):
     loads the timer again, which starts idle. The timer, its intervals and its runtime
     total stay."""
 
-    async def _async_fix(self) -> None:
+    async def _async_fix(self) -> str | None:
         await TimerStore(self.hass, self._entry_id).async_remove()
-        await self.hass.config_entries.async_reload(self._entry_id)
+        if not await self.hass.config_entries.async_reload(self._entry_id):
+            return "reload_failed"
+        return None
 
 
 async def async_create_fix_flow(
@@ -79,8 +86,9 @@ async def async_create_fix_flow(
 ) -> RepairsFlow:
     """The fix of a Timerify issue, picked by the `kind` in its data."""
     if data is not None:
-        if data["kind"] == TARGET_DELETED:
+        kind = data.get("kind")
+        if kind == TARGET_DELETED:
             return DeleteTimerFlow(str(data["entry_id"]))
-        if data["kind"] == STORED_TIMER_INVALID:
+        if kind == STORED_TIMER_INVALID:
             return ResetStoredTimerFlow(str(data["entry_id"]))
     raise ValueError(f"The issue {issue_id} has no fix: its data is {data}")

@@ -523,7 +523,8 @@
         },
         "abort": {
           "timer_gone": "This timer was already deleted.",
-          "issue_gone": "This problem is no longer open. Nothing needs to be done."
+          "issue_gone": "This problem is no longer open. Nothing needs to be done.",
+          "reload_failed": "The stored timer was reset, but the timer could not be loaded again. Open the timer's page to see why."
         }
       }
     }

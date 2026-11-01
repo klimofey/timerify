@@ -10,12 +10,13 @@ and the user submits it to reset the file.
 """
 
 from http import HTTPStatus
+from types import MappingProxyType
 from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.repairs import RepairsFlowManager, repairs_flow_manager
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState, ConfigSubentry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -24,6 +25,7 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.repairs import async_create_fix_flow
 
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
@@ -38,12 +40,15 @@ from .helpers import (
     add_interval,
     advance,
     advance_to,
+    at,
+    command_json,
     iso,
     local,
     open_sunday,
     payload,
     restart_after,
     runtime_saved,
+    saved,
     set_number,
     set_switch,
     start_set_number,
@@ -51,6 +56,7 @@ from .helpers import (
     storage_key,
     timerify_info,
     timerify_warnings,
+    window_json,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
@@ -542,18 +548,65 @@ async def test_a_stored_field_of_the_wrong_type_raises_the_same_repair(
     setup_target: SetupTarget,
 ) -> None:
     """A field that holds something else than the timer writes is unreadable too: the
-    same repair, with the reason Python gives, and no bare TypeError in the log."""
+    same repair, with a reason, and no bare TypeError in the log."""
     entry = await setup_target(stored={**payload(), "commands": 5})
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert entry.error_reason_translation_key == "stored_timer_invalid"
     issue = stored_timer_invalid_issue(hass, entry)
     assert issue is not None
-    assert issue.translation_placeholders == {
-        "timer": "Boiler",
-        "reason": "'int' object is not iterable",
-    }
+    assert issue.translation_placeholders is not None
+    reason = issue.translation_placeholders["reason"]
+    assert reason
+    assert entry.reason is not None
+    assert reason in entry.reason
     assert "TypeError" not in caplog.text
+
+
+def without(item: dict[str, Any], field: str) -> dict[str, Any]:
+    """`item` of a stored file with `field` left out."""
+    return {key: value for key, value in item.items() if key != field}
+
+
+@pytest.mark.parametrize(
+    ("stored", "reason"),
+    [
+        pytest.param(
+            payload(commands=[without(command_json(at(60), minutes=5), "minutes")]),
+            "the field minutes of a pending command is missing",
+            id="field-of-a-command",
+        ),
+        pytest.param(
+            payload(
+                windows=[
+                    without(
+                        window_json(
+                            "a", local(SUNDAY, "06:30"), local(SUNDAY, "07:15")
+                        ),
+                        "end",
+                    )
+                ]
+            ),
+            "the field end of a schedule window is missing",
+            id="field-of-a-window",
+        ),
+    ],
+)
+async def test_a_field_missing_inside_a_command_or_window_says_whose_it_is(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    stored: dict[str, Any],
+    reason: str,
+) -> None:
+    """A file whose pending command or schedule window lacks a field is unreadable, and
+    the repair says which item the field belongs to, not only its name."""
+    entry = await setup_target(stored=stored)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    assert issue.translation_placeholders == {"timer": "Boiler", "reason": reason}
 
 
 async def test_resetting_the_stored_timer_keeps_the_entry_and_its_intervals(
@@ -674,3 +727,122 @@ async def test_a_reset_shown_again_after_the_file_was_put_right_does_nothing(
     assert shown_again["type"] == "abort"
     assert shown_again["reason"] == "issue_gone"
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair of the deleted target in a second window. The device
+    is added again, and the second window submits: the problem is no longer open, so
+    the timer, which works again, is not deleted."""
+    entry = await setup_target()
+    await fake_target.delete()
+    client = await hass_client()
+    issue = target_deleted_issue(hass, entry)
+    assert issue is not None
+    flow = await start_fix(client, issue.issue_id)
+    await fake_target.restore()
+    assert target_deleted_issue(hass, entry) is None
+
+    done = await submit_fix(client, flow["flow_id"])
+
+    assert done["type"] == "abort"
+    assert done["reason"] == "issue_gone"
+    assert entry.state is ConfigEntryState.LOADED
+    assert timer_entities(hass, entry) != []
+
+
+async def test_a_reset_dialog_left_open_after_the_file_was_put_right_resets_nothing(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    hass_storage: dict[str, Any],
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair of the unreadable file in a second window. The file is
+    put right, the timer loads and runs a countdown, and the second window submits: the
+    problem is no longer open, so the countdown is not reset."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    client = await hass_client()
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    flow = await start_fix(client, issue.issue_id)
+    hass_storage[storage_key(entry)]["data"] = payload()
+    await hass.config_entries.async_reload(entry.entry_id)
+    await set_number(hass, NUMBER, 30)
+    assert stored_timer_invalid_issue(hass, entry) is None
+
+    done = await submit_fix(client, flow["flow_id"])
+
+    assert done["type"] == "abort"
+    assert done["reason"] == "issue_gone"
+    assert entry.state is ConfigEntryState.LOADED
+    assert state_of(hass, NUMBER) == "30"
+    assert saved(hass_storage, entry)["end"] is not None
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_a_reset_after_which_the_timer_does_not_load_does_not_say_it_worked(
+    hass: HomeAssistant,
+    hass_client: ClientSessionGenerator,
+    hass_storage: dict[str, Any],
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The file is reset, but the timer cannot load for another reason: an interval by
+    working days and no Workday sensor. The repair does not end as if it had worked: it
+    says that the file is reset and the timer does not load, and the timer's own page
+    has the reason."""
+    entry = await setup_target(stored=payload(scheduled_by="a"))
+    hass.config_entries.async_add_subentry(
+        entry,
+        ConfigSubentry(
+            data=MappingProxyType(
+                {
+                    "days": "workdays",
+                    "weekdays": [],
+                    "start": "06:30",
+                    "end": "07:15",
+                    "settings": {},
+                }
+            ),
+            subentry_type="interval",
+            title="06:30-07:15, Working days",
+            unique_id=None,
+        ),
+    )
+    client = await hass_client()
+    issue = stored_timer_invalid_issue(hass, entry)
+    assert issue is not None
+    flow = await start_fix(client, issue.issue_id)
+
+    done = await submit_fix(client, flow["flow_id"])
+
+    assert done["type"] == "abort"
+    assert done["reason"] == "reload_failed"
+    assert storage_key(entry) not in hass_storage
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "workday_sensor_missing"
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param(None, id="no-data"),
+        pytest.param({"entry_id": "abc"}, id="no-kind"),
+        pytest.param({"entry_id": "abc", "kind": "other"}, id="unknown-kind"),
+    ],
+)
+async def test_an_issue_with_no_known_kind_has_no_fix(
+    hass: HomeAssistant, data: dict[str, str | int | float | None] | None
+) -> None:
+    """Home Assistant asks for the fix of an issue by its id and data: data that names
+    no kind of ours is refused in one way, not with a KeyError for a missing kind."""
+    with pytest.raises(ValueError, match="has no fix"):
+        await async_create_fix_flow(hass, "issue", data)

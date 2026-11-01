@@ -153,20 +153,16 @@ not repeated beside its successor.
   `owed_turn_on_only`, `scheduled_by`, `windows` and `disabled_intervals`, the one from
   version 2 the last four, and the store reads version 3 strictly: the migration
   guarantees the keys, and tolerant reads would hide a broken migration. A file that
-  contradicts itself is refused when the timer is set up, and the timer does not repair it
-  itself (the user resets it, see "An unreadable stored timer is reset only by the user"
-  under Release 1.1.0): two windows of one
+  contradicts itself is refused when the timer is set up, not repaired: two windows of one
   interval, a window that is suppressed but has not started, a window of a switched-off
   interval, an interval switched off twice, `scheduled_by` without an end, the marker
   without owed settings, a window with a time that has no offset or that does not start
   before it ends or lasts more than a day (the rule of `checked_window`, the one the core
-  applies to every window it is given). The set-up fails with a `StoredTimerInvalid` (a
-  `ConfigEntryError`, `stored_timer_invalid`), whose translated reason says what is wrong
-  and tells the user to reset it under Repairs, not with a bare `ValueError`. The reason
-  is the English text of the error, also in the Russian message and the repair: it is for
-  the bug report of a defect, not for the user. Only the timer's own code writes the file,
-  so such a file means a defect, and it should show when the timer loads, not as a target
-  switched for reasons nobody can follow. Versions 2 and
+  applies to every window it is given). Changed in 1.1.0: see "An unreadable stored timer
+  is reset only by the user" under Release 1.1.0, for what the set-up fails with and what
+  the user does. Only the timer's own code writes the file, so such a file means a defect,
+  and it should show when the timer loads, not as a target switched for reasons nobody can
+  follow. Versions 2 and
   3 were never released before their keys were complete, so they need no further steps.
   Cost if wrong: a version 2 or 3 file written by a development build from between the
   changes lacks a key and fails to load; that exists on developer machines only.
@@ -1938,9 +1934,11 @@ in `docs/followups.md`.
   severity error, fixable). Its fix has one step, which shows what is deleted; submitting it
   removes the config entry, and so the entities, the intervals and the stored files. A timer
   that was already deleted on its integration page, with the repair still open, aborts with
-  `timer_gone`. A step that is shown again once its issue is gone aborts with `issue_gone`,
-  which says only that the problem is no longer open: the target may be back, or the timer
-  was unloaded (disabled, or reloaded and not yet checked again). The decisions:
+  `timer_gone`. A step that is shown again or submitted once its issue is gone aborts with
+  `issue_gone`, which says only that the problem is no longer open: the target may be
+  back, or the timer was unloaded (disabled, or reloaded and not yet checked again). So a
+  window of the repair that was left open does not delete a timer that works again. The
+  decisions:
   - The timer keeps its entities and accepts commands, as for an unavailable target (R10).
     The controller has no gate of its own. A deleted target has no state, so the core takes
     it for a target that is away: a command, the end of a countdown and the start of a
@@ -1988,19 +1986,32 @@ in `docs/followups.md`.
   Tests: `test_deleting_the_target_raises_a_repair_that_names_the_timer`,
   `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`,
   `test_a_report_queued_before_the_deletion_is_read_as_a_boiler_that_is_gone`,
-  `test_deleting_the_timer_on_the_integration_page_clears_the_repair`.
+  `test_deleting_the_timer_on_the_integration_page_clears_the_repair`,
+  `test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing`.
 - **An unreadable stored timer is reset only by the user, through a repair, and the reset
   drops the whole file.** A stored timer that cannot be used raises the repair "The stored
   state of the timer X cannot be read" (`stored_timer_invalid_<entry>`, severity error,
-  fixable) and the set-up fails with the same reason, so the entry stays in `SETUP_ERROR`.
-  The fix, "Reset the stored timer", has one step, which shows the reason and what is kept.
-  Submitting it deletes the file and reloads the entry. It shares its steps with the fix of a
-  deleted target: a timer deleted meanwhile aborts with `timer_gone`, and a step shown again
-  once its issue is gone aborts with `issue_gone`. The decisions:
+  fixable), and the set-up fails with the same reason (`StoredTimerInvalid`, a
+  `ConfigEntryError`), so the entry stays in `SETUP_ERROR`. The reason is the English text
+  of the error, also in the Russian message and the repair: it is for the bug report of a
+  defect, not for the user. The fix, "Reset the stored timer", has one step, which shows
+  the reason and what is kept. Submitting it deletes the file and reloads the entry. It
+  shares its steps with the fix of a deleted target. A timer deleted meanwhile aborts with
+  `timer_gone`. A step shown again or submitted once its issue is gone aborts with
+  `issue_gone`, so a window of the repair left open after the file was put right, or after
+  another window reset it, does not reset a timer that works. A reload that fails after the
+  reset (the timer cannot be set up for another reason, say an interval by working days
+  and no Workday sensor) aborts with `reload_failed`, which says that the file is reset
+  and that the timer's page has the reason, instead of ending as if the timer were fine.
+  The decisions:
   - A missing field is as unreadable as a file that contradicts itself, and so is a field of
-    a type that no timer writes. The reason of a missing field is "the field X is missing";
-    for a wrong type it is the text Python gives. Neither is a bare `KeyError` or `TypeError`
-    in the log.
+    a type that no timer writes. The reason of a missing field is "the field X is missing",
+    and "the field X of a pending command is missing" (or "of a schedule window") for a
+    field inside one. For a wrong type it is the text Python gives. Neither is a bare
+    `KeyError` or `TypeError` in the log.
+  - A file that is not valid JSON is not this repair. Home Assistant's `Store` renames it
+    (`.corrupt.<time>`), raises its own `storage_corruption` repair and returns no data, so
+    the timer starts idle and every interval is on, without asking.
   - The entry, its intervals (subentries) and the runtime file are kept. The countdown, the
     pending commands and the flags of the switched-off intervals are lost, because nothing
     in a file that contradicts itself can be trusted. Every interval is on again.
@@ -2012,11 +2023,21 @@ in `docs/followups.md`.
     step shown again then aborts with `issue_gone`. A timer disabled while it failed to set
     up keeps the repair until it is enabled, since Home Assistant runs no unload of ours
     for an entry that never loaded; the file is still unreadable, so the text stays true.
+  - `async_create_fix_flow` refuses data without a known `kind` with one `ValueError`,
+    whether the `kind` is missing or unknown.
   Why: #17. Before this the user was told to remove the timer and add it again, which also
   loses the intervals and the runtime total that were fine.
   Cost if wrong: a user loses the pending commands of a file that was only partly wrong.
   Tests: `test_a_stored_timer_that_cannot_be_read_raises_a_repair`,
+  `test_a_stored_timer_missing_a_field_raises_the_same_repair`,
+  `test_a_stored_field_of_the_wrong_type_raises_the_same_repair`,
+  `test_a_field_missing_inside_a_command_or_window_says_whose_it_is`,
   `test_resetting_the_stored_timer_keeps_the_entry_and_its_intervals`,
   `test_a_stored_timer_that_is_put_right_clears_the_repair`,
   `test_deleting_a_timer_whose_stored_timer_cannot_be_read_clears_the_repair`,
-  `test_a_stored_timer_missing_a_field_raises_the_same_repair`.
+  `test_the_reset_of_a_timer_deleted_meanwhile_does_nothing`,
+  `test_a_reset_shown_again_after_the_file_was_put_right_does_nothing`,
+  `test_a_reset_dialog_left_open_after_the_file_was_put_right_resets_nothing`,
+  `test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing`,
+  `test_a_reset_after_which_the_timer_does_not_load_does_not_say_it_worked`,
+  `test_an_issue_with_no_known_kind_has_no_fix`.

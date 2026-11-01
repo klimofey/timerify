@@ -2041,3 +2041,14 @@ in `docs/followups.md`.
   `test_a_delete_dialog_left_open_after_the_boiler_is_back_deletes_nothing`,
   `test_a_reset_after_which_the_timer_does_not_load_does_not_say_it_worked`,
   `test_an_issue_with_no_known_kind_has_no_fix`.
+- **Windows keep the old time zone after "Reload core configuration" until Home Assistant
+  signals it (#14, upstream).** Home Assistant 2026.10.4, 2026.11.0b1 and 2026.11.0b2 fire
+  nothing when that reload changes the zone: `_async_handle_reload_config` calls
+  `async_process_ha_core_config`, which sets the zone through `Config.async_set_time_zone`,
+  and that only calls `dt_util.set_default_time_zone`. `EVENT_CORE_CONFIG_UPDATE`, which
+  Timerify follows, comes only from `Config.async_update`, the settings page. Following
+  `EVENT_CALL_SERVICE` for `homeassistant.reload_core_config` was rejected: it fires before
+  the handler runs, so the zone has not changed yet, and waiting after it would be a guess.
+  The issue is labelled `upstream`; reporting it to Home Assistant is the owner's call.
+  Cost if wrong: after a YAML change of the zone and that reload, windows run in the old
+  zone until a window ends, the Workday sensor reports or the timer reloads.

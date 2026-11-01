@@ -1,4 +1,14 @@
-# Timerify
+<p align="center">
+  <img src="custom_components/timerify/brand/icon@2x.png" alt="Timerify" width="128">
+</p>
+
+<h1 align="center">Timerify</h1>
+
+<p align="center">
+  <a href="https://hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5.svg" alt="HACS: Custom"></a>
+  <a href="https://www.home-assistant.io/"><img src="https://img.shields.io/badge/Home%20Assistant-2026.10.4%2B-41BDF5.svg?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.10.4+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
 
 Timers for any Home Assistant entity, without writing automations.
 

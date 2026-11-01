@@ -1936,13 +1936,17 @@ in `docs/followups.md`.
   severity error, fixable). Its fix has one step, which shows what is deleted; submitting it
   removes the config entry, and so the entities, the intervals and the stored files. A timer
   that was already deleted on its integration page, with the repair still open, aborts with
-  `timer_gone`. The decisions:
+  `timer_gone`, and so does a step that is shown again once its issue is gone. The
+  decisions:
   - The timer keeps its entities and accepts commands, as for an unavailable target (R10).
-    Nothing needs gating. A deleted target has no state, so the core takes it for a target
-    that is away: a command, the end of a countdown and the start of a window are carried in
-    the core and sent when the target is back. Before start-up the target is unseen and the
-    gate of the ruling on start-up holds. The log says it (a warning when the target is
-    deleted, an info line when it is back), and so does the repair.
+    The controller has no gate of its own. A deleted target has no state, so the core takes
+    it for a target that is away: a command, the end of a countdown and the start of a
+    window are carried in the core and sent when the target is back. Before start-up the
+    target is unseen and the gate of the ruling on start-up holds. A report of the target
+    that waited for the lock while it was deleted is read as the target being gone, not as
+    the state it carries (`_handle_state_change`), or its "off" would make the core send the
+    turn-on that failed to an entity that is not there. The log says it (a warning when the
+    target is deleted, an info line when it is back), and so does the repair.
   - It is checked at start-up (`_handle_started`), not at the top of set-up. A target that is
     not in the registry has no state until its integration has set up, and an entity of YAML
     without a unique id is never in the registry. The target is there when it has a registry
@@ -1980,5 +1984,5 @@ in `docs/followups.md`.
   new entity id keeps the repair until the user deletes the timer.
   Tests: `test_deleting_the_target_raises_a_repair_that_names_the_timer`,
   `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`,
-  `test_a_report_queued_before_the_deletion_does_not_end_the_repair`,
+  `test_a_report_queued_before_the_deletion_is_read_as_a_boiler_that_is_gone`,
   `test_deleting_the_timer_on_the_integration_page_clears_the_repair`.

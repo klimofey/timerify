@@ -879,15 +879,17 @@ class TargetController:
         async with self._lock:
             if self._stopped or not self._started:
                 return  # `_handle_started` reads the state itself
-            if event.data["new_state"] is not None and self._target_exists():
-                # What exists now counts, not only the event: a report that waited for
-                # the lock may be one the target made before it was deleted.
+            # What exists now counts, not only the event: a report that waited for the
+            # lock may be one the target made before it was deleted. It is read as a
+            # target that is gone, so the core sends it nothing.
+            new_state = event.data["new_state"] if self._target_exists() else None
+            if new_state is not None:
                 self._set_target_deleted(False)
             before = self.snapshot
             now = dt_util.utcnow()
             effects = self._core.observe(
                 now,
-                actual_state(event.data["new_state"]),
+                actual_state(new_state),
                 by_us=event.context.id in self._own_contexts,
             )
             await self._execute_fold(before, now, effects)

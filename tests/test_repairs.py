@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant.components.repairs import repairs_flow_manager
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -309,18 +310,25 @@ async def test_a_target_deleted_over_a_restart_returns_to_its_device_with_the_ti
     assert target_deleted_issue(hass, entry) is None
 
 
-async def test_a_report_queued_before_the_deletion_does_not_end_the_repair(
-    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+@pytest.mark.parametrize("reported", ["on", "off"])
+async def test_a_report_queued_before_the_deletion_is_read_as_a_boiler_that_is_gone(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    reported: str,
 ) -> None:
     """The boiler reports while the timer is busy with a slow call of its own, and is
     deleted before the timer gets to the report. When the timer reads it the boiler is
-    gone, so the report is no sign that it is back."""
+    gone: the report does not end the repair, and a report of "off" does not make the
+    timer send the turn-on that failed to a boiler that is not there."""
     entry = await setup_target()
     held = fake_target.hold_next_call()
     fake_target.fail_next_call()
     running = start_set_number(hass, NUMBER, 30)
     await held.reached.wait()
-    fake_target.write("on")  # waits for the timer, which is busy
+    # An attribute makes the write a change, which the timer follows. It waits for the
+    # timer, which is busy.
+    fake_target.write(reported, queued=1)
     er.async_get(hass).async_remove(TARGET_ID)
     hass.states.async_remove(TARGET_ID)
 
@@ -329,6 +337,7 @@ async def test_a_report_queued_before_the_deletion_does_not_end_the_repair(
     await hass.async_block_till_done()
 
     assert target_deleted_issue(hass, entry) is not None
+    assert fake_target.calls == [TURN_ON]
 
 
 # --- The repair deletes the timer -----------------------------------------------------
@@ -403,3 +412,28 @@ async def test_the_repair_of_a_timer_deleted_meanwhile_does_nothing(
 
     assert done["type"] == "abort"
     assert done["reason"] == "timer_gone"
+
+
+async def test_a_repair_that_is_shown_again_without_its_issue_does_nothing(
+    hass: HomeAssistant,
+    repairs: None,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user opens the repair, the timer is deleted on its integration page, and the
+    dialog asks for its step again: it aborts, rather than show a form with the names of
+    the timer and the entity left blank."""
+    entry = await setup_target()
+    await fake_target.delete()
+    issue = target_deleted_issue(hass, entry)
+    assert issue is not None
+    manager = repairs_flow_manager(hass)
+    assert manager is not None
+    flow = await manager.async_init(DOMAIN, context={"issue_id": issue.issue_id})
+    assert flow["type"] == "form"
+    await hass.config_entries.async_remove(entry.entry_id)
+
+    shown_again = await manager.async_configure(flow["flow_id"], None)
+
+    assert shown_again["type"] == "abort"
+    assert shown_again["reason"] == "timer_gone"

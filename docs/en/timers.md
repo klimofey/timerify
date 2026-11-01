@@ -83,7 +83,7 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 - If the entity of a timer is deleted, for example with its device, Home Assistant shows a repair: "The device of timer Boiler was deleted". You see it at the top of **Settings** and under **Settings > System > Repairs**.
 - Until you act, the timer switches nothing. It keeps its countdown and its pending commands. What comes due meanwhile is applied when the device is back, as it is for a [device that does not answer](#when-the-device-does-not-answer).
 - Add the device again with the same entity ID, and the timer works again by itself. The repair goes away.
-- To delete the timer instead, open the repair, choose **Repair**, then **Submit**. The timer goes with its entities, schedule intervals and pending commands. Deleting the timer on its integration page does the same, and takes the repair away.
+- To delete the timer instead, open **Repairs**, choose the repair, then choose **Submit**. The timer goes with its entities, schedule intervals and pending commands. Deleting the timer on its integration page does the same, and takes the repair away.
 
 ## When Home Assistant restarts
 

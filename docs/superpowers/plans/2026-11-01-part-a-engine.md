@@ -37,7 +37,7 @@
 
 ## Review Focus
 
-1. **A deleted target with a countdown running is restored after the countdown's end.** Nothing is sent while it is gone. When it is back it is turned off once, as for an unavailable target (R10). Test: Task 6, `test_a_countdown_that_ended_while_the_target_was_deleted_turns_it_off_when_it_is_back`.
+1. **A deleted target with a countdown running is restored after the countdown's end.** Nothing is sent while it is gone. When it is back it is turned off once, as for an unavailable target (R10). Test: Task 6, `test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back`.
 2. **The user deletes the timer on the integration page instead of through the repair.** The issue goes with it, and no stale repair is left. Test: Task 6, `test_deleting_the_timer_on_the_integration_page_clears_the_repair`.
 3. **A due command whose only setting the running device no longer takes.** No call goes out, the warning is said once, and nothing is owed or re-sent afterwards. Test: Task 5, `test_a_running_ac_that_no_longer_takes_the_only_setting_of_a_command_gets_no_call`.
 4. **A stored file that misses a field, not only one that contradicts itself.** It raises the same repair, not a bare `KeyError` at set-up. Test: Task 7, `test_a_stored_timer_missing_a_field_raises_the_same_repair`.
@@ -406,6 +406,7 @@ git commit -m "Leave out the settings the target no longer takes when they are s
   - `custom_components/timerify/__init__.py`: `_follow_target` (`:100-121`), `_follow_target_gaining_a_device` (`:124-160`), a new `_follow_target_restored`, `async_setup_entry` (`:48-66`) and `async_remove_entry` (`:88-97`).
   - `translations/en.json` and `translations/ru.json`: a new top-level `"issues"`.
   - `tests/conftest.py`: the `FakeTarget` fields, `delete`, `delete_device` and `restore`, and `provide_target(..., registered=True)`.
+  - `tests/test_source_changes.py`: the deleted-target test. `source_entity_removed` switches off Home Assistant's default unlinking, so the timer's entities stay on the target's device.
   - `docs/en/timers.md` and `docs/ru/timers.md`: a new section.
   - `RULINGS.md`.
 
@@ -473,7 +474,7 @@ async def test_deleting_the_target_raises_a_repair_that_names_the_timer(...)
     # issue.is_fixable; issue.severity == "error"; entry.state is LOADED; state_of(NUMBER) == "0";
     # timerify_warnings(caplog) == ["The entity switch.boiler of the timer Boiler was deleted; the timer switches nothing until it is back"]
 
-async def test_a_countdown_that_ended_while_the_target_was_deleted_turns_it_off_when_it_is_back(...)  # Review Focus 1
+async def test_a_countdown_ended_while_the_target_was_deleted_turns_it_off_when_back(...)  # Review Focus 1
     # Run for 30; delete; advance 30 min: calls == [TURN_ON] (no stray call); await fake_target.restore("on"); block:
     # calls == [TURN_ON, TURN_OFF] (one turn-off, whichever of the report and the reload comes first); the issue is gone
 

@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Common-password list (src/tvsieve/data/common-passwords.txt): SecLists (MIT),
-danielmiessler/SecLists, Passwords/Common-Credentials/100k-most-used-passwords-NCSC.txt at
-commit 1a7bb9127eca9e6ff2fc0301c597fe6e16a0cb56, reduced by scripts/update_common_passwords.py.

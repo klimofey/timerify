@@ -1,12 +1,14 @@
 """The runtime counter adds up the time a target was on, and keeps its total in a file
 of its own."""
 
+import copy
 import math
 from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import UnsupportedStorageVersionError
 
 from custom_components.timerify.runtime import (
     RUNTIME_STORAGE_VERSION,
@@ -118,6 +120,44 @@ def test_clock_going_back_adds_nothing() -> None:
     assert counter.total(after(600)) == 300.0
 
 
+def test_stored_seconds_keep_what_was_shown_after_the_clock_went_back() -> None:
+    """The boiler has run 10 minutes and the sensor shows 10.0. The clock is then set
+    back 5 minutes, and Timerify is reloaded 2 minutes later. What it saves then has to
+    show 10.0 again after the restart, not the 7 minutes the clock now says."""
+    counter = RuntimeCounter()
+    counter.observe(START, True)
+    counter.mark_shown(counter.minutes(after(600)))
+    reloaded_at = after(420)
+
+    assert counter.total(reloaded_at) == 420.0
+
+    restarted = RuntimeCounter(counter.seconds_to_store(reloaded_at))
+    assert restarted.minutes(reloaded_at) >= 10.0
+
+
+def test_stored_seconds_show_what_was_shown_where_a_minute_is_rounded() -> None:
+    """A run of 299.7 seconds is published as 5.0 minutes: what is saved shows exactly
+    5.0 after a restart, not a hundredth less."""
+    counter = RuntimeCounter()
+    counter.observe(START, True)
+    counter.mark_shown(counter.minutes(after(299.7)))
+    assert counter.shown == 5.0
+
+    restarted = RuntimeCounter(counter.seconds_to_store(after(299.7)))
+
+    assert restarted.minutes(after(299.7)) == 5.0
+
+
+def test_stored_seconds_are_the_total_once_it_is_ahead_of_what_was_shown() -> None:
+    """When the boiler has run on past what was published, the file gets what was
+    counted, not the published figure."""
+    counter = RuntimeCounter()
+    counter.observe(START, True)
+    counter.mark_shown(5.0)
+
+    assert counter.seconds_to_store(after(330)) == 330.0
+
+
 async def test_store_round_trip(
     hass: HomeAssistant, hass_storage: dict[str, Any]
 ) -> None:
@@ -192,6 +232,27 @@ async def test_store_refuses_a_bad_file(
     await store.async_save(60.0)
     assert await RuntimeStore(hass, ENTRY_ID).async_load() == 60.0
     assert len(timerify_warnings(caplog)) == 1
+
+
+async def test_a_file_from_a_newer_version_is_not_overwritten(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    """A file that a newer Timerify wrote is not read as an empty one: starting from
+    zero would overwrite what it counted, so the load fails and the file stays as it
+    was."""
+    key = runtime_storage_key(ENTRY_ID)
+    hass_storage[key] = {
+        "version": RUNTIME_STORAGE_VERSION + 1,
+        "minor_version": 1,
+        "key": key,
+        "data": {"seconds": 7200.0, "since": "2026-01-05"},
+    }
+    before = copy.deepcopy(hass_storage[key])
+
+    with pytest.raises(UnsupportedStorageVersionError):
+        await RuntimeStore(hass, ENTRY_ID).async_load()
+
+    assert hass_storage[key] == before
 
 
 async def test_removing_the_store_deletes_the_file(

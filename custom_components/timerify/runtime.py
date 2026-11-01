@@ -73,6 +73,14 @@ class RuntimeCounter:
         was reset, or take the dip off their sum."""
         return max(self._shown, round(self.total(now) / 60, 2))
 
+    def seconds_to_store(self, now: datetime) -> float:
+        """The seconds the file has to hold as of `now`: the total, or the minutes
+        published if those are more. A counter built from them shows, to the hundredth,
+        at least what was published, even where the total is behind it: the clock was
+        set back, or the minute was rounded up. Saving `total` alone would let the
+        value drop after a restart."""
+        return max(self.total(now), self._shown * 60)
+
     @property
     def shown(self) -> float:
         """The minutes last published; 0 until some are."""
@@ -133,7 +141,9 @@ class RuntimeStore:
 
     async def async_save(self, seconds: float) -> None:
         """Write the total out at once, not after a delay: a value is published only
-        after the file holds at least as much, so that a crash cannot lose it."""
+        after the file holds at least as much, so that a crash cannot lose it. While
+        Home Assistant is stopping, the write is queued for its final write, which
+        comes before it has stopped."""
         await self._store.async_save({"seconds": seconds})
 
     async def async_remove(self) -> None:

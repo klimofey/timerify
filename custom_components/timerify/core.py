@@ -336,8 +336,8 @@ class TimerCore:
         self._wish_allowance = _Allowance(automatic_resends)
         """The sends of the pending wish. Only meaningful while a wish is pending: it
         has one for its whole life, and every new wish starts a new one. Never
-        persisted, so a stored wish starts a new one with the first report after a
-        start."""
+        persisted: a core starts with a new one, and the first report that finds a
+        stored wish unsent makes its free first delivery."""
         self._settings_allowance = _Allowance(automatic_resends)
         """The same for the owed settings: new settings, and a command that sends the
         ones owed, start a new one."""
@@ -910,6 +910,10 @@ class TimerCore:
             return self._settings_for_running_target(settings)
         self._snapshot = replace(state, pending=target)  # replaces an opposite wish
         self._wish_allowance.renew()  # new work, whatever became of the last wish
+        if target == "on" and state.owed_settings:
+            # Asking to run the target again asks for the settings it owes: they are
+            # delivered with this turn-on, or on the target's return if it is away.
+            self._settings_allowance.renew()
         self._owe(settings)  # they ride with the turn-on this causes
         if state.last_actual == "unavailable":
             self._unsent = True
@@ -938,8 +942,8 @@ class TimerCore:
 
         The first delivery by this core costs nothing. After it a report of any kind
         is answered `automatic_resends` times in all, whatever the target did in
-        between, then the core gives up once and sends nothing more until a command
-        wants the wish again.
+        between, then the core gives up once and sends nothing more until new work
+        wants the wish (see `_Allowance`).
         """
         match self._wish_allowance.take():
             case "give_up":

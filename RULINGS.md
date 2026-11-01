@@ -65,7 +65,8 @@ not repeated beside its successor.
   old state would be commanded for ever. Remotes and media players get none because a
   toggle-based remote can be switched back off by a repeat and a media player that is
   still booting reports a state that is not on; they are sent the command again only when
-  it is asked again. Cost if wrong: an ignoring media player is retried only then.
+  it is asked again or when the timer itself switches them. Cost if wrong: an ignoring
+  media player is retried only then.
 - **A report of our own call that contradicts the timer, with no wish pending, is a wish
   that has not landed, and the core asks for the state it wished again, once for each
   wish that was settled without a call.** A call that the device accepted but does not
@@ -1799,8 +1800,11 @@ in `docs/followups.md`.
   Only new work renews the allowance: a new pending wish (any command, or an item of the
   fold that wants a state, such as the end of a countdown or the start of a window), the one
   correction of a late report of our own call, new owed settings, and a command that sends
-  the owed settings. Reports renew nothing. The log says so: "did not turn off after 4
-  attempts; Timerify will not send it again until it is asked again".
+  the owed settings. A new wish to turn on also renews the allowance of the settings that
+  are owed, because it asks for them again: settings given up on are delivered when the
+  target returns, after a command made while it was away. Reports renew nothing. The log
+  says so: "did not turn off after 4 attempts; Timerify will not send it again until it is
+  asked again".
   Why: #11. A device that answers each refused call with `unknown` and then its old state
   looked like a target that went away and came back, and every such cycle reset the count, so
   the device was commanded as often as it answered. A device that drops off Wi-Fi and

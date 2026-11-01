@@ -1443,6 +1443,26 @@ def test_new_settings_riding_a_turn_on_have_an_allowance_of_their_own() -> None:
     ]
 
 
+def test_a_command_made_while_away_sends_given_up_settings_on_return() -> None:
+    """Timerify gave up on the settings. The target drops off, and the user asks to run
+    it again. That is asking again: when the target is back on, the settings go out
+    once, and are limited like any others."""
+    c = owing("strict", "on")
+    c.call_failed(NOW)
+    repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1)
+    c.observe(NOW + minutes(10), "unavailable", by_us=False)
+    c.set_duration(NOW + minutes(11), minutes(30))
+
+    back = c.observe(NOW + minutes(12), "on", by_us=False)
+    c.call_failed(NOW + minutes(12))
+    again = repeat_reports(c, MAX_AUTOMATIC_RESENDS + 1, since=minutes(12))
+
+    assert back == [ApplySettings(COOL24), Changed()]
+    assert again == [[ApplySettings(COOL24)]] * MAX_AUTOMATIC_RESENDS + [
+        [GaveUp("settings")]
+    ]
+
+
 def test_a_command_gives_refused_settings_a_full_allowance_again() -> None:
     """Asking for the timer again after the core gave up sends the settings once more,
     and they may be repeated as before."""

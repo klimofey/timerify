@@ -381,6 +381,35 @@ async def test_settings_that_keep_failing_are_given_up_on(
     assert len(timerify_warnings(caplog)) == asked + 1
 
 
+async def test_run_asked_while_the_ac_is_away_sends_given_up_settings_when_it_is_back(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Timerify gave up on the settings of an air conditioner that rejects them. The
+    air conditioner drops off Wi-Fi, and the user asks to run it again. That is asking
+    again: when it is back, the settings are sent."""
+    await setup_target(target=AC_ID)
+    await fake_climate.set_state("heat")
+    fake_climate.fail_next_call(service="set_hvac_mode")
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, hvac_mode="cool")
+    for signal in range(MAX_AUTOMATIC_RESENDS):
+        fake_climate.fail_next_call(service="set_hvac_mode")
+        await fake_climate.set_state("heat", signal=signal)
+    await fake_climate.set_state("heat", signal=MAX_AUTOMATIC_RESENDS)
+    asked = 1 + MAX_AUTOMATIC_RESENDS
+    assert fake_climate.call_data == [COOL] * asked
+    await fake_climate.set_state("unavailable")
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, minutes=30)
+    assert fake_climate.call_data == [COOL] * asked
+
+    await fake_climate.set_state("heat")
+
+    assert fake_climate.call_data == [COOL] * (asked + 1)
+    assert state_of(hass, AC_ID) == "cool"
+    assert state_of(hass, AC_NUMBER) == "30"
+
+
 async def test_service_that_keeps_raising_on_settings_logs_its_traceback_once(
     hass: HomeAssistant,
     fake_climate: FakeTarget,

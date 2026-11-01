@@ -127,7 +127,8 @@ RUNTIME_TICK_SECOND: Final = 59
 """The second of every minute at which the Runtime sensor publishes its total: the last
 one. A listener fires up to half a second after its second, so a run that crosses an
 hour or midnight is credited to the right side of it to within a second, which a tick
-at second 0 would credit to the wrong side."""
+at second 0 would credit to the wrong side. That holds while the file is saved in under
+half a second: the tick saves it before it writes the state."""
 
 
 def timer_unique_id(entry_id: str, key: str) -> str:

@@ -1564,8 +1564,9 @@ in the form they have now. Section numbers (§) are those of the spec; "research
 - **The file is saved immediately (`async_save`) before every published value, and flushed on
   unload and when Home Assistant stops.** A stop unloads no entry, so without the second the
   seconds since the last tick would be lost at every stop. The stored value is then always at
-  least the shown one, so no restart or crash can make the value go down. Cost if wrong: one
-  tiny write a minute while the target is on.
+  least the shown one, so no restart or crash can make the value go down, unless the file
+  cannot be written (Home Assistant logs a failed write and does not raise it). Cost if wrong:
+  one tiny write a minute while the target is on.
 - **Switching the counter off and on again keeps the stored total.** No false reset in the
   statistics and no silent loss. Deleting the timer deletes the file. Cost if wrong: a user who
   wants a fresh start clears the statistics and deletes the timer.
@@ -1579,9 +1580,12 @@ in the form they have now. Section numbers (§) are those of the spec; "research
   to 2 decimals, shown with display precision 0.** The spec's point is attributing runtime to
   the right hour and day. A tick at second 59, even with its jitter of up to 0.5 s, lands before
   the minute's boundary, so a run across midnight splits within a second, with one write a
-  minute. Whole minutes at second 0 would land after every boundary and could be off by up to
+  minute, provided the file write that precedes the state write finishes promptly: the tick
+  saves the file first, and the recorder dates the state by the write of the state.
+  Whole minutes at second 0 would land after every boundary and could be off by up to
   2 minutes (research §3). Cost if wrong: the raw state carries decimals, which the display
-  hides.
+  hides; a file write slower than about half a second at 23:59:59 (a stalled disk) moves the
+  day's last minute to the next day, and nothing is lost.
 - **The sensor has one tick listener for its whole life, and subscribes to the target's state on
   its own.** It does not go through the controller, its lock or its notifications, and it
   time-stamps a change with `event.time_fired`. The controller's handler can wait up to 30 s
@@ -1605,8 +1609,13 @@ in the form they have now. Section numbers (§) are those of the spec; "research
   before the duration.
 - **Neither `timerify/timer` nor the card gets a `runtime` key in this phase.** §6.3's card
   shows actions and the countdown, not runtime, and a key that nobody reads is dead weight. This
-  settles the earlier plan to add one "with the sensor". Cost if wrong: a later card feature
-  adds the key in three places (the Python `TimerInfo`, `hass.ts` and `watchedEntities`).
+  settles the earlier plan to add one "with the sensor". `mode` and `default_duration`, which
+  the answer has carried since phase 5 and the card does not read, stay as they are for the
+  same reason: the answer is a contract that the card mirrors key for key, and changing it for
+  two fields alone, with no card feature to ask for it, gains nothing; the first card feature
+  that changes the answer is the time to reconsider them. Cost if wrong: a later card feature
+  adds the key in three places (the Python `TimerInfo`, `hass.ts` and `watchedEntities`), and
+  two fields stay in the answer that nothing reads.
 
 ### Verification
 

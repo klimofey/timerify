@@ -185,14 +185,6 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   that a file written by Timerify alone cannot cause.
   `custom_components/timerify/store.py:200-220` (`async_load`) and
   `custom_components/timerify/translations/ru.json:435-437`.
-- **The store does not check the offset of the stored end and of the time of a command.**
-  A window is read through `checked_window`, which refuses a time with no offset; the
-  end of the countdown and the `at` of a command are read as they are, so a naive one
-  from a hand-edited file raises in the first fold instead of when the timer loads.
-  Only a hand-edited file can hold one, because the store writes UTC. The fix is one
-  helper in the store that reads a time and refuses a naive one, used by the three.
-  `custom_components/timerify/store.py:27-34` (`_command_from_json`) and `:192-206`
-  (`_read`, the end).
 - **Brand icon missing.** `custom_components/timerify/brand/icon.png` does not exist, so the
   HACS brand check and Home Assistant's integrations page show no logo. Add it in the final
   release phase.
@@ -205,7 +197,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   waits for a phase that can test every spoken form of a time in both languages.
   `custom_components/timerify/voice/commands.py:31-111` (`DelayedCommandHandler`) and
   `:136-150` (`_clock_time_of`, which only the tool feeds), and
-  `scripts/generate_core_commands.py:385-420` (`_delayed_blocks`, where the delayed
+  `scripts/generate_core_commands.py:385-418` (`_delayed_blocks`, where the delayed
   sentences are made).
 - **A target that is not in the entity registry: a changed friendly name is listed only
   after its timer reloads.** The sentence file is written again when an entity or a device
@@ -215,7 +207,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   device that changes its own list of modes (a firmware update). The fix is to follow the
   `state_changed` events of the targets when the name or the modes differ from the ones
   last written. The managed entry is the only one affected; the manual route is redone by
-  hand anyway. `custom_components/timerify/voice/files.py:356-378` (`_entity_updated`,
+  hand anyway. `custom_components/timerify/voice/files.py:357-378` (`_entity_updated`,
   `_device_updated`, the only triggers) and `custom_components/timerify/voice/sentences.py:156-181`
   (`voice_names`, the name of a target with no registry entry).
 - **A one-time repair issue listing interval switches exposed under 0.3.0.** Version 0.3.0
@@ -225,7 +217,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   entity stays, so an upgraded house keeps exposing them: "turn off Schedule 06:30 to 07:15"
   works, and the entity is offered to an LLM agent. The README tells how to take them
   away. A repairs issue at set-up that names the exposed ones and offers to unexpose them
-  would do it for the user. `custom_components/timerify/switch.py:33-79` (`IntervalSwitch`,
+  would do it for the user. `custom_components/timerify/switch.py:33-81` (`IntervalSwitch`,
   `entity_category` at line 47).
 - **An unavailable target with no timer is answered "off".** "How long is left on the
   boiler" says "Boiler is off and has no timer" for a target that is unavailable and is not
@@ -255,7 +247,7 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
   (a hyphen matches the dash of the title). A spoken form of the generated title ("the
   6:30 schedule") would need the times and the days in words in both languages.
   `custom_components/timerify/voice/sentences.py:185-201` (`interval_names`, which lists the
-  titles), `custom_components/timerify/schedule.py:128-155` (`interval_title`) and `:158-174`
+  titles), `custom_components/timerify/schedule.py:128-141` (`interval_title`) and `:158-171`
   (`title_key`).
 - **Voice names and titles do not fold the Russian letter yo.** Said as "elka", a name
   or an interval title "Yolka" is not matched, as the letter is in the file as it is
@@ -334,8 +326,9 @@ Decisions that were made on purpose are in `RULINGS.md`, not here.
 - **`TimerInfo.mode` and `default_duration` are carried and never read by the card.** Decided,
   not fixed: the contract (C3) asks for them, so it is not a defect, and the occasion this item
   waited for, a `runtime` key that would change the same answer, did not come (`RULINGS.md`,
-  phase 6, same entry). They stay as they are; reconsider them with the first card feature
-  that changes the answer. `card/src/hass.ts:73` and `:75`,
+  phase 6, "Neither `timerify/timer` nor the card gets a `runtime` key in this phase"). They
+  stay as they are; reconsider them with the first card feature that changes the answer.
+  `card/src/hass.ts:73` and `:75`,
   `custom_components/timerify/websocket.py:80` and `:81`.
 - **`services.yaml` hard-codes the limits.** The ranges of `add_time` (plus and minus 1440,
   `custom_components/timerify/services.yaml:12-13`), of the minutes of `run` (`:27-28`) and of

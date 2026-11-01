@@ -991,9 +991,10 @@ same device.
   be changed in the entity's settings, to hours for instance.
 - **Daily and weekly views come from Home Assistant's statistics**, with no extra entities.
   The sensor is a total that only goes up, so Home Assistant keeps its long-term statistics,
-  and a run that crosses midnight is split between the two days to within a second. The
-  history graph shows the total; a statistics graph card shows the minutes per day or per
-  week:
+  and a run that crosses midnight is split between the two days to within a second, as long as
+  the file of the total is written in under half a second (on a stalled disk the last minute
+  of a day may fall on the next one). The history graph shows the total; a statistics graph
+  card shows the minutes per day or per week:
 
   ```yaml
   type: statistics-graph
@@ -1007,7 +1008,8 @@ same device.
 - **Time that Timerify did not see is not counted**: the time Home Assistant is not running,
   and the time the target is unavailable or unknown. When Home Assistant is back, or the
   target reports again, and the target is on, the count goes on from that moment. The total
-  never goes down, not even when the clock of the machine is set back.
+  never goes down, not even when the clock of the machine is set back, unless its file cannot
+  be written (a full or read-only disk), which Home Assistant logs.
 - **A restart loses nothing.** The total is stored in a file of its own, before the sensor
   shows it. Stopping or restarting Home Assistant, and reloading the timer, keep every second
   the counter has seen. If Home Assistant crashes, a run loses at most its last minute.

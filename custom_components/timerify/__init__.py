@@ -3,15 +3,17 @@
 from typing import Final
 
 from homeassistant.const import Platform
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.device import async_entity_id_to_device_id
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_registry import EventEntityRegistryUpdatedData
+from homeassistant.helpers.event import async_track_entity_registry_updated_event
 from homeassistant.helpers.helper_integration import async_handle_source_entity_changes
 from homeassistant.helpers.typing import ConfigType
 
 from .card import async_register_card
-from .const import CONF_TARGET, DOMAIN, SIGNAL_TIMERS_CHANGED
+from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
 from .controller import TargetController, TimerifyConfigEntry
 from .runtime import RuntimeStore
 from .services import async_setup_services
@@ -53,6 +55,8 @@ async def async_setup_entry(
     entry.runtime_data = controller
     entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     entry.async_on_unload(_follow_target(hass, entry))
+    if CONF_WORKDAY_SENSOR in entry.options:
+        _follow_workday_sensor_rename(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await controller.async_start()
     async_dispatcher_send(hass, SIGNAL_TIMERS_CHANGED)
@@ -109,4 +113,34 @@ def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_
         set_source_entity_id_or_uuid=set_target,
         source_device_id=async_entity_id_to_device_id(hass, entry.options[CONF_TARGET]),
         source_entity_id_or_uuid=entry.options[CONF_TARGET],
+    )
+
+
+def _follow_workday_sensor_rename(
+    hass: HomeAssistant, entry: TimerifyConfigEntry
+) -> None:
+    """Keep the `workday_sensor` option in step with the sensor's entity id.
+
+    A renamed sensor is followed by updating the option, which reloads the entry
+    through its update listener, so that the controller asks about the new id and
+    listens to it. A removed sensor changes nothing: the option keeps its id and the
+    schedule waits, as it does for a sensor that is away, until the user picks another
+    one in the options. `async_handle_source_entity_changes` is not used, since it also
+    moves the entities between devices, and those follow the target's device, not the
+    sensor's.
+    """
+
+    @callback
+    def set_sensor(event: Event[EventEntityRegistryUpdatedData]) -> None:
+        data = event.data
+        if data["action"] != "update" or "entity_id" not in data["changes"]:
+            return
+        hass.config_entries.async_update_entry(
+            entry, options={**entry.options, CONF_WORKDAY_SENSOR: data["entity_id"]}
+        )
+
+    entry.async_on_unload(
+        async_track_entity_registry_updated_event(
+            hass, entry.options[CONF_WORKDAY_SENSOR], set_sensor
+        )
     )

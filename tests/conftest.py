@@ -418,6 +418,27 @@ class FakeWorkday:
         self.write()
         await self.hass.async_block_till_done()
 
+    async def rename(self, new_entity_id: str) -> None:
+        """Give the sensor another entity id, as the user does in its settings: the
+        registry entry moves, the entity takes its state to the new id and answers the
+        service for it, and everything that follows settles."""
+        old_entity_id, self.entity_id = self.entity_id, new_entity_id
+        er.async_get(self.hass).async_update_entity(
+            old_entity_id, new_entity_id=new_entity_id
+        )
+        self.hass.states.async_remove(old_entity_id)
+        self.write()
+        await self.hass.async_block_till_done()
+
+    async def remove(self) -> None:
+        """Delete the sensor, as the user does in its settings: the registry entry and
+        the state go, and the service, which stays, finds no entity to answer for.
+        Everything that follows settles."""
+        er.async_get(self.hass).async_remove(self.entity_id)
+        self._available = False
+        self.hass.states.async_remove(self.entity_id)
+        await self.hass.async_block_till_done()
+
     def fail_next_call(self, error: Exception | None = None) -> None:
         """Make the next `check_date` fail, with `error` (a bug of the integration may
         raise anything) or as a sensor that could not answer."""

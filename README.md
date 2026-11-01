@@ -274,10 +274,6 @@ only.
   that says which sensor and why. Timerify tries again whenever the sensor changes or
   reports, which the Workday integration does at every midnight; when it answers, a window
   that is open is run for its remainder. Intervals of weekdays do not depend on the sensor.
-- **A renamed Workday sensor is not followed.** Timerify keeps the sensor by its entity id,
-  and unlike the target it does not follow a rename. After renaming the sensor the working-day
-  intervals wait and the log says the sensor could not be asked; open **Configure** on the
-  timer and pick the sensor again.
 
 ### Windows
 

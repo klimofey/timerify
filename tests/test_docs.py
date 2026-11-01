@@ -21,10 +21,14 @@ FENCE = "`" * 3
 RAW = "https://raw.githubusercontent.com/klimofey/timerify/main"
 BLOB = "https://github.com/klimofey/timerify/blob/main"
 
-# Every helper below takes the repository root, skips fenced code blocks, and returns
-# one human-readable problem per string, or [] when the tree is clean.
+# Every helper below takes the repository root, skips fenced code blocks (and
+# `style_violations` inline code too), and returns one human-readable problem per
+# string, or [] when the tree is clean.
 README_NAMES = ("README.md", "README.ru.md")
 CODE_FENCE = re.compile(r"^\s*(`{3,})")
+# A code span runs from a run of backticks to the next run of the same length, on a
+# line.
+INLINE_CODE = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
 HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
 TITLE = r'(?:\s+"[^"]*")?'
 # `](target)` rather than `[text](target)`: a linked image, `[![alt](image)](page)`,
@@ -67,6 +71,11 @@ def prose(path: Path) -> str:
         else:
             lines.append(line)
     return "\n".join(lines)
+
+
+def without_inline_code(text: str) -> str:
+    """The text with its inline code spans removed, line by line."""
+    return "\n".join(INLINE_CODE.sub("", line) for line in text.splitlines())
 
 
 def matches(text: str, *patterns: re.Pattern[str]) -> list[tuple[int, re.Match[str]]]:
@@ -240,10 +249,12 @@ def missing_repository_targets(root: Path) -> list[str]:
 
 
 def style_violations(root: Path) -> list[str]:
-    """Long dashes, section signs and rule ids in the user pages."""
+    """Long dashes, section signs and rule ids in the user pages, outside code. A name
+    that Timerify generates, such as the title of an interval, holds a real en dash, so
+    a page quotes it in an inline code span, which is skipped as a code block is."""
     problems: list[str] = []
     for page in user_pages(root):
-        text = prose(page)
+        text = without_inline_code(prose(page))
         found = [
             (line, match, label)
             for pattern, label in STYLE_RULES
@@ -532,6 +543,38 @@ def test_long_dashes_section_signs_and_rule_ids_are_reported(tmp_path: Path) -> 
         'docs/en/timers.md:3: rule id "S1"',
         'docs/en/timers.md:3: rule id "P-7e"',
         'docs/en/timers.md:3: rule id "R12a"',
+    ]
+
+
+def test_a_long_dash_inside_an_inline_code_span_is_not_reported(
+    tmp_path: Path,
+) -> None:
+    # The title that Timerify generates for an interval holds a real en dash, and a
+    # page that names it quotes it exactly, in code.
+    write(
+        tmp_path,
+        "docs/en/schedules.md",
+        f"The switch is `Schedule 06:30{EN_DASH}07:15, Sun{EN_DASH}Thu`.\n"
+        f"A span of two ticks, ``a`b{EM_DASH}c``, holds one tick.\n"
+        f"Prose after a span, `06:30{EN_DASH}07:15`, counts: 07:15{EN_DASH}08:00.\n",
+    )
+
+    assert style_violations(tmp_path) == [
+        f'docs/en/schedules.md:3: long dash "{EN_DASH}"'
+    ]
+
+
+def test_a_backtick_that_does_not_close_hides_nothing(tmp_path: Path) -> None:
+    write(
+        tmp_path,
+        "docs/en/schedules.md",
+        f"A tick ` that never closes, and a long dash {EM_DASH} after it.\n"
+        f"A span `a{EN_DASH}b` and a tick of another length, ``c{EN_DASH}d`.\n",
+    )
+
+    assert style_violations(tmp_path) == [
+        f'docs/en/schedules.md:1: long dash "{EM_DASH}"',
+        f'docs/en/schedules.md:2: long dash "{EN_DASH}"',
     ]
 
 

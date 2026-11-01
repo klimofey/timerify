@@ -2,6 +2,7 @@
 
 from typing import Final
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
@@ -14,7 +15,15 @@ from homeassistant.helpers.helper_integration import async_handle_source_entity_
 from homeassistant.helpers.typing import ConfigType
 
 from .card import async_register_card
-from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
+from .const import (
+    CONF_GENERATED_TITLE,
+    CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
+    DOMAIN,
+    SIGNAL_TIMERS_CHANGED,
+    SUBENTRY_INTERVAL,
+    TRANSLATION_LANGUAGES,
+)
 from .controller import TargetController, TimerifyConfigEntry
 from .entity import remove_fallback_device
 from .issues import (
@@ -24,6 +33,7 @@ from .issues import (
     async_raise_stored_timer_invalid,
 )
 from .runtime import RuntimeStore
+from .schedule import async_title_labels, interval_title
 from .services import async_setup_services
 from .store import StoredTimerInvalid, TimerStore
 from .voice import async_register_intents
@@ -53,6 +63,36 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     async_register_intents(hass)
     async_register_websocket_commands(hass)
     await async_register_card(hass)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Bring an entry that an earlier release made to the current minor version.
+
+    Minor version 2 marks the titles Timerify gave the intervals
+    (`CONF_GENERATED_TITLE`), so that an edit names them again in the language of the
+    house. A title that equals the one made in any shipped language is marked,
+    whichever language the house was set to when the interval was made; any other is
+    the user's. The voice settings have no intervals and only move to the version.
+
+    Release 1.0.0 has no migration, so it loads an entry of this version and ignores
+    the mark, and its own rule for the title applies again.
+    """
+    if entry.minor_version < 2:
+        labels_by_language = [
+            await async_title_labels(hass, language)
+            for language in TRANSLATION_LANGUAGES
+        ]
+        for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
+            if subentry.title in {
+                interval_title(subentry.data, labels) for labels in labels_by_language
+            }:
+                hass.config_entries.async_update_subentry(
+                    entry,
+                    subentry,
+                    data={**subentry.data, CONF_GENERATED_TITLE: subentry.title},
+                )
+        hass.config_entries.async_update_entry(entry, minor_version=2)
     return True
 
 

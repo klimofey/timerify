@@ -36,6 +36,7 @@ from .helpers import (
     advance,
     edit_interval,
     prefilled,
+    retitle_interval,
     set_number,
     state_of,
     submit_interval,
@@ -129,6 +130,7 @@ async def test_adding_an_interval_stores_it_with_a_readable_title(
         "start": "06:30",
         "end": "07:15",
         "settings": {},
+        "generated_title": "06:30–07:15, Sun–Thu",
     }
 
 
@@ -548,6 +550,7 @@ async def test_editing_an_interval_updates_data_and_title(
         "start": "06:30",
         "end": "07:30",
         "settings": {},
+        "generated_title": "06:30–07:30, Mon–Sun",
     }
     assert subentry.title == "06:30–07:30, Mon–Sun"
 
@@ -626,6 +629,68 @@ async def test_editing_keeps_a_title_the_user_chose(
     subentry = entry.subentries[subentry_id]
     assert subentry.data["end"] == "07:30"
     assert subentry.title == "Morning"
+
+
+async def test_a_new_interval_is_marked_as_titled_by_timerify(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The interval keeps the title it was given, to tell later whether it is still
+    the one Timerify made."""
+    entry = await setup_target()
+
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+
+    subentry = entry.subentries[subentry_id]
+    assert subentry.title == "06:30–07:15, Mon–Sun"
+    assert subentry.data["generated_title"] == subentry.title
+
+
+async def test_an_edit_after_the_language_changed_renames_the_interval(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """An interval that Timerify named in Russian is named in English by the first
+    edit after the house is set to English, on the integration page and on its
+    switch alike; the mark follows the new name."""
+    entry = await setup_target()
+    hass.config.language = "ru"
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+    assert entry.subentries[subentry_id].title != "06:30–07:15, Mon–Sun"
+    hass.config.language = "en"
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    subentry = entry.subentries[subentry_id]
+    assert subentry.title == "06:30–07:30, Mon–Sun"
+    assert subentry.data["generated_title"] == subentry.title
+    (switch,) = (
+        registered
+        for registered in er.async_entries_for_config_entry(
+            er.async_get(hass), entry.entry_id
+        )
+        if registered.config_subentry_id == subentry_id
+    )
+    state = hass.states.get(switch.entity_id)
+    assert state is not None
+    assert state.name == "Boiler Schedule 06:30–07:30, Mon–Sun"
+
+
+async def test_a_renamed_interval_keeps_its_name_after_the_language_changed(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The name is the user's from the rename on: an edit keeps it, though it was the
+    name Timerify gave, in a language that the house no longer speaks."""
+    entry = await setup_target()
+    hass.config.language = "ru"
+    subentry_id = await add_interval(hass, entry, start="06:30", end="07:15")
+    await retitle_interval(hass, entry, subentry_id, "Morning")
+    hass.config.language = "en"
+
+    await edit_interval(hass, entry, subentry_id, end="07:30")
+
+    subentry = entry.subentries[subentry_id]
+    assert subentry.title == "Morning"
+    assert subentry.data["end"] == "07:30"
+    assert "generated_title" not in subentry.data
 
 
 async def test_editing_keeps_the_settings_it_is_not_asked_to_change(
@@ -845,6 +910,7 @@ async def test_workday_interval_titles(
         "start": "06:30",
         "end": "07:15",
         "settings": {},
+        "generated_title": title,
     }
 
 

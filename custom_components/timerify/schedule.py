@@ -9,11 +9,13 @@ to the day it starts on.
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 from hassil.util import remove_punctuation
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import WEEKDAYS
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.translation import async_get_translations
 
 from .const import (
     CONF_DAYS,
@@ -21,6 +23,7 @@ from .const import (
     CONF_SETTINGS,
     CONF_START,
     CONF_WEEKDAYS,
+    DOMAIN,
     MAX_MINUTES,
     WINDOW_SEARCH_DAYS,
     DaysMode,
@@ -32,6 +35,14 @@ from .core import Window
 _WEEK: Final = len(WEEKDAYS)
 _MIN_RANGE: Final = 3
 """The fewest consecutive days written as a range: Mon–Wed, not Mon, Tue, Wed."""
+
+WEEKDAY_SELECTOR: Final = "weekday"
+"""The key of the weekday names in the `selector` translations: the list the user
+picks days from and the words of an interval's title."""
+DAYS_SELECTOR: Final = "interval_days"
+"""The key of the kinds of days in the `selector` translations: the list the user picks
+from and the words of the title of an interval that follows working days."""
+DAYS_MODES: Final[tuple[DaysMode, ...]] = get_args(DaysMode.__value__)
 
 
 @dataclass(frozen=True)
@@ -139,6 +150,25 @@ def interval_title(data: Mapping[str, Any], labels: Mapping[str, str]) -> str:
         else labels[days]
     )
     return f"{data[CONF_START]}–{data[CONF_END]}, {label}"
+
+
+async def async_title_labels(hass: HomeAssistant, language: str) -> dict[str, str]:
+    """The words of an interval's title in `language`: the short names of the weekdays,
+    by their names, and the names of the kinds of days, by their `DaysMode`; the
+    language of the house for a title that is made now, any shipped one to tell what a
+    title was made in."""
+    words = await async_get_translations(hass, language, "selector", [DOMAIN])
+    prefix = f"component.{DOMAIN}.selector"
+    return {
+        **{
+            day: words[f"{prefix}.{WEEKDAY_SELECTOR}.options.{day}"] for day in WEEKDAYS
+        },
+        **{
+            days: words[f"{prefix}.{DAYS_SELECTOR}.options.{days}"]
+            for days in DAYS_MODES
+            if days != "weekdays"
+        },
+    }
 
 
 _DASHES: Final = str.maketrans(

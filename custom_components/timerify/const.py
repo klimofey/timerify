@@ -7,6 +7,8 @@ from types import MappingProxyType
 from typing import Any, Final, Literal
 
 DOMAIN: Final = "timerify"
+TRANSLATION_LANGUAGES: Final = ("en", "ru")
+"""The languages of `translations/`: a file each."""
 
 CONF_TARGET: Final = "target"
 """Option holding the entity id of the target. A renamed target is followed by
@@ -44,6 +46,11 @@ CONF_END: Final = "end"
 interval that crosses midnight."""
 CONF_SETTINGS: Final = "settings"
 """Subentry data: what the target is turned on with when the interval starts."""
+CONF_GENERATED_TITLE: Final = "generated_title"
+"""Subentry data: the title Timerify gave an interval, in the language of the house at
+the time. The title counts as generated while the subentry's title still equals it. A
+rename on the integration page changes only the title, so it ends the mark by itself,
+which a bare flag could not tell. Absent from an interval whose title the user chose."""
 
 DEFAULT_DURATION_MINUTES: Final = 30
 MAX_MINUTES: Final = 1440

@@ -60,6 +60,7 @@ from .const import (
     CONF_DAYS,
     CONF_DEFAULT_DURATION,
     CONF_END,
+    CONF_GENERATED_TITLE,
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_MODE,
@@ -93,7 +94,13 @@ from .domains import (
     switchable_by_features,
     validate_settings,
 )
-from .schedule import interval_title
+from .schedule import (
+    DAYS_MODES,
+    DAYS_SELECTOR,
+    WEEKDAY_SELECTOR,
+    async_title_labels,
+    interval_title,
+)
 from .services import SETTINGS_SCHEMA
 from .target import target_name
 from .voice.base import voice_language
@@ -507,14 +514,6 @@ OPTIONS_FLOW: Final = {
 _SETTING_TYPES: Final = probatio.Schema(SETTINGS_SCHEMA)
 """Gives the settings of an interval the types they have when a service makes them."""
 
-_WEEKDAY_SELECTOR: Final = "weekday"
-"""The key of the weekday names in the `selector` translations: the list the user
-picks days from and the words of an interval's title."""
-_DAYS_SELECTOR: Final = "interval_days"
-"""The key of the kinds of days in the `selector` translations: the list the user picks
-from and the words of the title of an interval that follows working days."""
-_DAYS_MODES: Final[tuple[DaysMode, ...]] = get_args(DaysMode.__value__)
-
 
 def _setting_selector(
     choice: SettingChoice,
@@ -573,8 +572,10 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         """Show the form, then take what was filled in.
 
         A refused form is shown again with what was typed, so that the user corrects
-        the mistake and nothing more. An edit keeps the title the user gave the
-        interval; one that is still the generated title follows the new data.
+        the mistake and nothing more. A new interval is titled by its times and days in
+        the language of the house, and keeps that title as `CONF_GENERATED_TITLE`. An
+        edit titles an interval whose title is still that one again, in the language of
+        the house now, and keeps any other title, the user's own.
         """
         entry = self._get_entry()
         subentry = (
@@ -586,11 +587,15 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             data, errors = self._interval_from(entry, user_input)
             if not errors:
-                labels = await self._async_day_labels()
+                labels = await async_title_labels(self.hass, self.hass.config.language)
                 title = interval_title(data, labels)
                 if subentry is None:
-                    return self.async_create_entry(title=title, data=data)
-                if subentry.title != interval_title(subentry.data, labels):
+                    return self.async_create_entry(
+                        title=title, data={**data, CONF_GENERATED_TITLE: title}
+                    )
+                if subentry.title == subentry.data.get(CONF_GENERATED_TITLE):
+                    data[CONF_GENERATED_TITLE] = title
+                else:
                     title = subentry.title
                 return self.async_update_and_abort(
                     entry, subentry, data=data, title=title
@@ -625,9 +630,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                 CONF_DAYS, default="workdays" if has_sensor else "weekdays"
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=list(_DAYS_MODES),
+                    options=list(DAYS_MODES),
                     mode=selector.SelectSelectorMode.LIST,
-                    translation_key=_DAYS_SELECTOR,
+                    translation_key=DAYS_SELECTOR,
                 )
             ),
             probatio.Required(
@@ -637,7 +642,7 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                     options=list(WEEKDAYS),
                     multiple=True,
                     mode=selector.SelectSelectorMode.LIST,
-                    translation_key=_WEEKDAY_SELECTOR,
+                    translation_key=WEEKDAY_SELECTOR,
                 )
             ),
             probatio.Required(CONF_START): selector.TimeSelector(),
@@ -699,26 +704,6 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         }
         return data, errors
 
-    async def _async_day_labels(self) -> dict[str, str]:
-        """The words of an interval's title in the language of the house: the short
-        names of the weekdays, by their names, and the names of the kinds of days, by
-        their `DaysMode`."""
-        words = await async_get_translations(
-            self.hass, self.hass.config.language, "selector", [DOMAIN]
-        )
-        prefix = f"component.{DOMAIN}.selector"
-        return {
-            **{
-                day: words[f"{prefix}.{_WEEKDAY_SELECTOR}.options.{day}"]
-                for day in WEEKDAYS
-            },
-            **{
-                days: words[f"{prefix}.{_DAYS_SELECTOR}.options.{days}"]
-                for days in _DAYS_MODES
-                if days != "weekdays"
-            },
-        }
-
 
 class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     """Handle the config, options and interval flows of Timerify."""
@@ -731,6 +716,9 @@ class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     Home Assistant does not combine that with a flow that reloads by itself."""
 
     VERSION = 1
+    MINOR_VERSION = 2
+    """Minor version 2 marks the titles Timerify gave the intervals
+    (`CONF_GENERATED_TITLE`); see `async_migrate_entry` in `__init__`."""
 
     @override
     def async_config_entry_title(self, options: Mapping[str, Any]) -> str:

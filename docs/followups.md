@@ -19,7 +19,6 @@ One line per issue: its number and its title, under the area it belongs to.
 ## Schedules
 
 - [#14](https://github.com/klimofey/timerify/issues/14) Windows keep the old time zone after "Reload core configuration"
-- [#15](https://github.com/klimofey/timerify/issues/15) An interval title generated in one language is treated as user-chosen after the language changes
 - [#16](https://github.com/klimofey/timerify/issues/16) Editing an interval silently drops settings the target no longer supports
 
 ## Voice

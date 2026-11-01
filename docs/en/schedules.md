@@ -31,7 +31,7 @@ The entry lists each interval with a menu to **Edit** or **Delete** it. The form
 - **Start time** and **End time**, in whole minutes. The two must differ. An end earlier than the start carries the interval past midnight into the next day. For example, 22:00 to 06:00 runs the night. It belongs to the day it starts on.
 - **Settings**, for a device that has some. See [Settings of an interval](#settings-of-an-interval). The section is collapsed for a new interval. It is open when you edit an interval that has settings.
 
-An interval is named by its times and days, in the language Home Assistant is set to. For example: `06:30–07:15, Sun–Thu`. A name you gave the interval yourself is kept when you edit it. A name that Timerify made follows the edit.
+An interval is named by its times and days, in the language Home Assistant is set to. For example: `06:30–07:15, Sun–Thu`. A name that Timerify made follows the edit, in the language Home Assistant is set to at that time. You can rename the interval on the integration page with **Rename**. The name is then yours, and it is kept when you edit the interval.
 
 Adding, editing or deleting an interval reloads the timer for a moment, so that it reads its intervals again. The countdown and the pending commands are stored, and they carry on. Deleting an interval removes its switch.
 

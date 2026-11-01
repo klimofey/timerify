@@ -2118,3 +2118,38 @@ in `docs/followups.md`.
   `test_run_for_zero_turns_off_a_loose_boiler_without_a_countdown`,
   `test_the_turn_off_button_has_the_unique_id_of_its_key`,
   `test_the_turn_off_button_is_not_exposed_by_default`.
+- **A generated interval title is marked by the title itself, kept in the subentry data.**
+  A new interval is stored with `generated_title` (`CONF_GENERATED_TITLE`) set to the
+  title Timerify gave it, in the language of the house at that time. The mark holds while
+  the subentry's title still equals it. An edit then makes the title again in the
+  language of the house now, and stores the new title under the key. Any other edit keeps
+  the title and stores no key. A rename on the integration page changes only the title
+  (`config_entries/subentries/update`), so it ends the mark with no hook of ours, which a
+  flag could not tell.
+  The migration to minor version 2 (`async_migrate_entry`) marks a subentry whose title
+  equals the title made from its data in any shipped language
+  (`TRANSLATION_LANGUAGES`, pinned to the files of `translations/`), whatever language
+  the house speaks now. A user title that happens to equal a generated one is taken as
+  generated, and the next edit renames it. The voice settings entry only moves to minor
+  version 2. `interval_title` and `async_title_labels` take the language as an argument,
+  so that the voice part can ask for the title of an interval in another language.
+  Minor version 2 keeps a downgrade to 1.0.0 loading: that release has no
+  `async_migrate_entry`, so Home Assistant accepts the entry (checked by loading an entry
+  of minor version 2 with the code of the `v1.0.0` tag). It ignores the key, its edit
+  stores none, and its old rule (a title different from the one made now is the user's)
+  applies again. An interval edited or added under 1.0.0 therefore has no mark when 1.1.0
+  comes back, and its title counts as the user's.
+  Why: #15. The title was made in the language of the house when the interval was added
+  and compared in the language of the house at the edit, so a house that changed language
+  took every generated title for a chosen one, and the title never followed.
+  Cost if wrong: a title typed to look generated is renamed by an edit.
+  Tests: `test_a_new_interval_is_marked_as_titled_by_timerify`,
+  `test_an_edit_after_the_language_changed_renames_the_interval`,
+  `test_a_renamed_interval_keeps_its_name_after_the_language_changed`,
+  `test_editing_keeps_a_title_the_user_chose`,
+  `test_a_title_generated_in_english_is_marked`,
+  `test_a_title_generated_in_russian_is_marked_in_an_english_house`,
+  `test_a_title_of_working_days_is_marked`,
+  `test_a_title_the_user_chose_is_not_marked`,
+  `test_the_voice_settings_entry_is_migrated_too`,
+  `test_the_translation_languages_are_the_files`.

@@ -10,7 +10,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.util.json import json_loads_object
 from homeassistant.util.yaml import load_yaml
 
-from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.const import DOMAIN, TRANSLATION_LANGUAGES
 
 INTEGRATION_DIR = Path(__file__).parent.parent / "custom_components" / DOMAIN
 TRANSLATIONS_DIR = INTEGRATION_DIR / "translations"
@@ -39,6 +39,12 @@ def texts_in(tree: Any, path: str = "") -> dict[str, str]:
 def blanks_of(text: str) -> set[str]:
     """The names of the `{blanks}` Home Assistant fills in."""
     return set(re.findall(r"\{(\w+)\}", text))
+
+
+def test_the_translation_languages_are_the_files() -> None:
+    """The migration that marks generated titles tries each language in the list, so a
+    translation that is added must be added there too."""
+    assert set(TRANSLATION_LANGUAGES) == set(LANGUAGES)
 
 
 def test_english_is_there() -> None:

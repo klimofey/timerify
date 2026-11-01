@@ -14,7 +14,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, KEY_RUN_FOR, MAX_MINUTES
+from .const import DOMAIN, KEY_RUN_FOR, run_for_max_minutes
 from .controller import TimerifyConfigEntry, command_when
 from .core import remaining_minutes
 from .entity import TimerifyEntity
@@ -39,7 +39,6 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         key=KEY_RUN_FOR,
         translation_key="run_for",
         native_min_value=0,
-        native_max_value=MAX_MINUTES,
         native_step=1,
         native_unit_of_measurement=UnitOfTime.MINUTES,
         mode=NumberMode.SLIDER,
@@ -47,6 +46,13 @@ class RunForNumber(TimerifyEntity, NumberEntity):
 
     _shown: float | None = None
     """The minutes the state was last written with."""
+
+    def __init__(self, hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
+        """The slider ends where the timer's maximum of Run for says. It bounds what the
+        slider and `number.set_value` accept, not the countdown: one that something else
+        started may show more minutes than that."""
+        super().__init__(hass, entry)
+        self._attr_native_max_value = run_for_max_minutes(entry.options)
 
     @property
     def native_value(self) -> float:

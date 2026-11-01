@@ -69,7 +69,7 @@ chip: 15                                  # no chip by default: the pill's "+15 
 | `layout` | `pill` | `pill` or `round`. |
 | `name` | the device's name | Replaces the name. |
 | `icon` | the device's icon | An icon such as `mdi:water-boiler`. It does not follow the state. |
-| `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. |
+| `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. Home Assistant refuses a preset that is longer than the timer's **Maximum of Run for**. |
 | `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
 
 An option that the card does not know is ignored. A value that it cannot use is shown as a message on the card, which says what is wrong.

@@ -72,6 +72,25 @@ def remove_fallback_device(hass: HomeAssistant, entry: TimerifyConfigEntry) -> N
     devices.async_remove_device(fallback.id)
 
 
+@callback
+def remove_timer_entity(
+    hass: HomeAssistant, entry: TimerifyConfigEntry, domain: str, key: str
+) -> None:
+    """Remove the registry entry of the timer's entity of `domain` with the key `key`,
+    if there is one: the entity of an option the timer no longer has.
+
+    Nothing else removes it: left there, it would come back at every start as an
+    unavailable entity. Choosing the option again brings it back as it was, with its
+    entity id and its history, because the registry keeps a removed entry's identity.
+    """
+    registry = er.async_get(hass)
+    entity_id = registry.async_get_entity_id(
+        domain, DOMAIN, timer_unique_id(entry.entry_id, key)
+    )
+    if entity_id is not None:
+        registry.async_remove(entity_id)
+
+
 class TimerifyEntity(Entity):
     """An entity of one target: on the target's device, refreshed by its controller.
 

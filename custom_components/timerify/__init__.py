@@ -2,6 +2,7 @@
 
 from typing import Final
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
@@ -14,16 +15,26 @@ from homeassistant.helpers.helper_integration import async_handle_source_entity_
 from homeassistant.helpers.typing import ConfigType
 
 from .card import async_register_card
-from .const import CONF_TARGET, CONF_WORKDAY_SENSOR, DOMAIN, SIGNAL_TIMERS_CHANGED
+from .const import (
+    CONF_GENERATED_TITLE,
+    CONF_TARGET,
+    CONF_WORKDAY_SENSOR,
+    DOMAIN,
+    SIGNAL_TIMERS_CHANGED,
+    SUBENTRY_INTERVAL,
+    TRANSLATION_LANGUAGES,
+)
 from .controller import TargetController, TimerifyConfigEntry
 from .entity import remove_fallback_device
 from .issues import (
     STORED_TIMER_INVALID,
     TARGET_DELETED,
     async_clear,
+    async_clear_settings_warnings,
     async_raise_stored_timer_invalid,
 )
 from .runtime import RuntimeStore
+from .schedule import async_title_labels, stored_interval_title
 from .services import async_setup_services
 from .store import StoredTimerInvalid, TimerStore
 from .voice import async_register_intents
@@ -36,7 +47,12 @@ from .voice.files import (
 )
 from .websocket import async_register_websocket_commands
 
-PLATFORMS: Final = (Platform.NUMBER, Platform.SENSOR, Platform.SWITCH)
+PLATFORMS: Final = (
+    Platform.BUTTON,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+)
 
 CONFIG_SCHEMA: Final = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -51,6 +67,38 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
 
 
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Bring an entry that an earlier release made to the current minor version.
+
+    Minor version 2 marks the titles Timerify gave the intervals
+    (`CONF_GENERATED_TITLE`), so that an edit names them again in the language of the
+    house. A title that equals the one made in any shipped language is marked,
+    whichever language the house was set to when the interval was made; any other is
+    the user's, and so is the title of an interval whose data no title can be made of.
+    The voice settings have no intervals and only move to the version.
+
+    Release 1.0.0 has no migration, so it loads an entry of this version and ignores
+    the mark, and its own rule for the title applies again.
+    """
+    if entry.minor_version < 2:
+        labels_by_language = [
+            await async_title_labels(hass, language)
+            for language in TRANSLATION_LANGUAGES
+        ]
+        for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
+            if subentry.title in {
+                stored_interval_title(subentry.data, labels)
+                for labels in labels_by_language
+            }:
+                hass.config_entries.async_update_subentry(
+                    entry,
+                    subentry,
+                    data={**subentry.data, CONF_GENERATED_TITLE: subentry.title},
+                )
+        hass.config_entries.async_update_entry(entry, minor_version=2)
+    return True
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> bool:
@@ -58,6 +106,18 @@ async def async_setup_entry(
     have no target and no entities."""
     if is_voice_entry(entry):
         return await async_setup_voice_entry(hass, entry)
+    try:
+        return await _async_setup_timer(hass, entry)
+    except Exception:
+        # A timer that does not load turns nothing on, so it has nothing to warn about.
+        # The warnings outlive an unload (see `TargetController.async_start`); a timer
+        # that loads again raises them again.
+        async_clear_settings_warnings(hass, entry.entry_id)
+        raise
+
+
+async def _async_setup_timer(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:
+    """Set up the timer of one target and its entities."""
     store = TimerStore(hass, entry.entry_id)
     try:
         snapshot = await store.async_load()
@@ -103,12 +163,14 @@ async def async_remove_entry(
     hass: HomeAssistant, entry: TimerifyConfigEntry | VoiceConfigEntry
 ) -> None:
     """Delete the stored timer and the stored runtime total of a removed entry, take its
-    repairs away, or delete the sentence files of the voice settings."""
+    repairs and the warnings of its intervals away, or delete the sentence files of the
+    voice settings."""
     if is_voice_entry(entry):
         await async_remove_voice_entry(hass, entry)
         return
     async_clear(hass, TARGET_DELETED, entry.entry_id)
     async_clear(hass, STORED_TIMER_INVALID, entry.entry_id)
+    async_clear_settings_warnings(hass, entry.entry_id)
     await TimerStore(hass, entry.entry_id).async_remove()
     await RuntimeStore(hass, entry.entry_id).async_remove()
 

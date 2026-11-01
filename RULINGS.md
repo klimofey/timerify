@@ -2056,3 +2056,285 @@ in `docs/followups.md`.
   The issue is labelled `upstream`; reporting it to Home Assistant is the owner's call.
   Cost if wrong: after a YAML change of the zone and that reload, windows run in the old
   zone until a window ends, the Workday sensor reports or the timer reloads.
+
+### Forms and entities
+
+- **The maximum of Run for bounds the slider, not the timer.** The option
+  (`CONF_RUN_FOR_MAX`, whole minutes, a day when an entry has none) sets the `max` of the
+  "Run for" number. Home Assistant's `number.set_value` refuses more, so the slider, the
+  more-info dialog and the card's presets (which use `set_value`) follow it. `run`,
+  `add_time`, pending commands, voice, the LLM tools and windows keep the 1440-minute
+  limit. A countdown they start runs in full, and the number shows its minutes above
+  `max`. Lowering the maximum leaves a running countdown as it is.
+  The default duration may not be above the maximum. A schema flow has only `base` errors
+  (`schema_config_entry_flow.py:285`), so the error is the base error of the duration
+  form, whose only field it is. The selector stays 1 to 1440, so the error is translated,
+  not a selector's text. The duration form of a new timer starts at the smaller of 30
+  minutes and the maximum, so that taking every default still adds the timer.
+  A loose timer is not checked: it has no duration form, and a stored default duration is
+  used only in strict mode. Switching to strict shows the duration form, which checks it.
+  Why: #35. The owner rarely runs a device for more than two hours. Refusing a window or a
+  spoken "for 3 hours" would change what the base spec defines.
+  Cost if wrong: a card preset longer than the maximum is refused with Home Assistant's own
+  message.
+  Tests: `test_the_first_form_asks_for_the_maximum_of_run_for`,
+  `test_a_default_duration_above_the_maximum_is_refused`,
+  `test_the_duration_form_starts_at_a_maximum_below_thirty`,
+  `test_a_maximum_in_part_minutes_is_refused`,
+  `test_settings_change_the_maximum_of_run_for`,
+  `test_lowering_the_maximum_below_the_default_duration_asks_to_lower_it`,
+  `test_the_slider_ends_at_the_maximum_of_the_timer`,
+  `test_setting_run_for_above_the_maximum_is_refused`,
+  `test_actions_and_commands_run_past_the_maximum`,
+  `test_lowering_the_maximum_keeps_a_longer_countdown_running`,
+  `test_the_settings_reopen_at_the_maximum_the_timer_has`,
+  `test_a_loose_timer_is_not_checked_until_it_turns_strict`,
+  `test_a_window_longer_than_the_maximum_runs_in_full`,
+  `test_a_run_by_voice_goes_past_the_maximum_of_run_for`.
+- **The Turn off button is the stop command, and only an option adds it.** Pressing is
+  `async_set_minutes(0)`, the stop that voice and Run for 0 use. So it ends a countdown,
+  turns off a loose device that runs without one, holds a started window until its next
+  occurrence (S4), and sends nothing to a device that is off.
+  The button has no entity category, because it switches the device. `button` is not
+  exposed to Assist by default, so it adds no phrase that competes with "turn off the
+  boiler". Its state is the time of the last press, which Home Assistant keeps, so the
+  controller's updates write nothing.
+  The option `off_button` is a box after the maximum of Run for on both first forms.
+  Absent or false: no button. Unticking removes the registry entry, as for the Runtime
+  sensor, and both use `remove_timer_entity`. The card option of #37 is part E.
+  Setting Run for to 0 by hand turns off a loose device that runs without a countdown,
+  whether it was switched on by hand or by `run` without a duration. Nothing pinned it
+  before.
+  Why: #37.
+  Cost if wrong: an automation that presses the button while a schedule window is open
+  stops the device until the next window.
+  Tests: `test_a_timer_has_no_turn_off_button_unless_asked`,
+  `test_ticking_the_box_puts_a_turn_off_button_on_the_device`,
+  `test_pressing_turn_off_stops_the_countdown_and_the_boiler`,
+  `test_pressing_turn_off_stops_a_loose_boiler_without_a_countdown`,
+  `test_pressing_turn_off_on_a_boiler_that_is_off_sends_nothing`,
+  `test_unticking_the_box_removes_the_button`,
+  `test_the_turn_off_box_is_on_both_first_forms`,
+  `test_run_for_zero_turns_off_a_loose_boiler_without_a_countdown`,
+  `test_the_turn_off_button_has_the_unique_id_of_its_key`,
+  `test_the_turn_off_button_is_not_exposed_by_default`.
+- **A generated interval title is marked by the title itself, kept in the subentry data.**
+  A new interval is stored with `generated_title` (`CONF_GENERATED_TITLE`) set to the
+  title Timerify gave it, in the language of the house at that time. The mark holds while
+  the subentry's title still equals it. An edit then makes the title again in the
+  language of the house now, and stores the new title under the key. Any other edit keeps
+  the title and stores no key. A rename on the integration page changes only the title
+  (`config_entries/subentries/update`), so it ends the mark with no hook of ours, which a
+  flag could not tell.
+  An interval with no mark falls back to the rule of release 1.0.0: if its title equals
+  the title its data makes now, in the language of the house now, the edit makes the title
+  again and stores the mark. That covers an interval added or edited by 1.0.0 after a
+  downgrade, whose entry is already at minor version 2 and is not migrated again.
+  The migration to minor version 2 (`async_migrate_entry`) marks a subentry whose title
+  equals the title made from its data in any shipped language
+  (`TRANSLATION_LANGUAGES`, pinned to the files of `translations/`), whatever language
+  the house speaks now. A user title that happens to equal a generated one is taken as
+  generated, and the next edit renames it. A subentry that no title can be made of (a
+  missing key, days that are no kind of days, a weekday that is not one) is checked for
+  explicitly (`stored_interval_title`) and left unmarked, so that one odd interval does
+  not fail the migration. Whether the timer then loads is for the data of that interval,
+  as without a migration: one that lacks a time keeps the timer from setting up, one with
+  an unknown day or kind of days loads. The voice settings entry only moves to minor
+  version 2. `async_title_labels(hass, language)` takes the language, so that the
+  migration can compare a title in every shipped language, not only the house's.
+  Minor version 2 keeps a downgrade to 1.0.0 loading: that release has no
+  `async_migrate_entry`, so Home Assistant accepts the entry (checked by loading an entry
+  of minor version 2 with the code of the `v1.0.0` tag). It ignores the key, and its edit
+  stores none. The title of an interval it edited is found again by the fallback above
+  when 1.1.0 comes back, as long as the house language is the one the title was made in.
+  A house language without a translation of Timerify gets English, as Home Assistant
+  falls back, for the titles that are made and for the labels that are compared.
+  Why: #15. The title was made in the language of the house when the interval was added
+  and compared in the language of the house at the edit, so a house that changed language
+  took every generated title for a chosen one, and the title never followed.
+  Cost if wrong: a title typed to look generated is renamed by an edit. A title that 1.0.0
+  made in another language than the house speaks when 1.1.0 comes back is taken as the
+  user's, since only the migration of a first upgrade tries every language.
+  Tests: `test_a_new_interval_is_marked_as_titled_by_timerify`,
+  `test_an_edit_after_the_language_changed_renames_the_interval`,
+  `test_a_renamed_interval_keeps_its_name_after_the_language_changed`,
+  `test_a_house_language_without_translations_names_in_english`,
+  `test_editing_keeps_a_title_the_user_chose`,
+  `test_a_title_generated_in_english_is_marked`,
+  `test_a_title_generated_in_russian_is_marked_in_an_english_house`,
+  `test_a_title_of_working_days_is_marked`,
+  `test_a_title_the_user_chose_is_not_marked`,
+  `test_an_interval_no_title_can_be_made_of_is_left_unmarked`,
+  `test_an_interval_without_the_mark_is_named_again_by_an_edit`,
+  `test_a_title_the_user_chose_is_kept_in_an_entry_of_the_current_version`,
+  `test_the_voice_settings_entry_is_migrated_too`,
+  `test_the_translation_languages_are_the_files`.
+- **An interval keeps a setting the form no longer offers, and a warning stands while the
+  device does not take it.** An edit saves the settings of the form, which have the user's
+  values, then the stored settings whose name the form does not offer
+  (`supported_settings`), untouched. A name the form shows is the user's, also when it is
+  emptied. The section opens only when a shown setting is one the form offers, so an
+  interval whose settings are all hidden shows it closed.
+  The warning is judged as the run-time filter judges (`settings_not_taken`, through
+  `validate_settings`, which `_settings_the_target_takes` goes by too), so it stands
+  exactly while the window would leave the setting out. That includes a value that is no
+  longer accepted, which the form shows and the user can change. The names come in the
+  order of the form (the row of the domain), whatever order they are stored in. A name the
+  form has no label for, which only a hand edit of the stored interval leaves, is shown as
+  the name it has.
+  The form shows a setting it offers with the value the interval holds, also when the
+  device no longer lists that value (`_setting_selector`). A list gets the held value
+  added to the values the device lists, a number field widens its range to take it, and
+  nothing else widens. Without that, the selector refuses the held value in Home
+  Assistant's own words, before `validate_settings` is reached, and a frontend that drops
+  a value its list does not hold would make the edit lose the setting without a word.
+  With it, saving the form unchanged is refused by `validate_settings` with the
+  translated base error `settings_not_supported`, and nothing is saved. A value the
+  device takes saves, and an emptied field drops the setting. A held value of another
+  kind than its field takes (a number where a mode belongs, which only a hand edit
+  leaves) widens nothing. A refused form is shown again with the value typed, so a value
+  just refused stays in its field.
+  There is one warning per interval, naming all its settings by the labels of the form in
+  the language of the house. Its title carries the interval, so that two warnings of a
+  timer differ in the Repairs list, and both are quoted in the texts, because a generated
+  title has a comma in it. It is a Repairs issue with severity warning and not fixable,
+  so it has no fix flow (spec). It is persistent, and its data holds the names it was
+  raised with. It is changed only when the names or the interval change, and it is judged after each report
+  of the target and after the start-up fold, so that reading the texts never delays what
+  the timer owes the target. An interval deleted but not yet reloaded gets no warning.
+  Deleting the interval drops a setting the form no longer shows.
+  While the target is deleted there is none, whose repair speaks for it.
+  While the target is unavailable or unknown, what the device does not take stays as it
+  was. An integration may drop its modes and features with the connection, which would
+  make every setting "not taken" for the length of an outage, and nothing is sent then.
+  The warning still follows the interval itself, which the user edits meanwhile: it is
+  raised again with the title the interval has now, and names only the settings the
+  interval still holds (one dropped from the interval leaves it, and an interval with
+  none left loses it). The target is judged again when it reports a real state. A
+  warning that Home Assistant loaded from its file after a restart is shown from the
+  first moment, with the names it last had, and stays so until the target reports.
+  A warning is updated in place, which keeps the Ignore of the user, when its names are
+  the same or fewer. When the interval gains a name that the warning does not list, the
+  warning is deleted and raised again, so that an Ignore of the earlier settings does not
+  hide the new one. The names of an earlier load, also one before a restart, come from the
+  data of its issue. An issue that keeps none, which this code never raises, counts every
+  name as new: it is raised again and its Ignore is not kept.
+  The warning outlives the unload, unlike the repair of a deleted target. That repair is
+  cleared on unload and raised again at start-up: it asks the user to delete the timer,
+  and an Ignore of it has nothing to keep. The user may knowingly accept this warning
+  and choose Ignore, and every change of an interval reloads the timer. Home Assistant
+  keeps `dismissed_version` when an issue is created again under its id
+  (`IssueRegistry.async_get_or_create` replaces the other fields), and forgets it when
+  the issue is deleted, so deleting on unload would show the warning again after every
+  edit. A warning is deleted when its check finds nothing missing, when the load finds
+  its interval gone (`_reconcile_settings_warnings`, by the id prefix in the issue
+  registry), when the entry is removed (`async_remove_entry`), and when the entry is
+  disabled, since it is not loaded again. The load remembers the warnings of the earlier
+  one, so that its first judgement raises them again, with the title the interval has
+  now, or takes them away. A warning that went away and comes back is new, not ignored.
+  A timer that fails to set up (an unreadable stored file, a Workday sensor missing, or
+  any other raise) takes its warnings away at once (`async_setup_entry`): it turns
+  nothing on, and a disabled timer in that state would keep them, because Home Assistant
+  runs no unload callback for it. If it loads again later, the first judgement raises
+  them again and an earlier Ignore is lost.
+  The warning also outlives a restart of Home Assistant, so it is raised with
+  `is_persistent=True`. Home Assistant saves an issue that is not persistent with its
+  Ignore only, and loads it back inactive, with no data and no placeholders. The names
+  would be lost, and a setting lost while Home Assistant was down would keep the Ignore
+  over a warning that grew, against the docs (the Ignore does not hide a new setting).
+  A persistent issue is saved whole and loaded back active. After a restart a warning
+  that grew is raised again as new, one that is the same or smaller is updated in place
+  and keeps its Ignore, and with the target offline at start-up it is shown from the
+  first moment with its last names and its Ignore, until the target reports (the freeze
+  above). Whatever takes a warning away takes a persistent one away alike, since
+  `IssueRegistry.async_delete` does not tell them apart. The names stay in the data of
+  the issue, not in the store of the timer: that would change the format of the store
+  for what the issue registry keeps through public API.
+  The labels and the title in a warning are in the language of the house as of the last
+  load of the timer. A change of the house language shows in them after the next reload or
+  restart of Home Assistant, the way a generated interval title follows the language only
+  on an edit (#15 above). The warning is not raised again for it: its names, the only
+  thing the check compares, have not changed.
+  Why: #16. An edit dropped the settings the form did not offer, silently, and the window
+  left them out with only a line in the log.
+  Cost if wrong: a user who never opens Repairs keeps a setting that is never sent, and
+  the log is the only other trace. A persistent warning is taken away only by the timer
+  that raised it: if the files of the integration are deleted from `custom_components`
+  without removing the entry, its warnings stay visible in Repairs, because no code of
+  Timerify is left to take them away. A downgrade to 1.0.0 does the same: that release
+  loads the entry (minor version 2, see #15) but has neither the texts of the warning nor
+  any code that deletes it, so the warnings are listed in Repairs without readable texts
+  until 1.1.0 is back. The release notes of 1.1.0 should say so.
+  Tests: `test_editing_keeps_a_setting_the_ac_no_longer_offers`,
+  `test_editing_changes_the_settings_shown_beside_a_kept_one`,
+  `test_editing_keeps_every_setting_while_the_ac_is_gone`,
+  `test_an_interval_with_only_settings_not_offered_shows_them_closed`,
+  `test_settings_not_taken_are_named_one_by_one_in_the_order_of_the_form`,
+  `test_an_interval_setting_the_ac_no_longer_takes_raises_a_warning`,
+  `test_the_warning_names_every_setting_the_ac_does_not_take`,
+  `test_the_warning_follows_the_settings_the_ac_does_not_take`,
+  `test_a_value_the_ac_no_longer_accepts_raises_the_warning`,
+  `test_a_setting_no_form_knows_is_named_by_its_own_name`,
+  `test_the_form_shows_a_value_the_ac_no_longer_lists`,
+  `test_submitting_a_value_the_ac_no_longer_lists_is_refused_in_words`,
+  `test_a_value_the_ac_takes_replaces_one_it_no_longer_lists`,
+  `test_clearing_a_value_the_ac_no_longer_lists_drops_the_setting`,
+  `test_a_value_of_the_wrong_kind_opens_the_form_without_a_wider_field`,
+  `test_only_the_interval_that_has_the_lost_setting_is_named`,
+  `test_the_warning_names_the_settings_in_the_language_of_the_house`,
+  `test_the_warning_clears_when_the_ac_takes_the_setting_again`,
+  `test_the_warning_clears_when_the_interval_no_longer_holds_it`,
+  `test_the_warning_stands_after_editing_an_interval_it_does_not_concern`,
+  `test_deleting_the_interval_clears_its_warning`,
+  `test_a_report_before_the_reload_raises_no_warning_for_a_deleted_interval`,
+  `test_a_setting_lost_while_down_raises_the_warning_at_start_up`,
+  `test_an_unavailable_ac_raises_no_settings_warning`,
+  `test_a_deleted_ac_raises_no_settings_warning`,
+  `test_the_warnings_of_a_timer_go_with_it`,
+  `test_an_ac_that_goes_offline_without_capabilities_raises_no_warning`,
+  `test_the_warning_stands_while_the_ac_is_offline_until_it_reports`,
+  `test_the_titles_of_two_warnings_of_a_timer_tell_the_intervals_apart`,
+  `test_renaming_an_interval_renames_its_warning`,
+  `test_the_warning_names_the_settings_in_the_order_of_the_form`,
+  `test_an_ignored_warning_stays_ignored_after_a_reload`,
+  `test_a_warning_that_went_away_comes_back_unignored`,
+  `test_a_warning_of_an_interval_deleted_while_down_is_gone_at_start_up`,
+  `test_a_warning_the_ac_takes_back_while_down_is_gone_at_start_up`,
+  `test_a_timer_that_cannot_read_its_file_has_no_settings_warning`,
+  `test_a_timer_that_cannot_set_up_has_no_settings_warning`,
+  `test_an_ignored_warning_returns_when_another_setting_is_lost`,
+  `test_an_ignored_warning_stays_ignored_when_a_setting_comes_back`,
+  `test_a_setting_lost_while_down_returns_an_ignored_warning`,
+  `test_renaming_an_interval_keeps_the_ignore_of_its_warning`,
+  `test_an_ignored_warning_survives_a_restart_of_home_assistant`,
+  `test_an_ignored_warning_stays_ignored_when_a_setting_returns_while_down`,
+  `test_a_warning_stays_shown_after_a_restart_with_the_ac_offline`,
+  `test_an_ignored_warning_survives_a_restart_with_the_ac_offline`,
+  `test_a_setting_lost_while_the_ac_is_offline_shows_an_ignored_warning`,
+  `test_an_interval_renamed_while_the_ac_is_offline_renames_its_warning`,
+  `test_a_setting_dropped_from_an_interval_leaves_its_warning_while_offline`,
+  `test_an_interval_left_with_no_setting_loses_its_warning_while_offline`,
+  `test_disabling_the_timer_takes_its_warnings_away`.
+- **The integration page that does not re-render waits on Home Assistant (#40, upstream).**
+  After a timer or an interval is added, or an interval is edited, the Timerify page under
+  Settings > Devices & services shows nothing new until it is loaded again, on Home
+  Assistant 2026.10.4 (frontend 20260930.5) and on 2026.11.0b2 (frontend 20261028.1;
+  2026.11.0 was not published when it was tested). The page that behaved the same is the
+  one of the built-in Random helper, which also keeps saying "No entries" after a helper is
+  added. The pages of `kitchen_sink` (a sensor subentry) and `local_calendar` (a calendar)
+  show the change at once. The cause is in the frontend, in both versions: the page
+  subscribes with `config_entries/subscribe` and `type_filter` `device`, `hub`, `service`,
+  `hardware`, so it is sent no event for an integration of type `helper`; and
+  `ha-config-integration-page` loads the entries of an integration of any type but device,
+  hub and service once, in `_fetchManifest`, and never again. No local change was made,
+  because Timerify sends what `kitchen_sink` sends: a new entry is `added`, `updated`
+  (setup_in_progress), `updated` (loaded), and an interval added or edited is `updated`
+  (unload_in_progress), `updated` (not_loaded), `updated` (setup_in_progress) twice,
+  `updated` (loaded), through the reload that `_async_entry_updated` schedules. A copy of
+  Timerify whose manifest said `integration_type` `service` and nothing else different
+  showed every change within milliseconds, so the type alone decides it. That is not a
+  fix we take: it would move Timerify out of Helpers and its "Add helper" into "Add
+  service", a product decision, and a change made to get round a frontend fault. The issue
+  is labelled `upstream`; reporting it to Home Assistant is the owner's call.
+  Cost if wrong: none for the timers, their schedules or their entities, which are always
+  right on the server; the Timerify page lists the old state until it is loaded again.

@@ -1,5 +1,10 @@
 {
   "entity": {
+    "button": {
+      "turn_off": {
+        "default": "mdi:power"
+      }
+    },
     "number": {
       "run_for": {
         "default": "mdi:timer-outline"

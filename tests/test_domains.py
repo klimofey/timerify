@@ -38,13 +38,14 @@ from custom_components.timerify.domains import (
     actual_state,
     behaviour_for,
     behaviour_for_domain,
+    settings_not_taken,
     supported_settings,
     switchable_by_features,
     validate_settings,
     voice_settings,
 )
 
-from .helpers import AC_ATTRS, AC_ID
+from .helpers import AC_ATTRS, AC_ID, AC_WITHOUT_FAN_MODE
 
 
 @pytest.mark.parametrize(
@@ -691,6 +692,41 @@ async def test_settings_the_entity_supports_are_accepted(
     hass.states.async_set(entity_id, "off", attributes)
 
     assert validate_settings(hass, entity_id, values) == values
+
+
+async def test_settings_not_taken_are_named_one_by_one_in_the_order_of_the_form(
+    hass: HomeAssistant,
+) -> None:
+    """An AC that lost cooling and its fan modes, and tops out at 22 degrees. Each
+    setting is judged alone, so the ones it still takes are not named with the others;
+    a value out of its range is named too. The names come in the order of the form,
+    whatever order the settings were stored in."""
+    hass.states.async_set(
+        AC_ID,
+        "off",
+        {
+            **AC_ATTRS,
+            "hvac_modes": ["off", "heat"],
+            "supported_features": AC_WITHOUT_FAN_MODE,
+            "max_temp": 22,
+        },
+    )
+    cool_and_low: dict[str, Any] = {"fan_mode": "low", "hvac_mode": "cool"}
+
+    assert settings_not_taken(hass, AC_ID, {**cool_and_low, "temperature": 20}) == (
+        "hvac_mode",
+        "fan_mode",
+    )
+    assert settings_not_taken(hass, AC_ID, {"temperature": 24, **cool_and_low}) == (
+        "hvac_mode",
+        "temperature",
+        "fan_mode",
+    )
+    assert settings_not_taken(hass, AC_ID, {"hvac_mode": "heat"}) == ()
+    assert settings_not_taken(hass, AC_ID, NO_SETTINGS) == ()
+    assert settings_not_taken(hass, "climate.nothing", {"hvac_mode": "heat"}) == (
+        "hvac_mode",
+    )
 
 
 SET_SPEED = features(FanEntityFeature.SET_SPEED)

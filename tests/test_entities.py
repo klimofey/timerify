@@ -27,6 +27,7 @@ from .helpers import (
     TURN_ON,
     advance,
     at,
+    call_service,
     command_json,
     payload,
     record_writes,
@@ -107,6 +108,30 @@ async def test_setting_zero_turns_target_off(
 
     assert fake_target.calls == [TURN_ON, TURN_OFF]
     assert state_of(hass, NUMBER) == "0"
+
+
+@pytest.mark.parametrize("started", ["by_hand", "by_run"])
+async def test_run_for_zero_turns_off_a_loose_boiler_without_a_countdown(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    started: str,
+) -> None:
+    """A loose boiler runs with no countdown, whether it was switched on at the wall
+    or by the run service without a duration. Run for shows 0, and setting it to 0
+    turns the boiler off all the same."""
+    await setup_target(mode="loose")
+    if started == "by_hand":
+        await fake_target.set_state("on")
+    else:
+        await call_service(hass, "run", {"entity_id": NUMBER})
+    assert state_of(hass, TARGET_ID) == "on"
+    assert state_of(hass, NUMBER) == "0"
+
+    await set_number(hass, NUMBER, 0)
+
+    assert fake_target.calls[-1] == TURN_OFF
+    assert state_of(hass, TARGET_ID) == "off"
 
 
 async def test_manual_off_resets_run_for_to_zero(

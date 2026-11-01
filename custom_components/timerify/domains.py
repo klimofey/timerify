@@ -647,6 +647,30 @@ def validate_settings(
     return freeze_settings(values)
 
 
+def settings_not_taken(
+    hass: HomeAssistant, entity_id: str, settings: Settings
+) -> tuple[str, ...]:
+    """The names in `settings` that the entity cannot be turned on with now, in the
+    order of its domain's row, which is the order of the form: a setting it does not
+    support, and one whose value it no longer accepts. A name the row does not know
+    comes last, in the order it has in `settings`.
+
+    Each setting is judged alone by `validate_settings`, as the form offers them, so
+    that one the entity cannot take does not hide the others. The send-time filter and
+    the warning of an interval both judge by this, and so they never disagree.
+    """
+    not_taken: list[str] = []
+    for name, value in settings.items():
+        try:
+            validate_settings(hass, entity_id, {name: value})
+        except ServiceValidationError:
+            not_taken.append(name)
+    place = {
+        spec.name: index for index, spec in enumerate(behaviour_for(entity_id).settings)
+    }
+    return tuple(sorted(not_taken, key=lambda name: place.get(name, len(place))))
+
+
 def voice_settings(
     hass: HomeAssistant,
     entity_id: str,

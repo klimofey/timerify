@@ -15,12 +15,16 @@
         "data": {
           "target": "Entity",
           "mode": "Mode",
-          "runtime": "Count runtime"
+          "runtime": "Count runtime",
+          "run_for_max": "Maximum of Run for",
+          "off_button": "Turn off button"
         },
         "data_description": {
           "target": "The switch, light, fan or other entity to run on a timer.",
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
-          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day.",
+          "off_button": "Adds a Turn off button to the device page. Pressing it stops the countdown and turns the device off. It also turns off a device that runs without a countdown."
         }
       },
       "voice_settings": {
@@ -53,6 +57,7 @@
       "target_not_supported": "A timer cannot turn this entity on and off. Pick another one.",
       "not_switchable": "This entity does not report on or off, so a timer cannot tell whether it is running. Pick another one; if it is unavailable now, try again when it is back.",
       "duration_not_whole": "The duration must be a whole number of minutes.",
+      "duration_above_maximum": "The default duration must not be longer than the maximum of Run for.",
       "languages_required": "Pick at least one language."
     },
     "abort": {
@@ -67,11 +72,15 @@
         "title": "Timer settings",
         "data": {
           "mode": "Mode",
-          "runtime": "Count runtime"
+          "runtime": "Count runtime",
+          "run_for_max": "Maximum of Run for",
+          "off_button": "Turn off button"
         },
         "data_description": {
           "mode": "Strict runs the entity only while the timer counts down. Loose also lets it run without a timer.",
-          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics."
+          "runtime": "A Runtime sensor adds up how long the target is on, by Timerify or by hand, for daily and weekly statistics.",
+          "run_for_max": "The end of the Run for slider, in minutes, up to 1440 (one day). Actions, voice, pending commands and schedules can still run the device for up to a day.",
+          "off_button": "Adds a Turn off button to the device page. Pressing it stops the countdown and turns the device off. It also turns off a device that runs without a countdown."
         }
       },
       "voice_settings": {
@@ -102,6 +111,7 @@
     },
     "error": {
       "duration_not_whole": "The duration must be a whole number of minutes.",
+      "duration_above_maximum": "The default duration must not be longer than the maximum of Run for.",
       "workday_in_use": "A schedule interval of this timer runs on working days or non-working days, which the Workday sensor tells. Change or delete that interval first, or keep the sensor.",
       "languages_required": "Pick at least one language."
     }
@@ -260,6 +270,11 @@
     }
   },
   "entity": {
+    "button": {
+      "turn_off": {
+        "name": "Turn off"
+      }
+    },
     "number": {
       "run_for": {
         "name": "Run for"
@@ -527,6 +542,10 @@
           "reload_failed": "The stored timer was reset, but the timer could not be loaded again. Open the timer's page to see why."
         }
       }
+    },
+    "settings_not_taken": {
+      "title": "The schedule interval \"{interval}\" of the timer \"{timer}\" has settings the device does not take",
+      "description": "The schedule interval \"{interval}\" of the timer \"{timer}\" turns the device on with settings that the device does not take now: {settings}. Timerify keeps them, and leaves them out when the interval turns the device on. If the device takes them again, they are used again and this message goes away. If the form of the interval shows a setting, pick a value the device takes. To drop a setting the form no longer shows, delete the interval and add it again."
     }
   },
   "common": {

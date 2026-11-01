@@ -7,6 +7,8 @@ from types import MappingProxyType
 from typing import Any, Final, Literal
 
 DOMAIN: Final = "timerify"
+TRANSLATION_LANGUAGES: Final = ("en", "ru")
+"""The languages of `translations/`: a file each."""
 
 CONF_TARGET: Final = "target"
 """Option holding the entity id of the target. A renamed target is followed by
@@ -17,6 +19,12 @@ CONF_DEFAULT_DURATION: Final = "default_duration"
 CONF_RUNTIME: Final = "runtime"
 """Option holding whether the timer counts how long its target was on, a `bool`. Absent
 or False: no counter, and no Runtime sensor; an entry of an earlier release has none."""
+CONF_RUN_FOR_MAX: Final = "run_for_max"
+"""Option holding the end of the Run for slider in whole minutes. An entry of an earlier
+release has none."""
+CONF_OFF_BUTTON: Final = "off_button"
+"""Option holding whether the timer has a Turn off button, a `bool`. Absent or False: no
+button; an entry of an earlier release has none."""
 CONF_WORKDAY_SENSOR: Final = "workday_sensor"
 """Option holding the entity id of the target's Workday sensor, which the intervals of
 working days and of days off ask which days are which. Absent when there is none."""
@@ -38,6 +46,11 @@ CONF_END: Final = "end"
 interval that crosses midnight."""
 CONF_SETTINGS: Final = "settings"
 """Subentry data: what the target is turned on with when the interval starts."""
+CONF_GENERATED_TITLE: Final = "generated_title"
+"""Subentry data: the title Timerify gave an interval, in the language of the house at
+the time. The title counts as generated while the subentry's title still equals it. A
+rename on the integration page changes only the title, so it ends the mark by itself,
+which a bare flag could not tell. Absent from an interval whose title the user chose."""
 
 DEFAULT_DURATION_MINUTES: Final = 30
 MAX_MINUTES: Final = 1440
@@ -122,8 +135,10 @@ KEY_RUN_FOR: Final = "run_for"
 KEY_ENDS_AT: Final = "ends_at"
 KEY_NEXT_COMMAND: Final = "next_command"
 KEY_RUNTIME: Final = "runtime"
-"""The keys of the entities a timer has one of, the last only if it counts its runtime:
-with the entry's id they make an entity's unique id (see `timer_unique_id`)."""
+KEY_TURN_OFF: Final = "turn_off"
+"""The keys of the entities a timer has one of, the last two only if it counts its
+runtime and if it has a Turn off button, in that order: with the entry's id they make
+an entity's unique id (see `timer_unique_id`)."""
 
 RUNTIME_TICK_SECOND: Final = 59
 """The second of every minute at which the Runtime sensor publishes its total: the last
@@ -135,7 +150,7 @@ half a second: the tick saves it before it writes the state."""
 
 def timer_unique_id(entry_id: str, key: str) -> str:
     """The unique id of the entity of a timer that has the key `key` (`KEY_RUN_FOR`,
-    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`, `KEY_RUNTIME`).
+    `KEY_ENDS_AT`, `KEY_NEXT_COMMAND`, `KEY_RUNTIME`, `KEY_TURN_OFF`).
 
     A unique id is an entity's identity in the registry: changing how it is made would
     leave every installed entity behind, with its entity id, its history and its place
@@ -155,6 +170,14 @@ def default_duration_minutes(options: Mapping[str, Any]) -> int:
     """The minutes a timer of strict mode runs by default: its option, or
     `DEFAULT_DURATION_MINUTES` for an entry that has none."""
     minutes: int = options.get(CONF_DEFAULT_DURATION, DEFAULT_DURATION_MINUTES)
+    return minutes
+
+
+def run_for_max_minutes(options: Mapping[str, Any]) -> int:
+    """The end of the Run for slider: its option, or `MAX_MINUTES` for an entry that
+    has none. It bounds the slider only; a countdown that something else starts may be
+    longer, up to `MAX_MINUTES`."""
+    minutes: int = options.get(CONF_RUN_FOR_MAX, MAX_MINUTES)
     return minutes
 
 

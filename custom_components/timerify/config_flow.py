@@ -2,11 +2,12 @@
 the voice sentences.
 
 The flow starts with a menu: add a timer, or, while there is none, the voice settings.
-Adding a timer takes the entity, the binding mode and whether to count how long the
-target is on, in strict mode a default duration, and, in a house that has a Workday
-sensor, that sensor. The options flow changes the mode, the counting, the duration and
-the sensor; the target stays. Schedule intervals are subentries of the timer's entry,
-added, edited and deleted one by one from its page.
+Adding a timer takes the entity, the binding mode, whether to count how long the
+target is on and where the Run for slider ends, in strict mode a default duration, and,
+in a house that has a Workday sensor, that sensor. The options flow changes the mode,
+the counting, the end of the slider, the duration and the sensor; the target stays.
+Schedule intervals are subentries of the timer's entry, added, edited and deleted one
+by one from its page.
 
 The voice settings are an entry of their own, of which there is one: whether Timerify
 writes the sentence files for the built-in agent, and in which languages. The options
@@ -59,9 +60,12 @@ from .const import (
     CONF_DAYS,
     CONF_DEFAULT_DURATION,
     CONF_END,
+    CONF_GENERATED_TITLE,
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_MODE,
+    CONF_OFF_BUTTON,
+    CONF_RUN_FOR_MAX,
     CONF_RUNTIME,
     CONF_SETTINGS,
     CONF_START,
@@ -80,6 +84,7 @@ from .const import (
     DaysMode,
     Mode,
     is_voice_options,
+    run_for_max_minutes,
 )
 from .domains import (
     SUPPORTED_DOMAINS,
@@ -89,7 +94,14 @@ from .domains import (
     switchable_by_features,
     validate_settings,
 )
-from .schedule import interval_title
+from .schedule import (
+    DAYS_MODES,
+    DAYS_SELECTOR,
+    WEEKDAY_SELECTOR,
+    async_title_labels,
+    interval_title,
+    stored_interval_title,
+)
 from .services import SETTINGS_SCHEMA
 from .target import target_name
 from .voice.base import voice_language
@@ -171,8 +183,9 @@ def _duration_selector() -> selector.NumberSelector:
 async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
     """The form that adds a timer, built for the domains on offer when it is shown.
 
-    The runtime box is on this form, not on a step of its own, so that a timer that
-    takes every default is still added in three clicks.
+    The runtime box, the end of the Run for slider and the Turn off box are on this
+    form, not on steps of their own, so that a timer that takes every default is still
+    added in three clicks.
     """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
@@ -181,6 +194,12 @@ async def _target_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
             probatio.Required(CONF_TARGET): _target_selector(flow.hass),
             probatio.Required(CONF_MODE, default="strict"): _mode_selector(),
             probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
+            probatio.Required(
+                CONF_RUN_FOR_MAX, default=MAX_MINUTES
+            ): _duration_selector(),
+            probatio.Required(
+                CONF_OFF_BUTTON, default=False
+            ): selector.BooleanSelector(),
         }
     )
 
@@ -198,7 +217,8 @@ async def _validate_target(
 
     The target is stored as an entity id, whichever of the two the selector took.
     The entry is identified by the registry id, which a rename leaves alone; an
-    entity that is not in the registry has only its entity id.
+    entity that is not in the registry has only its entity id. The end of the Run for
+    slider is kept in whole minutes.
     """
     flow = handler.parent_handler
     assert isinstance(flow, ConfigFlow)
@@ -219,7 +239,7 @@ async def _validate_target(
     registered = registry.async_get(entity_id)
     await flow.async_set_unique_id(registered.id if registered else entity_id)
     flow._abort_if_unique_id_configured()
-    return {**user_input, CONF_TARGET: entity_id}
+    return _whole_minutes({**user_input, CONF_TARGET: entity_id}, CONF_RUN_FOR_MAX)
 
 
 def _reads_on_or_off(hass: HomeAssistant, entity_id: str) -> bool:
@@ -229,14 +249,44 @@ def _reads_on_or_off(hass: HomeAssistant, entity_id: str) -> bool:
     return state is not None and state.state in (STATE_ON, STATE_OFF)
 
 
-async def _validate_duration(
-    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
-) -> dict[str, Any]:
-    """Keep the default duration in whole minutes, the unit the timer counts in."""
-    minutes: float = user_input[CONF_DEFAULT_DURATION]
+def _whole_minutes(user_input: dict[str, Any], key: str) -> dict[str, Any]:
+    """The input with the minutes in `key` as an `int`, the unit the timer counts in; a
+    fraction of a minute is refused."""
+    minutes: float = user_input[key]
     if not minutes.is_integer():
         raise SchemaFlowError("duration_not_whole")
-    return {**user_input, CONF_DEFAULT_DURATION: int(minutes)}
+    return {**user_input, key: int(minutes)}
+
+
+async def _validate_duration(
+    handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the default duration in whole minutes, and not above the end of the Run for
+    slider, which the first form has already put in the options.
+
+    The selector keeps a day as its end, so that the form is the same for every timer;
+    this is where a duration beyond the slider is refused, in words the user can read.
+    """
+    accepted = _whole_minutes(user_input, CONF_DEFAULT_DURATION)
+    if accepted[CONF_DEFAULT_DURATION] > run_for_max_minutes(handler.options):
+        raise SchemaFlowError("duration_above_maximum")
+    return accepted
+
+
+async def _duration_schema(handler: SchemaCommonFlowHandler) -> probatio.Schema:
+    """The form of the default duration: usually 30 minutes, but never above the end of
+    the Run for slider, so that a timer whose slider ends sooner takes every default
+    all the same."""
+    return probatio.Schema(
+        {
+            probatio.Required(
+                CONF_DEFAULT_DURATION,
+                default=min(
+                    DEFAULT_DURATION_MINUTES, run_for_max_minutes(handler.options)
+                ),
+            ): _duration_selector()
+        }
+    )
 
 
 def _workday_selector() -> selector.EntitySelector:
@@ -296,13 +346,7 @@ async def _after_duration(_options: dict[str, Any]) -> str:
 
 
 _DURATION_STEP = SchemaFlowFormStep(
-    probatio.Schema(
-        {
-            probatio.Required(
-                CONF_DEFAULT_DURATION, default=DEFAULT_DURATION_MINUTES
-            ): _duration_selector()
-        }
-    ),
+    _duration_schema,
     validate_user_input=_validate_duration,
     next_step=_after_duration,
 )
@@ -406,11 +450,13 @@ _VOICE_STEP = SchemaFlowFormStep(
 async def _options_init_schema(
     handler: SchemaCommonFlowHandler,
 ) -> probatio.Schema | None:
-    """The first form of the options: a timer's mode and whether it counts the runtime.
-    The voice settings have neither, and go to their own form.
+    """The first form of the options: a timer's mode, whether it counts the runtime,
+    where the Run for slider ends and whether it has a Turn off button. The voice
+    settings have none of them, and go to their own form.
 
-    The form opens with the options the entry has. A timer made before the counter has
-    no such option, so the box has no suggested value and shows its default, unticked.
+    The form opens with the options the entry has. A timer made before the counter or
+    before the Turn off box has no such option, so the box has no suggested value and
+    shows its default, unticked; one made before the maximum of Run for shows a day.
     """
     if is_voice_options(handler.options):
         return None
@@ -418,8 +464,22 @@ async def _options_init_schema(
         {
             probatio.Required(CONF_MODE): _mode_selector(),
             probatio.Required(CONF_RUNTIME, default=False): selector.BooleanSelector(),
+            probatio.Required(
+                CONF_RUN_FOR_MAX, default=MAX_MINUTES
+            ): _duration_selector(),
+            probatio.Required(
+                CONF_OFF_BUTTON, default=False
+            ): selector.BooleanSelector(),
         }
     )
+
+
+async def _validate_timer_settings(
+    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the end of the Run for slider in whole minutes. The default duration is
+    checked against it on the form that follows."""
+    return _whole_minutes(user_input, CONF_RUN_FOR_MAX)
 
 
 async def _after_options_init(options: dict[str, Any]) -> str:
@@ -441,7 +501,11 @@ CONFIG_FLOW: Final = {
 }
 
 OPTIONS_FLOW: Final = {
-    "init": SchemaFlowFormStep(_options_init_schema, next_step=_after_options_init),
+    "init": SchemaFlowFormStep(
+        _options_init_schema,
+        validate_user_input=_validate_timer_settings,
+        next_step=_after_options_init,
+    ),
     "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
     "workday": _WORKDAY_STEP,
@@ -451,31 +515,36 @@ OPTIONS_FLOW: Final = {
 _SETTING_TYPES: Final = probatio.Schema(SETTINGS_SCHEMA)
 """Gives the settings of an interval the types they have when a service makes them."""
 
-_WEEKDAY_SELECTOR: Final = "weekday"
-"""The key of the weekday names in the `selector` translations: the list the user
-picks days from and the words of an interval's title."""
-_DAYS_SELECTOR: Final = "interval_days"
-"""The key of the kinds of days in the `selector` translations: the list the user picks
-from and the words of the title of an interval that follows working days."""
-_DAYS_MODES: Final[tuple[DaysMode, ...]] = get_args(DaysMode.__value__)
-
 
 def _setting_selector(
-    choice: SettingChoice,
+    choice: SettingChoice, held: Any = None
 ) -> selector.SelectSelector | selector.NumberSelector:
     """The field for one setting: a list of the values the entity lists, or a number
-    in the range it accepts."""
+    in the range it accepts.
+
+    `held` is the value the form is filled in with, if there is one. The entity may no
+    longer list it, and the field takes it all the same: the form then shows what the
+    interval holds, and the user changes or empties it. A selector that refused it
+    would answer in Home Assistant's own words, or the frontend would drop it without
+    a word; `validate_settings` refuses it with a translated error instead.
+    """
     if choice.low is not None and choice.high is not None:
+        low, high = choice.low, choice.high
+        if isinstance(held, int | float) and not isinstance(held, bool):
+            low, high = min(low, held), max(high, held)
         return selector.NumberSelector(
             selector.NumberSelectorConfig(
-                min=choice.low,
-                max=choice.high,
+                min=low,
+                max=high,
                 step=0.5 if choice.name == "temperature" else 1,
                 mode=selector.NumberSelectorMode.BOX,
             )
         )
+    options = list(choice.options)
+    if isinstance(held, str) and held not in options:
+        options.append(held)
     config = selector.SelectSelectorConfig(
-        options=list(choice.options), mode=selector.SelectSelectorMode.DROPDOWN
+        options=options, mode=selector.SelectSelectorMode.DROPDOWN
     )
     if choice.name == "hvac_mode":
         config["translation_key"] = "hvac_mode"
@@ -517,8 +586,15 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         """Show the form, then take what was filled in.
 
         A refused form is shown again with what was typed, so that the user corrects
-        the mistake and nothing more. An edit keeps the title the user gave the
-        interval; one that is still the generated title follows the new data.
+        the mistake and nothing more. A new interval is titled by its times and days in
+        the language of the house, and keeps that title as `CONF_GENERATED_TITLE`. An
+        edit titles an interval whose title is still that one again, in the language of
+        the house now, and keeps any other title, the user's own. An interval that has
+        no `CONF_GENERATED_TITLE` counts as titled by Timerify when its title equals the
+        one its data makes in the language of the house now. An edit keeps the settings
+        the form does not offer, as they are (`_interval_from`), and shows one it offers
+        with the value it holds, though the target no longer takes that value; the
+        input is then refused in words, with the setting still shown.
         """
         entry = self._get_entry()
         subentry = (
@@ -528,13 +604,25 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         )
         errors: dict[str, str] = {}
         if user_input is not None:
-            data, errors = self._interval_from(entry, user_input)
+            data, errors = self._interval_from(
+                entry, user_input, subentry.data[CONF_SETTINGS] if subentry else {}
+            )
             if not errors:
-                labels = await self._async_day_labels()
+                labels = await async_title_labels(self.hass, self.hass.config.language)
                 title = interval_title(data, labels)
                 if subentry is None:
-                    return self.async_create_entry(title=title, data=data)
-                if subentry.title != interval_title(subentry.data, labels):
+                    return self.async_create_entry(
+                        title=title, data={**data, CONF_GENERATED_TITLE: title}
+                    )
+                # An interval without the mark was made or last edited by release 1.0.0,
+                # which keeps none; its rule applies: the title is generated while it
+                # equals the title the interval's data makes now.
+                generated = subentry.data.get(CONF_GENERATED_TITLE)
+                if generated is None:
+                    generated = stored_interval_title(subentry.data, labels)
+                if subentry.title == generated:
+                    data[CONF_GENERATED_TITLE] = title
+                else:
                     title = subentry.title
                 return self.async_update_and_abort(
                     entry, subentry, data=data, title=title
@@ -545,23 +633,30 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return self.async_show_form(
             step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
-                self._interval_schema(entry, opened=bool(shown.get(CONF_SETTINGS))),
+                self._interval_schema(entry, shown.get(CONF_SETTINGS) or {}),
                 shown,
             ),
             errors=errors,
         )
 
-    def _interval_schema(self, entry: ConfigEntry, *, opened: bool) -> probatio.Schema:
+    def _interval_schema(
+        self, entry: ConfigEntry, shown_settings: Mapping[str, Any]
+    ) -> probatio.Schema:
         """The form: the kind of days, the weekdays, start, end and, when the target can
         be turned on with any, a section of its settings.
 
         The kind of days is the working days of the Workday sensor from the start when
         the timer has one: those are what a house with a sensor schedules by.
 
-        The section is open when the form shows settings, which are then not hidden
-        from the user nor the fields an error about them is about, and closed when it
-        shows none. It has no default: a default on a section makes the frontend skip
-        the settings inside it, and an edit would clear them.
+        The section is open when `shown_settings`, the settings the form is filled in
+        with, holds one that the section offers, so that it is not hidden from the user
+        nor the fields an error about it is about. It is closed otherwise: a setting
+        the target no longer offers is not shown, so it does not open the section. It
+        has no default: a default on a section makes the frontend skip the settings
+        inside it, and an edit would clear them.
+
+        A field also takes the value that `shown_settings` holds for it when the target
+        does not list that value now (see `_setting_selector`).
         """
         has_sensor = CONF_WORKDAY_SENSOR in entry.options
         fields: dict[Any, Any] = {
@@ -569,9 +664,9 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                 CONF_DAYS, default="workdays" if has_sensor else "weekdays"
             ): selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=list(_DAYS_MODES),
+                    options=list(DAYS_MODES),
                     mode=selector.SelectSelectorMode.LIST,
-                    translation_key=_DAYS_SELECTOR,
+                    translation_key=DAYS_SELECTOR,
                 )
             ),
             probatio.Required(
@@ -581,17 +676,20 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                     options=list(WEEKDAYS),
                     multiple=True,
                     mode=selector.SelectSelectorMode.LIST,
-                    translation_key=_WEEKDAY_SELECTOR,
+                    translation_key=WEEKDAY_SELECTOR,
                 )
             ),
             probatio.Required(CONF_START): selector.TimeSelector(),
             probatio.Required(CONF_END): selector.TimeSelector(),
         }
         if choices := supported_settings(self.hass, entry.options[CONF_TARGET]):
+            opened = any(choice.name in shown_settings for choice in choices)
             fields[probatio.Optional(CONF_SETTINGS)] = section(
                 probatio.Schema(
                     {
-                        probatio.Optional(choice.name): _setting_selector(choice)
+                        probatio.Optional(choice.name): _setting_selector(
+                            choice, shown_settings.get(choice.name)
+                        )
                         for choice in choices
                     }
                 ),
@@ -600,11 +698,20 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
         return probatio.Schema(fields)
 
     def _interval_from(
-        self, entry: ConfigEntry, user_input: dict[str, Any]
+        self,
+        entry: ConfigEntry,
+        user_input: dict[str, Any],
+        stored: Mapping[str, Any],
     ) -> tuple[dict[str, Any], dict[str, str]]:
         """The data of the interval a filled-in form describes, and what is wrong
         with it by field, `base` for the settings as a whole; the data is whole only
-        when nothing is wrong."""
+        when nothing is wrong.
+
+        `stored` is the settings the interval has, none for a new one. The saved
+        settings are the ones of the form, which have the user's values, and then the
+        stored ones whose name the form does not offer: the target no longer takes
+        them, but may again, and the user cannot change what the form does not show.
+        """
         errors: dict[str, str] = {}
         days: DaysMode = user_input[CONF_DAYS]
         weekdays: list[str] = []
@@ -635,6 +742,13 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             errors["base"] = "settings_not_whole"
         except ServiceValidationError:
             errors["base"] = "settings_not_supported"
+        offered = {
+            choice.name
+            for choice in supported_settings(self.hass, entry.options[CONF_TARGET])
+        }
+        settings.update(
+            {name: value for name, value in stored.items() if name not in offered}
+        )
         data = {
             CONF_DAYS: days,
             CONF_WEEKDAYS: weekdays,
@@ -642,26 +756,6 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
             CONF_SETTINGS: settings,
         }
         return data, errors
-
-    async def _async_day_labels(self) -> dict[str, str]:
-        """The words of an interval's title in the language of the house: the short
-        names of the weekdays, by their names, and the names of the kinds of days, by
-        their `DaysMode`."""
-        words = await async_get_translations(
-            self.hass, self.hass.config.language, "selector", [DOMAIN]
-        )
-        prefix = f"component.{DOMAIN}.selector"
-        return {
-            **{
-                day: words[f"{prefix}.{_WEEKDAY_SELECTOR}.options.{day}"]
-                for day in WEEKDAYS
-            },
-            **{
-                days: words[f"{prefix}.{_DAYS_SELECTOR}.options.{days}"]
-                for days in _DAYS_MODES
-                if days != "weekdays"
-            },
-        }
 
 
 class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
@@ -675,6 +769,9 @@ class TimerifyConfigFlowHandler(SchemaConfigFlowHandler, domain=DOMAIN):
     Home Assistant does not combine that with a flow that reloads by itself."""
 
     VERSION = 1
+    MINOR_VERSION = 2
+    """Minor version 2 marks the titles Timerify gave the intervals
+    (`CONF_GENERATED_TITLE`); see `async_migrate_entry` in `__init__`."""
 
     @override
     def async_config_entry_title(self, options: Mapping[str, Any]) -> str:

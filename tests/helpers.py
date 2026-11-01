@@ -13,8 +13,10 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
+from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
-from homeassistant.data_entry_flow import FlowResultType, section
+from homeassistant.data_entry_flow import FlowResult, FlowResultType, section
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
     async_track_state_change_event,
@@ -32,6 +34,7 @@ NUMBER = "number.boiler_run_for"
 SENSOR = "sensor.boiler_ends_at"
 NEXT = "sensor.boiler_next_command"
 RUNTIME = "sensor.boiler_runtime"
+BUTTON = "button.boiler_turn_off"
 TURN_ON = ("turn_on", TARGET_ID)
 TURN_OFF = ("turn_off", TARGET_ID)
 
@@ -60,6 +63,11 @@ AC_ATTRS: Final[dict[str, Any]] = {
 }
 """The capability attributes and supported features of an air conditioner that Home
 Assistant keeps on its state, also while it is unavailable."""
+AC_WITHOUT_FAN_MODE: Final = int(AC_ATTRS["supported_features"]) & ~int(
+    ClimateEntityFeature.FAN_MODE
+)
+"""The supported features of that air conditioner once its integration stops offering
+the fan modes, as an update of the integration may."""
 AC_NUMBER = "number.ac_run_for"
 AC_ENDS_AT = "sensor.ac_ends_at"
 AC_NEXT = "sensor.ac_next_command"
@@ -235,6 +243,19 @@ async def reload_held_back(entry: ConfigEntry) -> AsyncIterator[None]:
         yield
 
 
+async def change_options(
+    hass: HomeAssistant, entry: ConfigEntry, *steps: dict[str, Any]
+) -> FlowResult:
+    """Open the entry's settings, submit a form per step; return the last result."""
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    for user_input in steps:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input
+        )
+    await hass.async_block_till_done()
+    return result
+
+
 async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
     """Move the slider, as the dashboard does, and let the target's report settle."""
     await hass.services.async_call(
@@ -242,6 +263,14 @@ async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
         "set_value",
         {"entity_id": entity_id, "value": value},
         blocking=True,
+    )
+    await hass.async_block_till_done()
+
+
+async def press_button(hass: HomeAssistant, entity_id: str) -> None:
+    """Press a button, as the dashboard does, and let everything that follows settle."""
+    await hass.services.async_call(
+        "button", "press", {"entity_id": entity_id}, blocking=True
     )
     await hass.async_block_till_done()
 
@@ -312,6 +341,7 @@ async def restart_after(
     entry: ConfigEntry,
     *,
     while_down: Callable[[], None] | None = None,
+    issues_reloaded: bool = False,
     **delta: float,
 ) -> None:
     """Stop the entry, let `delta` pass with nobody listening, and start it again: a
@@ -321,8 +351,16 @@ async def restart_after(
     restored backup or an update of the target's integration that linked its entity to
     a device before Timerify set up. It runs once the entry has stopped, so nothing of
     Timerify's follows it.
+
+    `issues_reloaded` is for a restart of Home Assistant itself, not just of the entry:
+    it writes its issue registry down as it stops and reads it back as it starts,
+    which keeps an issue that is not persistent without its data, and inactive.
     """
     await hass.config_entries.async_unload(entry.entry_id)
+    if issues_reloaded:
+        hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)
+        await hass.async_block_till_done()
+        await ir.async_load(hass)
     if while_down is not None:
         while_down()
     freezer.tick(timedelta(**delta))

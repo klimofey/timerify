@@ -155,7 +155,7 @@ Behaviour of `RuntimeSensor`:
   - Release both with `async_on_remove`.
 - **The tick.** Compute `value = counter.minutes(now)`. If it equals `shown`, return. Otherwise `await store.async_save(counter.seconds_to_store(now))`, then set the value, write the state, and `mark_shown`.
 - **`_handle_controller_update`** is a no-op.
-- **`async_will_remove_from_hass`** saves `counter.seconds_to_store(utcnow())`, the flush (R§2).
+- **The flush** saves `counter.seconds_to_store(utcnow())` (R§2). It runs from `async_will_remove_from_hass` and on `EVENT_HOMEASSISTANT_STOP` (`hass.bus.async_listen`, released by `async_on_remove`; while stopping, `Store.async_save` queues for the final write).
 - **The sensor never turns unavailable because the target does.** Only an unload makes it unavailable.
 
 - [ ] **Step 1: Write the failing tests.** They are user scenarios with `clock_at_start`, `fake_target` (`switch.boiler`), `setup_target(runtime=True)` and `record_writes(hass, RUNTIME)`. The sensor's state is read as `float(state_of(hass, RUNTIME))`.
@@ -270,7 +270,7 @@ Each ruling is a decision, then why, then the cost if it is wrong. They apply wh
 6. **A counter switched off has its registry entry removed (not disabled).** Why: otherwise an `unavailable` ghost comes back at every start. A removed entry returns with the same entity id and customisations when the counter is switched on again, so history and statistics stay attached (R§4). The statistics are kept, because they are the user's. Cost if wrong: none known.
 7. **Neither `timerify/timer` nor the card gets a `runtime` key in this phase.** Why: §6.3's card shows actions and the countdown, not runtime, and a key that nobody reads is dead weight. This settles the earlier plan to add one "with the sensor". Cost if wrong: a later card feature adds the key in three places (the Python `TimerInfo`, `hass.ts` and `watchedEntities`).
 8. **There is no reset action.** Why: the spec does not ask for one, and Home Assistant's statistics tools exist. Writing 0 later is safe for statistics. Cost if wrong: a user who wants to reset deletes and re-adds the timer.
-9. **The file is saved immediately (`async_save`) before every published value, and flushed on unload.** Why: the stored value is always at least the shown one, so no restart or crash can make the value go down. Cost if wrong: one tiny write a minute while the target is on.
+9. **The file is saved immediately (`async_save`) before every published value, and flushed on unload and when Home Assistant stops (a stop unloads no entry, so without the second the seconds since the last tick would be lost at every stop; amended after the Task 2 review).** Why: the stored value is always at least the shown one, so no restart or crash can make the value go down. Cost if wrong: one tiny write a minute while the target is on.
 10. **The sensor never turns unavailable because its target does.** Why: it is a total, not a reading, and cards and automations read its value. Cost if wrong: none known.
 11. **The sensor has one tick listener for its whole life, and subscribes to the target's state on its own.** It does not go through the controller, its lock or its notifications, and it time-stamps a change with `event.time_fired`. Why: the controller's handler can wait up to 30 s behind a service call (R§3), which would date runs late. A no-op tick is a comparison. Cost if wrong: a second state subscription per counted target.
 

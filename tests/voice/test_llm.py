@@ -347,6 +347,24 @@ async def test_time_left_tool_returns_structured_data(
     assert data["response_type"] == "query_answer"
 
 
+async def test_time_left_tool_tells_an_unavailable_target_from_an_off_one(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The agent is told that the boiler is away, so that it does not say it is off."""
+    api = await assist_api(hass)
+    await fake_target.set_state("unavailable")
+
+    away = await call_tool(api, "timerify__time_left", {"name": "Boiler"})
+
+    assert away["speech_slots"]["state"] == "unavailable"
+
+    await fake_target.set_state("off")
+
+    back = await call_tool(api, "timerify__time_left", {"name": "Boiler"})
+
+    assert back["speech_slots"]["state"] == "off"
+
+
 async def test_tool_refuses_an_unexposed_target(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
 ) -> None:

@@ -189,6 +189,47 @@ async def test_time_left_on_an_idle_target(
     assert speech(response) == "Boiler is off and has no timer."
 
 
+async def test_an_unavailable_target_with_no_timer_is_answered_unavailable(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The boiler dropped off the network and nothing is set to run it: the answer says
+    what is known, not that it is off."""
+    await fake_target.set_state("unavailable")
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert response.response_type is intent.IntentResponseType.QUERY_ANSWER
+    assert speech(response) == "Boiler is unavailable and has no timer."
+
+
+async def test_an_unavailable_target_with_a_countdown_is_answered_with_the_time_left(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The countdown runs while the boiler is away, since the wish is on: the answer
+    keeps saying how long is left, and says nothing of the boiler being away."""
+    await set_number(hass, NUMBER, 45)
+    await fake_target.set_state("unavailable")
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert speech(response) == "45 minutes left on Boiler, it turns off at 09:45."
+
+
+async def test_an_off_target_with_no_timer_is_still_answered_off(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """Once the boiler is back, switched off, the answer is the plain one again."""
+    await fake_target.set_state("unavailable")
+    away = await converse(hass, "how much time is left on the boiler")
+    assert speech(away) == "Boiler is unavailable and has no timer."
+
+    await fake_target.set_state("off")
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert speech(response) == "Boiler is off and has no timer."
+
+
 async def test_time_left_on_a_loose_target_running_without_a_timer(
     hass: HomeAssistant,
     fake_target: FakeTarget,
@@ -319,6 +360,22 @@ async def test_russian_sentences_reach_time_left(
         assert reached(response) == TIME_LEFT, text
         assert response.intent is not None
         assert response.intent.slots["name"]["value"] == "Boiler", text
+
+
+async def test_russian_answers_an_unavailable_target_in_other_words_than_an_off_one(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """In Russian too the answer says that the boiler is away: it differs from the one
+    for an off boiler in the state word alone, and still names the boiler."""
+    ask = samples("ru", TIME_LEFT, numbers={})[0]
+    off = speech(await converse(hass, ask, "ru"))
+    await fake_target.set_state("unavailable")
+
+    away = speech(await converse(hass, ask, "ru"))
+
+    assert "Boiler" in away
+    assert len(words(away) - words(off)) == 1
+    assert len(words(off) - words(away)) == 1
 
 
 async def said_after_counting(

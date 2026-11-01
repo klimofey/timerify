@@ -213,6 +213,7 @@ TIMER_CASES: Final[Sequence[Mapping[str, Any]]] = (
     counting(hours=2, days=21),
     {"state": "open", "target": "Boiler"},
     {"state": "off", "target": "Boiler"},
+    {"state": "unavailable", "target": "Boiler"},
 )
 """The slots a handler gives to an answer about a timer, in the cases it tells apart:
 every counting form of the language's plural rules, a day, and the states without a

@@ -1,6 +1,6 @@
 [project]
 name = "timerify"
-version = "1.1.0"
+version = "1.1.1"
 description = "Timers for any Home Assistant entity"
 readme = "README.md"
 license = "MIT"

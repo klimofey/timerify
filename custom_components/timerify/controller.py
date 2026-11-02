@@ -10,13 +10,13 @@ import asyncio
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from functools import cached_property
 from typing import Any, Literal, assert_never
 from uuid import uuid4
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID, EVENT_CORE_CONFIG_UPDATE
+from homeassistant.const import ATTR_ENTITY_ID, EVENT_CORE_CONFIG_UPDATE, Platform
 from homeassistant.core import (
     CALLBACK_TYPE,
     Context,
@@ -46,6 +46,10 @@ from .const import (
     CONF_TARGET,
     CONF_WORKDAY_SENSOR,
     DOMAIN,
+    EVENT_COMMAND_DUE,
+    EVENT_COUNTDOWN_ENDED,
+    EVENT_COUNTDOWN_STARTED,
+    KEY_RUN_FOR,
     MAX_COMMAND_AHEAD,
     MAX_COMMANDS,
     MAX_LISTED_INTERVALS,
@@ -57,13 +61,18 @@ from .const import (
     SettingValue,
     default_duration_minutes,
     freeze_settings,
+    timer_unique_id,
 )
 from .core import (
+    Announcement,
     ApplySettings,
     Arm,
     Changed,
     Command,
+    CommandCameDue,
     CommandDropped,
+    CountdownEnded,
+    CountdownStarted,
     Disarm,
     Effect,
     GaveUp,
@@ -112,6 +121,11 @@ type Label = Literal["on", "off", "settings"]
 what it runs with."""
 
 type TimerifyConfigEntry = ConfigEntry[TargetController]
+
+
+def _ends_at(end: datetime) -> str:
+    """The end as the Ends at sensor states it: ISO 8601 in UTC, to the second."""
+    return end.astimezone(UTC).isoformat(timespec="seconds")
 
 
 def _local_time(moment: datetime) -> str:
@@ -1205,6 +1219,11 @@ class TargetController:
             if not self._stopped:
                 # Shown at once too: the entities must not wait for a slow device.
                 self._refresh_entities()
+        # Told once the timer is saved and shown, and before the target is called: an
+        # automation sees the new Ends at, and a slow device does not delay it.
+        announcements = self._core.take_announcements()
+        if not self._stopped:
+            self._announce(announcements)
         for effect in effects:
             if self._stopped:
                 return  # Unloaded while an earlier effect was under way.
@@ -1245,6 +1264,45 @@ class TargetController:
                     self._log_dropped(command)
                 case _:
                     assert_never(effect)
+
+    def _announce(self, announcements: Sequence[Announcement]) -> None:
+        """Fire what the core announced as events, in the order it happened. Each names
+        the timer by its Run for as it is called now, so a renamed one is named by its
+        new id."""
+        if not announcements:
+            return
+        run_for = er.async_get(self._hass).async_get_entity_id(
+            Platform.NUMBER, DOMAIN, timer_unique_id(self._entry.entry_id, KEY_RUN_FOR)
+        )
+        if run_for is None:
+            _LOGGER.warning(
+                "Not announcing what happened to the timer of %s: its Run for is not in"
+                " the entity registry, so the events cannot name the timer",
+                self.target_entity_id,
+            )
+            return
+        for announcement in announcements:
+            match announcement:
+                case CountdownStarted(end):
+                    self._hass.bus.async_fire(
+                        EVENT_COUNTDOWN_STARTED,
+                        {"entity_id": run_for, "ends_at": _ends_at(end)},
+                    )
+                case CountdownEnded(reason):
+                    self._hass.bus.async_fire(
+                        EVENT_COUNTDOWN_ENDED, {"entity_id": run_for, "reason": reason}
+                    )
+                case CommandCameDue(command):
+                    self._hass.bus.async_fire(
+                        EVENT_COMMAND_DUE,
+                        {
+                            "entity_id": run_for,
+                            "command_id": command.id,
+                            "action": command.action,
+                        },
+                    )
+                case _:
+                    assert_never(announcement)
 
     def _settings_the_target_takes(self, settings: Settings) -> Settings:
         """The part of `settings` that the target can be turned on with now.

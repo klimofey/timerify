@@ -1,11 +1,12 @@
 # Actions
 
-Timerify adds four actions to Home Assistant. This page lists them with their fields and limits.
+Timerify adds five actions to Home Assistant. This page lists them with their fields and limits. It also lists the three events that Timerify fires.
 
 | Action | Name in the form | What it does |
 | --- | --- | --- |
 | `timerify.add_time` | **Add time** | Moves the end of the countdown. |
 | `timerify.run` | **Run** | Turns the device on. |
+| `timerify.stop` | **Stop** | Ends the countdown and turns the device off. |
 | `timerify.add_command` | **Add command** | Keeps a pending command. |
 | `timerify.cancel_command` | **Cancel command** | Removes a pending command. |
 
@@ -76,6 +77,18 @@ data:
 
 Other kinds of devices have no settings. If you ask for a setting that the device does not have, Timerify refuses. Timerify does not check the temperature step that the entity reports. A device may round 22.3 to 22.5.
 
+## Stop
+
+`timerify.stop` ends the countdown and turns the device off. It also turns off a device that runs without a countdown in **Loose** mode. A device that is off is left as it is.
+
+It has no fields. It does the same as setting **Run for** to 0, or pressing **Turn off**.
+
+```yaml
+action: timerify.stop
+target:
+  entity_id: number.boiler_run_for
+```
+
 ## Add command
 
 `timerify.add_command` keeps a pending command. See [Pending commands](pending-commands.md).
@@ -142,6 +155,52 @@ data:
 | `command_id` | text, required | The id of the command to cancel. |
 
 The id is in the response of `timerify.add_command`. It is also in the `commands` attribute of the [Next command sensor](#what-you-can-read-from-a-timer).
+
+## Events
+
+Timerify fires three events. The [triggers](automations.md#triggers) are built on them. A YAML `event` trigger can use them too.
+
+| Event | Data | When it fires |
+| --- | --- | --- |
+| `timerify_countdown_started` | `entity_id`, `ends_at` | A timer that was not counting down starts a countdown. |
+| `timerify_countdown_ended` | `entity_id`, `reason` | A countdown is over. |
+| `timerify_command_due` | `entity_id`, `command_id`, `action` | A pending command is carried out at its time. |
+
+`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
+
+A countdown ends for one of three reasons. The event names it in `reason`.
+
+- `expired`: the countdown ran out.
+- `stopped`: Timerify stopped it. The cause is one of these:
+  - **Run for** set to 0, **Stop**, or the **Turn off** button.
+  - A voice request, or the tools of an LLM agent.
+  - A pending "off".
+  - **Add time** down to zero.
+  - A schedule interval that you switched off or deleted while its window ran.
+  - A schedule interval that you edited, so that its window no longer runs.
+  - The Workday sensor changed its answer, so that the window of a working day or day off interval no longer runs.
+- `turned_off`: the device was switched off outside Timerify, for example by hand or in its own app. Another automation, or the device itself, counts too.
+
+An automation about the end of a countdown should check `reason`. Say it starts something when the boiler runs out of time. Without the check, it would also start after **Stop**.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: timerify_countdown_ended
+    event_data:
+      entity_id: number.boiler_run_for
+      reason: expired
+actions:
+  - action: persistent_notification.create
+    data:
+      message: The boiler ran out of time.
+```
+
+Changing a countdown that runs fires nothing. That covers a new **Run for**, **Run** with minutes, **Add time** and a schedule window that ends later. A pending command that comes due in the middle still fires its event.
+
+A countdown that ended while Home Assistant was down fires its event once Home Assistant has started. A countdown that still runs after a restart fires nothing.
+
+One exception: if you give an action while Home Assistant is still starting, the events that follow can reach no automation. Home Assistant does not run automations during start-up.
 
 ## What you can read from a timer
 

@@ -16,15 +16,27 @@ from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
 from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, section
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import selector
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_state_report_event,
 )
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
-from custom_components.timerify.const import DOMAIN, SUBENTRY_INTERVAL, DaysMode
+from custom_components.timerify.const import (
+    DOMAIN,
+    EVENT_COMMAND_DUE,
+    EVENT_COUNTDOWN_ENDED,
+    EVENT_COUNTDOWN_STARTED,
+    KEY_RUN_FOR,
+    SUBENTRY_INTERVAL,
+    DaysMode,
+    timer_unique_id,
+)
 
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
@@ -104,6 +116,54 @@ def start_set_number(
             blocking=True,
         )
     )
+
+
+def run_for_of(hass: HomeAssistant, entry: ConfigEntry) -> str:
+    """The entity id of the "Run for" number of the timer of `entry`, from the registry:
+    a device with two timers gives their numbers ids that tell the timers apart only by
+    a suffix."""
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "number", DOMAIN, timer_unique_id(entry.entry_id, KEY_RUN_FOR)
+    )
+    assert entity_id is not None, "the timer has no Run for in the registry"
+    return entity_id
+
+
+async def add_automation(
+    hass: HomeAssistant, trigger: dict[str, Any], actions: list[dict[str, Any]]
+) -> None:
+    """Set up `automation` with one automation, which runs `actions` when `trigger`
+    fires, and let it arm."""
+    assert await async_setup_component(
+        hass, "automation", {"automation": {"triggers": [trigger], "actions": actions}}
+    )
+    await hass.async_block_till_done()
+
+
+async def components_for_device(
+    client: MockHAClientWebSocket,
+    kind: Literal["services", "triggers"],
+    device_id: str,
+) -> set[str]:
+    """The `kind` (actions or triggers) that the automation editor lists under **By
+    target** once the user picks the device `device_id`, as `domain.name`: the answer
+    of `get_services_for_target` or `get_triggers_for_target`."""
+    await client.send_json_auto_id(
+        {"type": f"get_{kind}_for_target", "target": {"device_id": [device_id]}}
+    )
+    message: dict[str, Any] = await client.receive_json()
+    assert message["success"] is True, message
+    return set(message["result"])
+
+
+def record_action(fields: Sequence[str]) -> dict[str, Any]:
+    """An action that calls `test.record` with the `fields` of the trigger that started
+    the automation, as templates; the test gets the calls from
+    `async_mock_service(hass, "test", "record")`."""
+    return {
+        "action": "test.record",
+        "data": {field: f"{{{{ trigger.{field} }}}}" for field in fields},
+    }
 
 
 async def add_command(
@@ -449,6 +509,23 @@ def runtime_saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> float:
     """The seconds the runtime file of `entry` holds."""
     seconds: float = hass_storage[runtime_storage_key(entry)]["data"]["seconds"]
     return seconds
+
+
+def record_events(hass: HomeAssistant) -> list[tuple[str, dict[str, Any]]]:
+    """Every Timerify event from now on, with its type, in the order it is fired."""
+    fired: list[tuple[str, dict[str, Any]]] = []
+
+    @callback
+    def record(event: Event[Any]) -> None:
+        fired.append((event.event_type, dict(event.data)))
+
+    for event_type in (
+        EVENT_COUNTDOWN_STARTED,
+        EVENT_COUNTDOWN_ENDED,
+        EVENT_COMMAND_DUE,
+    ):
+        hass.bus.async_listen(event_type, record)
+    return fired
 
 
 def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:

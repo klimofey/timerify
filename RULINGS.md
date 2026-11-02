@@ -2338,3 +2338,169 @@ in `docs/followups.md`.
   is labelled `upstream`; reporting it to Home Assistant is the owner's call.
   Cost if wrong: none for the timers, their schedules or their entities, which are always
   right on the server; the Timerify page lists the old state until it is loaded again.
+
+### Automations
+
+- **Timerify's actions and triggers are offered by target, not in the Device block.** The
+  Device block of a device asks the integration that owns the device and the domain of each
+  of its entities (`ha/components/device_automation/__init__.py:232-294`: the owner at
+  :254-261, the entity domains at :245-247 and :262-263; `RegistryEntry.domain` is the
+  domain of the entity id, not the platform, `ha/helpers/entity_registry.py:255` and
+  :288-291). A device belongs to one config entry (`ha/helpers/device_registry.py:404`),
+  and Timerify puts its entities on the target's device without owning it. So on the
+  boiler's device the block asks the boiler's integration and `number`, `sensor`, `switch`
+  and `button`, never `timerify`. Timerify owns only the device it made for a target that is
+  on none.
+  The editor's **By target** tab matches the `target` of every service and trigger against
+  the entities of the picked device: the integration and domain filters
+  (`ha/components/websocket_api/automation.py:52-83`), with the entities that have an entity
+  category left out of a device or area target (:128-131), and the lookup at :223-287. The
+  tab is the frontend string `ui.panel.config.automation.editor.tabs.target`, "By target".
+  So there is no `device_action` or `device_trigger` platform: one way for every timer,
+  wherever its entities are. The owner accepted this at plan review (#38, #39) and
+  confirmed it on 2026-11-02: no Device block, also not for the device Timerify made.
+  Why: the owner's wish is to pick the boiler and choose an action or a trigger. The Device
+  block cannot offer that for a device another integration owns.
+  Cost if wrong: a user who looks only in the Device block finds the number's and the
+  button's actions there and not Timerify's. The docs send them to **By target**.
+  Tests: `test_the_boilers_device_offers_timerifys_actions_by_target`,
+  `test_the_device_made_for_a_switch_offers_them_too`.
+- **Stop is a service of its own, `timerify.stop`, the stop of Run for 0.** It calls
+  `async_set_minutes(0)`, as the Turn off button and voice do. So it ends a countdown, turns
+  off a loose device that runs without one, holds a started window until its next
+  occurrence (S4), and sends nothing to a device that is off. It has no fields. A target
+  names its timers, as for every service.
+  Why: #38 asks for Stop beside Run and Add time. `number.set_value` with 0 is not one of
+  Timerify's actions, and the button is optional.
+  Cost if wrong: none known.
+  Tests: `test_stop_ends_the_countdown_and_turns_the_boiler_off`,
+  `test_stop_turns_off_a_loose_boiler_without_a_countdown`,
+  `test_stop_leaves_a_boiler_that_is_off_alone`,
+  `test_stop_aimed_at_one_channel_leaves_the_other_running`,
+  `test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on`.
+- **Countdowns and due commands are announced by the core and fired as Timerify's own
+  events.** The core decides, in `_set_end` (the only writer of the end) and `_run_command`;
+  the controller fires `timerify_countdown_started` (`entity_id`, `ends_at`),
+  `timerify_countdown_ended` (`entity_id`, `reason`) and `timerify_command_due`
+  (`entity_id`, `command_id`, `action`). `entity_id` is the timer's Run for, looked up in
+  the registry when the event is fired, so a renamed Run for is named by its new id.
+  `ends_at` is the end in the form of the Ends at state: UTC, to the second.
+  - **A start** is a timer with no end getting one (Run, Add time on an idle timer, Run for,
+    a strict-mode manual on, a pending "on", a window that opens on an idle timer). A loose
+    run without a countdown starts none. A move of a running end, however it is made (Run
+    for, Add time, Run with minutes, a pending "on", a window that ends later), announces
+    neither a start nor an end. The pending command that came due in the middle of it is
+    still announced. A start that the same step moves, because more than one write of the
+    end falls in one fold (two intervals that open together, a window and a command due at
+    one instant, a start-up catch-up), is announced with the end it leaves, which the Ends
+    at sensor shows: `_set_end` carries a start that has not been taken yet to each new end.
+  - **An end** has a reason. `expired`: the end was reached, by the alarm, a fold after a
+    restart or a report of the target; a window whose end is the timer's end counts too.
+    `stopped`: Timerify ended it: Run for 0, Stop, the Turn off button, voice and the LLM
+    tools, Add time down to zero, a pending "off", a window taken away by switching off,
+    editing or deleting its interval or by a change of the Workday sensor. `turned_off`:
+    the target was switched off outside Timerify, by hand, by its app, by another
+    automation or by the device itself (`observe` with `by_us=False`). The core already
+    takes a different path for each, so the reason costs nothing to tell.
+  - **A countdown whose end is not ahead of now is no countdown** (#42), whether or not a
+    tick folded it. Run for, Run and Add time (up) on such a timer announce its end as
+    `expired` first and then the start of the new countdown. Run for 0 announces only the
+    expiry: there is nothing left to stop, and so does the core's `stop()`, which applies
+    the same rule. A zero or negative Add time writes nothing and announces nothing; the
+    tick that folds the end announces it.
+  - **A command that comes due is announced after the drop check** (`CommandDropped` is
+    not: it did nothing, and the log says so), and before the start or end it causes. A
+    pending "off" on a timer with no countdown is announced too. A command that comes due
+    at the very instant the countdown ends finds it run out, so the end it leaves is
+    `expired`, as for a zero after a stale end (#42): a pending "off", and a bare "on" in
+    loose mode (which leaves the target on with no countdown). An "off" that comes due
+    earlier stops the countdown, as `stopped`. A command with minutes at that instant
+    moves the end (the target is not switched off and on), so it announces no end. An
+    automation that filters on `reason: expired` therefore sees the end of a window whose
+    pending "off" is due at the window's end.
+  - **The announcements are a channel of their own**, `TimerCore.take_announcements`, not
+    effects: they switch nothing, and the effect lists of the steps stay as they were. The
+    core keeps them until the controller takes them, so no step has to return them and none
+    is taken twice.
+  - **They are fired after the save and the refresh of the entities, and before the calls
+    to the target.** An automation sees the new Ends at and Run for, and a slow device does
+    not delay it. A controller that is unloaded fires nothing.
+  - **Start-up announces what it folds.** A countdown that ended while Home Assistant was
+    down fires `expired` at start-up, to the automations that are armed by then (Tech
+    Stack, "Start-up"); a countdown that still runs fires nothing, because the restored core
+    has nothing to say. A command given while Home Assistant is still starting folds its
+    catch-up before automations are armed, so its announcements can reach none. That is
+    Home Assistant's rule that automations do not fire during start-up.
+  - **A timer whose Run for is not in the entity registry fires nothing** and logs a
+    warning: an event that cannot name its timer is of no use to a trigger.
+  - **A timer that is unloaded during the save fires nothing** (`_execute` fires only for
+    a controller that is not stopped): the saved snapshot no longer holds the end, so the
+    next load cannot announce it either. This is not tested: it needs an unload exactly
+    during the save.
+  Why: #39. A state cannot tell a countdown that ended from one that was stopped, or a
+  start from a move, and the Next command sensor also changes when a command is added or
+  cancelled. The core's decision point is exact, and an event reaches YAML users too.
+  Cost if wrong: a user who wants an event when a countdown is changed has none; an
+  automation that turns the boiler on again when its countdown ends would loop through
+  `stopped` too, so it must check `trigger.reason`. The docs show that. An event that
+  falls while its timer is unloaded during the save is not fired, by that load or the next:
+  the saved timer no longer holds the end. An `expired` that coincides with a reload of
+  the timer can be lost this way.
+  Tests: the announcement tests of `tests/test_core.py` (from
+  `test_a_countdown_from_idle_is_announced_as_started`) and `tests/test_events.py`, among
+  them `test_changing_a_running_countdown_announces_nothing`,
+  `test_moving_run_for_while_it_runs_fires_no_event`,
+  `test_a_countdown_restored_at_start_up_is_not_announced_again`,
+  `test_a_countdown_that_ended_while_down_fires_ended_at_start_up`,
+  `test_a_pending_off_due_as_the_countdown_ends_announces_it_expired`,
+  `test_stop_after_the_end_passed_announces_that_it_expired`,
+  `test_editing_the_running_interval_to_other_days_fires_ended_stopped`,
+  `test_a_holiday_that_takes_the_window_away_fires_ended_stopped`,
+  `test_the_end_of_a_schedule_window_fires_start_and_expired`,
+  `test_two_intervals_that_open_together_fire_the_end_the_boiler_shows`,
+  `test_two_windows_that_open_together_announce_the_end_they_leave`,
+  `test_switching_the_running_interval_off_fires_ended_stopped`, and
+  `test_running_and_stopping_the_boiler_by_voice_fires_start_and_stop` with its LLM twin
+  in `tests/voice/test_events_by_voice.py`.
+- **The triggers are integration triggers on the Run for entities, matched against their
+  target at each event.** The platform is `trigger.py` with `async_get_triggers`, the
+  kind behind Home Assistant's own "Timer started" and "Button pressed": every loaded
+  integration's `trigger` platform is registered (`ha/helpers/trigger/__init__.py:186-257`),
+  the key `timerify.<name>` loads it (:451-476), and a `Trigger`
+  (`ha/helpers/trigger/models.py:108-182`, its config at :27-33) validates its config
+  and attaches a runner. `ENTITY_STATE_TRIGGER_SCHEMA`
+  (`ha/helpers/trigger/entity_trigger.py:99-104`) is a required target and no options.
+  The descriptions are read from `triggers.yaml` (`ha/helpers/trigger/descriptions.py:60-80`,
+  :158-160). hassfest accepts the `triggers.yaml` and the `triggers` strings of a custom
+  integration, and refuses a trigger whose description is missing from `en.json`.
+  - **The target filter is the one of the services** (`entity: integration: timerify,
+    domain: number`, in the normalised list form so that the description equals it), so
+    **By target** offers the actions and the triggers for the same devices.
+  - **The target is resolved at each event**, never cached
+    (`async_extract_referenced_entity_ids`, `expand_group=False`): a timer added to the
+    device, deleted, or moved to another area needs no tracking, and an automation saved
+    before the timer existed covers it. A deleted timer is never matched, and nothing is
+    logged: its automation stays on and simply hears no event of it. Events come a few
+    times a day, so the lookup costs nothing.
+  - **No options**: no "for", and no "first" or "last" of several timers. An event has no
+    duration, and each timer's event stands alone, so a device with two timers fires the
+    trigger twice and `trigger.entity_id` tells which.
+  - **An event that names no timer is ignored**, without an error: the events are
+    documented for YAML, so a user may fire one by hand from Developer tools.
+  - **A hidden Run for drops out of a device or area target**, as every hidden entity does
+    in Home Assistant (`helpers/target.py`, `_include_entry`); the docs say to aim at the
+    Run for itself to include it.
+  Why: #39 and Decision 1 of the plan: pick the boiler and choose a trigger.
+  Cost if wrong: an automation aimed at a Run for whose entity id the user renames never
+  fires again, as with any entity id in Home Assistant; a device target avoids it, and the
+  docs say so.
+  Tests: `tests/test_automation_triggers.py`, among them
+  `test_the_boilers_device_offers_the_three_triggers_by_target`,
+  `test_a_trigger_ignores_the_timers_of_other_devices`,
+  `test_a_relay_trigger_names_the_channel_whose_countdown_ended`,
+  `test_a_trigger_aimed_at_one_run_for_ignores_the_other_channel`,
+  `test_a_trigger_of_a_deleted_timer_never_fires`,
+  `test_a_timer_added_later_is_covered_by_the_device_trigger`,
+  `test_an_event_fired_by_hand_without_a_timer_is_ignored`,
+  `test_a_countdown_that_ended_while_down_triggers_once_at_start_up` and
+  `test_a_command_that_came_due_while_down_triggers_at_start_up`.

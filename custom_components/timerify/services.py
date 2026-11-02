@@ -20,6 +20,7 @@ from .const import DOMAIN, MAX_DELAY_MINUTES, MAX_MINUTES
 
 SERVICE_ADD_TIME = "add_time"
 SERVICE_RUN = "run"
+SERVICE_STOP = "stop"
 SERVICE_ADD_COMMAND = "add_command"
 SERVICE_CANCEL_COMMAND = "cancel_command"
 
@@ -150,6 +151,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entity_domain=NUMBER_DOMAIN,
         schema=RUN_SCHEMA,
         func="async_run",
+    )
+    service.async_register_platform_entity_service(
+        hass,
+        DOMAIN,
+        SERVICE_STOP,
+        entity_domain=NUMBER_DOMAIN,
+        schema={},
+        func="async_stop",
     )
     service.async_register_platform_entity_service(
         hass,

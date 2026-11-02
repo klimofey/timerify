@@ -37,11 +37,25 @@
     "run": {
       "service": "mdi:timer-play-outline"
     },
+    "stop": {
+      "service": "mdi:timer-stop-outline"
+    },
     "add_command": {
       "service": "mdi:clock-plus-outline"
     },
     "cancel_command": {
       "service": "mdi:clock-remove-outline"
+    }
+  },
+  "triggers": {
+    "countdown_started": {
+      "trigger": "mdi:timer-play-outline"
+    },
+    "countdown_ended": {
+      "trigger": "mdi:timer-off-outline"
+    },
+    "command_due": {
+      "trigger": "mdi:calendar-clock"
     }
   }
 }

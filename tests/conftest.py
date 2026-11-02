@@ -34,6 +34,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.typing import (
+    MockHAClientWebSocket,
+    WebSocketGenerator,
+)
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
@@ -653,6 +657,21 @@ def hass_read_only_access_token(
     return hass_read_only_access_token
 
 
+@pytest.fixture
+async def client(
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
+) -> MockHAClientWebSocket:
+    """A websocket connection of an admin, as the editor and the dashboard hold one.
+
+    Timerify is set up first. Setting it up adds the card to the web server's routes,
+    and the test server closes the routes when the first connection is made, which the
+    web server of Home Assistant does not: it takes the routes of integrations that are
+    set up after it has started.
+    """
+    assert await async_setup_component(hass, DOMAIN, {})
+    return await hass_ws_client(hass)
+
+
 def provide_fake(
     hass: HomeAssistant,
     services: FakeServices,
@@ -661,6 +680,7 @@ def provide_fake(
     *,
     name: str,
     on_device: bool = True,
+    device_id: str | None = None,
     registered: bool = True,
     capability_attributes: dict[str, Any] | None = None,
     state_attributes: dict[str, Any] | None = None,
@@ -669,17 +689,19 @@ def provide_fake(
     entry (on a device called `name` unless `on_device` is false), a state, and the
     services of `obeys`, which `services` hands the calls for the entity to.
 
+    With a `device_id` the registry entry goes on that device, one that another entity
+    made, and no device is made: the channels of a relay share one.
+
     An entity that is not `registered` has a state and services and no registry entry,
     nor a device, as an entity of YAML without a unique id has.
     """
     domain, object_id = split_entity_id(entity_id)
     platform = f"{object_id}_maker"
     provider = None
-    device_id = None
     if registered:
         provider = MockConfigEntry(domain=platform)
         provider.add_to_hass(hass)
-        if on_device:
+        if device_id is None and on_device:
             device_id = (
                 dr.async_get(hass)
                 .async_get_or_create(
@@ -737,6 +759,7 @@ async def provide_target(
         *,
         name: str,
         on_device: bool = True,
+        device_id: str | None = None,
         registered: bool = True,
         capability_attributes: dict[str, Any] | None = None,
         state_attributes: dict[str, Any] | None = None,
@@ -748,6 +771,7 @@ async def provide_target(
             services,
             name=name,
             on_device=on_device,
+            device_id=device_id,
             registered=registered,
             capability_attributes=capability_attributes,
             state_attributes=state_attributes,
@@ -774,6 +798,17 @@ def fake_target(
         name="Boiler",
         on_device=getattr(request, "param", True),
     )
+
+
+@pytest.fixture
+def fake_relay(provide_target: ProvideTarget) -> tuple[FakeTarget, FakeTarget]:
+    """`switch.relay_1` and `switch.relay_2` on one device called Relay, both switched
+    off, at `START`: a relay with two channels."""
+    one = provide_target("switch.relay_1", SWITCH_SERVICES, name="Relay")
+    two = provide_target(
+        "switch.relay_2", SWITCH_SERVICES, name="Relay", device_id=one.device_id
+    )
+    return one, two
 
 
 @pytest.fixture

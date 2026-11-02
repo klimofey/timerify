@@ -56,6 +56,7 @@ Timerify добавляет отсчёт к объекту, который у в
 - [Таймеры](https://github.com/klimofey/timerify/blob/main/docs/ru/timers.md): включайте выключатель, свет, вентилятор или кондиционер на заданное время, и он сам выключится.
 - [Ожидающие команды](https://github.com/klimofey/timerify/blob/main/docs/ru/pending-commands.md): велите таймеру включить или выключить устройство в выбранное вами время, не дальше чем на 7 дней вперёд.
 - [Расписания](https://github.com/klimofey/timerify/blob/main/docs/ru/schedules.md): запускайте устройство в заданное время недели, в выбранные вами дни недели или по датчику Workday.
+- [Автоматизации](https://github.com/klimofey/timerify/blob/main/docs/ru/automations.md): запускайте, продлевайте и останавливайте таймер из автоматизации и реагируйте, когда отсчёт начинается или заканчивается, а также когда наступает время ожидающей команды.
 - [Голос](https://github.com/klimofey/timerify/blob/main/docs/ru/voice.md): скажите Assist «включи Котёл на 10 минут» или спросите, сколько осталось, на английском или русском.
 - [Карточка на панели](https://github.com/klimofey/timerify/blob/main/docs/ru/card.md): показывайте таймер на панели, а во всплывающем окне включайте, продлевайте и останавливайте его.
 - [Счётчик времени работы](https://github.com/klimofey/timerify/blob/main/docs/ru/runtime.md): по желанию складывайте, сколько времени устройство было включено, чтобы узнать, сколько часов котёл проработал за неделю.
@@ -63,7 +64,7 @@ Timerify добавляет отсчёт к объекту, который у в
 ## Дальше
 
 - [Все страницы](https://github.com/klimofey/timerify/blob/main/docs/ru/README.md)
-- [Действия](https://github.com/klimofey/timerify/blob/main/docs/ru/services.md): четыре действия, которые Timerify добавляет в Home Assistant.
+- [Действия](https://github.com/klimofey/timerify/blob/main/docs/ru/services.md): пять действий, которые Timerify добавляет в Home Assistant, и три события, которые он отправляет.
 - [Ограничения](https://github.com/klimofey/timerify/blob/main/docs/ru/limits.md): чего Timerify пока не умеет.
 - [Известные ошибки и запросы](https://github.com/klimofey/timerify/issues): задачи на GitHub.
 - [Участие в разработке](https://github.com/klimofey/timerify/blob/main/CONTRIBUTING.md): как работать над самим Timerify (страница на английском).

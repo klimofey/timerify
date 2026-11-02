@@ -1,7 +1,8 @@
 // The words of the card. They live in `translations/<language>.json` under `common`, where
-// Home Assistant's backend serves them in the user's language; the English file is also built
-// into the bundle, so that a key that does not exist fails the type check, and so that the
-// words are there before the frontend has delivered any.
+// Home Assistant's backend serves them in the user's language; `common` of the English file is
+// also built into the bundle, so that a key that does not exist fails the type check, and so
+// that the words are there before the frontend has delivered any. The build hands the bundle
+// `common` alone (see build.mjs), so the other sections do not belong in the card's bytes.
 import { common } from "../../custom_components/timerify/translations/en.json";
 import type { HomeAssistant } from "./hass";
 

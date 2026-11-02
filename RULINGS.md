@@ -3192,3 +3192,35 @@ in `docs/followups.md`.
   `test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing`,
   `test_a_state_change_after_the_entry_is_unloaded_writes_nothing` and
   `test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences`.
+
+### Card
+
+- **The card's bundle is built from `common` of `translations/en.json` alone: an esbuild plugin
+  in `card/build.mjs` loads that one file as the module `export const common = {...}`.**
+  `strings.ts` keeps its typed `import { common }` of the JSON file, so a key that does not
+  exist still fails `tsc`. `build.mjs` exports `bundleOptions(entryPoint)`, the options the
+  script builds with, and runs the build only when node started it (`import.meta.main`), so
+  that a test can build with the same options and the committed file is neither written nor
+  checked by it. `card/tsconfig.json` has `allowJs` so that `tsc` reads the types of that
+  export from its JSDoc. After this, the bytes of the bundle are a function of `card/src`, the
+  pinned packages and `common`: a text of an exception, an issue, a service or a config flow
+  changes nothing in it (#43).
+  Why: esbuild names the identifiers of a minified bundle after the letters its sources use
+  most, and it counts the letters of every file it reads, the whole JSON file included, before
+  it drops the sections the card does not import. Measured with esbuild 0.28.2 on the sources
+  of this commit: reversing every text outside `common` (the same letters) gave the same
+  bundle byte for byte; adding " reworded" to each of them, or removing every section outside
+  `common`, gave a bundle of the same size in which identifiers had traded names (a class and
+  a helper of Lit's `css-tag` and `reactive-element` among them); and with the minifying of
+  identifiers off, the bundle was the same whatever the other sections held. A generated
+  `common` module in the repository would do the same, but it is a second file to keep in step
+  with `en.json`; the plugin reads the file the translators already edit.
+  Cost if wrong: the committed bundle changes once, in this commit, with the same size and
+  behaviour. The plugin and the test find the file by its name, `translations/en.json`; if the
+  file is renamed, the plugin no longer runs and the whole JSON is bundled again, and the last
+  test below fails, since its reworded copy is no longer the file that is read. A text of
+  `common` still changes the bundle, as it should.
+  Tests (`card/test/bundle.test.ts`, which builds the card with the options of the script and
+  an `en.json` copy outside the repository): `does not change when a text outside common is
+  reworded`, `does not change when a section outside common is added`, `does not change when
+  every section outside common is removed` and `changes when a text of common changes`.

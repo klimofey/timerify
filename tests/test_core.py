@@ -4394,6 +4394,20 @@ def test_disabling_the_interval_of_an_open_window_announces_a_stop() -> None:
     assert c.take_announcements() == [CountdownEnded("stopped")]
 
 
+def test_editing_an_open_window_so_that_it_no_longer_runs_announces_a_stop() -> None:
+    """The interval is changed while its window carries the timer, to one that is not
+    open now: the timer is taken off, and it is Timerify that ended it."""
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 60)], configured={"x"})
+    c.tick(NOW)
+    c.take_announcements()
+
+    c.set_windows(NOW + minutes(10), [window("x", 120, 180)], configured={"x"})
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [CountdownEnded("stopped")]
+
+
 def test_a_manual_off_is_announced_as_turned_off() -> None:
     c = core("strict", "on")
     c.set_duration(NOW, minutes(30))
@@ -4479,6 +4493,40 @@ def test_a_bare_on_that_comes_due_as_the_countdown_ends_announces_the_end() -> N
     assert c.take_announcements() == [CommandCameDue(on), CountdownEnded("expired")]
 
 
+def test_a_pending_off_due_as_the_countdown_ends_announces_it_expired() -> None:
+    """The countdown ran out at the command's time, so there is nothing left for the
+    command to stop: the same reason as for a bare "on" or a zero at that instant."""
+    off = cmd(10, "off")
+    c = holding("strict", "on", off, end=NOW + minutes(10))
+
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [CommandCameDue(off), CountdownEnded("expired")]
+
+
+def test_a_pending_off_due_as_a_window_ends_announces_it_expired() -> None:
+    """The window carries the timer to its end, and the command is due at that end."""
+    off = cmd(30, "off")
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 30)], configured={"x"})
+    c.tick(NOW)
+    c.add_command(NOW, off)
+    c.take_announcements()
+
+    c.tick(NOW + minutes(30))
+
+    assert c.take_announcements() == [CommandCameDue(off), CountdownEnded("expired")]
+
+
+def test_a_pending_off_a_minute_before_the_countdown_ends_stops_it() -> None:
+    off = cmd(9, "off")
+    c = holding("strict", "on", off, end=NOW + minutes(10))
+
+    c.tick(NOW + minutes(9))
+
+    assert c.take_announcements() == [CommandCameDue(off), CountdownEnded("stopped")]
+
+
 def test_a_dropped_command_is_not_announced_as_due() -> None:
     """The run it asked for was over before it was folded: it did nothing."""
     late = cmd(-61, minutes=60)
@@ -4544,6 +4592,17 @@ def test_a_zero_given_after_the_end_passed_announces_that_it_expired() -> None:
     idle = TimerCore("strict", minutes(45), Snapshot())
 
     assert c.set_duration(NOW, timedelta(0)) == idle.set_duration(NOW, timedelta(0))
+
+    assert c.snapshot == idle.snapshot
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+def test_stop_after_the_end_passed_announces_that_it_expired() -> None:
+    """Like a zero: there is no countdown left to stop, the one that ran out is told."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(1)))
+    idle = TimerCore("strict", minutes(45), Snapshot())
+
+    assert c.stop(NOW) == idle.stop(NOW)
 
     assert c.snapshot == idle.snapshot
     assert c.take_announcements() == [CountdownEnded("expired")]

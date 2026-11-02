@@ -29,6 +29,9 @@ from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
 from custom_components.timerify.const import (
     DOMAIN,
+    EVENT_COMMAND_DUE,
+    EVENT_COUNTDOWN_ENDED,
+    EVENT_COUNTDOWN_STARTED,
     KEY_RUN_FOR,
     SUBENTRY_INTERVAL,
     DaysMode,
@@ -506,6 +509,23 @@ def runtime_saved(hass_storage: dict[str, Any], entry: ConfigEntry) -> float:
     """The seconds the runtime file of `entry` holds."""
     seconds: float = hass_storage[runtime_storage_key(entry)]["data"]["seconds"]
     return seconds
+
+
+def record_events(hass: HomeAssistant) -> list[tuple[str, dict[str, Any]]]:
+    """Every Timerify event from now on, with its type, in the order it is fired."""
+    fired: list[tuple[str, dict[str, Any]]] = []
+
+    @callback
+    def record(event: Event[Any]) -> None:
+        fired.append((event.event_type, dict(event.data)))
+
+    for event_type in (
+        EVENT_COUNTDOWN_STARTED,
+        EVENT_COUNTDOWN_ENDED,
+        EVENT_COMMAND_DUE,
+    ):
+        hass.bus.async_listen(event_type, record)
+    return fired
 
 
 def record_writes(hass: HomeAssistant, entity_id: str) -> list[str]:

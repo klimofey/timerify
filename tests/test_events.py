@@ -7,11 +7,10 @@ boiler through the user's own actions and watch the bus.
 """
 
 from datetime import timedelta
-from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_capture_events
 
@@ -21,17 +20,25 @@ from custom_components.timerify.const import (
     EVENT_COUNTDOWN_STARTED,
 )
 
-from .conftest import FakeTarget, SetupTarget
+from .conftest import FakeTarget, FakeWorkday, SetupTarget
 from .helpers import (
     BUTTON,
     NUMBER,
     SENSOR,
+    SUNDAY,
     TURN_OFF,
     TURN_ON,
     add_command,
+    add_interval,
     advance,
+    advance_to,
     call_service,
+    edit_interval,
+    iso,
+    local,
+    open_sunday,
     press_button,
+    record_events,
     restart_after,
     run_for_of,
     set_number,
@@ -39,23 +46,6 @@ from .helpers import (
     state_of,
     timerify_warnings,
 )
-
-
-def record_events(hass: HomeAssistant) -> list[tuple[str, dict[str, Any]]]:
-    """Every Timerify event from now on, with its type, in the order it is fired."""
-    fired: list[tuple[str, dict[str, Any]]] = []
-
-    @callback
-    def record(event: Event[Any]) -> None:
-        fired.append((event.event_type, dict(event.data)))
-
-    for event_type in (
-        EVENT_COUNTDOWN_STARTED,
-        EVENT_COUNTDOWN_ENDED,
-        EVENT_COMMAND_DUE,
-    ):
-        hass.bus.async_listen(event_type, record)
-    return fired
 
 
 async def test_running_the_boiler_fires_countdown_started_with_its_end(
@@ -400,3 +390,78 @@ async def test_a_timer_that_lost_its_run_for_fires_nothing_and_says_so(
         "Not announcing what happened to the timer of switch.boiler: its Run for is not"
         " in the entity registry, so the events cannot name the timer"
     ]
+
+
+async def test_the_end_of_a_schedule_window_fires_start_and_expired(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The window carries the boiler: it starts the countdown when it opens and ends it
+    by running out when it closes."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    fired = record_events(hass)
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+
+    assert fired == [
+        (
+            EVENT_COUNTDOWN_STARTED,
+            {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15")},
+        ),
+        (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "expired"}),
+    ]
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_editing_the_running_interval_to_other_days_fires_ended_stopped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user changes the days of the interval while its window runs. Today is not
+    one of them, so Timerify takes the boiler off: that is a stop, not an expiry, and
+    the countdown that follows the edit's reload is not announced as a new one."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    fired = record_events(hass)
+
+    await edit_interval(hass, entry, interval, weekdays=["mon"])
+
+    assert fired == [
+        (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "stopped"})
+    ]
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_a_holiday_that_takes_the_window_away_fires_ended_stopped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+) -> None:
+    """The morning of a working day is running when the Workday sensor says that today
+    is a day off after all. The window is gone, and Timerify takes the boiler off."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(workday_sensor=fake_workday.entity_id)
+    await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    fired = record_events(hass)
+
+    fake_workday.holidays = {SUNDAY}
+    await fake_workday.report()
+
+    assert fired == [
+        (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "stopped"})
+    ]
+    assert fake_target.calls == [TURN_ON, TURN_OFF]

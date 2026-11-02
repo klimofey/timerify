@@ -159,8 +159,8 @@ type Effect = (
 
 type EndReason = Literal["expired", "stopped", "turned_off"]
 """Why a countdown ended: its end was reached, Timerify stopped it (Run for 0, Stop, a
-pending "off", Add time down to zero, a schedule interval switched off while its window
-ran), or the target was switched off outside Timerify."""
+pending "off", Add time down to zero, a schedule interval switched off or edited so that
+its window no longer runs), or the target was switched off outside Timerify."""
 
 
 @dataclass(frozen=True)
@@ -440,8 +440,9 @@ class TimerCore:
 
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
-        """End the countdown and switch the target off."""
-        _utc(now)  # unused, but every command rejects a naive time alike
+        """End the countdown and switch the target off. An end that is not ahead is a
+        countdown that ran out, as for `set_duration` (#42)."""
+        self._expire_stale_end(_utc(now))
         return self._stop()
 
     @_reports_change
@@ -826,6 +827,9 @@ class TimerCore:
         """
         if command.action == "off":
             self._announce(CommandCameDue(command))
+            # A countdown that ends at the command's time ran out; there is nothing
+            # left for the command to stop.
+            self._expire_stale_end(command.at)
             self._end_timer()
             return "off"
         end = self._command_end(command)

@@ -64,7 +64,7 @@ Timerify добавляет отсчёт к объекту, который у в
 ## Дальше
 
 - [Все страницы](https://github.com/klimofey/timerify/blob/main/docs/ru/README.md)
-- [Действия](https://github.com/klimofey/timerify/blob/main/docs/ru/services.md): пять действий, которые Timerify добавляет в Home Assistant.
+- [Действия](https://github.com/klimofey/timerify/blob/main/docs/ru/services.md): пять действий, которые Timerify добавляет в Home Assistant, и три события, которые он отправляет.
 - [Ограничения](https://github.com/klimofey/timerify/blob/main/docs/ru/limits.md): чего Timerify пока не умеет.
 - [Известные ошибки и запросы](https://github.com/klimofey/timerify/issues): задачи на GitHub.
 - [Участие в разработке](https://github.com/klimofey/timerify/blob/main/CONTRIBUTING.md): как работать над самим Timerify (страница на английском).

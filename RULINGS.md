@@ -2395,21 +2395,25 @@ in `docs/followups.md`.
     restart or a report of the target; a window whose end is the timer's end counts too.
     `stopped`: Timerify ended it: Run for 0, Stop, the Turn off button, voice and the LLM
     tools, Add time down to zero, a pending "off", a window taken away by switching or
-    editing its interval. `turned_off`: the target was switched off outside Timerify
+    editing its interval or by a change of the Workday sensor. `turned_off`: the target was switched off outside Timerify
     (`observe` with `by_us=False`). The core already takes a different path for each, so
     the reason costs nothing to tell.
   - **A countdown whose end is not ahead of now is no countdown** (#42), whether or not a
     tick folded it. Run for, Run and Add time (up) on such a timer announce its end as
     `expired` first and then the start of the new countdown. Run for 0 announces only the
-    expiry: there is nothing left to stop. A zero or negative Add time writes nothing and
-    announces nothing; the tick that folds the end announces it.
+    expiry: there is nothing left to stop, and so does the core's `stop()`, which applies
+    the same rule. A zero or negative Add time writes nothing and announces nothing; the
+    tick that folds the end announces it.
   - **A command that comes due is announced after the drop check** (`CommandDropped` is
     not: it did nothing, and the log says so), and before the start or end it causes. A
-    pending "off" on a timer with no countdown is announced too. A bare "on" in loose mode
-    that comes due at the very instant the countdown ends leaves the target on with no
-    countdown, so the end is announced as `expired`. A command with minutes that comes due
-    at that instant moves the end (the target is not switched off and on), so it announces
-    no end.
+    pending "off" on a timer with no countdown is announced too. A command that comes due
+    at the very instant the countdown ends finds it run out, so the end it leaves is
+    `expired`, as for a zero after a stale end (#42): a pending "off", and a bare "on" in
+    loose mode (which leaves the target on with no countdown). An "off" that comes due
+    earlier stops the countdown, as `stopped`. A command with minutes at that instant
+    moves the end (the target is not switched off and on), so it announces no end. An
+    automation that filters on `reason: expired` therefore sees the end of a window whose
+    pending "off" is due at the window's end.
   - **The announcements are a channel of their own**, `TimerCore.take_announcements`, not
     effects: they switch nothing, and the effect lists of the steps stay as they were. The
     core keeps them until the controller takes them, so no step has to return them and none
@@ -2425,15 +2429,29 @@ in `docs/followups.md`.
     Home Assistant's rule that automations do not fire during start-up.
   - **A timer whose Run for is not in the entity registry fires nothing** and logs a
     warning: an event that cannot name its timer is of no use to a trigger.
+  - **A timer that is unloaded during the save fires nothing** (`_execute` fires only for
+    a controller that is not stopped): the saved snapshot no longer holds the end, so the
+    next load cannot announce it either. This is not tested: it needs an unload exactly
+    during the save.
   Why: #39. A state cannot tell a countdown that ended from one that was stopped, or a
   start from a move, and the Next command sensor also changes when a command is added or
   cancelled. The core's decision point is exact, and an event reaches YAML users too.
   Cost if wrong: a user who wants an event when a countdown is changed has none; an
   automation that turns the boiler on again when its countdown ends would loop through
-  `stopped` too, so it must check `trigger.reason`. The docs show that.
+  `stopped` too, so it must check `trigger.reason`. The docs show that. An event that
+  falls while its timer is unloaded during the save is not fired, by that load or the next:
+  the saved timer no longer holds the end. An `expired` that coincides with a reload of
+  the timer can be lost this way.
   Tests: the announcement tests of `tests/test_core.py` (from
   `test_a_countdown_from_idle_is_announced_as_started`) and `tests/test_events.py`, among
   them `test_changing_a_running_countdown_announces_nothing`,
   `test_moving_run_for_while_it_runs_fires_no_event`,
   `test_a_countdown_restored_at_start_up_is_not_announced_again`,
-  `test_a_countdown_that_ended_while_down_fires_ended_at_start_up`.
+  `test_a_countdown_that_ended_while_down_fires_ended_at_start_up`,
+  `test_a_pending_off_due_as_the_countdown_ends_announces_it_expired`,
+  `test_stop_after_the_end_passed_announces_that_it_expired`,
+  `test_editing_the_running_interval_to_other_days_fires_ended_stopped`,
+  `test_a_holiday_that_takes_the_window_away_fires_ended_stopped`,
+  `test_the_end_of_a_schedule_window_fires_start_and_expired`, and
+  `test_running_and_stopping_the_boiler_by_voice_fires_start_and_stop` with its LLM twin
+  in `tests/voice/test_events_by_voice.py`.

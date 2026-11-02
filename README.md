@@ -64,7 +64,7 @@ The dashboard card comes with Timerify. Refresh your browser once after you inst
 ## More
 
 - [All pages](https://github.com/klimofey/timerify/blob/main/docs/en/README.md)
-- [Actions](https://github.com/klimofey/timerify/blob/main/docs/en/services.md): the five actions that Timerify adds to Home Assistant.
+- [Actions](https://github.com/klimofey/timerify/blob/main/docs/en/services.md): the five actions that Timerify adds to Home Assistant, and the three events that it fires.
 - [Limits](https://github.com/klimofey/timerify/blob/main/docs/en/limits.md): what Timerify does not do yet.
 - [Known faults and requests](https://github.com/klimofey/timerify/issues): the GitHub issues.
 - [Contributing](https://github.com/klimofey/timerify/blob/main/CONTRIBUTING.md): how to work on Timerify itself.

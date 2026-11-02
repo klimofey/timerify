@@ -1436,9 +1436,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
 - **A tap opens the pop-up in both layouts, and a hold on the round layout runs the timer with
   no duration through `timerify.run`, or stops it while it runs; the pill has no hold.**
   `timerify.run` with no duration is R9: in strict mode the default duration, in loose mode an
-  open run, in either mode the end of the schedule window that is open, and a target that
-  already runs keeps its countdown. A running timer, with or without
-  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
+  open run, in either mode the end of the schedule window that is open (in strict mode the
+  default duration instead, if that ends later), and a target that already runs keeps its
+  countdown. A running timer, with or without a countdown, is stopped by
+  `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
   press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
   uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
@@ -3833,3 +3834,18 @@ in `docs/followups.md`.
   starts none, as before. Test: `test_a_loose_turn_on_inside_a_window_starts_a_countdown`.
   Cost if wrong: an automation on "Countdown started" runs for a loose boiler that someone
   turned on inside a window.
+
+### Voice
+
+- **An hour written with a leading zero is the morning (#57, the owner's decision of
+  2026-11-03).** The ruling was rewritten in place, in the "Reading (owner's decisions,
+  2026-11-02 and 2026-11-03, issue #57)" entry of the clock commands under Release 1.1.0,
+  `### Voice`, because it replaced the reading of 2026-11-02; read it there. The two
+  changes of this release meet in "turn on the boiler at 07", a pending turn-on that names
+  no length of time: the hour decides only when the command falls due (`Command.at`), and
+  the window rule above decides only how long it then runs (`_open_run_end`), so neither
+  reads the other. A bare "turn on the boiler" to Assist follows the window rule like any
+  other bare turn-on. Tests (`tests/voice/test_turn_on_inside_a_window.py`):
+  `test_a_bare_turn_on_inside_a_window_runs_to_its_end` and
+  `test_a_turn_on_at_a_clock_time_inside_a_window_runs_to_its_end`. Cost if wrong: none
+  found.

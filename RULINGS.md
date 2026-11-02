@@ -3278,9 +3278,12 @@ in `docs/followups.md`.
   command, follow the server's date), and the `CountdownController`, whose check that the end is
   still ahead decides whether it ticks. The pop-up takes the whole lookup (`lookup`) in place of
   `info`, so that it reads the same offset. A lookup that found no timer counts by the browser's
-  clock, as does one whose answer has no `server_time` that `Date.parse` can read (an older
-  Timerify answering a card that was cached or added by hand): there is nothing to correct then,
-  and a `NaN` must never reach the countdown. A new lookup replaces the offset.
+  clock, as does one whose answer has a `server_time` that `momentOf` cannot read. `momentOf` is
+  the one rule for reading every moment the server writes (Ends at, `started_at` and this one),
+  and a time it cannot read must never put a `NaN` into the countdown: a `NaN` offset would draw
+  "NaN" and stop the ticking, since no end is ever after it. The answer is typed and the server
+  always sends the key, so this is a guard of that one rule, not one for a version that lacks the
+  key. A new lookup replaces the offset.
   Why: Ends at is a moment the server wrote, and a time left is its distance from a clock; a wall
   tablet whose clock has drifted by minutes showed a time left that was wrong by as many. The
   offset costs no request of its own, since the answer to the question the card asks anyway

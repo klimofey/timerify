@@ -136,7 +136,7 @@ Nothing counts down on the server for the card. The card counts once a second. I
 
 The card counts by Home Assistant's clock, not by the browser's. Timerify's answer says what time it is on the server. The card keeps the difference from the browser's clock. So a browser clock that is off by minutes does not change the time left. A wall tablet whose clock drifts shows the right countdown. The end time shown, such as "until 4:42 PM", follows the server's clock too. So does the day shown beside a time that is not today.
 
-The card measures the difference again whenever it asks again, for example when the connection returns. If the browser's clock jumps in between, the countdown is off until then. The time left never goes below 0:00. The fill stays between empty and full. What you press always goes to the server.
+The card measures the difference again whenever it asks again, for example when the connection returns. If the browser's clock jumps in between, the countdown is off until then. Even then, the time left never goes below 0:00. The fill stays between empty and full. What you press always goes to the server.
 
 ## Permissions
 

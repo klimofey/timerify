@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import (
     MockHAClientWebSocket,
@@ -129,7 +130,8 @@ async def restart_without_target(
 
 def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
     """What Timerify tells about the boiler's timer, for a timer that is set up with
-    the defaults of the scenarios; `different` changes what the scenario changes."""
+    the defaults of the scenarios, at the time on the frozen clock now; `different`
+    changes what the scenario changes."""
     return {
         "entry_id": entry.entry_id,
         "target": TARGET_ID,
@@ -141,7 +143,7 @@ def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
         "target_on": {"match": "is", "states": ["on"]},
         "percent_settings": [],
         "disabled_sensors": [],
-        "server_time": START.isoformat(),
+        "server_time": dt_util.utcnow().isoformat(),
         **different,
     }
 

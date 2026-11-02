@@ -40,7 +40,8 @@ export async function lookupTimer(hass: HomeAssistant, entityId: string): Promis
   try {
     const info = await hass.callWS<TimerInfo>({ type: "timerify/timer", entity_id: entityId });
     const stamped = momentOf(info.server_time);
-    // An answer with no time to read is counted by the browser's clock, as before.
+    // Read by the one rule for every moment the server writes. A time it cannot read must not
+    // put a NaN into the countdown, so it is counted by the browser's clock.
     const clockOffset = stamped === undefined ? 0 : stamped - (sent + Date.now()) / 2;
     return { status: "found", info, clockOffset };
   } catch (error) {

@@ -22,7 +22,7 @@ from homeassistant.helpers.llm import (
 
 from .const import DOMAIN
 from .target import target_name
-from .voice import HANDLER_TYPES
+from .voice import TOOL_HANDLER_TYPES
 from .voice.base import TimerifyIntentHandler, loaded_timers
 
 TOOLS_PROMPT = (
@@ -82,6 +82,6 @@ def async_get_tools(
     if not names:
         return None
     return LLMTools(
-        tools=[handler_tool(handler_type) for handler_type in HANDLER_TYPES],
+        tools=[handler_tool(handler_type) for handler_type in TOOL_HANDLER_TYPES],
         prompt=TOOLS_PROMPT.format(names=json.dumps(names, ensure_ascii=False)),
     )

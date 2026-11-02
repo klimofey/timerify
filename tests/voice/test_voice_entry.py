@@ -32,9 +32,9 @@ from custom_components.timerify.const import (
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
+    CONTEXT_HVAC_MODES,
     DOMAIN,
     KIND_VOICE_SETTINGS,
-    LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_MODE,
     MANAGED_HEADER,
@@ -43,6 +43,7 @@ from custom_components.timerify.const import (
     VOICE_SYNC_COOLDOWN,
     VOICE_UNIQUE_ID,
 )
+from custom_components.timerify.spelling import fold_yo
 from custom_components.timerify.voice.files import SentenceFiles
 from custom_components.timerify.voice.sentences import (
     InvalidSentences,
@@ -50,9 +51,18 @@ from custom_components.timerify.voice.sentences import (
     render,
 )
 
-from ..conftest import SWITCH_SERVICES, FakeTarget, HeldCall, ProvideTarget, SetupTarget
+from ..conftest import (
+    CLIMATE_SERVICES,
+    SWITCH_SERVICES,
+    FakeTarget,
+    HeldCall,
+    ProvideTarget,
+    SetupTarget,
+)
 from ..helpers import (
+    AC_ATTRS,
     AC_ID,
+    SMALL_AC_ID,
     TARGET_ID,
     add_interval,
     advance,
@@ -65,8 +75,11 @@ from .helpers import (
     conversation_reloads,
     converse,
     copy_sentences,
+    hvac_blocks,
+    hvac_words,
     listed,
     managed_file,
+    outs,
     put_file,
     reached,
     samples,
@@ -80,6 +93,9 @@ BOILER = {"in": "Boiler", "out": "Boiler", "context": {"domain": "switch"}}
 FAN = {"in": "Fan", "out": "Fan", "context": {"domain": "switch"}}
 AN_OLD_TIME = 1_000_000_000
 """A time, as the seconds since 1970, that no file written during a test has."""
+YO_NAME = "\N{CYRILLIC CAPITAL LETTER IO}lka"
+"""A name with the Russian letter yo, built from the code point so that this file stays
+free of Cyrillic."""
 
 
 async def open_menu(hass: HomeAssistant) -> FlowResult:
@@ -602,11 +618,6 @@ async def test_device_rename_follows_the_full_name(
 # The words for the settings the targets take
 
 
-def outs(values: list[dict[str, Any]]) -> list[Any]:
-    """What the values of a list mean, in the order they are listed."""
-    return [value["out"] for value in values]
-
-
 @pytest.mark.usefixtures("assist")
 async def test_words_for_settings_come_with_the_targets_that_take_them(
     hass: HomeAssistant,
@@ -621,14 +632,16 @@ async def test_words_for_settings_come_with_the_targets_that_take_them(
     await setup_target()
     await add_voice_entry(hass, languages=("en",))
     reloads = conversation_reloads(hass)
-    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert hvac_words(hass, "en") == {}
     assert listed(hass, "en", LIST_MODE) == []
 
     await setup_target(target=AC_ID)
     await setup_target(target=fake_vent.entity_id)
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
-    assert outs(listed(hass, "en", LIST_HVAC_MODE)) == ["cool", "heat", "fan_only"]
+    assert hvac_words(hass, "en") == {
+        "cool fan_only heat": ["cool", "heat", "fan_only"]
+    }
     assert outs(listed(hass, "en", LIST_MODE)) == [
         "auto",
         "eco",
@@ -660,7 +673,7 @@ async def test_words_for_settings_leave_with_the_target(
     await hass.async_block_till_done()
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
-    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert hvac_words(hass, "en") == {}
     assert listed(hass, "en", LIST_MODE) == []
 
 
@@ -699,20 +712,117 @@ async def test_a_mode_is_listed_as_a_person_says_it(
 async def test_every_language_gets_the_same_modes(
     hass: HomeAssistant, fake_climate: FakeTarget, setup_target: SetupTarget
 ) -> None:
-    """The words for an HVAC mode differ by language, the modes they mean and the modes
-    of the devices do not."""
+    """The words for an HVAC mode differ by language, and so do the words of Home
+    Assistant for a mode of a device; the modes they mean do not."""
     await setup_target(target=AC_ID)
     await add_voice_entry(hass)
 
     hvac = {
-        language: set(outs(listed(hass, language, LIST_HVAC_MODE)))
+        language: {key: set(modes) for key, modes in hvac_words(hass, language).items()}
         for language in VOICE_LANGUAGES
     }
     modes = {
-        language: listed(hass, language, LIST_MODE) for language in VOICE_LANGUAGES
+        language: set(outs(listed(hass, language, LIST_MODE)))
+        for language in VOICE_LANGUAGES
     }
-    assert hvac["en"] == hvac["ru"] == {"cool", "heat", "fan_only"}
-    assert modes["en"] == modes["ru"] != []
+    assert (
+        hvac["en"] == hvac["ru"] == {"cool fan_only heat": {"cool", "heat", "fan_only"}}
+    )
+    assert modes["en"] == modes["ru"] == {"auto", "high", "low"}
+
+
+@pytest.mark.usefixtures("assist")
+async def test_each_thermostat_is_listed_with_the_modes_it_has(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The name of a thermostat carries the key of its modes, which is what ties it to
+    the sentences with the words for those modes; a target that is no thermostat has no
+    key. Each set of modes has its own copy of the sentences for thermostats."""
+    await setup_target()
+    await setup_target(target=fake_full_ac.entity_id)
+    await setup_target(target=fake_small_ac.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+
+    assert {value["out"]: value["context"] for value in listed(hass, "en")} == {
+        "Boiler": {"domain": "switch"},
+        "AC": {
+            "domain": "climate",
+            CONTEXT_HVAC_MODES: "auto cool dry fan_only heat heat_cool",
+        },
+        "Small AC": {"domain": "climate", CONTEXT_HVAC_MODES: "cool fan_only"},
+    }
+    assert sorted(hvac_words(hass, "en")) == [
+        "auto cool dry fan_only heat heat_cool",
+        "cool fan_only",
+    ]
+    assert len(hvac_blocks(hass, "en")) == 6
+
+
+@pytest.mark.usefixtures("assist")
+async def test_thermostats_with_the_same_modes_share_their_sentences(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Two air conditioners that can be turned on in the same modes, whatever order
+    their integrations list them in, are known by one copy of the sentences."""
+    second = provide_target(
+        SMALL_AC_ID,
+        CLIMATE_SERVICES,
+        name="Small AC",
+        capability_attributes={
+            **AC_ATTRS,
+            "hvac_modes": ["fan_only", "cool", "off", "heat"],
+        },
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+    await setup_target(target=fake_climate.entity_id)
+    await setup_target(target=second.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+
+    assert hvac_words(hass, "en") == {
+        "cool fan_only heat": ["cool", "heat", "fan_only"]
+    }
+    assert len(hvac_blocks(hass, "en")) == 3
+    assert {value["context"][CONTEXT_HVAC_MODES] for value in listed(hass, "en")} == {
+        "cool fan_only heat"
+    }
+
+
+@pytest.mark.usefixtures("assist")
+async def test_the_sentences_for_thermostats_follow_the_thermostats_of_the_house(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A thermostat added later brings its own copy after the cooldown, and one taken
+    away takes its copy with it; the agent reads the sentences once for the change."""
+    await setup_target(target=fake_full_ac.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+    assert len(hvac_blocks(hass, "en")) == 3
+    reloads = conversation_reloads(hass)
+
+    small_timer = await setup_target(target=fake_small_ac.entity_id)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert len(hvac_blocks(hass, "en")) == 6
+    assert len(reloads) == 1
+    cooled = await converse(hass, "turn on the small AC for an hour cooling")
+    assert reached(cooled) == "TimerifyRun"
+
+    await hass.config_entries.async_remove(small_timer.entry_id)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert len(hvac_blocks(hass, "en")) == 3
+    assert sorted(hvac_words(hass, "en")) == ["auto cool dry fan_only heat heat_cool"]
 
 
 # Schedule interval titles
@@ -1012,6 +1122,44 @@ async def test_name_left_empty_by_punctuation_is_skipped(
 
 
 @pytest.mark.usefixtures("assist")
+async def test_a_russian_name_with_yo_is_matched_said_with_ye(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A speech recogniser writes ye where Russian prints yo, and the built-in agent
+    compares letter by letter: the name is listed with both, and the answer gives the
+    name as the device has it."""
+    er.async_get(hass).async_update_entity(TARGET_ID, name=YO_NAME)
+    await setup_target()
+
+    await add_voice_entry(hass, languages=("ru",))
+
+    domain = {"domain": "switch"}
+    assert listed(hass, "ru") == [
+        {"in": YO_NAME, "out": YO_NAME, "context": domain},
+        {"in": fold_yo(YO_NAME), "out": YO_NAME, "context": domain},
+    ]
+    (text, *_) = samples("ru", TIME_LEFT, names=(fold_yo(YO_NAME),), numbers={})
+    response = await converse(hass, text, "ru")
+    assert reached(response) == TIME_LEFT
+    assert speech(response).startswith(YO_NAME)
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_russian_name_with_yo_is_still_matched_as_written(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    er.async_get(hass).async_update_entity(TARGET_ID, name=YO_NAME)
+    await setup_target()
+    await add_voice_entry(hass, languages=("ru",))
+
+    (text, *_) = samples("ru", TIME_LEFT, names=(YO_NAME,), numbers={})
+    response = await converse(hass, text, "ru")
+
+    assert reached(response) == TIME_LEFT
+    assert speech(response).startswith(YO_NAME)
+
+
+@pytest.mark.usefixtures("assist")
 async def test_shared_name_is_not_resolved_to_the_other_entity(
     hass: HomeAssistant,
     fake_target: FakeTarget,
@@ -1108,7 +1256,7 @@ async def test_a_language_that_fails_does_not_stop_the_other(
     is named in the log, and the other is written."""
     await setup_target()
 
-    def failing_for_russian(language: str, built: dict[str, Any]) -> None:
+    def failing_for_russian(language: str, *_: object) -> None:
         if language == "ru":
             raise InvalidSentences("this language is broken")
 

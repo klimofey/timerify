@@ -20,6 +20,7 @@ from homeassistant.helpers.translation import async_get_translations
 from .const import (
     CONF_DAYS,
     CONF_END,
+    CONF_GENERATED_TITLE,
     CONF_SETTINGS,
     CONF_START,
     CONF_WEEKDAYS,
@@ -31,6 +32,7 @@ from .const import (
     freeze_settings,
 )
 from .core import Window
+from .spelling import fold_yo
 
 _WEEK: Final = len(WEEKDAYS)
 _MIN_RANGE: Final = 3
@@ -74,18 +76,44 @@ class Interval:
         )
 
 
+def wall_moment(day: date, clock: time, zone: tzinfo) -> datetime:
+    """The moment it is `clock` on `day` on the wall clock of `zone`, in UTC.
+
+    A wall time that does not exist on a day the clock goes forward lands later by the
+    length of the gap (02:30 becomes 03:30); one that comes twice when it goes back is
+    its first time.
+    """
+    return datetime.combine(day, clock, zone).astimezone(UTC)
+
+
+def wall_moments(day: date, clock: time, zone: tzinfo) -> list[datetime]:
+    """Every moment it is `clock` on `day` on the wall clock of `zone`, in UTC, the
+    earliest first.
+
+    That is one moment, `wall_moment`, but for a wall time that comes twice because the
+    clock goes back: both of its moments.
+    """
+    first = wall_moment(day, clock, zone)
+    again = datetime.combine(day, clock, zone).replace(fold=1).astimezone(UTC)
+    # A wall time the clock skips is read at the second offset as a moment before the
+    # gap, which is not that wall time: only a time that comes twice is told by it.
+    if again != first and again.astimezone(zone).replace(tzinfo=None) == (
+        datetime.combine(day, clock)
+    ):
+        return [first, again]
+    return [first]
+
+
 def window_on(interval: Interval, day: date, zone: tzinfo) -> Window | None:
     """The occurrence of `interval` that starts on `day` on the wall clock of `zone`;
     None when the change of the clock swallows it.
 
     It ends the next day when the interval ends at or before its start, and never lasts
-    longer than `MAX_MINUTES`. A wall time that does not exist on a day the clock goes
-    forward lands later by the length of the gap (02:30 becomes 03:30); one that comes
-    twice when it goes back is its first time.
+    longer than `MAX_MINUTES`. Its times follow `wall_moment`.
     """
     ends_on = day + timedelta(days=1) if interval.end <= interval.start else day
-    start = datetime.combine(day, interval.start, zone).astimezone(UTC)
-    end = datetime.combine(ends_on, interval.end, zone).astimezone(UTC)
+    start = wall_moment(day, interval.start, zone)
+    end = wall_moment(ends_on, interval.end, zone)
     end = min(end, start + timedelta(minutes=MAX_MINUTES))
     if end <= start:
         return None
@@ -197,10 +225,6 @@ _DASHES: Final = str.maketrans(
     )
 )
 """Every dash that a title may be written with, as the hyphen a keyboard has."""
-_YO: Final = "\N{CYRILLIC SMALL LETTER IO}"
-_YE: Final = "\N{CYRILLIC SMALL LETTER IE}"
-"""Russian prints the one for the other, and a speech recogniser does not tell them
-apart."""
 
 
 def title_key(title: str) -> str:
@@ -216,7 +240,51 @@ def title_key(title: str) -> str:
     built-in agent does not know it either.
     """
     unpunctuated = remove_punctuation(title).translate(_DASHES)
-    return " ".join(unpunctuated.casefold().replace(_YO, _YE).split())
+    return " ".join(fold_yo(unpunctuated.casefold()).split())
+
+
+def has_generated_title(subentry: ConfigSubentry, labels: Mapping[str, str]) -> bool:
+    """Whether the interval still has the title Timerify gave it, not one its owner
+    wrote: an edit that changes the times and days gives it the new title, a rename
+    ends it. `labels` are the words of the title in the language of the house now
+    (`async_title_labels`).
+
+    The title is Timerify's while it equals the mark `CONF_GENERATED_TITLE`. An interval
+    with no mark was made or last edited by release 1.0.0, which keeps none: its title
+    is Timerify's while it equals the one its data makes in the language of the house
+    now. This is the one rule of the interval form and of the times an interval can be
+    said by.
+    """
+    generated = subentry.data.get(CONF_GENERATED_TITLE)
+    if generated is None:
+        generated = stored_interval_title(subentry.data, labels)
+    return subentry.title == generated
+
+
+def start_aliases(start: str) -> tuple[str, ...]:
+    """The ways a speech recogniser writes the time `start`, an `HH:MM`, without a
+    repeat: the hour with and without its leading zero, after a colon, then after a dot,
+    then after a space, as the clock sentences take a time. So `06:30` is `6:30`,
+    `06:30`, `6.30`, `06.30`, `6 30` and `06 30`, and `18:00` is `18:00`, `18.00` and
+    `18 00`. They are the same in every language."""
+    clock = time.fromisoformat(start)
+    hours = dict.fromkeys((str(clock.hour), f"{clock.hour:02d}"))
+    return tuple(
+        f"{hour}{separator}{clock.minute:02d}"
+        for separator in (":", ".", " ")
+        for hour in hours
+    )
+
+
+def spoken_aliases(
+    subentry: ConfigSubentry, labels: Mapping[str, str]
+) -> tuple[str, ...]:
+    """The times an interval can be said by instead of its title: `start_aliases` of
+    its start while it has the title Timerify gave it (`has_generated_title`), none once
+    it has been renamed, since its owner's title is the name to say."""
+    if not has_generated_title(subentry, labels):
+        return ()
+    return start_aliases(subentry.data[CONF_START])
 
 
 def _weekdays_label(weekdays: list[str], labels: Mapping[str, str]) -> str:

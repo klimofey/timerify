@@ -38,9 +38,13 @@ from ..conftest import CLIMATE_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import (
     AC_ATTRS,
     AC_ID,
+    AC_NEXT,
     AC_NUMBER,
     NUMBER,
     SENSOR,
+    SMALL_AC_ID,
+    SMALL_AC_NEXT,
+    SMALL_AC_NUMBER,
     SUNDAY,
     TARGET_ID,
     TURN_OFF,
@@ -56,8 +60,10 @@ from ..helpers import (
     state_of,
 )
 from .helpers import (
+    CLIMATE_FAN_MODE,
     HOUR_CLASSES,
     MINUTE_CLASSES,
+    SETTING_LISTS,
     PluralClasses,
     assert_one_form_per_class,
     assist_api,
@@ -65,25 +71,28 @@ from .helpers import (
     converse,
     copy_sentences,
     expose,
+    hvac_words,
     listed,
+    pending,
     reached,
+    readings,
     refusal_of,
     samples,
     speech,
+    spoken_rule,
     spoken_values,
     talk,
     translated,
     with_voice_settings,
+    word_of,
 )
 
 RUN = "TimerifyRun"
 ADD_TIME = "TimerifyAddTime"
 STOP = "TimerifyStop"
 LAMP_NUMBER = "number.lamp_run_for"
+TANK_NUMBER = "number.tank_run_for"
 VENT_NUMBER = "number.vent_run_for"
-SETTING_LISTS = ("timerify_hvac_mode", "timerify_mode")
-"""The lists of the words for a setting: a sample that leaves them out is a sentence for
-a target that is turned on without any setting."""
 COOL = ("set_hvac_mode", {"hvac_mode": "cool"})
 TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]
@@ -134,6 +143,19 @@ async def test_run_phrasings(
     assert reached(response) == RUN, speech(response)
     assert state_of(hass, NUMBER) == str(minutes)
     assert fake_target.calls == [TURN_ON]
+
+
+async def test_for_an_hour_and_bare_minutes_runs_a_switch_for_90_minutes(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """A speaker drops the word "minutes" after the hours: "for 1 hour 30" is what
+    "for 1 hour 30 minutes" means, for a device that takes no temperature."""
+    response = await converse(hass, "turn on the boiler for 1 hour 30")
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, NUMBER) == "90"
+    assert fake_target.calls == [TURN_ON]
+    assert speech(response).startswith("Boiler runs for 1 hour and 30 minutes, until")
 
 
 async def test_a_day_is_the_longest_run(
@@ -439,11 +461,9 @@ async def test_hvac_words_are_listed_only_for_supported_modes(
     await with_voice_settings(hass, setup_target, fake_target, fake_climate)
 
     for language in VOICE_LANGUAGES:
-        assert {word["out"] for word in listed(hass, language, LIST_HVAC_MODE)} == {
-            "cool",
-            "heat",
-            "fan_only",
-        }
+        assert {
+            key: set(modes) for key, modes in hvac_words(hass, language).items()
+        } == {"cool fan_only heat": {"cool", "heat", "fan_only"}}
     response = await converse(hass, "turn on the AC for an hour drying")
     assert reached(response) != RUN
     assert fake_climate.calls == []
@@ -457,11 +477,131 @@ async def test_no_hvac_word_is_a_setting_of_a_target_that_has_no_modes(
     minutes is not part of any sentence of Timerify."""
     await with_voice_settings(hass, setup_target, fake_target)
 
-    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert hvac_words(hass, "en") == {}
     response = await converse(hass, "turn on the boiler for an hour cooling")
 
     assert reached(response) != RUN
     assert fake_target.calls == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_each_ac_understands_only_its_own_hvac_modes(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The AC has every mode and the small one only cools and ventilates: each is
+    understood with the words for its own modes."""
+    await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
+
+    answers = [
+        await converse(hass, "turn on the AC for an hour heating"),
+        await converse(hass, "turn on the AC for an hour drying"),
+        await converse(hass, "turn on the small AC for an hour cooling"),
+        await converse(hass, "turn on the small AC for an hour fan only"),
+    ]
+
+    assert [reached(answer) for answer in answers] == [RUN] * 4, [
+        speech(answer) for answer in answers
+    ]
+    assert fake_full_ac.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "heat"}),
+        ("set_hvac_mode", {"hvac_mode": "dry"}),
+    ]
+    assert fake_small_ac.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "cool"}),
+        ("set_hvac_mode", {"hvac_mode": "fan_only"}),
+    ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_mode_only_another_ac_has_switches_neither_on(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The small AC cannot heat, and the AC can. "Heating" after the name of the small
+    one is not understood: it is not turned on without the mode, nor is the AC that has
+    the mode turned on in its place, and no command is kept."""
+    await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
+
+    response = await converse(hass, "turn on the small AC for an hour heating")
+
+    assert response.response_type is intent.IntentResponseType.ERROR, speech(response)
+    assert reached(response) != RUN
+    assert fake_small_ac.calls == []
+    assert fake_full_ac.calls == []
+    assert pending(hass, SMALL_AC_NEXT) == []
+    assert pending(hass, AC_NEXT) == []
+    assert state_of(hass, SMALL_AC_NUMBER) == state_of(hass, AC_NUMBER) == "0"
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_thermostat_that_no_mode_is_listed_for_is_still_run_for_a_time(
+    hass: HomeAssistant, provide_target: ProvideTarget, setup_target: SetupTarget
+) -> None:
+    """A thermostat that can only be off has no HVAC mode to be turned on in. It is
+    run for a time as any other target is, and no word for a mode is part of its
+    sentences."""
+    off_only = provide_target(
+        SMALL_AC_ID,
+        CLIMATE_SERVICES,
+        name="Small AC",
+        capability_attributes={**AC_ATTRS, "hvac_modes": ["off"]},
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+    await with_voice_settings(hass, setup_target, off_only)
+
+    assert hvac_words(hass, "en") == {"": []}
+    run = await converse(hass, "turn on the small AC for an hour")
+    cooled = await converse(hass, "turn on the small AC for an hour cooling")
+
+    assert reached(run) == RUN, speech(run)
+    assert reached(cooled) != RUN
+    assert off_only.call_data == [("turn_on", {})]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_russian_hvac_words_are_scoped_per_ac(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Every Russian word for an HVAC mode, said of the small AC, arrives as the mode it
+    means when the small AC has it, and as no HVAC mode otherwise: it is never told to
+    take a mode it lacks, and the AC that has the mode is never turned on instead. (The
+    word for an automatic fan is also one for the mode `auto`, and is the fan's.)"""
+    await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
+    numbers = {"timerify_minutes": 30}
+    own_modes = {"cool", "fan_only"}
+
+    for mode, words in spoken_values("ru", LIST_HVAC_MODE).items():
+        for word in words:
+            texts = samples(
+                "ru",
+                RUN,
+                names=("Small AC",),
+                numbers=numbers,
+                texts={"timerify_hvac_mode": word},
+                absent=("timerify_mode",),
+                requiring="climate",
+            )
+            text = next(text for text in texts if word in text)
+            fake_small_ac.call_data.clear()
+
+            response = await converse(hass, text, language="ru")
+
+            slots = {} if response.intent is None else response.intent.slots
+            assert ("hvac_mode" in slots) == (mode in own_modes), text
+            assert [
+                data
+                for service, data in fake_small_ac.call_data
+                if service == "set_hvac_mode"
+            ] == ([{"hvac_mode": mode}] if mode in own_modes else []), text
+            assert fake_full_ac.calls == [], text
 
 
 @pytest.mark.usefixtures("assist")
@@ -491,6 +631,59 @@ async def test_auto_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode(
     assert ac.call_data == [
         ("set_hvac_mode", {"hvac_mode": "auto"}),
         ("set_fan_mode", {"fan_mode": "auto"}),
+        ("set_fan_mode", {"fan_mode": "auto"}),
+    ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_auto_in_russian_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode(
+    hass: HomeAssistant, provide_target: ProvideTarget, setup_target: SetupTarget
+) -> None:
+    """The word Home Assistant shows in Russian for the automatic fan of a thermostat
+    is also a word for its automatic HVAC mode. Bare, with "in mode" or with "mode", it
+    is the mode of the thermostat; with "fan" it is the fan."""
+    ac = provide_target(
+        AC_ID,
+        CLIMATE_SERVICES,
+        name="AC",
+        capability_attributes={**AC_ATTRS, "hvac_modes": ["off", "heat", "auto"]},
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+    await with_voice_settings(hass, setup_target, ac)
+    word = await word_of(hass, "ru", "entity_component", f"{CLIMATE_FAN_MODE}.auto")
+    hvac_words = {w.casefold() for w in spoken_values("ru", LIST_HVAC_MODE)["auto"]}
+    assert word.casefold() in hvac_words, "the fan word is no longer an HVAC word"
+    hvac_forms = spoken_rule(
+        "ru", "timerify_hvac_part", {}, texts={"timerify_hvac_mode": word}
+    )
+    fan_forms = [
+        form
+        for form in spoken_rule(
+            "ru", "timerify_mode_part", {}, texts={"timerify_mode": word}
+        )
+        if form not in hvac_forms
+    ]
+    assert len(fan_forms) == 1
+    turn_on = min(
+        samples(
+            "ru",
+            RUN,
+            names=("AC",),
+            numbers={"timerify_hours": 1},
+            absent=SETTING_LISTS,
+            admitting="climate",
+        ),
+        key=len,
+    )
+
+    for form in [*hvac_forms, *fan_forms]:
+        response = await converse(hass, f"{turn_on} {form}", "ru")
+        assert reached(response) == RUN, (form, speech(response))
+
+    assert ac.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
         ("set_fan_mode", {"fan_mode": "auto"}),
     ]
 
@@ -537,13 +730,12 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
     fake_tank: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """A boiler has no temperature to be turned on at, so a number after the time is
-    not read as one ("for 1 hour 30" is not 30 degrees), and the words for an HVAC mode
-    are the thermostat's alone. The water heater has a temperature but no HVAC mode."""
+    """A boiler has no temperature to be turned on at, so a temperature after the time
+    is not understood, and the words for an HVAC mode are the thermostat's alone. The
+    water heater has a temperature but no HVAC mode."""
     await with_voice_settings(hass, setup_target, fake_target, fake_full_ac, fake_tank)
 
     for text in (
-        "turn on the boiler for 1 hour 30",
         "turn on the boiler for an hour at 55 degrees",
         "turn on the tank for an hour cooling",
     ):
@@ -556,6 +748,154 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
         ("turn_on", {}),
         ("set_temperature", {"temperature": 55.0}),
     ]
+
+
+AND_WORDS = {"en": "and", "ru": "\N{CYRILLIC SMALL LETTER I}"}
+"""The word that joins the hours to the minutes, in each language."""
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize(
+    ("name", "domain"), [("AC", "climate"), ("Tank", "water_heater")]
+)
+def test_hours_and_a_number_are_read_one_way_where_a_temperature_is_said(
+    language: str, name: str, domain: str
+) -> None:
+    """A thermostat or a water heater has one reading of each phrase, not a tie that
+    the order of the alternatives breaks: the number right after the hours is the
+    temperature, and the number after the word for "and" is the minutes."""
+    hours = samples(
+        language,
+        RUN,
+        names=(name,),
+        requiring=domain,
+        numbers={"timerify_hours": 1},
+        absent=SETTING_LISTS,
+    )
+    assert hours
+
+    for text in hours:
+        bare = readings(language, f"{text} 30", name=name, domain=domain)
+        joined = readings(
+            language, f"{text} {AND_WORDS[language]} 30", name=name, domain=domain
+        )
+
+        assert bare == [{"name": name, "hours": 1, "temperature": 30}], text
+        assert joined == [{"name": name, "hours": 1, "minutes": 30}], text
+
+
+@pytest.mark.usefixtures("assist")
+async def test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature(
+    hass: HomeAssistant, fake_full_ac: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A thermostat reads the bare number after the hours as its temperature, and as
+    nothing else, so the air conditioner runs for the hour and is set at 30 degrees."""
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+    text = "turn on the AC for 1 hour 30"
+    assert readings("en", text, name="AC", domain="climate") == [
+        {"name": "AC", "hours": 1, "temperature": 30}
+    ]
+
+    response = await converse(hass, text)
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, AC_NUMBER) == "60"
+    assert fake_full_ac.call_data == [
+        ("turn_on", {}),
+        ("set_temperature", {"temperature": 30.0}),
+    ]
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    ("text", "calls"),
+    [
+        ("turn on the AC for 1 hour and 30", [("turn_on", {})]),
+        (
+            "turn on the AC for 1 hour and 30 at 24",
+            [("turn_on", {}), ("set_temperature", {"temperature": 24.0})],
+        ),
+    ],
+)
+async def test_for_an_hour_and_30_is_90_minutes_to_a_thermostat(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    text: str,
+    calls: list[tuple[str, dict[str, object]]],
+) -> None:
+    """With "and" before it the number is minutes, also for a thermostat: a person who
+    wants an hour at 30 degrees leaves "and" out."""
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, text)
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, AC_NUMBER) == "90"
+    assert fake_full_ac.call_data == calls
+
+
+@pytest.mark.usefixtures("assist")
+async def test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature(
+    hass: HomeAssistant, fake_tank: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A water heater reads the bare number after the hours as its temperature, as a
+    thermostat does, and "and" before the number makes it minutes."""
+    await with_voice_settings(hass, setup_target, fake_tank)
+    text = "turn on the tank for 1 hour 30"
+    assert readings("en", text, name="Tank", domain="water_heater") == [
+        {"name": "Tank", "hours": 1, "temperature": 30}
+    ]
+
+    response = await converse(hass, text)
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, TANK_NUMBER) == "60"
+    assert fake_tank.call_data == [
+        ("turn_on", {}),
+        ("set_temperature", {"temperature": 30.0}),
+    ]
+
+    await set_number(hass, TANK_NUMBER, 0)
+    fake_tank.call_data.clear()
+    response = await converse(hass, "turn on the tank for 1 hour and 30")
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, TANK_NUMBER) == "90"
+    assert fake_tank.call_data == [("turn_on", {})]
+
+
+@pytest.mark.parametrize("hours", [1, 2, 5])
+async def test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, hours: int
+) -> None:
+    """Every form of the word for hours that the Russian sentences take after 1, 2 or 5,
+    followed by 30 with no word for the minutes, with or without the word for "and",
+    runs the boiler for that many hours and half an hour, in each sampled way to ask.
+
+    The sampler takes the first alternative of a rule, which is the hours alone, so the
+    minutes, and the other forms of the hours, are put in the sampled texts."""
+    forms = spoken_rule("ru", "timerify_hours_part", {"timerify_hours": hours})
+    texts: list[str] = []
+    for sampled in samples(
+        "ru", RUN, numbers={"timerify_hours": hours}, absent=SETTING_LISTS
+    ):
+        (ending,) = [form for form in forms if sampled.endswith(form)]
+        asked = sampled.removesuffix(ending)
+        texts += [
+            f"{asked}{form} {more}"
+            for form in forms
+            for more in ("30", f"{AND_WORDS['ru']} 30")
+        ]
+    assert len(forms) == 3
+    assert texts
+
+    for text in dict.fromkeys(texts):
+        response = await converse(hass, text, language="ru")
+
+        assert reached(response) == RUN, text
+        assert state_of(hass, NUMBER) == str(hours * 60 + 30), text
+        await set_number(hass, NUMBER, 0)
 
 
 HOT_WATER = [("turn_on", {}), ("set_temperature", {"temperature": 120.0})]
@@ -664,6 +1004,34 @@ async def test_the_manual_installation_knows_the_hvac_words_but_not_the_modes(
     assert reached(cooled) == RUN
     assert fake_climate.call_data == COOL_24
     assert reached(fanned) != RUN
+
+
+async def test_a_hand_listed_ac_keeps_every_hvac_word(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> None:
+    """The files that are copied by hand cannot tell the modes of one thermostat from
+    those of another, so every thermostat takes every word: the AC is turned on drying,
+    and the small AC, which lacks heating, is understood and refuses it."""
+    await setup_target(target=fake_full_ac.entity_id)
+    await setup_target(target=fake_small_ac.entity_id)
+    await copy_sentences(
+        hass, ["AC", "Small AC"], {"AC": "climate", "Small AC": "climate"}
+    )
+
+    dried = await converse(hass, "turn on the AC for an hour drying")
+    heated = await converse(hass, "turn on the small AC for an hour heating")
+
+    assert reached(dried) == RUN, speech(dried)
+    assert fake_full_ac.call_data == [("set_hvac_mode", {"hvac_mode": "dry"})]
+    assert reached(heated) == RUN
+    assert refusal_of(heated) == (
+        "heat is not a valid HVAC mode: it must be one of cool, fan_only."
+    )
+    assert fake_small_ac.calls == []
 
 
 async def test_a_name_listed_by_hand_without_its_domain_has_no_hvac_words(
@@ -825,6 +1193,15 @@ async def test_add_time_on_an_idle_timer_starts_it(
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "20"
     assert speech(response) == "Boiler runs for 20 minutes, until 09:20."
+
+
+async def test_add_an_hour_and_bare_minutes_adds_90_minutes(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    response = await converse(hass, "add 1 hour 30 to the boiler")
+
+    assert reached(response) == ADD_TIME, speech(response)
+    assert state_of(hass, NUMBER) == "90"
 
 
 async def test_add_time_past_a_day_runs_a_day(

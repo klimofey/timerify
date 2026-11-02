@@ -279,6 +279,7 @@ ADD_TIME_NUMBERS = {
     "timerify_hours": 1,
     "timerify_minutes": 1,
     "timerify_long_minutes": MAX_MINUTES + 1,
+    "timerify_minutes_of_hour": 1,
 }
 """The numbers with which the sentences that add time can be said."""
 
@@ -321,6 +322,7 @@ def test_every_text_does_not_leave_out_what_it_cannot_say() -> None:
                 "timerify_hours": 1,
                 "timerify_minutes": 1,
                 "timerify_long_minutes": MAX_MINUTES + 1,
+                "timerify_minutes_of_hour": 1,
                 "timerify_percent": 1,
                 "timerify_temperature": 1,
             },

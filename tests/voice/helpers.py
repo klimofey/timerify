@@ -19,7 +19,15 @@ from typing import Any, Final
 import yaml
 from freezegun.api import FrozenDateTimeFactory
 from hassil.expression import RuleReference, Sentence
-from hassil.intents import Intents, RangeSlotList, SlotList, TextSlotList
+from hassil.intents import (
+    IntentData,
+    Intents,
+    RangeSlotList,
+    SlotList,
+    TextSlotList,
+)
+from hassil.parse_expression import parse_sentence
+from hassil.recognize import recognize_all
 from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
 from home_assistant_intents import get_intents
@@ -33,12 +41,15 @@ from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callb
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import intent, llm
 from homeassistant.helpers.template import Template
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import (
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
+    CONTEXT_HVAC_MODES,
     DOMAIN,
+    LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_TARGET,
     MANUAL_SENTENCES_DIR,
@@ -49,7 +60,7 @@ from custom_components.timerify.voice.sentences import read_back, references
 from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 
 from ..conftest import FakeTarget, SetupTarget
-from ..helpers import advance_to, local
+from ..helpers import advance_to, local, state_of
 
 ASSISTANT: Final = "conversation"
 """The assistant the built-in agent asks Home Assistant about exposure as."""
@@ -66,6 +77,19 @@ LATE_EVENING: Final = local(date(2026, 1, 5), "23:00")
 """From this time every count of hours up to 24 ends the next day, and every count of
 minutes below 60 ends the same day, so that answers to different counts differ in
 nothing but the count."""
+SET_SCHEDULE: Final = "TimerifySetSchedule"
+MORNING: Final = "switch.boiler_schedule_06_30_07_15_mon_sun"
+EVENING: Final = "switch.boiler_schedule_18_00_19_00_mon_sun"
+"""The switches of the intervals from 06:30 to 07:15 and from 18:00 to 19:00."""
+MORNING_TITLE: Final = "06:30\u201307:15, Mon\u2013Sun"
+EVENING_TITLE: Final = "18:00\u201319:00, Mon\u2013Sun"
+"""The titles Timerify gives the morning and the evening interval when nobody titles
+them."""
+BOILER_INTERVALS: Final = "Morning; Evening"
+"""How a refusal lists the titles of the intervals the boiler has."""
+SETTING_LISTS: Final = ("timerify_hvac_mode", "timerify_mode")
+"""The lists of the words for a setting: a sample that leaves them out is a sentence for
+a target that is turned on without any setting."""
 
 
 @dataclass(frozen=True)
@@ -304,16 +328,14 @@ tells apart: none, the next one (each of the ways a command is said), every one,
 the counts of each plural form, and one by its id."""
 
 
-def scheduling(
-    enabled: bool, interval: str | None = None, count: int = 2
-) -> dict[str, Any]:
+def scheduling(enabled: bool, *intervals: str, count: int = 2) -> dict[str, Any]:
     """The slots a handler gives to the answer about switching a schedule: the
-    schedule of the target, or the one `interval` of it, `enabled` or not, with the
-    `count` of intervals switched."""
+    schedule of the target, or the `intervals` of it that were asked for by their titles
+    (each title once), `enabled` or not, with the `count` of intervals switched."""
     return {
         "target": "Boiler",
         "enabled": enabled,
-        "interval": interval,
+        "intervals": list(intervals),
         "count": count,
     }
 
@@ -325,9 +347,12 @@ SCHEDULE_CASES: Final[Sequence[Mapping[str, Any]]] = (
     scheduling(True, "Morning", count=1),
     scheduling(False, "Morning", count=1),
     scheduling(False, "Morning", count=3),
+    scheduling(False, "Morning", "Evening"),
+    scheduling(True, "Morning", "Noon", "Evening", count=3),
 )
 """The slots a handler gives to the answer about switching a schedule, in the cases it
-tells apart: the whole schedule, or an interval by its title, on and off."""
+tells apart: the whole schedule, or the intervals asked for by their titles (one title,
+two, or three), on and off."""
 
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyTimeLeft", "default"): TIMER_CASES,
@@ -335,6 +360,7 @@ RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyAddTime", "default"): TIMER_CASES,
     ("TimerifyStop", "default"): TIMER_CASES,
     ("TimerifyDelayedCommand", "delayed"): LATER_CASES,
+    ("TimerifyCommandAt", "delayed"): LATER_CASES,
     ("TimerifyListCommands", "default"): LIST_CASES,
     ("TimerifyCancelCommands", "default"): CANCEL_CASES,
     ("TimerifySetSchedule", "default"): SCHEDULE_CASES,
@@ -342,6 +368,19 @@ RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
 """For each answer of the sentence files, by intent and response key, the slots a
 handler gives it in the cases it tells apart. A task that adds an answer adds its slots
 here."""
+
+
+SCHEDULE_ANSWERS: Final = (
+    Path(__file__).parents[1] / "fixtures" / "ru" / "schedule_answers.yaml"
+)
+"""The file of the tests that holds the Russian answers about switching a schedule."""
+
+
+def russian_schedule_answers() -> dict[str, dict[str, Any]]:
+    """The cases of the hand-written Russian answers about switching a schedule, by
+    name: the slots a handler gives and the answer a speaker expects."""
+    cases: list[dict[str, Any]] = yaml.safe_load(SCHEDULE_ANSWERS.read_text("utf-8"))
+    return {case["name"]: case for case in cases}
 
 
 def translated(language: str, *path: str) -> str:
@@ -478,6 +517,58 @@ def listed(
     return values
 
 
+def pending(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
+    """The commands a "Next command" sensor lists in its attributes."""
+    state = hass.states.get(entity_id)
+    assert state is not None
+    commands: list[dict[str, Any]] = state.attributes["commands"]
+    return commands
+
+
+def hvac_blocks(hass: HomeAssistant, language: str) -> list[dict[str, Any]]:
+    """Every data block of the managed file of `language` that is for the thermostats of
+    one set of HVAC modes: the blocks that require a set (`CONTEXT_HVAC_MODES`), in the
+    order of the file."""
+    written = yaml.safe_load(managed_file(hass, language).read_text("utf-8"))
+    return [
+        data
+        for intent_type in written["intents"].values()
+        for data in intent_type["data"]
+        if CONTEXT_HVAC_MODES in data.get("requires_context", {})
+    ]
+
+
+def hvac_words(hass: HomeAssistant, language: str) -> dict[str, list[str]]:
+    """The HVAC modes that the managed file of `language` has words for, by the key of
+    the set of modes whose thermostats understand them: the modes the words in the
+    blocks that require the key mean, in the order of the words. Every block of a key
+    has the same words, which this asserts."""
+    found: dict[str, list[str]] = {}
+    for block in hvac_blocks(hass, language):
+        key = block["requires_context"][CONTEXT_HVAC_MODES]
+        modes = outs(block["lists"][LIST_HVAC_MODE]["values"])
+        assert found.setdefault(key, modes) == modes, key
+    return found
+
+
+def outs(values: list[dict[str, Any]]) -> list[Any]:
+    """What the values of a list mean, in the order they are listed."""
+    return [value["out"] for value in values]
+
+
+CLIMATE_FAN_MODE: Final = (
+    "component.climate.entity_component._.state_attributes.fan_mode.state"
+)
+"""Where Home Assistant keeps the words for the fan modes of all thermostats."""
+
+
+async def word_of(hass: HomeAssistant, language: str, category: str, key: str) -> str:
+    """The word Home Assistant has at `key` in `language`: the integration or domain
+    that the key names is the one that is loaded."""
+    component = key.split(".")[1]
+    return (await async_get_translations(hass, language, category, [component]))[key]
+
+
 def conversation_reloads(hass: HomeAssistant) -> list[ServiceCall]:
     """Start recording the calls of `conversation.reload`; the list fills as they are
     made."""
@@ -577,6 +668,26 @@ def _intents_of(language: str, takeover: bool = False) -> Intents:
     return Intents.from_dict(merged)
 
 
+def _domains_of(context: Mapping[str, Any]) -> list[str]:
+    """The domains a context of a block of sentences names, if any."""
+    domains = context.get("domain")
+    return [domains] if isinstance(domains, str) else list(domains or [])
+
+
+def _required_domains(data: IntentData) -> list[str]:
+    """The domains a block of sentences is for (its `requires_context`), if any."""
+    return _domains_of(data.requires_context)
+
+
+def _admits(data: IntentData, domain: str) -> bool:
+    """Whether a block of sentences is for the targets of `domain`: it requires no
+    domain or requires this one, and does not exclude it."""
+    required = _required_domains(data)
+    return (not required or domain in required) and domain not in _domains_of(
+        data.excludes_context
+    )
+
+
 def _one_value(
     slot_lists: Mapping[str, SlotList],
     names: Sequence[str],
@@ -621,9 +732,14 @@ def samples(
     absent: Collection[str] = (),
     takeover: bool = False,
     optionals: bool = True,
+    requiring: str | None = None,
+    admitting: str | None = None,
 ) -> list[str]:
     """Sentences of the intent as a user would say them, a bounded number: those of
-    `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`.
+    `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`; with `requiring`, only the
+    blocks that are for a target of that domain alone (`requires_context`); with
+    `admitting`, only the blocks that a target of that domain can be said with: those
+    that require it or no domain, and do not exclude it (`excludes_context`).
 
     Every list is cut down to one value (see `_one_value`) and every sentence
     template is sampled twice: once as its first expansion with the optional parts
@@ -639,6 +755,10 @@ def samples(
         return []
     found: list[str] = []
     for data in intents.intents[intent_type].data:
+        if requiring is not None and requiring not in _required_domains(data):
+            continue
+        if admitting is not None and not _admits(data, admitting):
+            continue
         slot_lists = _one_value(
             {**intents.slot_lists, **data.slot_lists},
             names,
@@ -663,7 +783,53 @@ def samples(
     return found
 
 
-EVERY_TEXT_LIMIT: Final = 2000
+@cache
+def _own_intents(language: str, takeover: bool = False) -> Intents:
+    """The shipped sentences of Timerify alone, or, for `takeover`, those of
+    `CORE_COMMANDS` in their place, with the rules and lists of the core that they use
+    (`<turn>`, `<the>`, the delays): the core's own sentences need lists that a test of
+    one reading has no use for."""
+    core = get_intents(language)
+    assert core is not None, f"home-assistant-intents has no {language}"
+    shipped = SENTENCES_DIR / language
+    own = read_back((shipped / OWN_SENTENCES).read_text("utf-8"))
+    if takeover:
+        taken = read_back((shipped / CORE_COMMANDS).read_text("utf-8"))
+        own["intents"] = taken["intents"]
+        own["expansion_rules"] = {
+            **own.get("expansion_rules", {}),
+            **taken.get("expansion_rules", {}),
+        }
+    own["expansion_rules"] = {
+        **core.get("expansion_rules", {}),
+        **own.get("expansion_rules", {}),
+    }
+    own["lists"] = {**core.get("lists", {}), **own.get("lists", {})}
+    return Intents.from_dict(own)
+
+
+def readings(
+    language: str, text: str, *, name: str, domain: str, takeover: bool = False
+) -> list[dict[str, Any]]:
+    """Every different way the shipped sentences of Timerify (`takeover`: those that
+    take over Home Assistant's commands) read `text`, said of the target `name`, a
+    device of `domain`: the slots each reading fills in. Results that differ only in how
+    the sentence was worded (an article, a verb) are one reading."""
+    targets = TextSlotList.from_tuples([(name, name, {"domain": domain})])
+    found: list[dict[str, Any]] = []
+    for result in recognize_all(
+        text,
+        _own_intents(language, takeover),
+        slot_lists={LIST_TARGET: targets},
+        language=language,
+    ):
+        slots = {slot: entity.value for slot, entity in result.entities.items()}
+        if slots not in found:
+            found.append(slots)
+    return found
+
+
+EVERY_TEXT_LIMIT: Final = 4000
 """The most texts `every_text` returns, so that an intent with a long list of values is
 refused where a bounded sample (`samples`) is meant."""
 
@@ -771,6 +937,43 @@ def _first_sample(
     return None if first is None else first.strip()
 
 
+def spoken_rule(
+    language: str,
+    rule_name: str,
+    numbers: Mapping[str, int],
+    texts: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Every text the shipped expansion rule `rule_name` of `language` can be said as,
+    with the lists of numbers it says a value of cut down to the one `numbers` gives,
+    and a list of words to its first value or the one `texts` gives: the forms of a part
+    of a sentence (the word for hours after a count), read from the sentence files so
+    that a test can use them without writing them."""
+    intents = _intents_of(language)
+    slot_lists = _one_value(dict(intents.slot_lists), (), numbers, texts or {}, ())
+    return [
+        text.strip()
+        for text in sample_sentence(
+            intents.expansion_rules[rule_name],
+            slot_lists,
+            dict(intents.expansion_rules),
+            language=language,
+        )
+    ]
+
+
+def spoken_number(language: str, number: int) -> list[str]:
+    """Every way `number` is said in words in `language`, as the built-in agent hears
+    it: the forms of its cases and genders, the same ones that a range list of words
+    matches. Words are read from the library that builds them, so that a test can say
+    them without writing them."""
+    spoken = RangeSlotList(name="number", start=number, stop=number, digits=False)
+    return sorted(
+        sample_sentence(
+            parse_sentence("{number}"), {"number": spoken}, language=language
+        )
+    )
+
+
 def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:
     """What the shipped list `list_name` of `language` says for each of its values: the
     words that mean it, by what it means. The words of a language are read from the
@@ -781,3 +984,8 @@ def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:
         str(value.value_out): list(sample_expression(value.text_in, language=language))
         for value in slot_list.values
     }
+
+
+def switches(hass: HomeAssistant) -> tuple[str, str]:
+    """What the switches of the Morning and the Evening interval show."""
+    return state_of(hass, MORNING), state_of(hass, EVENING)

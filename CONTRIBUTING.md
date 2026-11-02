@@ -16,7 +16,8 @@ Where things live:
   [GitHub issues](https://github.com/klimofey/timerify/issues).
 
 Everything in the repository is in English: code, comments, commit messages and documentation.
-Cyrillic is allowed only in the translations of the product and of its user pages. Git hooks in
+Cyrillic is allowed only in the translations of the product and of its user pages, and in
+`tests/fixtures/ru/`, the Russian answers that the tests are checked against. Git hooks in
 `.githooks/` enforce this (see [Development](#development) for turning them on), and they must
 never be bypassed.
 

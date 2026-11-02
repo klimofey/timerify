@@ -1,5 +1,6 @@
 """The pre-commit hook: Cyrillic is refused everywhere in the repository but in the
-translations of the product and of its user documentation."""
+translations of the product and of its user documentation, and in the one folder of
+test fixtures that holds the Russian answers written by hand."""
 
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ CYRILLIC = "".join(chr(code) for code in (0x442, 0x430, 0x439, 0x43C, 0x435, 0x4
 """A word in Cyrillic, built from code points, as the sources hold no Cyrillic."""
 SENTENCES = "custom_components/timerify/sentences"
 TRANSLATIONS = "custom_components/timerify/translations"
+FIXTURES = "tests/fixtures"
 
 
 def commit_attempt(repository: Path, path: str) -> subprocess.CompletedProcess[str]:
@@ -41,9 +43,11 @@ def commit_attempt(repository: Path, path: str) -> subprocess.CompletedProcess[s
         f"{SENTENCES}/ru/src/timerify.yaml",
         f"{SENTENCES}/ru/src/macros.jinja",
         f"{SENTENCES}/de/src/deeper/anything.yaml",
+        f"{FIXTURES}/ru/answers.yaml",
+        f"{FIXTURES}/ru/deeper/more.yaml",
     ],
 )
-def test_cyrillic_is_allowed_in_the_translations_of_the_product(
+def test_cyrillic_is_allowed_in_the_russian_files_of_the_repository(
     tmp_path: Path, path: str
 ) -> None:
     attempt = commit_attempt(tmp_path, path)
@@ -66,6 +70,11 @@ def test_cyrillic_is_allowed_in_the_translations_of_the_product(
         "tests/voice/test_anything.py",
         "scripts/sentences/ru/generate.py",
         "docs/sentences/ru/notes.md",
+        f"{FIXTURES}/en/answers.yaml",
+        f"{FIXTURES}/answers.yaml",
+        f"{FIXTURES}/ru.yaml",
+        f"{FIXTURES}/rux/answers.yaml",
+        "tests/voice/fixtures/ru/answers.yaml",
     ],
 )
 def test_cyrillic_is_refused_everywhere_else(tmp_path: Path, path: str) -> None:

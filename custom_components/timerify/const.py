@@ -91,7 +91,13 @@ which the sentences use as the slot `name`."""
 LIST_HVAC_MODE: Final = "timerify_hvac_mode"
 """The list of the sentence sources that holds the words for an HVAC mode, which the
 sentences use as the slot `hvac_mode`. The sources say every mode in words; the files
-Timerify writes keep the modes the targets support."""
+Timerify writes leave it empty and give each data block that is for thermostats a list
+of its own, with the words for the modes of one set of thermostats."""
+CONTEXT_HVAC_MODES: Final = "timerify_hvac_modes"
+"""The context of the name of a thermostat in the files Timerify writes: the HVAC modes
+it can be turned on with, sorted and joined by a space. A data block of the sentences
+for thermostats requires the context of one set, so that a thermostat is understood
+with the words for its own modes only."""
 LIST_MODE: Final = "timerify_mode"
 """The list that holds the modes of the targets as their devices name them, which the
 sentences use as the slot `mode`. Empty in the sources: only the files Timerify writes

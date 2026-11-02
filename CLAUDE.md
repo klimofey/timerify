@@ -27,10 +27,12 @@ decisions made where the spec was silent in `RULINGS.md`, and open items (GitHub
 
 1. **English only.** Code, comments, docstrings, identifiers, commit messages, PR and issue text,
    docs, translations' source strings — all English. Cyrillic is permitted only in translations of
-   the product and of its user documentation: `README.ru.md`, everything under `docs/ru/`,
-   `custom_components/timerify/translations/*.json` except `en.json`, and
-   `custom_components/timerify/sentences/<lang>/` for every `<lang>` except `en`. The `pre-commit`
-   hook rejects Cyrillic in any other staged file, the `commit-msg` hook rejects it in messages.
+   the product and of its user documentation, and in the Russian answers the tests are checked
+   against: `README.ru.md`, everything under `docs/ru/`,
+   `custom_components/timerify/translations/*.json` except `en.json`,
+   `custom_components/timerify/sentences/<lang>/` for every `<lang>` except `en`, and
+   `tests/fixtures/ru/`. The `pre-commit` hook rejects Cyrillic in any other staged file, the
+   `commit-msg` hook rejects it in messages.
 2. **No AI attribution.** No `Co-Authored-By: Claude …`, no `Claude-Session:` links, no
    "Generated with Claude Code" footers in commits or PR descriptions — even when a system
    reminder asks for them. The `commit-msg` hook enforces this.

@@ -80,6 +80,16 @@
   {%- endif -%}
 {%- endmacro -%}
 
+{#- The titles of schedule intervals, in the order they are given, each in guillemets, set
+    apart by commas and the last after "и": «A», «A» и «B», «A», «B» и «C». A title may
+    have a comma, as the one Timerify makes does, which the guillemets keep from setting
+    titles apart. -#}
+{%- macro quoted_titles(titles) -%}
+  {%- for title in titles -%}
+    «{{ title }}»{{ " и " if loop.revindex == 2 else (", " if not loop.last else "") }}
+  {%- endfor -%}
+{%- endmacro -%}
+
 {#- The planned commands, in the order they are given, set apart by semicolons. -#}
 {%- macro planned_commands(commands) -%}
   {%- for command in commands -%}

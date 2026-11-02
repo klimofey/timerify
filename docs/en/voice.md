@@ -31,6 +31,8 @@ Each sentence has more wordings than the table shows. In English, "the" is optio
 | Turn on or off by name | turn on the boiler, turn off the boiler | vklyuchi Boiler, vyklyuchi Boiler |
 | Turn on later | turn on the boiler in 15 minutes for an hour | vklyuchi Boiler cherez 15 minut na chas |
 | Turn off later | turn off the boiler in 20 minutes | vyklyuchi Boiler cherez 20 minut |
+| Turn on at a time | turn on the boiler at 7:30 | vklyuchi Boiler v 7:30 |
+| Turn off at a time | turn off the boiler at 7:30 | vyklyuchi Boiler v 7:30 |
 | What is planned | what is planned for the boiler | chto zaplanirovano u taymera Boiler |
 | Cancel what is planned | cancel all planned commands for the boiler | otmeni vse zaplanirovannye komandy u taymera Boiler |
 | Cancel the next one | cancel the next planned command for the boiler | otmeni blizhayshuyu zaplanirovannuyu komandu u taymera Boiler |
@@ -49,7 +51,9 @@ The Russian column is transliterated because this page is in English. The real s
 **Run for a time**
 
 - It does the same as setting **Run for**. The countdown is that long, from one minute to 24 hours. It replaces a countdown that runs.
-- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count beyond a week is not understood at all.
+- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count of hours or minutes beyond a week is not understood at all.
+- If a number of minutes follows the hours, with or without "and", it adds to them. "For 1 hour 30" and "for 1 hour and 30" are both 90 minutes. You can leave out the word "minutes".
+- The exception is turning on a thermostat or a water heater for a time. There "for 1 hour 30" means one hour at 30 degrees. Say "and" or "minutes" for the minutes: "for 1 hour and 30" is 90 minutes.
 - A thermostat, a water heater, a light, a fan or a humidifier takes its settings in the same sentence, in any order:
   - the HVAC mode ("cooling", "heating", "auto");
   - a temperature ("24 degrees", "at 22.5", or "120 degrees" for a water heater in Fahrenheit). Any number up to 250 works, in digits or words. The device then accepts or refuses it by its own range;
@@ -83,8 +87,34 @@ The Russian column is transliterated because this page is in English. The real s
 - A command to turn on can say how long the device then runs, and its settings. An example is "turn on the AC in 15 minutes for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then. It replaces the end, whether the device had a countdown or not. For a device that is off, nothing changes, and the answer says so.
 - A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these limits is refused with a message.
-- By voice, each of the hours, minutes and seconds of a delay is at most 100. This is the same in Home Assistant's own sentences. A longer delay is not understood. Use an LLM agent or the [**Add command** action](services.md#add-command) for it.
+- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count of hours or minutes beyond a week is not understood at all.
+- You can also say a delay in days or weeks, such as "turn on the boiler in 2 days" or "turn on the boiler in 2 weeks". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 365, and weeks up to 52. You cannot join days or weeks with hours or minutes.
+- "In a day", "in half a day" and "in a week" work too. In Russian they are "cherez den'", "cherez poldnya" and "cherez nedelyu".
+- In English, you can end a delay with "from now", "from today" or "later". It works with days, weeks and these words. Examples are "turn on the boiler 2 days from now" and "turn on the boiler a week later". You can say it before the command too: "a week from now turn on the boiler".
+- The limits above hold for days and weeks. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer names the limit. More than 365 days or 52 weeks is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
+
+**Turn on or off at a time**
+
+- You can name a time of day instead of a delay, such as "turn on the boiler at 7:30" or "turn off the boiler at 23:00". Home Assistant has no such sentences. Timerify adds them for the devices that have a timer.
+- The time can come after the command or before it: "at 7:30 turn on the boiler".
+- You can add a day: "today", "tomorrow" or "the day after tomorrow". Say it before the time or after it: "tomorrow at 7" or "at 7 tomorrow".
+- You can say the time as "7:30", "7.30" or "7 30", or in words, such as "seven thirty". "7 o'clock", "noon" and "midnight" work too.
+- After the colon, the dot or the space, the minutes are two digits: "7:05", not "7:5". "At 7.5" is not understood.
+- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
+- You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
+- In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
+- An hour from 1 to 12 without any of these is the nearer of its two times ahead. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
+- With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
+- The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
+- "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
+- With a day word, "midnight" is the one that ends that day. "Today at midnight" is tonight's 00:00, and "tomorrow at midnight" is the one after tomorrow. "Tomorrow at 12 am" and "tomorrow at 0:00" are the start of tomorrow.
+- With a day word, the small hours said with "night" belong to the night that follows that day. That means "at night" or "night" with the hours 12 and 1 to 5. "Tomorrow night at 2" and "tomorrow at 2 at night" are 02:00 the day after tomorrow. "Tomorrow night at 12" is the same as "tomorrow at midnight". "Today at 2 at night" is the coming 02:00. Said before 06:00, it is the night in progress while that time is ahead: at 00:30 it is 02:00 today. "Tomorrow at 2 am" is 02:00 tomorrow, and "tomorrow night at 11" is 23:00 tomorrow.
+- Without a day, a time is the next one: today if it is still ahead, tomorrow if it has passed. With the word "today", a time that has passed is refused, and the answer names it.
+- A time that the change of the clock skips happens later by the length of the gap, as in [the schedules](schedules.md#clock-changes-and-time-zones). A time that it repeats happens twice. Timerify takes the first of the two that is still ahead.
+- A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
+- A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer names the limit.
+- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
 
 **What is planned**
 
@@ -102,8 +132,11 @@ The Russian column is transliterated because this page is in English. The real s
 - It switches every interval of the timer's schedule on or off, as the interval switches do. It has the same effects, on the same conditions. See [How a schedule and your own changes meet](schedules.md#how-a-schedule-and-your-own-changes-meet).
 - Switching off while a window runs stops the timer only if the schedule is running it. That means the end of the countdown came from that interval, and nobody has changed the timer since. Otherwise the run is yours, and it stays. If another open window wants the device, that window takes the timer over instead.
 - Switching on inside a window runs the device for the rest of the window. The exception is a timer that already ends later. An interval that is on already is left as it is. So a device that was turned off during its window stays off until the next one.
-- To switch one interval, say its title, such as "the Morning schedule of the boiler". Give your intervals titles of your own. The title that Timerify makes, such as `06:30–07:15, Sun–Thu`, cannot be said to the built-in agent.
-- A title that two intervals share switches both. A title that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
+- In English, you can say "scheduling" instead of "schedule", and you can leave out "the" before it. Examples are "turn off scheduling for the boiler" and "turn off schedule for the boiler".
+- To switch one interval, say its title, such as "the Morning schedule of the boiler".
+- An interval that still has the title Timerify made, such as `06:30–07:15, Sun–Thu`, can be said by its start time. An example is "turn off the 6:30 schedule of the boiler". Say the time as "6:30", "06:30", "6.30", "06.30", "6 30" or "06 30". Every interval of the timer that starts then is switched, and the answer names each of them.
+- The days of a title that Timerify made cannot be said. Two intervals that start together are told apart only by a title of your own. An interval you renamed is said by its new title, not by its start time. An interval you titled like a time, such as "6:30", is named by that text. Every interval with Timerify's title that starts then is switched with it.
+- A title that two intervals share switches both. A title or a start time that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
 
 ### How Assist answers
 
@@ -117,7 +150,7 @@ A few things work the way Home Assistant does, not the way Timerify does.
 
 - "Turn it off" and "them", after a question or a command about a device, are answered by Home Assistant's own commands. They switch the device, and the timer follows. But the answer is Home Assistant's. A device that is unavailable is not switched. Timerify keeps nothing of what you asked.
 - Suppose a sentence of Timerify's names something that is not a device with a timer. Home Assistant then answers "not aware of any device". An example is "what is planned for the fan".
-- Home Assistant can take a wording that Timerify does not have for a plain turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off scheduling for the boiler" and "turn off the boiler in 2 days". Home Assistant then turns the device off at once. Use the wordings above.
+- Home Assistant can take a wording that Timerify does not have for a plain turn on or turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off the boiler tonight" and "turn on the boiler next week". Home Assistant then switches the device at once. It does this in English only. Use the wordings above.
 - Say two entities have the same name, and one of them has a timer. Then "turn off the boiler" and the other sentences above mean the one with the timer. Likewise, "turn off the boiler schedule" means the schedule of the timer called Boiler. This holds even when another exposed entity is called "Boiler schedule". That entity is reached by other wordings, and by the interface.
 
 ## Set up the sentences for the built-in agent
@@ -133,21 +166,27 @@ This is the way to use, unless you have a reason not to.
 
 Timerify then writes the file `custom_sentences/<language>/timerify.yaml` in your configuration folder, for each language you picked. The file holds the names of your timers' devices. Timerify tells the built-in agent to read the sentences again.
 
-A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. They are written as the devices name them, with a space for an underscore.
+A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. Each of them is listed in two ways. One is the mode as the device names it, with a space for an underscore. The other is the word Home Assistant shows for it in the language of the file. The Russian file has the Russian words, whatever language your house is set to.
+
+Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one. A word that two modes of different devices share is listed for one of them only. The other mode is then said by its own name.
+
+Each thermostat is understood with the HVAC modes it has, and with no others. Say you have an AC that cools and heats, and a small AC that only cools. "Heating" after the name of the small AC is then not understood. Nothing is turned on, and Assist answers with an error. The same goes for a delayed command and a command at a time. Thermostats with the same modes share their sentences. The file grows a little for each different set of modes.
+
+A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
 
 Timerify writes the file again when any of these happens:
 
 - A timer is added, removed or reloaded.
 - A device is renamed or gets another alias.
-- A schedule interval is added, deleted or renamed.
+- A device reports another name or another list of modes. A firmware update can do that.
+- A schedule interval is added, deleted, renamed or edited.
 
-It writes the file only when its text changes.
+It writes the file only when its text changes. A device that switches on and off, or reports a temperature, changes nothing.
 
 - Timerify checks the file with the parser Home Assistant uses (hassil) before it writes it. It checks every sentence, every list and every name, which has to be matched as it is said. A file that Home Assistant cannot read would break Assist for the whole language. So when a check fails, Timerify leaves the old file as it is and logs an error.
 - Timerify writes only where there is no file, or where the file is its own. Its own file has the first line `# Managed by Timerify. ...`. A `timerify.yaml` of yours at that path is left as it is. That language is not written, and the log says so once.
 - The files are removed when you turn off the option, disable the entry, remove the entry, or stop picking a language. They stay when Home Assistant restarts or the entry reloads.
 - The sentences need Timerify's handlers. **Remove the Voice settings entry, or turn off its option, before you uninstall Timerify.** A file that is left behind makes the built-in agent fail on every phrase of it that matches. That includes the delayed commands it took over from Home Assistant. It fails until you remove the file by hand.
-- Names are listed when a timer is set up or its device changes. A device may change its own list of modes later, for example after a firmware update. That is picked up at the next change. So is a new friendly name of a device that is not in the entity registry.
 
 ### Copy the sentences by hand
 
@@ -180,8 +219,11 @@ For each language you want (`en`, `ru`):
 
    - `in` is the name as it is said, with the punctuation that Home Assistant ignores removed. Say it has any of the characters `( ) [ ] { } < > | @`. Then put a backslash before each of them, and before every backslash in it. Home Assistant would otherwise read them as a sentence template. `out` is the name as Home Assistant shows it.
    - Give each name its `context: domain`, which is the part of the entity id before the dot. Settings are said only of a device that has them. A thermostat's HVAC mode and temperature need `climate`. A water heater's temperature needs `water_heater`. A name with no domain gets the sentences that fit every device, and nothing more.
-   - `timerify_interval` is needed only to switch a schedule interval by its title. The whole schedule needs none.
-   - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. A mode that the device does not have is refused when it is said.
+   - `timerify_interval` is needed only to switch a schedule interval by its title or its start time. The whole schedule needs none.
+   - To say an interval by its start time, list each way of writing the time that you want to say. Write it in quotes, such as `"6:30"`, with the same text in `in` and `out`. Without the quotes, YAML reads it as a number. A start time names an interval only while the interval keeps the title Timerify gave it.
+   - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. Every thermostat takes every one of them. A mode that a thermostat does not have is refused when it is said.
+   - List the word Home Assistant shows for a mode as well, if you want to say it. Give it the same `out` as the mode. The entry does this for you, but a copy made by hand holds only what you write.
+   - List a name with the Russian letter yo twice: once with yo and once with ye. Both values have the same `out`. Do the same for a title and a mode. Speech recognition often writes ye, and Home Assistant does not treat the two letters as one.
 4. Restart Home Assistant, or call `conversation.reload`.
 
 Do it again after every update of Timerify, because the sentences change between versions. Do it again after every rename of a device or an interval. A file that is not valid breaks Assist for the whole language. The entry above protects you from that, by checking before it writes. Check yours by reading the log after the reload.
@@ -204,22 +246,20 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 | `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, and a device that is running keeps its countdown. |
 | `timerify__add_time` | Adds hours and minutes to the countdown. |
 | `timerify__stop` | Stops the timer and turns the device off. |
-| `timerify__delayed_command` | Plans to turn on or off later. You give a delay in hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |
+| `timerify__delayed_command` | Plans to turn on or off later. You give a delay in weeks, days, hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |
 | `timerify__list_commands` | Lists the planned commands, with the ids that cancel them. |
 | `timerify__cancel_commands` | Cancels all the commands, the next one, or one by its id. |
-| `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title. |
+| `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title or its start time. |
 
-An agent can plan a command at a clock time, which the built-in agent's sentences cannot. If the interval is empty, the whole schedule is switched.
+If the interval is empty, the whole schedule is switched.
 
 ## What you cannot say
 
-- **A command at a clock time**, such as "turn on the boiler at 7:30". The built-in agent's sentences take a delay only. An LLM agent can give a time.
 - **Taking time off**, such as "10 minutes less". Set the countdown to the new length instead.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
-- **An interval by the title it is made with.** Rename it first.
-- **The modes that a device names in Latin letters**, such as "eco" or "high", in Russian. They are said as written. The HVAC modes have Russian words.
-- **Two thermostats with different HVAC modes.** The words are the modes of all of them. So if you say a mode that only one of them has to the other, it is refused. The answer lists the modes that thermostat has.
+- **The days of a title that Timerify made.** The title has them, such as `Sun–Thu`, and they cannot be said. Say the start time, or give the interval a title of your own.
+- **Some ways of saying the time.** "Half past 7", "quarter to 8", "7:30am" written together, "tonight at 7" and "this morning at 7" are not understood yet ([issue #49](https://github.com/klimofey/timerify/issues/49)). Say "at 7:30", "at 7:45", "at 7:30 am", "at 7 in the evening" or "at 7 in the morning" instead.
 
 ---
 

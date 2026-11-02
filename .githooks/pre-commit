@@ -3,7 +3,10 @@
 # The exceptions are translations of the product and of its user documentation:
 # README.ru.md, everything under docs/ru/, and every language but English under
 # custom_components/timerify/translations/<lang>.json and
-# custom_components/timerify/sentences/<lang>/, subfolders (src/) included.
+# custom_components/timerify/sentences/<lang>/, subfolders (src/) included. The one
+# other exception is tests/fixtures/ru/, subfolders included: the Russian answers of
+# the voice, written by hand, which the tests compare with the shipped ones. It is under
+# tests/, so HACS does not ship it.
 set -o pipefail  # a failing `git diff` must refuse the commit, not pass it unchecked
 status=0
 
@@ -11,6 +14,7 @@ cyrillic_allowed() {
   local path="$1"
   [[ $path == README.ru.md ]] && return 0
   [[ $path == docs/ru/* ]] && return 0
+  [[ $path == tests/fixtures/ru/* ]] && return 0
   if [[ $path =~ ^custom_components/timerify/translations/([^/]+)\.json$ ]]; then
     [[ ${BASH_REMATCH[1]} != en ]]
     return

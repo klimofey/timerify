@@ -32,8 +32,9 @@ class SetScheduleHandler(TimerifyIntentHandler):
         " already ends later; an interval that is on already is left as it is, so a"
         " run that a person ended by turning the device off is not started again."
         " Give 'interval', the title of an interval, to switch only that one; without"
-        " it every interval of the schedule is switched. 'name' is the name of the"
-        " device, as the prompt lists it."
+        " it every interval of the schedule is switched. An interval that still has"
+        " the title Timerify gave it can also be named by its start time, such as"
+        " '6:30'. 'name' is the name of the device, as the prompt lists it."
     )
     idempotent = True
     slot_schema: ClassVar[dict[Any, Any]] = {
@@ -57,8 +58,10 @@ class SetScheduleHandler(TimerifyIntentHandler):
             {
                 "target": target_name(intent_obj.hass, controller.target_entity_id),
                 "enabled": enabled,
-                # The title as the interval has it, not as it was said.
-                "interval": None if asked is None else titles[0],
+                # The titles as the intervals have them, not as they were said, each
+                # once, in the order of the schedule: intervals that share a title are
+                # one title. Empty when the whole schedule was asked for.
+                "intervals": [] if asked is None else list(dict.fromkeys(titles)),
                 "count": len(titles),
             }
         )

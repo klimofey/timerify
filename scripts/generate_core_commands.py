@@ -10,11 +10,23 @@ are written again, for Timerify's intents, from the sentences of the pinned
 `HassTurnOff`), alone, and inside each of the shapes in which `HassStartTimer` says a
 delayed command ("<command> in 15 minutes", "in 15 minutes <command>", with hours,
 minutes and seconds in each combination); the ways to say the delay are written once,
-as two rules of the file that every command refers to. Timerify's sentences name only
-the devices that have a timer, and the built-in agent prefers a custom sentence to its
-own, so a device without one still reaches Home Assistant's. A phrasing that this file
-does not repeat, such as one a newer release of the intents adds, reaches Home
-Assistant's until the file is written again.
+as two rules of the file that every command refers to. Home Assistant counts the hours,
+minutes and seconds of a delay up to 100. These sentences count the hours and minutes
+with Timerify's own lists, the ones a duration uses, which reach a week (`DELAY_LISTS`):
+a delay past the limit of a command is then refused by the controller, and the answer
+names the limit, instead of the sentence not being understood. Home Assistant has no
+delay in days or weeks, and its gazetteer takes "turn off the boiler in 2 days" for a
+plain turn off of the device, so the sentences of the language may define them
+(`OWN_DELAY_RULE`), and each way to say a delay then has them as one more alternative.
+Home Assistant has no command at a clock time either ("turn on the boiler at 7:30"), and
+its gazetteer takes "turn off the boiler at 7" for a plain turn off of the device. The
+sentences of the language say the time (`CLOCK_AFTER_RULE_NAME` and its siblings), and
+the same commands are written once more, for the intent that has a handler of its own,
+with the time in the place of the delay (`CLOCK_COMMAND`).
+Timerify's sentences name only the devices that have a timer, and the built-in agent
+prefers a custom sentence to its own, so a device without one still reaches Home
+Assistant's. A phrasing that this file does not repeat, such as one a newer release of
+the intents adds, reaches Home Assistant's until the file is written again.
 
 The file is written from the data, not retyped, and what the generator does not
 understand it refuses: a block of the intents with a key it has not been taught could
@@ -25,8 +37,12 @@ widen or narrow the takeover without a word.
 The settings a delayed "turn on" can be said with come from the sentences of the
 language (`sentences/<language>/src/timerify.yaml`): each device, thermostat and water
 heater has the settings of its own there, for "turn on for an hour", and the delayed
-command copies each of those blocks' scope, so a word for an HVAC mode or a temperature
-follows a thermostat's name and nothing else.
+command, and the command at a clock time, copy the scope and every rule of each of
+those blocks. So a word for an HVAC
+mode or a temperature follows a thermostat's name and nothing else, and a rule that a
+block says in its own way (how long, for a thermostat, whose temperature a bare number
+after the hours is, or which clock times may follow the settings) is said so in the
+delayed command too.
 """
 
 import re
@@ -34,6 +50,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final, Literal
 
 from home_assistant_intents import get_intents
@@ -75,6 +92,16 @@ GENERIC_DOMAIN: Final = "switch"
 """The domain whose commands are the generic ones, for every device that can be turned
 on and off: the block of Home Assistant that lists it is the block for them all."""
 
+CLOCK_COMMAND: Final = "TimerifyCommandAt"
+"""The intent of Timerify that a command said at a clock time goes to."""
+CLOCK_AFTER_RULE_NAME: Final = "timerify_clock_after_command"
+CLOCK_AFTER_EXTRAS_RULE_NAME: Final = "timerify_clock_after_extras"
+CLOCK_BEFORE_RULE_NAME: Final = "timerify_clock_before_command"
+"""The rules, in the sentences of a language (`SOURCE_FILE`), that say a clock time
+after the command, after how long it runs and its settings, and before the command. The
+sources define all three: a block of settings may say the second its own way, for a
+device whose settings a clock time could be taken for (a thermostat's temperature)."""
+
 COMMAND_SLOT: Final = "{timer_command:conversation_command}"
 """Where a delayed command of Home Assistant has the command it delays."""
 NAME_SLOT: Final = "{name}"
@@ -94,6 +121,10 @@ DELAY_BEFORE_RULE_NAME: Final = "timerify_delay_before_command"
 """The rules, in the file, that say a delay in the ways Home Assistant says it after the
 command and before it ("in 15 minutes", "in an hour and 5 minutes"). Written once, since
 each command in each block says the same delays (`delay_rules`)."""
+OWN_DELAY_RULE: Final = "timerify_own_delay"
+"""The rule, in the sentences of a language (`SOURCE_FILE`), that says a delay in days
+or weeks, or in a word such as "a week", which Home Assistant has no sentence for: one
+more way to say a delay, wherever the rules above say one, if the language has it."""
 EXTRAS: Final = "<timerify_run_extras>"
 """What a command to turn on may say besides when: how long to run, and the settings."""
 EXTRAS_RULE: Final = (
@@ -102,6 +133,19 @@ EXTRAS_RULE: Final = (
 )
 """What `EXTRAS` is in a block: how long, the settings, or both, in either order, and
 never neither. The settings are those of the block's scope."""
+
+DELAY_LISTS: Final[Mapping[str, str]] = {
+    "hours": "{timerify_hours:delay_hours}",
+    "minutes": (
+        "({timerify_minutes:delay_minutes}|{timerify_long_minutes:delay_minutes})"
+    ),
+    "seconds": "{timer_seconds:delay_seconds}",
+}
+"""What says the count of each unit of a delay, in place of Home Assistant's list of
+`{timer_<unit>:<unit>}` (1 to 100): Timerify's own lists of hours and minutes, the ones
+a duration uses (`sentences/<language>/src/timerify.yaml`), which reach a week; the
+seconds stay Home Assistant's. The slot is `delay_<unit>` for each, since `hours` and
+`minutes` are how long a command to turn on runs."""
 
 _SLOT: Final = re.compile(r"\{[^{}]*\}")
 _DELAY_SLOT: Final = re.compile(r"\{timer_(hours|minutes|seconds):\1\}")
@@ -142,8 +186,10 @@ class Scope:
 
     requires: tuple[str, ...]
     excludes: tuple[str, ...]
-    settings: str
-    """The expansion rule `timerify_settings` of the block that has the scope."""
+    rules: Mapping[str, str]
+    """Every expansion rule of the block of `TimerifyRun` that has the scope, by name.
+    It holds `timerify_settings`, and may hold a rule that changes how another is said
+    for these devices alone (the words for how long, for a thermostat)."""
 
 
 def _domains_of(values: object) -> tuple[str, ...]:
@@ -258,13 +304,16 @@ def command_group(block: CommandBlock) -> str:
     return "(" + "|".join(_about_the_target(s) for s in block.sentences) + ")"
 
 
-def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
+def delay_rules(data: Mapping[str, Any], sources: Mapping[str, Any]) -> dict[str, str]:
     """The rules that say a delay, from the delayed commands in the intents `data`: the
     delays that Home Assistant says after the command, and those it says before it, by
     the name of the rule; a rule only if there is a delay to say in that place.
 
     A delay is said with the slots `delay_hours`, `delay_minutes` and `delay_seconds`,
-    since `hours` and `minutes` are how long a command to turn on runs.
+    since `hours` and `minutes` are how long a command to turn on runs, and its hours
+    and minutes with Timerify's lists (`DELAY_LISTS`). If the sentences `sources` of the
+    language define the rule of a delay in days or weeks (`OWN_DELAY_RULE`), each rule
+    has it as one more way to say a delay.
 
     Raises ValueError for a shape whose command is not at one end and set apart by a
     space, or that has anything but the command and the delay in it.
@@ -279,7 +328,7 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
         for slot in _SLOT.findall(shape.replace(COMMAND_SLOT, "")):
             if not _DELAY_SLOT.fullmatch(slot):
                 raise ValueError(f"A delayed command with {slot} in it: {shape!r}")
-        delay = _DELAY_SLOT.sub(r"{timer_\1:delay_\1}", shape)
+        delay = _DELAY_SLOT.sub(lambda found: DELAY_LISTS[found[1]], shape)
         if shape.startswith(f"{COMMAND_SLOT} "):
             after.append(_flat(delay.removeprefix(f"{COMMAND_SLOT} ")))
         elif shape.endswith(f" {COMMAND_SLOT}"):
@@ -288,33 +337,44 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
             raise ValueError(
                 f"A delayed command with the command not at an end: {shape!r}"
             )
+    defined = OWN_DELAY_RULE in sources.get("expansion_rules", {})
+    own = [f"<{OWN_DELAY_RULE}>"] if defined else []
     places = {DELAY_AFTER_RULE_NAME: after, DELAY_BEFORE_RULE_NAME: before}
     return {
-        name: "(" + "|".join(delays) + ")" for name, delays in places.items() if delays
+        name: "(" + "|".join([*delays, *own]) + ")"
+        for name, delays in places.items()
+        if delays
     }
 
 
-def delayed_sentences(block: CommandBlock, rules: Mapping[str, str]) -> list[str]:
-    """The sentences that say the command of `block` with a delay, naming a device that
-    has a timer, from the rules that say the delay (`delay_rules`), in each place that
-    one is for.
+def timed_sentences(
+    block: CommandBlock,
+    after: str | None,
+    after_extras: str | None,
+    before: str | None,
+) -> list[str]:
+    """The sentences that say the command of `block` at a time, naming a device that has
+    a timer: the time is said by the rules `after`, `after_extras` and `before`, in the
+    place each is for, and a place whose rule is None is not written.
 
-    A command to turn off is said as Home Assistant says it. One to turn on may also say
-    how long it runs, and with what settings (`EXTRAS`), once and not more: before the
-    delay, or after it if the command comes first, and after the command if the delay
-    does.
+    A command to turn off is said as Home Assistant says it, with the time after it or
+    before it. One to turn on may also say how long it runs, and with what settings
+    (`EXTRAS`), once and not more: before the time, or after it if the command comes
+    first, and after the command if the time does (`after_extras` says the time that
+    follows the settings, which may be narrower than the one that follows the command
+    itself).
     """
     sentences: list[str] = []
-    if DELAY_AFTER_RULE_NAME in rules:
-        later = f"{COMMAND_RULE} <{DELAY_AFTER_RULE_NAME}>"
+    later = None if after is None else f"{COMMAND_RULE} <{after}>"
+    if later is not None:
         sentences.append(later)
-        if block.action == "on":
-            sentences += [
-                f"{COMMAND_RULE} {EXTRAS} <{DELAY_AFTER_RULE_NAME}>",
-                f"{later} {EXTRAS}",
-            ]
-    if DELAY_BEFORE_RULE_NAME in rules:
-        earlier = f"<{DELAY_BEFORE_RULE_NAME}> {COMMAND_RULE}"
+    if block.action == "on":
+        if after_extras is not None:
+            sentences.append(f"{COMMAND_RULE} {EXTRAS} <{after_extras}>")
+        if later is not None:
+            sentences.append(f"{later} {EXTRAS}")
+    if before is not None:
+        earlier = f"<{before}> {COMMAND_RULE}"
         sentences.append(earlier if block.action == "off" else f"{earlier} [{EXTRAS}]")
     return sentences
 
@@ -322,7 +382,7 @@ def delayed_sentences(block: CommandBlock, rules: Mapping[str, str]) -> list[str
 def run_scopes(sources: Mapping[str, Any]) -> list[Scope]:
     """The scopes of the settings that a command to turn on is said with, from the
     sentences `sources` of a language: the blocks of `TimerifyRun` that have a rule
-    `timerify_settings` of their own.
+    `timerify_settings` of their own, with every rule they have.
 
     Raises ValueError if there are none.
     """
@@ -330,7 +390,7 @@ def run_scopes(sources: Mapping[str, Any]) -> list[Scope]:
         Scope(
             _domains_of(block.get("requires_context", {}).get("domain")),
             _domains_of(block.get("excludes_context", {}).get("domain")),
-            block["expansion_rules"]["timerify_settings"],
+            MappingProxyType(dict(block["expansion_rules"])),
         )
         for block in sources["intents"][TIMERIFY_COMMANDS["on"]]["data"]
         if "timerify_settings" in block.get("expansion_rules", {})
@@ -382,60 +442,109 @@ def _bare_blocks(
     ]
 
 
-def _delayed_blocks(
-    blocks: Sequence[CommandBlock], scopes: Sequence[Scope], delays: Mapping[str, str]
+def _timed_blocks(
+    blocks: Sequence[CommandBlock],
+    scopes: Sequence[Scope],
+    after: str | None,
+    after_extras: str | None,
+    before: str | None,
 ) -> list[dict[str, Any]]:
-    """The data blocks that say a command to turn on or off after a delay, said by the
-    rules `delays`: for each command, one block for a command to turn off, and for a
-    command to turn on one for each scope of settings that devices of its domains are
-    in."""
-    delayed: list[dict[str, Any]] = []
+    """The data blocks that say a command to turn on or off at a time, said by the
+    rules `after`, `after_extras` and `before` (`timed_sentences`): for each command,
+    one block for a command to turn off, and for a command to turn on one for each scope
+    of settings that devices of its domains are in.
+
+    A block of settings has its rules, all of them, whether or not the time uses them: a
+    delay has no use for the rule that narrows the time after the settings.
+    """
+    timed: list[dict[str, Any]] = []
     for block in blocks:
         rules = {COMMAND_RULE_NAME: command_group(block)}
         common: dict[str, Any] = {
-            "sentences": delayed_sentences(block, delays),
+            "sentences": timed_sentences(block, after, after_extras, before),
             "slots": {"action": block.action},
             "response": "delayed",
         }
         if block.action == "off":
-            delayed.append(
-                {**common, **_context(block.scope), "expansion_rules": rules}
-            )
+            timed.append({**common, **_context(block.scope), "expansion_rules": rules})
             continue
         for settings in scopes:
             if (context := scoped(block.scope, settings)) is not None:
-                delayed.append(
+                timed.append(
                     {
                         **common,
                         **context,
                         "expansion_rules": {
                             **rules,
-                            "timerify_settings": settings.settings,
+                            **settings.rules,
                             "timerify_run_extras": EXTRAS_RULE,
                         },
                     }
                 )
-    return delayed
+    return timed
+
+
+def _delayed_blocks(
+    blocks: Sequence[CommandBlock], scopes: Sequence[Scope], delays: Mapping[str, str]
+) -> list[dict[str, Any]]:
+    """The data blocks that say a command to turn on or off after a delay, said by the
+    rules `delays`."""
+    after = DELAY_AFTER_RULE_NAME if DELAY_AFTER_RULE_NAME in delays else None
+    before = DELAY_BEFORE_RULE_NAME if DELAY_BEFORE_RULE_NAME in delays else None
+    return _timed_blocks(blocks, scopes, after, after, before)
+
+
+def clock_blocks(
+    blocks: Sequence[CommandBlock], scopes: Sequence[Scope], sources: Mapping[str, Any]
+) -> list[dict[str, Any]]:
+    """The data blocks that say a command to turn on or off at a clock time, said by the
+    rules of the sentences `sources` of the language (`CLOCK_AFTER_RULE_NAME` and its
+    siblings).
+
+    Raises ValueError if the sources lack any of them: the language would have a
+    handler for a command at a clock time that no sentence reaches.
+    """
+    defined = sources.get("expansion_rules", {})
+    if missing := [
+        name
+        for name in (
+            CLOCK_AFTER_RULE_NAME,
+            CLOCK_AFTER_EXTRAS_RULE_NAME,
+            CLOCK_BEFORE_RULE_NAME,
+        )
+        if name not in defined
+    ]:
+        raise ValueError(
+            f"The sentences of the language do not define {', '.join(missing)}: there"
+            " is nothing to say a command at a clock time with"
+        )
+    return _timed_blocks(
+        blocks,
+        scopes,
+        CLOCK_AFTER_RULE_NAME,
+        CLOCK_AFTER_EXTRAS_RULE_NAME,
+        CLOCK_BEFORE_RULE_NAME,
+    )
 
 
 def render(language: str) -> str:
     """The text of the file of `language`: the commands of Home Assistant to turn on and
-    off, alone and delayed, for the devices that have a timer."""
+    off, alone, delayed and at a clock time, for the devices that have a timer."""
     data = get_intents(language)
     if data is None:
         raise ValueError(f"home-assistant-intents has no sentences in {language}")
     sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
     blocks = command_blocks(data)
-    delays = delay_rules(data)
+    delays = delay_rules(data, sources)
+    scopes = run_scopes(sources)
     sentences = {
         "language": language,
         "expansion_rules": delays,
         "intents": {
             TIMERIFY_COMMANDS["on"]: {"data": _bare_blocks(blocks, "on")},
             TIMERIFY_COMMANDS["off"]: {"data": _bare_blocks(blocks, "off")},
-            DELAYED_COMMAND: {
-                "data": _delayed_blocks(blocks, run_scopes(sources), delays)
-            },
+            DELAYED_COMMAND: {"data": _delayed_blocks(blocks, scopes, delays)},
+            CLOCK_COMMAND: {"data": clock_blocks(blocks, scopes, sources)},
         },
     }
     header = HEADER.format(version=version("home-assistant-intents"))

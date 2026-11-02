@@ -7,8 +7,11 @@
 # and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
 # mode of a thermostat, the preset of a fan, the mode of a humidifier),
-# timerify_interval, the titles of the schedule intervals, and timerify_hvac_mode, which
-# the Voice settings entry cuts down to the HVAC modes that the devices have.
+# timerify_interval, the titles of the schedule intervals and the times that the intervals
+# titled by Timerify start at. The list timerify_hvac_mode has every word for an HVAC mode
+# here, for the copy made by hand. The Voice settings entry empties it, and copies each
+# block for thermostats once for each set of HVAC modes that thermostats have, with a list
+# of its own that has the words for those modes only.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains
@@ -46,6 +49,12 @@ intents:
         requires_context:
           domain: climate
         expansion_rules:
+          # A bare number after the hours is the temperature here; minutes need "and".
+          timerify_duration: "<timerify_duration_with_and>"
+          # A bare number after the settings is the temperature too: a time said there
+          # must show that it is one (the delayed commands of core_commands.yaml use
+          # this, not the sentences of this block).
+          timerify_clock_after_extras: "<timerify_exact_clock>"
           timerify_settings: "(<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])\
@@ -54,6 +63,12 @@ intents:
         requires_context:
           domain: water_heater
         expansion_rules:
+          # A bare number after the hours is the temperature here; minutes need "and".
+          timerify_duration: "<timerify_duration_with_and>"
+          # A bare number after the settings is the temperature too: a time said there
+          # must show that it is one (the delayed commands of core_commands.yaml use
+          # this, not the sentences of this block).
+          timerify_clock_after_extras: "<timerify_exact_clock>"
           timerify_settings: "(<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])\
             |<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))"
@@ -86,39 +101,46 @@ intents:
   TimerifySetSchedule:
     data:
       # The whole schedule of a device, or the interval of a title: on and off are
-      # separate blocks, each fixing what it means. An interval is said by its title,
-      # which timerify_interval holds. The schedule "of" and "for" a device are one, and
-      # on or off comes before the noun or after it, since a phrasing that is left out
-      # here is not left alone: the built-in agent takes "turn off the schedule for the
-      # boiler" for a turn off of the boiler.
+      # separate blocks, each fixing what it means. An interval is said by its title, or by
+      # the time it starts at while Timerify made its title: timerify_interval holds both.
+      # The schedule "of" and "for" a device are one, and on or off comes before the noun
+      # or after it, since a phrasing that is left out here is not left alone: the
+      # built-in agent takes "turn off the schedule for the boiler" for a turn off of the
+      # boiler. So does it "turn off scheduling for the boiler", which is why "scheduling"
+      # is a word for the schedule too, and the article before the noun is optional.
       - sentences:
-          - "<turn> on [<the>] {timerify_target:name} schedule"
-          - "<turn> [<the>] {timerify_target:name} schedule on"
-          - "<turn> on the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} on"
-          - "(enable|resume) [<the>] {timerify_target:name} schedule"
-          - "(enable|resume) the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> on [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} on"
-          - "(enable|resume) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "<turn> [<the>] {timerify_target:name} (schedule|scheduling) on"
+          - "<turn> on [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on"
+          - "(enable|resume) [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "(enable|resume) [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on"
+          - "(enable|resume) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: true
       - sentences:
-          - "<turn> off [<the>] {timerify_target:name} schedule"
-          - "<turn> [<the>] {timerify_target:name} schedule off"
-          - "<turn> off the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} off"
-          - "(disable|pause) [<the>] {timerify_target:name} schedule"
-          - "(disable|pause) the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> off [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} off"
-          - "(disable|pause) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "<turn> [<the>] {timerify_target:name} (schedule|scheduling) off"
+          - "<turn> off [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off"
+          - "(disable|pause) [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "(disable|pause) [<the>] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off"
+          - "(disable|pause) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: false
 # How long: hours and minutes, each alone or both, or a phrase such as "half an hour";
-# and how much more: "30 more minutes".
+# and how much more: "30 more minutes". Hours followed by a bare number of minutes
+# ("1 hour 30") are a duration too. A thermostat and a water heater read that bare number as
+# their temperature, so they need "and" between the hours and the minutes
+# (timerify_duration_with_and, set in their blocks of TimerifyRun).
 expansion_rules:
-  timerify_duration: "(<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_spelled_duration: "(<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_duration_with_and: "(<timerify_spelled_duration>|<timerify_hours_part> and {timerify_minutes_of_hour:minutes})"
+  timerify_duration: "(<timerify_spelled_duration>|<timerify_hours_part> [and] {timerify_minutes_of_hour:minutes})"
   timerify_more_duration: "({timerify_hours:hours} more hour[s]|<timerify_minutes_count> more minute[s])"
   timerify_hours_part: "{timerify_hours:hours} hour[s]"
   timerify_minutes_part: "<timerify_minutes_count> minute[s]"
@@ -126,6 +148,39 @@ expansion_rules:
 # How long a command that turns a device on runs for, said before or after the delay of
 # core_commands.yaml: "turn on the AC in 15 minutes for an hour".
   timerify_for_part: "for <timerify_duration>"
+# A delay in days or weeks, or in a word ("in a day", "in half a day", "in a week"), one
+# more way to say the delay of core_commands.yaml, after "in" or "after" or before "from
+# now", "from today" or "later" ("turn on the boiler 2 days from now"). Home Assistant
+# has no sentence for any of them, and its gazetteer takes "turn off the boiler in 2
+# days" for a turn off of the device. A bare "later" is not a delay and is not said.
+  timerify_own_delay: "((in|after) <timerify_own_span>|<timerify_own_span> (from (now|today)|later))"
+  timerify_own_span: "({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})"
+# A clock time, which core_commands.yaml says after the command, before it, and after how
+# long it runs and the settings ("turn on the boiler at 7:30", "tomorrow at 7 turn on the
+# boiler", "turn on the AC for an hour at 7:30"). An hour from 1 to 12 with no "am", "pm"
+# or part of the day is the nearer of its two times, and the hour of 0 or 13 to 23 is that
+# of the 24-hour clock: the handler works that out. A part of the day is said after the
+# time ("at 7 in the morning") or before it, with a day or "in the" ("tomorrow morning at
+# 7", "in the morning at 7").
+# After the settings of a thermostat or a water heater the time must not be a bare hour or
+# hour and minutes with a dot, which the temperature is said as ("for an hour at 21"):
+# those blocks of TimerifyRun say that rule their own way, and the delayed commands take
+# it from them. A part of the day before the hour is no temperature, so it is said there.
+# The minutes after a separator are two digits (timerify_clock_minute), so that "at 7.5"
+# and "at 22.5" are no time.
+  timerify_clock_after_command: "<timerify_clock>"
+  timerify_clock_after_extras: "<timerify_clock_after_command>"
+  timerify_clock_before_command: "<timerify_clock>"
+  timerify_clock: "(<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)"
+  timerify_exact_clock: "(<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)"
+  timerify_clock_day: "{timerify_clock_days:clock_day}"
+  timerify_clock_part_of_day: "(<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>)"
+  timerify_clock_when: "(<timerify_clock_day> {timerify_clock_part_words:clock_part}|[<timerify_clock_day>] in the {timerify_clock_part_words:clock_part})"
+  timerify_part_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour})"
+  timerify_clock_minute: "({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})"
+  timerify_clock_time: "(<timerify_exact_time>|<timerify_loose_time>)"
+  timerify_exact_time: "({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_clock_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
+  timerify_loose_time: "({timerify_clock_hours:clock_hour}|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -156,6 +211,215 @@ lists:
       from: 1441
       to: 10080
       words: false
+  # The minutes that follow the hours with no word for them: "1 hour 30".
+  timerify_minutes_of_hour:
+    range:
+      from: 1
+      to: 59
+  # The days and the weeks of a delay: plain ranges, each in a slot of its own
+  # (`delay_days`, `delay_weeks`), that the handler adds up with the other units of a delay.
+  # A year of each is understood, so that a delay a command cannot wait is refused with
+  # the limit (a week to turn on, a day to turn off) and no longer one is left to the
+  # gazetteer. A range is not given a multiplier to count days as hours: hassil keeps the
+  # words of a range by its bounds and not by its multiplier (`_RANGE_TRIE_CACHE` of
+  # `hassil/string_matcher.py`), so such a range would be handed the words of any other
+  # range with its bounds, and hand out its own.
+  timerify_delay_days:
+    range:
+      from: 1
+      to: 365
+  timerify_delay_weeks:
+    range:
+      from: 1
+      to: 52
+  # The delays that are said in a word, in minutes: a day, half a day, a week.
+  timerify_delay_words:
+    values:
+      - in: "a day"
+        out: 1440
+      - in: "half a day"
+        out: 720
+      - in: "a week"
+        out: 10080
+  # The parts of a clock time, each in the slot the handler of TimerifyCommandAt reads.
+  # The hours of the 24-hour clock are for a time said without "am" or "pm", and the
+  # hours of the 12-hour clock for one said with them. All are plain ranges.
+  timerify_clock_hours:
+    range:
+      from: 0
+      to: 23
+  timerify_half_day_hours:
+    range:
+      from: 1
+      to: 12
+  # The minutes of a clock time said after a separator are two digits ("7:05", "7.05",
+  # "7 05"), or number words ("seven thirty"); both fill the same slot. One digit is no
+  # minute: "7.5" is not 7:05 and "22.5" is not 22:05.
+  timerify_clock_minute_digits:
+    values:
+      - in: "00"
+        out: 0
+      - in: "01"
+        out: 1
+      - in: "02"
+        out: 2
+      - in: "03"
+        out: 3
+      - in: "04"
+        out: 4
+      - in: "05"
+        out: 5
+      - in: "06"
+        out: 6
+      - in: "07"
+        out: 7
+      - in: "08"
+        out: 8
+      - in: "09"
+        out: 9
+      - in: "10"
+        out: 10
+      - in: "11"
+        out: 11
+      - in: "12"
+        out: 12
+      - in: "13"
+        out: 13
+      - in: "14"
+        out: 14
+      - in: "15"
+        out: 15
+      - in: "16"
+        out: 16
+      - in: "17"
+        out: 17
+      - in: "18"
+        out: 18
+      - in: "19"
+        out: 19
+      - in: "20"
+        out: 20
+      - in: "21"
+        out: 21
+      - in: "22"
+        out: 22
+      - in: "23"
+        out: 23
+      - in: "24"
+        out: 24
+      - in: "25"
+        out: 25
+      - in: "26"
+        out: 26
+      - in: "27"
+        out: 27
+      - in: "28"
+        out: 28
+      - in: "29"
+        out: 29
+      - in: "30"
+        out: 30
+      - in: "31"
+        out: 31
+      - in: "32"
+        out: 32
+      - in: "33"
+        out: 33
+      - in: "34"
+        out: 34
+      - in: "35"
+        out: 35
+      - in: "36"
+        out: 36
+      - in: "37"
+        out: 37
+      - in: "38"
+        out: 38
+      - in: "39"
+        out: 39
+      - in: "40"
+        out: 40
+      - in: "41"
+        out: 41
+      - in: "42"
+        out: 42
+      - in: "43"
+        out: 43
+      - in: "44"
+        out: 44
+      - in: "45"
+        out: 45
+      - in: "46"
+        out: 46
+      - in: "47"
+        out: 47
+      - in: "48"
+        out: 48
+      - in: "49"
+        out: 49
+      - in: "50"
+        out: 50
+      - in: "51"
+        out: 51
+      - in: "52"
+        out: 52
+      - in: "53"
+        out: 53
+      - in: "54"
+        out: 54
+      - in: "55"
+        out: 55
+      - in: "56"
+        out: 56
+      - in: "57"
+        out: 57
+      - in: "58"
+        out: 58
+      - in: "59"
+        out: 59
+  timerify_clock_minute_words:
+    range:
+      from: 0
+      to: 59
+      digits: false
+  # Which half of the day an hour of the 12-hour clock is in, said after the time. The
+  # night is the small hours for 1 to 5 and the evening for 6 to 11.
+  timerify_day_parts:
+    values:
+      - in: "(am|a.m.|in the morning)"
+        out: am
+      - in: "(pm|p.m.|in the afternoon|in the evening)"
+        out: pm
+      - in: "at night"
+        out: night
+  # The same parts as words that go with a day, before the time: "tomorrow morning at 7".
+  timerify_clock_part_words:
+    values:
+      - in: "morning"
+        out: am
+      - in: "(afternoon|evening)"
+        out: pm
+      - in: "night"
+        out: night
+  # The times that are said in a word, which name their hour as well as their part of the
+  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
+  # which the handler then takes to be 12, so that "at noon" is not the bare 12 of "at 12",
+  # which is the nearer of noon and midnight.
+  timerify_clock_words:
+    values:
+      - in: "noon"
+        out: pm
+      - in: "midnight"
+        out: am
+  # The day a time is said for, in days from today.
+  timerify_clock_days:
+    values:
+      - in: "today"
+        out: 0
+      - in: "tomorrow"
+        out: 1
+      - in: "[the] day after tomorrow"
+        out: 2
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the
@@ -217,6 +481,8 @@ responses:
       default: "{{ timer_now(slots) }}"
     TimerifyDelayedCommand:
       delayed: "{{ timer_later(slots) }}"
+    TimerifyCommandAt:
+      delayed: "{{ timer_later(slots) }}"
     TimerifyListCommands:
       default: |-
         {%- if slots.count == 0 -%}
@@ -235,8 +501,10 @@ responses:
         {%- endif -%}
     TimerifySetSchedule:
       default: |-
-        {%- if slots.interval -%}
-          The {{ slots.interval }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- if slots.intervals | length == 1 -%}
+          The {{ slots.intervals[0] }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- elif slots.intervals -%}
+          The {{ titles_list(slots.intervals) }} schedules of {{ slots.target }} are {{ "on" if slots.enabled else "off" }}.
         {%- else -%}
           The schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
         {%- endif -%}

@@ -7,8 +7,11 @@
 # and the names to custom_sentences/ru/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
 # mode of a thermostat, the preset of a fan, the mode of a humidifier),
-# timerify_interval, the titles of the schedule intervals, and timerify_hvac_mode, which
-# the Voice settings entry cuts down to the HVAC modes that the devices have.
+# timerify_interval, the titles of the schedule intervals and the times that the intervals
+# titled by Timerify start at. The list timerify_hvac_mode has every word for an HVAC mode
+# here, for the copy made by hand. The Voice settings entry empties it, and copies each
+# block for thermostats once for each set of HVAC modes that thermostats have, with a list
+# of its own that has the words for those modes only.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains
@@ -48,6 +51,8 @@ intents:
         requires_context:
           domain: climate
         expansion_rules:
+          # A bare number after the hours is the temperature here; minutes need "и".
+          timerify_duration: "<timerify_duration_with_and>"
           timerify_settings: "(<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])\
@@ -56,6 +61,8 @@ intents:
         requires_context:
           domain: water_heater
         expansion_rules:
+          # A bare number after the hours is the temperature here; minutes need "и".
+          timerify_duration: "<timerify_duration_with_and>"
           timerify_settings: "(<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])\
             |<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))"
@@ -87,8 +94,9 @@ intents:
   TimerifySetSchedule:
     data:
       # The whole schedule of a device, or the interval of a title: on and off are
-      # separate blocks, each fixing what it means. An interval is said by its title,
-      # which timerify_interval holds, after the noun, since a title cannot be declined.
+      # separate blocks, each fixing what it means. An interval is said by its title, or by
+      # the time it starts at while Timerify made its title: timerify_interval holds both,
+      # after the noun, since a title cannot be declined.
       - sentences:
           - "<timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}"
           - "<timerify_schedule_verb> (расписание|интервал) {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}"
@@ -103,16 +111,39 @@ intents:
           enabled: false
         expansion_rules:
           timerify_schedule_verb: "(выключи|выключить|отключи|отключить|деактивируй|останови|остановить|приостанови|приостановить)"
-# How long: hours and minutes, each alone or both, or a phrase such as "полчаса".
+# How long: hours and minutes, each alone or both, or a phrase such as "полчаса". Hours
+# followed by a bare number of minutes ("1 час 30") are a duration too. A thermostat and a
+# water heater read that bare number as their temperature, so they need "и" between the
+# hours and the minutes (timerify_duration_with_and, set in their blocks of TimerifyRun).
 expansion_rules:
   timerify_turn_on: "(включи|запусти)[ть]"
-  timerify_duration: "(<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_spelled_duration: "(<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})"
+  timerify_duration_with_and: "(<timerify_spelled_duration>|<timerify_hours_part> и {timerify_minutes_of_hour:minutes})"
+  timerify_duration: "(<timerify_spelled_duration>|<timerify_hours_part> [и] {timerify_minutes_of_hour:minutes})"
   timerify_hours_part: "{timerify_hours:hours} час[а|ов]"
   timerify_minutes_part: "<timerify_minutes_count> минут[у|ы]"
   timerify_minutes_count: "({timerify_minutes:minutes}|{timerify_long_minutes:minutes})"
 # How long a command that turns a device on runs for, said before or after the delay of
 # core_commands.yaml.
   timerify_for_part: "на <timerify_duration>"
+# A delay in days or weeks, or in a word (a day, half a day, a week), one more way to say
+# the delay of core_commands.yaml.
+  timerify_own_delay: "через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})"
+# A clock time, which core_commands.yaml says after the command, before it, and after how
+# long it runs and the settings. An hour from 1 to 12 with no word for the part of the
+# day is the nearer of its two times, and the hour of 0 or 13 to 23 is that of the 24-hour
+# clock: the handler works that out. A time is said with "в" and a temperature with "на",
+# so the time after the settings of a thermostat needs no narrower rule than the one after
+# the command.
+# The minutes after a separator are two digits (timerify_clock_minute), so that "в 7.5"
+# is no time.
+  timerify_clock_after_command: "<timerify_clock>"
+  timerify_clock_after_extras: "<timerify_clock_after_command>"
+  timerify_clock_before_command: "<timerify_clock>"
+  timerify_clock: "(<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])"
+  timerify_clock_day: "{timerify_clock_days:clock_day}"
+  timerify_clock_minute: "({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})"
+  timerify_clock_time: "в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -143,6 +174,212 @@ lists:
       from: 1441
       to: 10080
       words: false
+  # The minutes that follow the hours with no word for them: "1 час 30".
+  timerify_minutes_of_hour:
+    range:
+      from: 1
+      to: 59
+  # The days and the weeks of a delay: plain ranges, each in a slot of its own
+  # (`delay_days`, `delay_weeks`), that the handler adds up with the other units of a delay.
+  # A year of each is understood, so that a delay a command cannot wait is refused with
+  # the limit (a week to turn on, a day to turn off) and no longer one is left to the
+  # gazetteer. A range is not given a multiplier to count days as hours: hassil keeps the
+  # words of a range by its bounds and not by its multiplier (`_RANGE_TRIE_CACHE` of
+  # `hassil/string_matcher.py`), so such a range would be handed the words of any other
+  # range with its bounds, and hand out its own.
+  timerify_delay_days:
+    range:
+      from: 1
+      to: 365
+  timerify_delay_weeks:
+    range:
+      from: 1
+      to: 52
+  # The delays that are said in a word, in minutes: a day, half a day, a week.
+  timerify_delay_words:
+    values:
+      - in: "день"
+        out: 1440
+      - in: "полдня"
+        out: 720
+      - in: "неделю"
+        out: 10080
+  # The parts of a clock time, each in the slot the handler of TimerifyCommandAt reads.
+  # The hours of the 24-hour clock are for a time said without a word for the part of the
+  # day, and the hours of the 12-hour clock for one said with it. All are plain ranges.
+  timerify_clock_hours:
+    range:
+      from: 0
+      to: 23
+  timerify_half_day_hours:
+    range:
+      from: 1
+      to: 12
+  timerify_clock_minutes:
+    range:
+      from: 0
+      to: 59
+  # The minutes of a clock time said after a separator are two digits ("7:05", "7.05",
+  # "7 05") or number words, both in the slot of the minutes above, which are said with the
+  # word for them ("7 часов 5 минут") and may be one digit. One digit after a separator
+  # is no minute: "7.5" is not 7:05.
+  timerify_clock_minute_digits:
+    values:
+      - in: "00"
+        out: 0
+      - in: "01"
+        out: 1
+      - in: "02"
+        out: 2
+      - in: "03"
+        out: 3
+      - in: "04"
+        out: 4
+      - in: "05"
+        out: 5
+      - in: "06"
+        out: 6
+      - in: "07"
+        out: 7
+      - in: "08"
+        out: 8
+      - in: "09"
+        out: 9
+      - in: "10"
+        out: 10
+      - in: "11"
+        out: 11
+      - in: "12"
+        out: 12
+      - in: "13"
+        out: 13
+      - in: "14"
+        out: 14
+      - in: "15"
+        out: 15
+      - in: "16"
+        out: 16
+      - in: "17"
+        out: 17
+      - in: "18"
+        out: 18
+      - in: "19"
+        out: 19
+      - in: "20"
+        out: 20
+      - in: "21"
+        out: 21
+      - in: "22"
+        out: 22
+      - in: "23"
+        out: 23
+      - in: "24"
+        out: 24
+      - in: "25"
+        out: 25
+      - in: "26"
+        out: 26
+      - in: "27"
+        out: 27
+      - in: "28"
+        out: 28
+      - in: "29"
+        out: 29
+      - in: "30"
+        out: 30
+      - in: "31"
+        out: 31
+      - in: "32"
+        out: 32
+      - in: "33"
+        out: 33
+      - in: "34"
+        out: 34
+      - in: "35"
+        out: 35
+      - in: "36"
+        out: 36
+      - in: "37"
+        out: 37
+      - in: "38"
+        out: 38
+      - in: "39"
+        out: 39
+      - in: "40"
+        out: 40
+      - in: "41"
+        out: 41
+      - in: "42"
+        out: 42
+      - in: "43"
+        out: 43
+      - in: "44"
+        out: 44
+      - in: "45"
+        out: 45
+      - in: "46"
+        out: 46
+      - in: "47"
+        out: 47
+      - in: "48"
+        out: 48
+      - in: "49"
+        out: 49
+      - in: "50"
+        out: 50
+      - in: "51"
+        out: 51
+      - in: "52"
+        out: 52
+      - in: "53"
+        out: 53
+      - in: "54"
+        out: 54
+      - in: "55"
+        out: 55
+      - in: "56"
+        out: 56
+      - in: "57"
+        out: 57
+      - in: "58"
+        out: 58
+      - in: "59"
+        out: 59
+  timerify_clock_minute_words:
+    range:
+      from: 0
+      to: 59
+      digits: false
+  # Which half of the day an hour of the 12-hour clock is in: the morning, the afternoon
+  # and the evening (the last two are one half), and the night, which is the small hours
+  # for 1 to 5 and the evening for 6 to 11.
+  timerify_day_parts:
+    values:
+      - in: "утра"
+        out: am
+      - in: "(дня|вечера)"
+        out: pm
+      - in: "ночи"
+        out: night
+  # The times that are said in a word, which name their hour as well as their part of the
+  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
+  # which the handler then takes to be 12, so that "в полдень" is not the bare 12 of "в 12",
+  # which is the nearer of noon and midnight.
+  timerify_clock_words:
+    values:
+      - in: "полдень"
+        out: pm
+      - in: "полночь"
+        out: am
+  # The day a time is said for, in days from today.
+  timerify_clock_days:
+    values:
+      - in: "сегодня"
+        out: 0
+      - in: "завтра"
+        out: 1
+      - in: "послезавтра"
+        out: 2
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the
@@ -217,6 +454,8 @@ responses:
       default: "{{ timer_now(slots) }}"
     TimerifyDelayedCommand:
       delayed: "{{ timer_later(slots) }}"
+    TimerifyCommandAt:
+      delayed: "{{ timer_later(slots) }}"
     TimerifyListCommands:
       default: |-
         {%- if slots.count == 0 -%}
@@ -235,8 +474,10 @@ responses:
         {%- endif -%}
     TimerifySetSchedule:
       default: |-
-        {%- if slots.interval -%}
-          {{ slots.target }}: расписание «{{ slots.interval }}» {{ "включено" if slots.enabled else "выключено" }}.
+        {%- if slots.intervals | length == 1 -%}
+          {{ slots.target }}: расписание «{{ slots.intervals[0] }}» {{ "включено" if slots.enabled else "выключено" }}.
+        {%- elif slots.intervals -%}
+          {{ slots.target }}: расписания {{ quoted_titles(slots.intervals) }} {{ "включены" if slots.enabled else "выключены" }}.
         {%- else -%}
           {{ slots.target }}: расписание {{ "включено" if slots.enabled else "выключено" }}.
         {%- endif -%}

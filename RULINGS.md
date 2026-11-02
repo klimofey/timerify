@@ -774,13 +774,15 @@ those of the spec.
   timer called Boiler next to one called "Boiler schedule" is the same case. Cost if wrong:
   a user who has an entity with a timer's name, or one called "<timer> schedule", must say
   it another way.
-- **The English phrasings of the schedule take "of" and "for", and on or off before or
-  after the noun, because a phrasing that is left out is not left alone.** The built-in
-  agent takes "turn off the schedule for the boiler" for a turn off of the boiler, so the
-  near misses that were found are sentences. The set is open ended: a phrasing with a
-  device's name that Timerify does not have, and "turn on" or "turn off" in it, can still be
-  matched by core's gazetteer (English only), which is issue #21. Cost if
-  wrong: the boiler is switched off by a sentence meant for its schedule.
+- **The English phrasings of the schedule take "of" and "for", "schedule" or
+  "scheduling" with the article optional, and on or off before or after the noun, because a
+  phrasing that is left out is not left alone.** The built-in agent takes "turn off the
+  schedule for the boiler" and "turn off scheduling for the boiler" for a turn off of the
+  boiler, so the near misses that were found are sentences. The set is open ended: a
+  phrasing with a device's name that Timerify does not have, and "turn on" or "turn off" in
+  it, can still be matched by core's gazetteer (English only), which is issue #21 (see
+  Release 1.1.0, Voice). Cost if wrong: the boiler is switched off by a sentence meant for
+  its schedule.
 - **There is no sentence for subtracting time.** §6.4 lists set, add and stop, and setting
   the countdown to the new length covers shortening. "10 minutes less" has no match.
   Cost if wrong: none.
@@ -797,9 +799,10 @@ those of the spec.
   hours" gives a day. For the user to hear either, a longer duration has to reach the
   handler, so the sentences understand hours up to 168 and minutes up to 10080, a week in
   each, the same in both languages and equal to the longest delay a command takes; a count
-  beyond a week is not understood, and a test pins that bound too. The tools take any count
-  and the controller decides. Cost if wrong: "for 200 hours" is answered as not understood,
-  not with the limit.
+  beyond a week is not understood, and a test pins that bound too. The delay of a delayed
+  command is counted with the same lists, so the week is its bound too (see Release 1.1.0,
+  Voice). The tools take any count and the controller decides. Cost if wrong: "for 200
+  hours" is answered as not understood, not with the limit.
   The shape of the minutes is a matter of cost. A range that allows number words makes
   hassil build, on the first request in a language, a table of the words of every number in
   it, and that table grows with the range: measured on hassil 3.12 in a fresh process, hours
@@ -832,23 +835,28 @@ those of the spec.
   tell them apart. The list of planned commands says them ("turn off at 11:00"), so a
   voice user can hear one that a service made. Cost if wrong: a user who wants a command
   to turn off that survives a later "turn on" uses the service.
-- **Commands at a clock time are for an LLM only.** The tool takes `at`, read by the same
-  parser as the service's (`command_time`), with exactly one of a delay and `at`
-  (`command_when`), through the same controller path. The built-in agent's sentences take
-  delays: core has no clock-time shapes to mirror, and §6.4's example is a delay. Cost if
-  wrong: "turn on the boiler at 7:30" has no match (issue #19).
+- **Commands at a clock time are said to the built-in agent by an intent of their own, and
+  to an LLM by the tool's `at`.** The tool takes `at`, read by the same parser as the
+  service's (`command_time`), with exactly one of a delay and `at` (`command_when`),
+  through the same controller path. In 1.0.0 the built-in agent's sentences took delays
+  only, since core has no clock-time shapes to mirror and §6.4's example is a delay; 1.1.0
+  adds the sentences, as `TimerifyCommandAt` (issue #19, Release 1.1.0, Voice: "A clock
+  time is a sentence-only intent, not a tool."). Cost if wrong: a clock time said to the
+  built-in agent is read by the rules of that entry, not by the tool's parser.
 - **Every setting of §5.4 that a target supports can be said, with one word per
   meaning.** The HVAC mode and the temperature have their own words, and "percent" and
   "mode" are single slots that each domain row declares the meaning of (brightness,
   percentage or humidity; fan mode, preset, humidifier mode or operation mode), so the row
   stays the one description of a domain. The values come from lists that hold only what
   the targets support: the HVAC words are translated per language, and the other modes are
-  the device's strings, said with a space for an underscore ("eco plus 2" for `eco_plus_2`).
-  The request is checked by the same `validate_settings` as the services, which refuses
-  what the device cannot do, by voice and tool alike. Booleans for a number setting and
-  fractions for a whole one are refused there, where every channel passes (`Coerce` would
-  turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard to
-  say must be said as it is written.
+  the device's strings, said with a space for an underscore ("eco plus 2" for `eco_plus_2`)
+  and, in the file the Voice settings entry writes, in the words Home Assistant's
+  translations give them in the language of the file (Decision 7 of the voice part,
+  below). The request is checked by the same `validate_settings` as the services, which
+  refuses what the device cannot do, by voice and tool alike. Booleans for a number setting
+  and fractions for a whole one are refused there, where every channel passes (`Coerce`
+  would turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard
+  to say must be said as it is written, or in the word the translations give it.
 - **A temperature can be said up to 250, in halves, as words or digits, because the
   sentences do not know the unit of the device.** A house that counts in Fahrenheit sets
   a water heater at 110 to 140 degrees, so a range that ended at 100 made "turn on the
@@ -871,56 +879,121 @@ those of the spec.
   the first Russian request in a language.
 - **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
   bare number after a duration is taken as a temperature, and only for a target that takes
-  one (the next entry scopes it). Cost if wrong: a number that was meant as something else
-  after a duration ("for 1 hour 30", "for 2 hours 120") is a temperature, which a
-  thermostat or a water heater then checks and refuses when it is out of its range, and a
-  device without one does not understand. The temperature is understood up to 250, so
-  "turn on the AC for 2 hours 120" is answered "120 is not a valid Temperature: it must be
-  between 16 and 30." and nothing is switched, while a water heater that counts in
-  Fahrenheit takes the same 120 as its temperature (probed on both).
+  one (the next entry scopes it). A device without a temperature reads hours followed by a
+  bare number up to 59 as minutes instead ("for 1 hour 30" is 90 minutes: see "A scope of
+  settings carries every rule of its block" in the voice section of release 1.1.0).
+  Cost if wrong: a number that was meant as something else after a duration ("for 1 hour
+  30" said to a thermostat, "for 2 hours 120") is a temperature, which a thermostat or a
+  water heater then checks and refuses when it is out of its range, while a device
+  without one does not understand "for 2 hours 120", since the bare minutes stop at 59.
+  The temperature is understood up to 250, so "turn on the AC for 2 hours 120" is answered
+  "120 is not a valid Temperature: it must be between 16 and 30." and nothing is switched,
+  while a water heater that counts in Fahrenheit takes the same 120 as its temperature
+  (probed on both).
 - **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
   on the domain of the name), in blocks of their own.** Before that, any thermostat with an
   "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which
   refused it. The managed route always writes the domain of a name; a name listed by hand
   with no domain gets the sentences that fit every device and nothing more, so the README
   shows `context: domain` on a hand-listed thermostat or water heater. Said of a device that
-  takes no temperature, "turn on the boiler for 1 hour 30" is not understood, and the
-  answer is the built-in agent's "not aware of any device called boiler", which says that a
-  device that exists is unknown: the mechanism of the entry above on names that are not a
-  device with a timer, where a sentence of Timerify's wins the stage for unknown names.
+  takes no temperature, "turn on the boiler for an hour at 55 degrees" is not understood,
+  and the answer is the built-in agent's "not aware of any device called boiler", which
+  says that a device that exists is unknown: the mechanism of the entry above on names that
+  are not a device with a timer, where a sentence of Timerify's wins the stage for unknown
+  names.
   Before the scoping it was a refusal about the setting "Temperature" that also misled.
   Cost if wrong: that wording; and a user who lists a thermostat by hand without its
   domain gets no HVAC words.
-- **The list of HVAC words is the union of the modes of every thermostat.** Two air
-  conditioners with different modes, one without "auto": a bare "auto" said of the one that
-  lacks it is understood and refused truthfully, naming the modes that AC has ("fan auto"
-  and "in auto mode" still reach the fan mode). One block of sentences per distinct set of
-  modes would close it and is its own step (issue #25). Cost if wrong: that
-  refusal.
+- **Each thermostat is understood with the HVAC modes it has, by one copy of the sentences
+  for thermostats per distinct set of modes (Decision 8, #25).** The name of a thermostat
+  carries the context `timerify_hvac_modes`: its modes sorted and joined by a space
+  (`hvac_key`), from `supported_settings`, which leaves `off` out; a thermostat with none
+  has the empty key, and is still run for a time. `build` replaces every data block of the
+  sources that requires the domain `climate` alone (`TimerifyRun`, `TimerifyDelayedCommand`
+  and `TimerifyCommandAt`: three in each language) by one copy for each set of HVAC modes
+  that the listed names carry (Decision 10), in the order of the keys. A copy requires its
+  key as well as the domain, and has a list `timerify_hvac_mode` of its own with the words of the
+  sources that mean its modes, in their order. The list of the file stays, empty, since
+  the rules refer to it; without a set no block for thermostats is left. `build`
+  fails closed: it raises `InvalidSentences` for a block that requires `climate` with
+  another domain, for a block that says a word for an HVAC mode (the list itself or a rule
+  that reaches it, the block's own or the file's) without requiring `climate` alone, since
+  with the list of the file empty it could never be matched, and for a `domain` that is
+  neither a name nor a list of names (hassil's form with a `value`). The sources are
+  Timerify's own and have none of these. The shipped files, which the manual route
+  copies, keep the one block with every word, so there every thermostat takes every word
+  and the handler refuses a mode it lacks, truthfully, naming the modes it has. Checked in
+  hassil: a data block takes `requires_context` and `lists` of its own
+  (`hassil/intents.py`, `IntentData` and `Intents.from_dict`), the `context` of a matched
+  name joins the context that `requires_context` is checked against (`string_matcher.py`,
+  after the match of a list value), and a block's lists win over those of the file
+  (`recognize.py`). The words are Timerify's own templates, copied as they are, so
+  `validate` has no text to hold them to (`said` is for the names that come from devices),
+  and a copy is pinned by the structure test instead. Why: with the union, a mode only one
+  thermostat had was understood of the other and refused. Now it is not understood, and in
+  English the built-in name fallback (the gazetteer) could have acted on the rest of the
+  sentence; the tests say it does not, for "turn on the small AC for an hour heating", the
+  same after a delay or at a clock time, and nothing is switched on either thermostat and
+  no command is kept. A bare "auto" said of a thermostat with no HVAC mode `auto` is its
+  fan mode `auto`, if it has one. Growth, measured with `len(render(built.data))`: one set
+  makes the English file 41985 characters and the Russian 34779 (the union of six modes
+  made 41556 and 34376); each further set adds about 4.3 KB in English and 3.9 KB in
+  Russian, so three sets make 50600 and 42590; building, rendering and `validate` take
+  about 0.03 s. The test helper's `EVERY_TEXT_LIMIT` counts the texts of the shipped
+  sentences, which have one block, so it does not grow. Cost if wrong: in English, a
+  sentence with a mode the thermostat lacks is not understood, where it was refused with
+  the modes it has.
+  Tests: `test_each_ac_understands_only_its_own_hvac_modes`,
+  `test_a_mode_only_another_ac_has_switches_neither_on`,
+  `test_a_delayed_turn_on_takes_only_the_hvac_modes_of_its_ac`,
+  `test_a_command_at_a_time_takes_only_the_hvac_modes_of_its_ac`,
+  `test_russian_hvac_words_are_scoped_per_ac`,
+  `test_a_hand_listed_ac_keeps_every_hvac_word`,
+  `test_a_thermostat_that_no_mode_is_listed_for_is_still_run_for_a_time`,
+  `test_each_set_of_hvac_modes_adds_its_climate_blocks_once`,
+  `test_without_a_set_of_hvac_modes_the_sentences_for_thermostats_go`,
+  `test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own`,
+  `test_a_block_for_climate_and_another_domain_is_refused`,
+  `test_a_block_that_says_hvac_words_for_any_other_target_is_refused`,
+  `test_a_domain_that_is_not_a_name_or_a_list_of_names_is_refused`,
+  `test_a_block_for_another_domain_that_says_no_hvac_word_is_kept`,
+  `test_a_thermostat_is_listed_with_the_key_of_the_modes_it_has`,
+  `test_each_thermostat_is_listed_with_the_modes_it_has`,
+  `test_thermostats_with_the_same_modes_share_their_sentences` and
+  `test_the_sentences_for_thermostats_follow_the_thermostats_of_the_house`.
 - **Pending commands are cancelled by voice as "all" (the default) or "the next one",
   which repeats; an LLM may also cancel by id.** A voice cannot say an id. The tool that
   cancels by id says it cancelled one command, and one by "next" or "all" says that, so the
   answer is true to what was done. `async_cancel_command` returns what it cancelled. Cost
   if wrong: none.
-- **The schedule is switched as a whole, or one interval by its title, and the lookup and
-  its refusals live in one place, `controller.async_set_schedule_enabled`.** The voice, the
-  tool and the interval switches share one path (a manual override wins, switching off
-  folds what is due, nothing reloads the entry). The whole schedule is the default; one
-  interval is said by the title it has, and the list of titles is one for the house, not
-  one per timer, so "the Morning schedule of the pump" is understood and refused by the
-  controller when only the boiler has a Morning (a list per timer is expressible, and would
-  multiply the sentences by the timers). Two intervals of one timer with the same title are
-  switched together, since refusing them as ambiguous would make a generated weekday title
-  and weekend title unreachable. The answer counts the intervals that are now as asked,
-  whether or not they already were, because switching is idempotent. Cost if wrong:
-  titles that are said, not generated ones, are what voice can reach (below).
+- **The schedule is switched as a whole, or one interval by its title or, while Timerify
+  made the title, by its start time, and the lookup and its refusals live in one place,
+  `controller.async_set_schedule_enabled`.** The voice, the tool and the interval switches
+  share one path (a manual override wins, switching off folds what is due, nothing reloads
+  the entry). The whole schedule is the default; one interval is said by the title it has
+  or by a start time (Decision 9 of the voice part, below), and the list of titles is one
+  for the house, not one per timer, so "the Morning schedule of the pump" is understood and
+  refused by the controller when only the boiler has a Morning (a list per timer is
+  expressible, and would multiply the sentences by the timers). Two intervals of one timer
+  with the same title, or that start at the same time, are switched together, since
+  refusing them as ambiguous would make a generated weekday title and weekend title
+  unreachable. The answer names the titles of the intervals that are now as asked and
+  counts them, whether or not they already were, because switching is idempotent. Cost if
+  wrong: two intervals that start
+  together on different days are switched together, and only a title of the owner's tells
+  them apart.
 - **Titles are compared by `schedule.title_key`: the title as the built-in agent hears it,
-  without punctuation and case, every dash a hyphen, the Russian yo a ye, runs of space one
-  space.** So "morning" means `Morning!` and `06:30-07:15, Mon-Sun` means the generated
-  title with en dashes. A title of nothing but punctuation has the key `""`, which matches
-  nothing: the built-in agent does not know such a title either, so an LLM cannot ask for it
-  and it is reached by the whole schedule or its own switch. Cost if wrong: such an
-  interval is not named by an agent.
+  without punctuation and case, every dash a hyphen, the Russian yo a ye (`fold_yo`, the one
+  fold of the repository), runs of space one space.** So "morning" means `Morning!` and
+  `06:30-07:15, Mon-Sun` means the generated title with en dashes. The asked text is held
+  against the key of the title of each interval and the key of each of its start times
+  (`spoken_aliases`); the key keeps a colon, a dot or a space between digits, so "6:30",
+  "06:30", "6.30", "06.30", "6 30" and "06 30" are six keys, and each of them is an alias.
+  The sentence files list a title with a yo under both spellings, since the built-in agent
+  cannot be told to fold (Decision 6 of the voice part, below). A title of nothing but
+  punctuation has the key `""`, which matches nothing: the built-in agent does not know such
+  a title either, so an LLM cannot ask for it and it is reached by the whole schedule or its
+  own switch. Cost if wrong: such an interval is not named by an agent.
 - **A refusal for an unknown title lists the titles that can be asked for, bare, each
   once, joined by semicolons, at most five; the translation chooses the quotes around the
   asked title.** A placeholder can be put in quotes as a whole but not each element of a
@@ -978,13 +1051,14 @@ those of the spec.
   repository allows it under `sentences/<language>/` and its subfolders. The generator also
   deletes shipped files it no longer produces, and the drift test asserts the set. Cost if
   wrong: a contributor must run the script, and the failing test says how.
-- **Russian is tested without Cyrillic in the tests: inputs are sampled from the shipped
-  Russian files and the plural forms are proved by classes.** The hook forbids Cyrillic
-  outside the translations and `sentences/ru/`. This proves that the Russian templates
-  parse, reach their handlers and outrank core, and that the three plural forms partition
-  the counts; it does not prove which word goes with which class, nor inflected names. The
-  owner reads the rendered Russian texts of each phase; a swapped "few" and "many" passes
-  the tests. Cost if wrong: a wrong plural noun reaches a user.
+- **Russian is tested without Cyrillic in the test code: inputs are sampled from the shipped
+  Russian files, the plural forms are proved by classes, and the answers for each class of
+  counts are pinned by a fixture.** The hook forbids Cyrillic outside the translations,
+  `sentences/ru/` and `tests/fixtures/ru/` (see Release 1.1.0, Voice). Sampling proves that
+  the Russian templates parse, reach their handlers and outrank core, and the classes that
+  the three plural forms partition the counts; the fixture says which word goes with which
+  count. Inflected names are not proved: the owner reads the rendered Russian texts of
+  each phase. Cost if wrong: a wrong inflected name reaches a user.
 
 ### The Voice settings entry and the sentence files
 
@@ -1017,21 +1091,26 @@ those of the spec.
   language, because a reload by language misses the regional caches of the built-in agent;
   every cached language is rebuilt. Cost if wrong: none.
 - **The file is rewritten when a timer is set up, unloaded or reloaded, when a target's
-  entity or device changes its name or aliases, and when a schedule interval is added,
-  deleted or renamed; the changes are debounced.** A change is written one cooldown
+  entity or device changes its name or aliases, when a target reports another name or
+  other modes, and when a schedule interval is added, deleted or renamed; the changes are
+  debounced.** A change is written one cooldown
   (`VOICE_SYNC_COOLDOWN`, one second) after the first of the changes that come in a row,
   never twice within a cooldown, so a burst that lasts longer is written more than once;
   Home Assistant's `Debouncer` does not move its timer for the changes that follow and
   drops a call that falls due while a write runs, so a write that finds a change came in
   during it schedules another. The first write happens before set-up returns when Home
-  Assistant is running, and at start otherwise. A new mode that a device
-  reports later (a firmware update) and a changed friendly name of a target that is not in
-  the registry are picked up at the next trigger (issue #20). Cost if wrong: such
-  a name or mode is missing from the file until then.
+  Assistant is running, and at start otherwise. The state of every target is followed
+  too, so that a new mode that a device reports later (a firmware update) and a changed
+  friendly name of a target that is not in the registry are written as the other changes
+  are, and only when what the file says of the target changed (Decision 10 of the voice
+  part, below). Cost if wrong: such a name or mode is missing from the file until the
+  next change of the kinds above.
 - **The names are listed as the built-in agent lists them: every alias with the computed
-  name, with punctuation removed, an empty name left out; `in` is escaped only when hassil
-  would read it as a template, `out` is the name as Home Assistant shows it, and
-  `context.domain` is the target's.** What is matched is what Home Assistant matches. A
+  name, with punctuation removed, an empty name left out, and a name with a Russian yo
+  listed again with a ye; `in` is escaped only when hassil would read it as a template,
+  `out` is the name as Home Assistant shows it, and `context.domain` is the target's.**
+  What is matched is what Home Assistant matches, and the ye a speech recogniser writes for
+  a yo (Decision 6 of the voice part, below). A
   lone backslash is literal in hassil, so a name that differs only in characters the
   default agent keeps must be said with them. A name that is nothing but punctuation would
   match anywhere and is left out. Cost if wrong: a name with an odd character is said as it
@@ -2504,3 +2583,612 @@ in `docs/followups.md`.
   `test_an_event_fired_by_hand_without_a_timer_is_ignored`,
   `test_a_countdown_that_ended_while_down_triggers_once_at_start_up` and
   `test_a_command_that_came_due_while_down_triggers_at_start_up`.
+
+### Voice
+
+- **Russian answers are pinned by a fixture written by hand, in the one test folder that
+  may hold Cyrillic.** `tests/fixtures/ru/answers.yaml` holds, for every answer that says a
+  count (time left, the answer of Run for, Add time and Stop, the list of planned commands
+  and the cancelling of them) and for each class of counts, the slots of a handler and the
+  Russian text a speaker expects. The text is written from the rules of Russian plurals,
+  never rendered from the templates, so a fixture does not repeat what it checks.
+  `tests/voice/test_russian_answers.py` renders each shipped answer with the slots of a
+  case and compares. It fails if a class of counts has no case (1, 2, 5, 11, 21 and, for
+  minutes, 22; for the days ahead a command is due, 3 and 5), or if the slots of a case do
+  not hold the count it is labelled with. The time left and the answer of Run for also have
+  a case of hours with minutes after them, which pins the verb that goes with the hours and
+  the word "and" that joins the two. The pre-commit hook allows Cyrillic under
+  `tests/fixtures/ru/`, at any depth, and refuses it everywhere else in `tests/`, a
+  `fixtures/ru/` of another folder included. The owner decided it on 2026-11-01 (#27).
+  Why: the plural classes test (`assert_one_form_per_class`) proves the forms differ, not
+  which goes with which count; a swapped "few" and "many" passed it. The folder is under
+  `tests/`, not `custom_components/`, so HACS does not ship it.
+  Cost if wrong: a Russian answer changed on purpose needs its fixture line changed too.
+  Not in the fixture: 1 and 2 days, which are said "tomorrow" and "the day after
+  tomorrow", and the "one" form of the days (21), since a command is due at most 7 days
+  ahead.
+  Tests: `test_each_russian_answer_reads_as_the_fixture_says`,
+  `test_the_fixture_has_every_count_class_of_every_counted_answer`,
+  `test_each_case_counts_what_it_is_labelled_with`,
+  `test_every_case_has_a_name_of_its_own`,
+  `test_cyrillic_is_allowed_in_the_russian_files_of_the_repository` and
+  `test_cyrillic_is_refused_everywhere_else`.
+- **A scope of settings carries every rule of its block, so a scope can change how a
+  duration is said.** `Scope.rules` of `scripts/generate_core_commands.py` is every
+  expansion rule of a block of `TimerifyRun` that has `timerify_settings`, and the delayed
+  blocks of `core_commands.yaml` copy all of them, not `timerify_settings` alone. The first
+  rule that uses it is `timerify_duration` (#26). Everywhere it is
+  `timerify_spelled_duration`, which is what it was (hours and minutes, each alone or both,
+  or a phrase such as "half an hour"), or hours followed by a bare number of minutes from 1
+  to 59, with "and" between them or not, in English and in Russian: "for 1 hour 30" and
+  "for 1 hour and 30" are 90 minutes. The `climate` and `water_heater` blocks of
+  `TimerifyRun` set `timerify_duration` to `timerify_duration_with_and`: the spelled-out
+  form, or hours, "and" and the minutes, with "and" required (Russian: its word for "and").
+  So for them "for 1 hour 30" stays one hour at 30 degrees, and "for 1 hour and 30" is 90
+  minutes. The rule is shared by every sentence that says a duration: "set the boiler timer
+  to 1 hour 30", "add 1 hour 30 to the boiler" (a thermostat takes that one too, since
+  adding time has no settings) and the delayed command "turn on the boiler in 15 minutes for
+  1 hour 30", whose block copies the override for a thermostat and a water heater.
+  Why: hours followed by a bare number is a temperature only where there is a temperature;
+  for the devices without one the issue's fix adds no new ambiguity, and the devices with
+  one keep the old reading. "And" cannot start a setting, so for them the two phrases
+  cannot be read each as the other's: the number right after the hours is the temperature,
+  and the number after "and" is the minutes (the controller's ruling after the review of
+  the first version, which left "for 1 hour and 30" not understood on a thermostat). A
+  block's rule replaces a global one inside the global rules that its sentences use
+  (`timerify_for_part` is global and says `timerify_duration`), so the override reaches the
+  delayed command without a copy of the sentences. The override is not only a label: probed
+  with hassil 3.12.1, without it "turn on the AC for 1 hour 30" has two parses of the same
+  score (`text_chunks_matched` 16), the temperature and the 90 minutes, and `recognize_best`
+  (`hassil/recognize.py:814`, `_get_result_score` at :819) keeps the first of them, which
+  is the temperature only because the rule lists the spelled-out form first. With the
+  override each phrase has one reading, in both languages, for both kinds of device, alone
+  and after a delay.
+  Cost if wrong: "for 1 hour 30" said to a thermostat sets 30 degrees, as before. A user
+  who means "an hour, and 30 degrees" and says "and" gets 90 minutes, and must say
+  "degrees". A thermostat or water heater listed by hand with no domain gets the sentences
+  that fit every device, so it takes "for 1 hour 30" as 90 minutes.
+  Tests: `test_for_an_hour_and_bare_minutes_runs_a_switch_for_90_minutes`,
+  `test_add_an_hour_and_bare_minutes_adds_90_minutes`,
+  `test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes`,
+  `test_a_delayed_turn_on_runs_a_switch_for_hours_and_bare_minutes`,
+  `test_hours_and_a_number_are_read_one_way_where_a_temperature_is_said`,
+  `test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature`,
+  `test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature`,
+  `test_for_an_hour_and_30_is_90_minutes_to_a_thermostat`,
+  `test_a_delayed_turn_on_of_a_thermostat_reads_hours_and_a_number` and
+  `test_a_scope_carries_every_rule_of_its_block`.
+- **A delay is said with the lists of a duration, and refused by the controller with its
+  limit.** The delayed commands of `core_commands.yaml` count the hours of a delay with
+  `timerify_hours` (1 to 168) and its minutes with `timerify_minutes` (1 to 1440, which may
+  be said as words) or `timerify_long_minutes` (1441 to 10080, in digits): the lists a
+  duration uses, filling the slots `delay_hours` and `delay_minutes`. The seconds stay
+  core's `timer_seconds`, 1 to 100. `DELAY_LISTS` of the generator maps each unit of a
+  shape of core to its list, and `delay_rules` applies it; the handler is as it was,
+  since `_delay_of` already sums the three slots (#29). The limits are the controller's: a
+  command to turn on is kept at most 7 days ahead, and a command to turn off sets the
+  countdown, so it reaches 24 hours. A delay past one is refused with the texts that
+  exist, which name the limit: `command_too_far` ("A command can be set at most 7 days
+  ahead.") and `duration_out_of_range` ("A timer runs for 1 min to 24 h."). A count past a
+  week in one unit is not understood, as for durations. A test ties `DELAY_LISTS` to the
+  rules of the sources that count a duration (`timerify_minutes_count`,
+  `timerify_hours_part`), so that a change in how the minutes are split reaches the delays
+  with it. Why: one bound for every count, already measured for cost (the duration entry
+  of "What can be said"), and no new string.
+  Cost if wrong: "in 200 hours" is not understood.
+  Tests: `test_turn_on_in_2000_minutes_keeps_a_command`,
+  `test_turn_on_in_150_hours_keeps_a_command`,
+  `test_turn_on_a_week_and_a_minute_ahead_is_refused_with_the_limit`,
+  `test_turn_off_in_120_minutes_sets_the_timer`,
+  `test_turn_off_in_2000_minutes_is_refused_with_the_limit`,
+  `test_russian_delays_past_100_reach_the_handler`,
+  `test_turn_on_in_one_hundred_twenty_minutes_keeps_a_command`,
+  `test_a_delay_past_100_can_be_said_in_words`,
+  `test_a_delay_beyond_a_week_in_one_unit_is_not_understood`,
+  `test_a_delay_counts_its_hours_and_minutes_as_a_duration_does` and
+  `test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_device`.
+- **The phrasings core's gazetteer took are added as they are found; the gazetteer itself
+  cannot be told to leave Timerify's devices alone.** In Home Assistant 2026.10.4 the
+  built-in agent hands a sentence to the gazetteer when hassil has no result or one with
+  unmatched entities (`conversation/default_agent.py:495`), and skips it only for a custom
+  sentence that matched with an unmatched entity (`:704-718`). The gazetteer builds its home
+  from every exposed entity, with no way to leave one out (`conversation/gazetteer.py:96-136`),
+  and reads English only (`:206-208`). So a sentence in English that names a device with a
+  timer, has "turn on" or "turn off" in it, and that no sentence of Timerify's matches,
+  switches the device at once, with no timer. 2026.11.0b1, the newest release on PyPI
+  (2026-10-29), has the same gate (`default_agent.py:502` and `:720-734`), and
+  `gazetteer.py` differs only in naming `async_get_matcher` (`:222`, `:263`). There is no
+  way to keep a custom intent's names out of it, so #21 stays open, labelled upstream, and
+  each phrasing found is made Timerify's own (#21):
+  - A delay in days, N from 1 to 365 ("in" or "after", "day" or "days"; Russian "cherez",
+    "den'", "dnya", "dney"), and in weeks, N from 1 to 52, as one more way to say a delay
+    for every command that takes one. Each count has a slot of its own, `delay_days` and
+    `delay_weeks`, a plain range with no multiplier, and the handler adds the units up
+    (`_UNIT_SECONDS`). So the tool of an LLM agent takes `delay_days` and `delay_weeks` too.
+    A year is understood so that what a command cannot wait is refused with the limit and
+    not left to the gazetteer: "turn on in 8 days" or "in 2 weeks" with `command_too_far`
+    (7 days), "turn off in 2 days" or "in a week" with `duration_out_of_range` (24 h).
+  - A day, half a day and a week, said in a word: "in a day", "in half a day", "in a week"
+    (Russian "cherez den'", "cherez poldnya", "cherez nedelyu"). They are a list of fixed
+    values, `timerify_delay_words`, that fills `delay_minutes` with 1440, 720 and 10080, as
+    `timerify_duration_words` fills `minutes`.
+  - English also says all of these ended by "from now", "from today" or "later": "turn
+    on the boiler 2 days from now", "a week from today", "2 days later", "a week from now
+    turn on the boiler", "half a day later". The same slots and words, in the rule
+    `timerify_own_delay`, after "in" or "after" or before one of those endings. Only days,
+    weeks and these words: "5 minutes from now", "2 hours from today" and "an hour later"
+    were never taken by the gazetteer (no device by that name), and Russian has no phrase
+    that is used the same way, so none was added there. A bare "later" is not a delay: it
+    says no time, so no sentence reads it (`test_a_bare_later_is_not_a_delay`) and it is
+    left to Home Assistant, which turns the device on at once for "turn on the boiler
+    later" and does not understand "turn off the boiler later".
+  - `delay_rules` of the generator appends `<timerify_own_delay>`, the rule that says all
+    of these, to each rule it writes, when the sentences of the language define it.
+  - "scheduling" for "schedule" in the English schedule sentences, with the article before
+    the noun optional, since "turn off scheduling for the boiler" has none (and "turn off
+    schedule for the boiler", which the gazetteer took too, is then a sentence).
+  - A range is not given a multiplier to count days as hours. hassil keeps the number words
+    of a range by its bounds, not by its multiplier: the cache of the trie is keyed by
+    `(start, stop, step, fractions)` per language (`hassil/string_matcher.py:889-904`) and
+    the multiplier is applied when the trie is built (`:1094`). Probed with a percentage
+    and a list of days in one `Intents`, a range of 1 to 100 with `multiplier: 24` is handed
+    the words of the first range of 1 to 100 that was read, and hands out its own: both say
+    "two" as 2 when the percentage is read first (so "in two days" would be two hours), and
+    both say it as 48 when the days are (so "at forty percent" would be 960). Digits are
+    multiplied on the spot and are right either way. Core has the same collision in its own
+    sentences (a `0..100` range with `multiplier: -1` next to plain `0..100` ranges, in
+    every language), so it is an upstream defect, and no bounds that happen to be free
+    today are a safe way around it: a release of Home Assistant, another integration or the
+    user's own sentences can add a range with them. Plain ranges share a trie harmlessly,
+    since the values are the same.
+  What still reaches the gazetteer, probed through the built-in agent with Timerify's
+  sentences loaded (English; Russian has no gazetteer). A phrasing that Timerify's
+  sentences meet with an unmatched entity is not handed on, so "in a month", "in a year",
+  "in 366 days", "in 53 weeks", "in 400 days", "a month from now", "a year from now",
+  "a month from today", "a month later", "366 days from now", "366 days later", "53
+  weeks from now", "53 weeks from today", "in an hour", "in half an hour", "in 2 days
+  and 3 hours", "2 days and 3 hours from now", "2 days and 3 hours later", "a few days
+  from now", "a few days later", "the day after tomorrow", "3 days after today" and "in
+  200 hours" switch nothing ("Sorry, I couldn't understand that"). That skip is the
+  mechanism of
+  `default_agent.py:704-718`, which Timerify does not control, so tests pin it for the
+  count past a year, a month and a year, in sentences of every command: a release that
+  changes it fails them (`test_more_than_a_year_of_days_or_weeks_is_not_understood` and
+  its siblings; simulating the change by passing no result to the fallback fails them in
+  English and leaves Russian green). These do switch:
+  - turn on, the dangerous direction, since in Loose mode the device then runs without a
+    countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later"
+    (alone), "in the morning", "on monday", "2 days ahead" and "by 7";
+  - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "by 7".
+  The clock times "at 7", "tomorrow at 7", "at noon", "at 7 in the morning", "at 7 in
+  the evening", "tomorrow morning at 7", "tomorrow at 7 in the morning" and "in the
+  morning at 7" were in both lists (the last four, and the turn off "at 7 in the
+  morning", found in the review of #19); they are Timerify's now (`TimerifyCommandAt`,
+  "A clock time is a sentence-only intent, not a tool." below), so they switch nothing and
+  are pinned by `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`. "By 7"
+  means "be on by then", which has no sentence of Timerify's (Decision 5 has no form for
+  it), so it stays here.
+  Why: each phrasing found is then refused or done as asked, instead of switching the
+  device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
+  Russian is not affected, since the gazetteer has no Russian.
+  Tests: `test_turn_on_in_2_days_keeps_a_command_two_days_ahead`,
+  `test_turn_on_in_7_days_is_the_longest_delay_that_is_kept`,
+  `test_turn_on_in_8_days_is_refused_with_the_limit`,
+  `test_a_delay_in_more_days_or_weeks_is_refused_with_the_limit`,
+  `test_turn_off_in_2_days_is_refused_and_leaves_the_boiler_on`,
+  `test_a_delay_in_days_can_be_followed_by_how_long_the_boiler_runs`,
+  `test_a_thermostat_is_turned_on_in_days_with_its_settings`,
+  `test_a_delay_in_days_can_be_said_in_words`,
+  `test_every_sentence_that_says_a_delay_in_days_reaches_the_handler`,
+  `test_every_sentence_that_says_a_delay_in_weeks_reaches_the_handler`,
+  `test_turn_on_so_long_ahead_keeps_a_command`,
+  `test_turn_on_beyond_a_week_ahead_is_refused_with_the_limit`,
+  `test_turn_off_half_a_day_ahead_sets_the_timer_of_a_running_boiler`,
+  `test_turn_off_beyond_a_day_ahead_is_refused_and_leaves_the_boiler_on`,
+  `test_every_sentence_of_every_command_can_end_the_delay_in_other_words`,
+  `test_a_bare_later_is_not_a_delay`,
+  `test_more_than_a_year_of_days_or_weeks_is_not_understood`,
+  `test_more_than_a_year_ahead_is_not_understood`,
+  `test_in_a_month_or_a_year_is_not_understood`,
+  `test_a_month_or_a_year_ahead_is_not_understood`,
+  `test_turn_on_in_a_day_or_a_week_keeps_a_command`,
+  `test_turn_off_in_half_a_day_sets_the_timer_of_a_running_boiler`,
+  `test_turn_off_in_a_week_is_refused_and_leaves_the_boiler_on`,
+  `test_a_day_half_a_day_and_a_week_are_said_as_fixed_delays`,
+  `test_a_week_is_kept_by_a_turn_on_and_two_weeks_are_refused`,
+  `test_the_days_and_weeks_of_a_delay_have_slots_of_their_own`,
+  `test_the_own_delay_rule_is_a_delay_only_when_the_sources_have_it`,
+  `test_llm_plans_a_command_in_days_and_weeks`,
+  `test_turning_off_scheduling_switches_the_schedule_not_the_boiler`,
+  `test_scheduling_asked_off_in_other_words_switches_the_schedule_only` and
+  `test_scheduling_asked_on_in_other_words_switches_the_schedule_only`.
+- **A clock time is a sentence-only intent, not a tool.** "Turn on the boiler at 7:30",
+  "tomorrow at 7", "at 7 pm", "at noon" (issue #19) are the sentences of `TimerifyCommandAt`,
+  with its own handler (`ClockCommandHandler`, a `DelayedCommandHandler` whose `when` is the
+  moment of the time said, where the delayed one's is a delay). It is registered for the
+  built-in agent in `HANDLER_TYPES` and left out of `TOOL_HANDLER_TYPES`, which
+  `llm.async_get_tools` offers. The exclusion is a class attribute of the handler,
+  `offered_as_tool = False` (the base class says `True`), that `TOOL_HANDLER_TYPES` filters
+  on, not a test of the class's identity; and the handler has a tool name
+  (`timerify__clock_command`), a title and a description of its own, since a subclass of the
+  delayed command's handler would otherwise inherit its identity and a loop over every
+  handler would offer two tools under one name (the final review of part D). Why: the tool
+  `timerify__delayed_command` already takes `at`, and the sentence slots (`clock_hour`,
+  `clock_minute`, `clock_part`, `clock_day`) would only confuse a model. Cost if wrong: a
+  model that is shown a second way to plan a command at a time chooses between two tools
+  that do the same.
+  - **Reading (owner's decision, 2026-11-02).** An hour from 1 to 12 said with no "am",
+    "pm" and no Russian word for a part of the day is the nearer of its two times ahead:
+    "at 7" at 18:00 is 19:00 today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow;
+    the same goes for "at 7:30". An hour of 0 or from 13 to 23 is on the 24-hour clock.
+    "Am" and "pm" and the Russian "utra", "dnya", "vechera" and "nochi" fix the half
+    (`hour_of_day`; "nochi" is the small hours for 1 to 5 and the evening for 6 to 11).
+    With a day word the same rule works on that date, so "tomorrow at 7" is 07:00. Without
+    one the time is the next, today or tomorrow, and a time equal to now is tomorrow. "Today"
+    at a time that has passed is refused by the controller (`command_in_past`), since the
+    speaker named the day. The wall time is `schedule.wall_moment`, the schedules' rule: a
+    time the clock skips happens later by the gap. A time it repeats (01:30 on the night
+    the clock goes back) is on the wall twice, and of its two moments the earliest that is
+    still ahead is taken, across both passes: "at 1:30" said at 01:45 in the first pass is
+    the second 01:30 (`schedule.wall_moments`; a schedule window, which has no "now",
+    still starts at the first). Cost if wrong: a speaker who says "at 7" at 18:00 meaning
+    tomorrow morning hears "19:00" in the answer and must say "in the morning" or "am"
+    (Russian: "utra") to get 07:00. The answer always says the time that was chosen.
+  - **The minutes after a separator are exactly two digits (the final review of part D).**
+    After ":", "." or a space the minutes are "00" to "59": "at 7:05",
+    "at 7.05" and "at 7 05" are 07:05, and "at 7.5" and "at 7:5" are not a time at all.
+    Why: nobody writes 07:05 as "7.5", which reads as seven and a half if anything, and
+    "turn on the AC at 22.5 for an hour" (a temperature said first) was planned for 22:05.
+    The sources say the minutes with the rule `timerify_clock_minute`, the text list
+    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since a
+    range list reads "5" and "05" alike) or the number words `timerify_clock_minute_words`
+    (a range with `digits: false`, so spelled minutes work as before: "seven thirty"); both
+    fill `clock_minute`. In Russian the minutes said with their word ("v 7 chasov 5 minut")
+    keep the range `timerify_clock_minutes`, where one digit is no ambiguity. Minutes of
+    one digit spelled as words ("seven five") are unchanged. Cost if wrong: a person who
+    writes "7:5" is told that it was not understood, and nothing is kept. Tests:
+    `test_a_minute_of_one_digit_after_a_separator_is_no_time`,
+    `test_a_temperature_said_before_how_long_is_no_time_of_day`,
+    `test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs`,
+    `test_russian_minute_of_one_digit_after_a_separator_is_no_time`,
+    `test_russian_minutes_of_two_digits_make_a_time` and
+    `test_russian_minutes_said_with_their_word_may_be_one_digit`.
+  - **Parts of the day in English words are Timerify's.** "In the morning" is `am`, "in the
+    afternoon" and "in the evening" are `pm`, "at night" is `night` (the small hours for 1 to
+    5, the evening for 6 to 11, as in Russian), said after the time ("at 7 in the
+    morning"); and the part as a word goes before it, after a day or after "in the"
+    ("tomorrow morning at 7", "in the evening at 7:30", "at 7.30 tomorrow evening"). Why:
+    they are what a speaker whose "at 7" was read as the evening says next, and core's
+    gazetteer switched the target at once for them; the plan's policy (Decision 4) takes a
+    found phrasing over. The forms before the hour are in `timerify_exact_clock` too, since
+    a part of the day before "at 7" cannot be a temperature. Russian has no gazetteer: its
+    "zavtra utrom v 7" (a day, a part of the day as an adverb, the hour) is taken by core's
+    sentences for an area or a floor called "7" and refused ("no zone 7"), and nothing is
+    switched, so it is not taken over here; it is a followup for the owner to decide.
+    Cost if wrong: a form of the part of the day that is not here ("this morning at 7",
+    "tonight at 7") is not understood, and nothing is switched; the voice pages list them
+    ("What you cannot say", `test_the_clock_forms_not_understood_yet_are_not_understood`).
+  - **Midnight with a day word is the one that ends that day.** Alone, "at midnight" is the
+    next 00:00. "Today at midnight" is tonight's 00:00 (the 00:00 of tomorrow's date), and
+    is never refused; "tomorrow at midnight" is the 00:00 after tomorrow; "the day after
+    tomorrow at midnight" the one after that. "12 am" is the start of the day it is said
+    with ("tomorrow at 12 am" is tomorrow's 00:00), and noon is 12:00 of its day. The same
+    in Russian for "polnoch'". Why: "midnight of Friday" is most often said for the end of
+    Friday, and "today at midnight" would otherwise always be a time that has passed.
+    Cost if wrong: a speaker who means the start of the day says "12 am" ("0:00").
+  - **The night with a day word is the night that follows that day, in both languages.**
+    The small hours said with "night" (the hour 12 and 1 to 5, with English "at night" or
+    "night" before or after the hour, Russian "nochi") are, with a day word, in the night
+    after that day, as midnight is (the owner's ruling, 2026-11-02, after the review of the
+    fix round): said on Sunday, "tomorrow night at 2", "tomorrow at 2 at night" and
+    "zavtra v 2 nochi" are Tuesday 02:00; "tomorrow night at 12" and "zavtra v 12 nochi" are
+    Tuesday 00:00, the moment of "tomorrow at midnight"; "today at 2 at night" and
+    "segodnya v 2 nochi" said at 20:00 are the coming 02:00, Monday's, and are not refused.
+    Said in the small hours, "today" names the night in progress while its moment is still
+    ahead (the owner's ruling, fix round 3): at 00:30 "today at 2 at night" and "segodnya
+    v 2 nochi" are Sunday's 02:00, answered without "tomorrow"; at 03:00 it has passed and
+    they are Monday's. "Tomorrow" and the day after are unchanged.
+    "Am" and "utra" are halves of the clock, not nights: "tomorrow at 2 am" is Monday 02:00.
+    The evening hours of the night (6 to 11) are the day itself ("tomorrow night at 11" is
+    Monday 23:00), and a night with no day word keeps the next-ahead reading. The handler
+    adds the day where the resolved hour of a `night` part is before `_NIGHT_ENDS`
+    (`ClockCommandHandler.when`), the same step as for midnight. Why: "tomorrow night at 2"
+    is said for the small hours after tomorrow's evening, and the device would run a day
+    early; the plan's first reading, which anchored the night to the start of the day,
+    contradicted the reason of the midnight ruling. Cost if wrong: a speaker who means 02:00
+    at the start of tomorrow says "tomorrow at 2 am" ("zavtra v 2 utra").
+  - **Noon and midnight fill the part of the day, not the hour.** "At noon" is
+    `clock_part: pm` with no hour, "at midnight" is `clock_part: am`, and the handler takes
+    a missing hour to be 12. The first design had the words fill `clock_hour` with 12 and
+    0; but "noon" said at 13:00 then came out as a bare 12, which is the nearer of noon and
+    midnight, and so it meant midnight. So `clock_hour` is optional in the slot schema and
+    the words are lists of parts. A bare "at 12" stays the nearer of the two. A missing
+    hour is valid for nothing else: the handler raises `probatio.Invalid`, which the
+    agents answer as not understood (`InvalidSlotInfo`), for slots with no hour and a part
+    that is not `am` or `pm`, for minutes without an hour, and for no time at all, instead
+    of reading them as the nearer of noon and midnight. Cost if wrong:
+    none; this is a correction of the interface the plan described, found by the tests
+    `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer` and
+    `test_the_russian_words_for_noon_and_midnight_name_their_time`.
+  - **A thermostat or a water heater, in English, says a time after its settings so that it
+    is not a temperature.** After "for an hour" a bare number is a temperature ("turn on the
+    AC for an hour at 21" stays a run at 21 degrees), so in the `climate` and `water_heater`
+    blocks of `TimerifyRun` the rule `timerify_clock_after_extras` is
+    `<timerify_exact_clock>`: a time with minutes, "o'clock", "am" or "pm", "noon" or
+    "midnight", not a bare hour or "H.MM". The generator copies that override into the
+    clock blocks of those scopes (`Scope.rules`). Before the settings, and in every other
+    block, any form works. Russian needs no override: it says a time with "v" and a
+    temperature with "na" or nothing. Cost if wrong: "turn on the AC for an hour at 7"
+    sets 7 degrees, as it did.
+  - **The generator writes the blocks of both intents with one function.** `timed_sentences`
+    (which replaced `delayed_sentences`) says the command with the time after it, for a
+    command to turn on also with the settings first and the time after them, and with the
+    time before it; `_timed_blocks` writes the blocks of either intent, and `render` adds
+    `TimerifyCommandAt` with `slots.action` and the answer `delayed`, and raises when the
+    sources lack one of the three clock rules. The answer is `timer_later`, as a delay's.
+  Tests: `test_turn_on_at_a_clock_time_keeps_a_command_for_then`,
+  `test_every_english_clock_form_means_its_time`,
+  `test_the_time_may_come_before_the_command`,
+  `test_a_command_to_turn_on_at_a_time_may_say_how_long_it_runs`,
+  `test_turn_on_at_a_time_for_a_while_with_settings`,
+  `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer`,
+  `test_a_part_of_the_day_said_in_words_names_the_half_it_means`,
+  `test_a_thermostat_takes_a_part_of_the_day_after_its_settings`,
+  `test_midnight_with_a_day_is_the_one_that_ends_the_day`,
+  `test_the_night_with_a_day_word_is_the_night_that_follows_that_day`,
+  `test_the_russian_night_with_a_day_is_the_night_that_follows_that_day`,
+  `test_the_russian_start_of_a_day_is_said_with_the_hour_0`,
+  `test_the_answer_names_the_night_that_today_at_night_was_taken_for`,
+  `test_the_russian_answer_names_the_night_that_today_was_taken_for`,
+  `test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day`,
+  `test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead`,
+  `test_a_wall_time_is_one_moment_but_when_the_clock_goes_back`,
+  `test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understood`,
+  `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`,
+  `test_a_bare_hour_said_in_the_evening_is_that_hour_tonight`,
+  `test_a_bare_hour_said_early_is_that_hour_this_morning`,
+  `test_an_hour_past_twelve_is_a_24_hour_clock`,
+  `test_tomorrow_with_a_bare_hour_is_the_morning_one`,
+  `test_a_clock_time_already_past_today_means_tomorrow`,
+  `test_today_at_a_time_that_has_passed_is_refused`,
+  `test_a_wall_time_the_clock_skips_happens_an_hour_later`,
+  `test_turn_off_at_a_clock_time_sets_the_countdown_to_end_then`,
+  `test_turn_off_at_a_time_more_than_a_day_ahead_is_refused`,
+  `test_for_an_hour_at_21_stays_a_temperature_for_a_thermostat`,
+  `test_a_thermostat_takes_an_exact_time_after_its_settings`,
+  `test_russian_clock_forms_reach_the_clock_handler`,
+  `test_russian_day_parts_mean_the_hours_they_name`,
+  `test_the_clock_sentences_add_no_llm_tool`,
+  `test_a_handler_that_is_no_tool_has_a_tool_identity_of_its_own`,
+  `test_the_file_says_every_command_at_a_clock_time_for_every_kind_of_device` and
+  `test_the_generator_refuses_sentences_that_lack_a_way_to_say_the_time`.
+- **A name, a title and a mode with a Russian yo are listed under both spellings, and
+  `fold_yo` is the one fold (Decision 6, #23).** A speech recogniser writes "ye" where
+  Russian prints "yo", and the built-in agent compares what it hears with the file letter
+  by letter and cannot be told to fold. So `build` takes a name, an interval title and a
+  mode as they are written and lists each as `spoken_variants` makes of it: `spoken_form` of
+  the text, and `fold_yo` of that when it differs, both with the same `out` and context. A
+  text of nothing but punctuation has no variant and is left out. The answer gives the name
+  as the device has it. `spelling.fold_yo` makes each yo, small and capital, a ye; it is
+  also what `schedule.title_key` folds with, which the controller and the tools of an LLM
+  agent compare titles by, so the repository folds the letter in one place. `build` returns
+  `BuiltSentences`, the sentences and `said`, the text each value of the three lists is
+  meant to be said as (unescaped, in order), and `validate` holds every value of the file to
+  its text, refusing a list that `said` has no texts for and one whose count of texts is not
+  its count of values: the text of `in` is no longer a function of `out`, so the check that
+  derived it from `out` could not stay. `VoiceName` and `VoiceTitle` hold the text as it is
+  written and nothing derived from it. `spoken_form` is applied once to each value, by
+  `spoken_variants`: removing punctuation twice does not always leave what removing it once
+  did, and the built-in agent applies it once to every entity it lists. So a caller (the
+  words of a mode, the aliases of a title) passes `spoken_variants` the text as it is
+  written, never what `spoken_form` made of it; a mode is `spoken_variants` of the mode with
+  a space for each underscore. Why: a name such as the Russian "boiler" is printed with a yo
+  and spoken, and recognised, with a ye. Cost if wrong: the file has one more value per such
+  name, title and mode.
+  Tests: `test_a_russian_name_with_yo_is_matched_said_with_ye`,
+  `test_a_russian_name_with_yo_is_still_matched_as_written`,
+  `test_an_interval_title_with_yo_is_switched_said_with_ye`,
+  `test_every_value_is_listed_under_both_spellings`,
+  `test_a_value_without_a_yo_is_listed_once`,
+  `test_a_text_is_listed_as_it_is_said_and_with_ye_for_each_yo`,
+  `test_a_name_and_a_title_of_nothing_but_punctuation_are_left_out`,
+  `test_a_value_not_read_as_the_text_it_was_built_from_is_refused`,
+  `test_a_list_with_another_number_of_texts_said_is_refused`,
+  `test_a_list_that_nothing_is_said_of_is_refused`,
+  `test_each_yo_is_a_ye_and_nothing_else_changes` and
+  `test_a_letter_with_and_without_the_diaeresis_is_one_in_a_title`.
+- **The modes of the devices are listed in the words Home Assistant's translations give
+  them in the language of each file, and as the device names them (Decision 7, #24).** The
+  Russian file lists the Russian words and the English file the English ones, whatever
+  the language of the house: a house set to English that asks for the Russian file wants
+  Russian words. The modes are the ones "mode" means: the fan mode of a thermostat, the
+  preset of a fan, the mode of a humidifier and the operation mode of a water heater. A
+  `ModeSource` holds the modes of one target and what finds their words: the domain, the
+  platform and translation key of its registry entry, the device class of its state, and
+  the attribute the modes are values of. `async_mode_words` looks the words up through
+  `async_get_translations` (`helpers/translation.py:335-358`), for the language of the
+  file, in the order of `async_translate_state_attr` (`:497-533`): the platform's
+  `component.<platform>.entity.<domain>.<translation_key>.state_attributes.<attribute>.state.<mode>`,
+  then `component.<domain>.entity_component.<device_class>.state_attributes...`, then
+  `component.<domain>.entity_component._.state_attributes...`. That function reads the
+  language of the house and takes no other, so its order is repeated here. No device class
+  of the four domains has words for these attributes today; the step stays because the
+  order is Home Assistant's, and a string it adds is found without a change here. The cache
+  holds English under every other language (`_async_load`, `:208-256`): a mode that has
+  no Russian word but an English one gets the English one, which is what the interface
+  shows in Russian, and it is listed. A mode that no translation covers has no word,
+  and is listed only as the device names it. The words of one mode from several targets
+  are all listed. `_mode_entries` lists, per mode in order, the name with a space for each
+  underscore and then each word, sorted, all through `spoken_variants`. The built-in agent
+  compares texts without a difference of case and takes the first value that has the
+  text, so a text that is listed already is left out, whatever mode has it: the English
+  "Auto" of `auto` is the name again, and every mode is listed by its name before any
+  word is, so a word that is said like another mode cannot mean the wrong one. A word
+  that two modes of different devices share goes to the one that sorts first, and the
+  other is said by its name, since the values of the list are not scoped to a device (the
+  HVAC words are scoped to a set of modes, #25, and these are not).
+  `SentenceFiles.async_sync` asks for the words of each language it writes, in the event
+  loop, before the executor job that builds the file; `VoiceSettingValues.mode_sources`
+  replaces the set of modes, which stays as the property `modes`. Why: a person who reads
+  a Russian screen says what it shows, not the Latin name the device keeps. Cost if wrong:
+  the Russian file has an English word for a mode that no Russian translation covers.
+  Tests: `test_a_fan_preset_is_listed_in_the_words_of_its_integration`,
+  `test_a_russian_preset_word_runs_the_fan_in_that_preset`,
+  `test_a_thermostat_fan_mode_uses_the_words_of_the_climate_domain`,
+  `test_a_thermostat_that_is_not_registered_is_spoken_to_in_the_climate_words`,
+  `test_a_mode_without_a_russian_word_is_listed_in_the_english_one`,
+  `test_a_file_has_the_words_of_its_own_language_whatever_the_house_speaks`,
+  `test_the_words_listed_are_the_words_home_assistant_shows`,
+  `test_a_humidifier_mode_uses_the_words_of_the_humidifier_domain`,
+  `test_a_water_heater_mode_uses_the_words_of_the_water_heater_domain`,
+  `test_a_device_class_without_words_of_its_own_has_the_words_of_the_domain`,
+  `test_every_language_gets_the_same_modes`,
+  `test_auto_in_russian_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode`,
+  `test_the_words_of_a_mode_are_listed_after_its_name_in_the_order_of_the_words`,
+  `test_a_word_with_a_yo_is_listed_under_both_spellings_like_a_name`,
+  `test_a_word_that_is_the_name_of_its_own_mode_is_listed_once`,
+  `test_a_word_said_like_another_mode_is_left_out`,
+  `test_a_word_that_two_modes_have_is_listed_for_the_first` and
+  `test_a_word_of_a_mode_no_target_has_is_not_listed`.
+- **An interval that still has the title Timerify gave it is said by its start time
+  (Decision 9, #22).** The title Timerify makes, `06:30–07:15, Mon–Sun`, is a mouthful and
+  cannot be told from another by a person who hears it, so the time it starts at names the
+  interval. `schedule.has_generated_title(subentry, labels)` is the one definition of "the
+  title is Timerify's", and the interval form uses it as well as the aliases: the title
+  equals the mark `CONF_GENERATED_TITLE` (an edit that moves the times gives the title and
+  the mark again, a rename ends it), or, for an interval with no mark (release 1.0.0
+  keeps none, so one edited there after a downgrade has none when the entry comes back),
+  equals the title its data makes in the language of the house now (`labels`, from
+  `async_title_labels`, which the form, the sentence files and the controller each fetch
+  where they run). `start_aliases("06:30")` is "6:30", "06:30", "6.30", "06.30", "6 30" and
+  "06 30", `start_aliases("18:00")` is "18:00", "18.00" and "18 00": the hour with and
+  without its leading zero, after a colon, then after a dot, then after a space (the forms
+  of the clock sentences, so a person who learned "at 7 30" can say "the 6 30 schedule"; the
+  final review of part D), as a recogniser writes it, without repeats, in that order, and
+  the same in every language. `spoken_aliases(subentry, labels)` is those of the start of
+  such an interval and nothing for a renamed one. `interval_names` lists
+  the title of each loaded interval and then its aliases, each text once for the house, and
+  the file lists an alias with itself as the value (`in` and `out` are the text that was
+  said), so the intent receives what was said and the controller works out what it names:
+  `async_set_schedule_enabled` keeps an interval when `title_key(asked)` is the key of its
+  title or of one of its aliases, and switches every one it keeps, as it switches two with
+  one title. A start time that only another timer has is understood, and refused with the
+  titles of this timer, as a title is; so is the start time of a renamed interval of this
+  timer when another timer has it with the title Timerify made. The answer names every
+  title that was switched (the review of Task 9, the controller's ruling): the handler
+  gives the slot `intervals`, the titles as the intervals have them, each once and in the
+  order of the schedule, so that intervals that share a title read as one title as they
+  did, and empty when the whole schedule was asked for (it replaces `interval`, which was
+  the first title or none); `count` still says how many intervals were switched. The
+  English answer is "The A schedule of Boiler is off." for one title, "The A and B
+  schedules of Boiler are off." for two and "The A; B and C schedules ..." for more, the
+  titles set apart by semicolons since a title has a comma (`titles_list`); the Russian
+  one puts each title in guillemets and sets them apart by commas, the last after the
+  word for "and" (`quoted_titles`), with the singular noun and verb for one title
+  (raspisanie ... vklyucheno) and the plural from two on (raspisaniya ... vklyucheny).
+  Nothing rewrites the sentence files when the house language changes, so for an interval
+  with no mark only, the file and the controller can disagree on its start times until the
+  next rewrite: the worst is a refusal or "not understood", never a wrong switch (the
+  re-review of Task 9, accepted).
+  The Russian texts are pinned by a fixture written by hand,
+  `tests/fixtures/ru/schedule_answers.yaml`, which counts titles and not a unit with a
+  plural form per count, so it is not in `answers.yaml`. The description of the LLM tool
+  says the start time may be given. Why: a value that meant a title would make "6:30"
+  ambiguous between two timers, since the list is one for the house. Checked: hassil strips
+  punctuation at the edges of a word only, so `spoken_form` leaves "6:30", "6.30" and
+  "6 30" as they are, `normalize_text` does too, and `validate` reads each alias back as it
+  was written; the writer quotes the values that YAML would read as numbers (unquoted, `6:30`
+  is the integer 390 and `6.30` the float 6.3), which
+  `test_the_file_lists_each_start_time_with_itself_as_the_value` and
+  `test_the_start_times_are_listed_as_the_built_in_agent_reads_them` read back. A
+  phrasing with a time in it is read by one intent: over core's sentences and Timerify's,
+  "turn off the 6:30 schedule of the boiler" is `TimerifySetSchedule` alone and "turn off
+  the boiler at 6:30" is `TimerifyCommandAt` alone, so no tie between intents is left to
+  the order of enumeration (hassil keeps the first of equal scores). The built-in name
+  fallback (the gazetteer) does not act on the phrasings of a start time that is not
+  understood or is refused: with the boiler running, nine wordings of it, on and off, with
+  "of" and "for", "6:30" and "6.30", leave the boiler and the schedule as they were. The
+  manual route lists the times by hand, in quotes, and a time names an interval only
+  while it keeps Timerify's title. An owner's title that reads as a time, such as "6:30",
+  is the same text as the alias: it is listed once, and asking for it switches the
+  interval that has the title and every one that starts then with a title of Timerify's
+  (the voice page says so). Renaming an interval after the file was written takes its
+  times out of the file at the next write, and the time stops working. Cost if wrong: two
+  intervals that start together on different days are switched together, the days tell
+  them apart only by title, and the answer names each of them; a slot that an LLM read as
+  `interval` is `intervals` now.
+  Tests (`tests/voice/test_schedule_start_times.py`, the answers also in
+  `test_each_russian_schedule_answer_reads_as_the_fixture_says`):
+  `test_start_aliases_are_the_ways_a_recogniser_writes_the_time`,
+  `test_an_interval_is_meant_by_a_start_time_as_it_was_written`,
+  `test_a_start_time_said_with_a_space_names_the_interval_too`,
+  `test_a_generated_title_is_said_by_its_start_time`,
+  `test_every_way_a_recogniser_writes_the_start_time_names_the_interval`,
+  `test_the_file_lists_each_start_time_with_itself_as_the_value`,
+  `test_the_start_times_are_listed_as_the_built_in_agent_reads_them`,
+  `test_the_start_time_switches_every_interval_that_starts_then`,
+  `test_the_answer_names_each_title_apart_by_semicolons_and_the_last_after_and`,
+  `test_a_start_time_is_listed_once_and_each_timer_switches_its_own`,
+  `test_a_start_time_only_another_timer_has_is_refused`,
+  `test_a_title_the_user_gave_is_not_said_by_its_start_time`,
+  `test_a_renamed_interval_is_refused_when_its_start_time_is_another_timer_s`,
+  `test_an_interval_edited_to_start_later_is_said_by_the_new_time`,
+  `test_renaming_a_generated_interval_takes_its_start_times_out_of_the_file`,
+  `test_an_unmarked_interval_with_the_generated_title_is_said_by_its_start_time`,
+  `test_a_title_that_reads_as_a_time_is_its_own_name_and_the_time_s_too`,
+  `test_russian_start_time_switches_the_interval`,
+  `test_the_russian_answer_names_every_interval_a_start_time_switched`,
+  `test_the_time_in_each_phrase_is_read_by_one_intent_only`,
+  `test_a_start_time_is_not_a_clock_time_and_the_other_way_round`,
+  `test_turning_off_at_a_time_does_not_switch_the_schedule`,
+  `test_llm_names_an_interval_by_its_start_time`,
+  `test_llm_is_told_every_title_a_start_time_switched` and
+  `test_llm_naming_a_renamed_interval_by_its_start_time_is_told_the_titles`.
+- **The file follows the state of every target, and is written only when what it says of
+  a target changed (Decision 10, #20).** `target_voice(hass, entity_id)` is what the file
+  says of one target: `TargetVoice(names, mode_sources)`, frozen. `names` are the
+  `VoiceName`s of the target, each with the HVAC modes of a thermostat (`hvac_modes`, None
+  for any other target), and `mode_sources` the `ModeSource`s of its settings that "mode"
+  means. `target_voices` reads it for the target of each loaded timer, once for a target
+  that two timers share, and `voice_names` and `voice_setting_values` are made of those.
+  The sets of HVAC modes that get a copy of the sentences are taken by `build` from the
+  names it lists, and `VoiceSettingValues` has no `hvac_sets` of its own: it was a second
+  source for what the names already carry, and a thermostat with no name (its aliases
+  taken away, or a name of nothing but punctuation) got a copy that no name could reach.
+  The modes are on the names only, so `TargetVoice` has no `hvac_modes` of its own either.
+  `ModeSource.modes` is sorted, so that a device that lists the same modes in another
+  order says the same. `SentenceFiles._written` holds the `TargetVoice` of each target by
+  entity id, set by `async_sync` from the inputs it used, whether the write succeeded or
+  not. At the same read, `async_sync` replaces its `async_track_state_change_event`
+  subscription with one on those targets (not at the end of the write, so that a state
+  reported during it is compared with what the write is built from), and the unload of the
+  entry ends it. `_check_target` recomputes the target and calls `_changed()` only when it
+  differs from `_written`; the state callback, the entity registry callback and the device
+  registry callback all go through it, so the one rule is "the file says something else of
+  the target". `_ENTITY_CHANGES` gains `capabilities`, `supported_features` and
+  `translation_key`: a target with no state is judged by its registry entry, and a change
+  there is followed like one of the state. A registered target's modes are followed the
+  same way, since a firmware update changes the state and not the registry entry.
+  A state change that leaves it as it was (on and off, a temperature) builds nothing and
+  fetches no translation, since `async_mode_words` runs in the sync only and a
+  `ModeSource` holds the raw modes. Why: the spec's "without churn", for one target at a
+  time. Cost if wrong: one comparison of one target per state change of a target. A
+  target whose state goes and comes back over more than one cooldown (a YAML integration
+  that reloads) is listed without its name and then with it again: the file is written
+  twice and the agent reloads twice, which is what following the state means.
+  Tests (`tests/voice/test_voice_follows_targets.py`, and in
+  `tests/voice/test_sentence_validation.py` the one below):
+  `test_a_yaml_switch_renamed_by_its_state_is_listed_by_its_new_name`,
+  `test_a_new_mode_a_device_reports_is_listed`,
+  `test_a_registered_thermostat_that_gains_a_fan_mode_is_listed`,
+  `test_a_mode_a_device_stops_reporting_leaves_the_list`,
+  `test_a_thermostat_that_gains_an_hvac_mode_is_understood_with_it`,
+  `test_a_thermostat_with_no_state_follows_the_capabilities_of_its_entry`,
+  `test_a_thermostat_with_no_name_to_be_said_adds_no_sentences`,
+  `test_the_hvac_modes_of_a_thermostat_with_no_name_change_nothing`,
+  `test_a_target_switching_on_and_off_rewrites_nothing`,
+  `test_a_registry_change_that_leaves_what_the_file_says_rewrites_nothing`,
+  `test_a_target_whose_last_timer_is_removed_is_no_longer_followed`,
+  `test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing`,
+  `test_a_state_change_after_the_entry_is_unloaded_writes_nothing` and
+  `test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences`.

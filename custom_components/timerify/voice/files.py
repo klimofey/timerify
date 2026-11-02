@@ -2,10 +2,15 @@
 them in step with the timers, and takes them away again.
 
 The file of a language is `custom_sentences/<language>/timerify.yaml`. It is the shipped
-sentences with the names of the timers' targets in them and the titles of their schedule
-intervals, and it is rewritten whenever those may have changed. Writing a file and
-removing one are followed by a reload of the built-in agent's sentences, so that the
-change is heard at once.
+sentences with the names of the timers' targets in them, the titles of their schedule
+intervals and the modes of their devices, in the words that Home Assistant translates
+them to in that language, and with the sentences for thermostats copied for each set of
+HVAC modes that thermostats have. It is rewritten whenever those may have changed: when
+a timer is set up or taken away, when a target or its device is renamed, and when a
+target reports another name or other modes, which the integration of a device may do
+without touching the registry, so the state of every target is followed. Writing a file
+and removing one are followed by a reload of the built-in agent's sentences, so that
+the change is heard at once.
 
 The path is the user's directory, and a file at it is Timerify's only if its first line
 is `MANAGED_HEADER`: Timerify writes where there is no file or its own, removes only its
@@ -13,7 +18,7 @@ own, and leaves any other alone.
 """
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from enum import Enum, auto
 from pathlib import Path
@@ -21,11 +26,19 @@ from typing import TypeIs
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import SERVICE_RELOAD
-from homeassistant.core import CoreState, Event, HomeAssistant, callback
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    CoreState,
+    Event,
+    EventStateChangedData,
+    HomeAssistant,
+    callback,
+)
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.start import async_at_started
 from homeassistant.util.file import write_utf8_file_atomic
 
@@ -40,17 +53,22 @@ from ..const import (
     is_voice_options,
 )
 from ..controller import TimerifyConfigEntry
+from ..schedule import async_title_labels
 from .base import loaded_timers
 from .sentences import (
     InvalidSentences,
+    TargetVoice,
     VoiceName,
     VoiceSettingValues,
     VoiceTitle,
+    async_mode_words,
     build,
     interval_names,
     load_sources,
     read_back,
     render,
+    target_voice,
+    target_voices,
     validate,
     voice_names,
     voice_setting_values,
@@ -63,9 +81,19 @@ CONVERSATION_DOMAIN = "conversation"
 sentences."""
 
 _ENTITY_CHANGES = frozenset(
-    {"name", "aliases", "original_name", "entity_id", "device_id"}
+    {
+        "name",
+        "aliases",
+        "original_name",
+        "entity_id",
+        "device_id",
+        "capabilities",
+        "supported_features",
+        "translation_key",
+    }
 )
-"""What of a registered entity decides the names it is known by."""
+"""What of a registered entity decides what the file says of it: the names it is known
+by, and the modes it takes while it has no state to say so."""
 _DEVICE_CHANGES = frozenset({"name", "name_by_user"})
 """What of a device decides the full names of the entities on it."""
 
@@ -116,6 +144,7 @@ def _write_if_changed(
     names: Sequence[VoiceName],
     settings: VoiceSettingValues,
     intervals: Sequence[VoiceTitle],
+    mode_words: Mapping[str, frozenset[str]],
 ) -> WriteResult:
     """Build the sentences of `language`, check that the built-in agent can read the
     text that would be written, and write it to `path` unless it is what is there
@@ -127,8 +156,9 @@ def _write_if_changed(
     first_line = _first_line(path)
     if first_line is not None and first_line != MANAGED_HEADER:
         return WriteResult.FOREIGN
-    text = render(build(load_sources(language), names, settings, intervals))
-    validate(language, read_back(text))
+    built = build(load_sources(language), names, settings, intervals, mode_words)
+    text = render(built.data)
+    validate(language, read_back(text), built.said)
     if first_line is not None and path.read_text("utf-8", errors="replace") == text:
         return WriteResult.UNCHANGED
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,8 +211,14 @@ class SentenceFiles:
     The first writing happens before the entry is set up when Home Assistant is running,
     and once it has started otherwise, when every timer is there to be listed. Changes
     cause writing from just before it: a timer set up or unloaded, which an edit of the
-    title of an interval of its schedule is, and a rename of a target, of its device or
-    of an alias of it.
+    title of an interval of its schedule is, and a target that says something else of
+    itself: a rename of it, of its device or of an alias of it, or another name or other
+    modes reported by its state or its registry entry.
+
+    What each target said when the files were last written is kept (`_written`), and a
+    change of a target is looked at once, by the target alone: it is written for only
+    when it says something else now. A target that switches on and off, or reports a
+    temperature, says what it said.
 
     A change is written `VOICE_SYNC_COOLDOWN` after the first of the changes that come
     in a row, and never twice within a cooldown: the debouncer (with `immediate=False`)
@@ -204,8 +240,13 @@ class SentenceFiles:
             function=self.async_sync,
         )
         self._changes = 0
-        """How many changes of what the names depend on have been seen. A writing that
-        finds it has moved by the time it ends has not written the last of them."""
+        """How many changes of what the files say have been seen. A writing that finds
+        it has moved by the time it ends has not written the last of them."""
+        self._written: dict[str, TargetVoice] = {}
+        """What each target said when the files were last built, by entity id: the
+        inputs of the writing, whether it succeeded or not."""
+        self._stop_following: CALLBACK_TYPE | None = None
+        """Ends the following of the states of the targets, if they are followed."""
         self._warned_about_manual = False
         self._warned_about_foreign: set[Path] = set()
 
@@ -223,7 +264,8 @@ class SentenceFiles:
         await self._async_first_sync()
 
     async def _async_first_sync(self) -> None:
-        """Follow what the names depend on, then write the files.
+        """Follow what the files say (the names, the HVAC modes and the mode lists of
+        the targets, the titles of the intervals), then write the files.
 
         The following starts first: the writing awaits the executor and the built-in
         agent, and a timer set up or a target renamed meanwhile would otherwise be
@@ -245,6 +287,7 @@ class SentenceFiles:
                 dr.EVENT_DEVICE_REGISTRY_UPDATED, self._device_updated
             )
         )
+        self._entry.async_on_unload(self._unfollow_targets)
         async with self._debouncer.async_lock():
             await self.async_sync()
 
@@ -263,17 +306,26 @@ class SentenceFiles:
 
         A language whose sentences are not fit to be read is left as it was, and said so
         in the log: a file the built-in agent cannot load breaks it for the language.
+
+        The targets are followed from the moment they are read, so that a state they
+        report during the writing is compared with what the writing is built from.
         """
         hass = self._hass
+        # The words of a title come first: nothing may change between what is read of
+        # Home Assistant below and the count of the changes seen.
+        labels = await async_title_labels(hass, hass.config.language)
         changes_seen = self._changes
         chosen = [
             language
             for language in VOICE_LANGUAGES
             if language in self._entry.options[CONF_LANGUAGES]
         ]
-        names = voice_names(hass)
-        settings = voice_setting_values(hass)
-        intervals = interval_names(hass)
+        targets = target_voices(hass)
+        names = voice_names(targets.values())
+        settings = voice_setting_values(targets.values())
+        intervals = interval_names(hass, labels)
+        self._written = targets
+        self._follow_targets(targets)
         await self._async_warn_about_manual_installs(chosen)
         changed = False
         try:
@@ -282,9 +334,18 @@ class SentenceFiles:
                 if language not in chosen:
                     changed |= await hass.async_add_executor_job(_remove, [path])
                     continue
+                mode_words = await async_mode_words(
+                    hass, language, settings.mode_sources
+                )
                 try:
                     result = await hass.async_add_executor_job(
-                        _write_if_changed, path, language, names, settings, intervals
+                        _write_if_changed,
+                        path,
+                        language,
+                        names,
+                        settings,
+                        intervals,
+                        mode_words,
                     )
                 except InvalidSentences as err:
                     _LOGGER.error(
@@ -343,7 +404,8 @@ class SentenceFiles:
 
     @callback
     def _changed(self) -> None:
-        """Something that the names depend on may have changed: write again soon."""
+        """What the files say (the names, the HVAC modes and the mode lists of the
+        targets, the titles of the intervals) may have changed: write again soon."""
         if not self._hass.is_stopping:
             self._changes += 1
             self._debouncer.async_schedule_call()
@@ -353,20 +415,47 @@ class SentenceFiles:
             entry.runtime_data.target_entity_id for entry in loaded_timers(self._hass)
         }
 
+    def _follow_targets(self, targets: Iterable[str]) -> None:
+        """Follow the states of `targets` in place of the targets followed so far: a
+        timer set up or taken away has changed them."""
+        self._unfollow_targets()
+        self._stop_following = async_track_state_change_event(
+            self._hass, targets, self._target_state_changed
+        )
+
     @callback
-    def _entity_updated(self, event: Event[er.EventEntityRegistryUpdatedData]) -> None:
-        """A registered entity changed: write again when it is a target, and its names
-        are what changed."""
-        data = event.data
-        if data["action"] != "update" or not _ENTITY_CHANGES & data["changes"].keys():
-            return
-        if {data["entity_id"], data.get("old_entity_id")} & self._targets():
+    def _unfollow_targets(self) -> None:
+        if self._stop_following is not None:
+            self._stop_following()
+            self._stop_following = None
+
+    @callback
+    def _target_state_changed(self, event: Event[EventStateChangedData]) -> None:
+        """A target reported a state: write again when it says something else of itself
+        than it did when the files were built."""
+        self._check_target(event.data["entity_id"])
+
+    @callback
+    def _check_target(self, entity_id: str) -> None:
+        """Write again soon if what the files say of the target `entity_id` is not what
+        they were last built with. It is a comparison of one target, with nothing
+        fetched, however often the target reports."""
+        if target_voice(self._hass, entity_id) != self._written.get(entity_id):
             self._changed()
 
     @callback
+    def _entity_updated(self, event: Event[er.EventEntityRegistryUpdatedData]) -> None:
+        """A registered entity changed: look at it when it is a target, and what the
+        files say of it is what changed."""
+        data = event.data
+        if data["action"] != "update" or not _ENTITY_CHANGES & data["changes"].keys():
+            return
+        for target in self._targets() & {data["entity_id"], data.get("old_entity_id")}:
+            self._check_target(target)
+
+    @callback
     def _device_updated(self, event: Event[dr.EventDeviceRegistryUpdatedData]) -> None:
-        """A device changed: write again when a target is on it, and its name is what
-        changed."""
+        """A device changed: look at the targets on it, if its name is what changed."""
         data = event.data
         if data["action"] != "update" or not _DEVICE_CHANGES & data["changes"].keys():
             return
@@ -374,8 +463,7 @@ class SentenceFiles:
         for target in self._targets():
             registered = registry.async_get(target)
             if registered is not None and registered.device_id == data["device_id"]:
-                self._changed()
-                return
+                self._check_target(target)
 
 
 async def async_setup_voice_entry(hass: HomeAssistant, entry: VoiceConfigEntry) -> bool:

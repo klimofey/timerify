@@ -19,6 +19,7 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import LIST_INTERVAL, VOICE_SYNC_COOLDOWN
+from custom_components.timerify.spelling import fold_yo
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import (
@@ -40,6 +41,10 @@ from ..helpers import (
     state_of,
 )
 from .helpers import (
+    BOILER_INTERVALS,
+    EVENING,
+    MORNING,
+    SET_SCHEDULE,
     add_voice_entry,
     assist_api,
     call_tool,
@@ -52,53 +57,15 @@ from .helpers import (
     reached,
     refusal_of,
     speech,
+    switches,
     translated,
 )
 
-SET_SCHEDULE = "TimerifySetSchedule"
-MORNING = "switch.boiler_schedule_06_30_07_15_mon_sun"
-EVENING = "switch.boiler_schedule_18_00_19_00_mon_sun"
-"""The switches of the intervals from 06:30 to 07:15 and from 18:00 to 19:00."""
 OFF = "The schedule of Boiler is off."
 ON = "The schedule of Boiler is on."
-BOILER_INTERVALS = "Morning; Evening"
-"""How a refusal lists the titles of the intervals the boiler has."""
-
-
-@pytest.fixture
-async def boiler_schedule(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    assist: None,
-    setup_target: SetupTarget,
-) -> MockConfigEntry:
-    """A timer on the Boiler with a schedule of two intervals, Morning from 06:30 to
-    07:15 and Evening from 18:00 to 19:00, on every day of the week, the way its owner
-    titled them. It is Sunday, six in the morning. Assist is not told about them yet."""
-    await open_sunday(hass, freezer)
-    entry = await setup_target()
-    morning = await add_interval(hass, entry, start="06:30", end="07:15")
-    evening = await add_interval(hass, entry, start="18:00", end="19:00")
-    await retitle_interval(hass, entry, morning, "Morning")
-    await retitle_interval(hass, entry, evening, "Evening")
-    return entry
-
-
-@pytest.fixture
-async def scheduled(
-    hass: HomeAssistant, boiler_schedule: MockConfigEntry
-) -> MockConfigEntry:
-    """The boiler and its two intervals, which Assist knows by the Voice settings in
-    English. A test of another language asks for `boiler_schedule` and adds the Voice
-    settings of its own."""
-    await add_voice_entry(hass, languages=("en",))
-    return boiler_schedule
-
-
-def switches(hass: HomeAssistant) -> tuple[str, str]:
-    """What the switches of the Morning and the Evening interval show."""
-    return state_of(hass, MORNING), state_of(hass, EVENING)
+YO_TITLE = "Day\N{CYRILLIC CAPITAL LETTER IO}"
+"""A title with the Russian letter yo, built from the code point so that this file stays
+free of Cyrillic."""
 
 
 # --- The whole schedule ------------------------------------------------------------
@@ -562,6 +529,90 @@ async def test_the_schedule_asked_on_in_other_words_is_not_a_bare_turn_on(
     assert fake_target.calls == ([TURN_ON] if expected[0] == "on" else [])
 
 
+# Core's gazetteer takes "turn off scheduling for the boiler" for a turn off of the
+# boiler, so "scheduling" is a word for the schedule too, in English, and the article
+# before the noun is optional: "turn off schedule for the boiler" is taken as well.
+
+
+async def test_turning_off_scheduling_switches_the_schedule_not_the_boiler(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+) -> None:
+    """The schedule is switched off, as "turn off the schedule for the boiler" does, and
+    the gazetteer, which would have turned the boiler off, does not act."""
+    response = await converse(hass, "turn off scheduling for the boiler")
+
+    assert reached(response) == SET_SCHEDULE
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert speech(response) == OFF
+    assert switches(hass) == ("off", "off")
+    assert fake_target.calls == []
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == []
+
+
+SCHEDULING_OFF = [
+    ("turn off schedule for the boiler", ("off", "off")),
+    ("turn off the scheduling for the boiler", ("off", "off")),
+    ("turn off the scheduling of the boiler", ("off", "off")),
+    ("turn the scheduling for the boiler off", ("off", "off")),
+    ("turn the scheduling of the boiler off", ("off", "off")),
+    ("turn off the boiler scheduling", ("off", "off")),
+    ("turn off boiler scheduling", ("off", "off")),
+    ("turn the boiler scheduling off", ("off", "off")),
+    ("disable scheduling for the boiler", ("off", "off")),
+    ("pause the scheduling of the boiler", ("off", "off")),
+    ("turn off the morning scheduling for the boiler", ("off", "on")),
+    ("turn the morning scheduling of the boiler off", ("off", "on")),
+]
+SCHEDULING_ON = [
+    ("turn on schedule for the boiler", ("on", "on")),
+    ("turn on scheduling for the boiler", ("on", "on")),
+    ("turn on the scheduling of the boiler", ("on", "on")),
+    ("turn the scheduling for the boiler on", ("on", "on")),
+    ("turn on the boiler scheduling", ("on", "on")),
+    ("enable scheduling for the boiler", ("on", "on")),
+    ("resume the scheduling of the boiler", ("on", "on")),
+    ("turn on the morning scheduling for the boiler", ("on", "off")),
+    ("turn the morning scheduling of the boiler on", ("on", "off")),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), SCHEDULING_OFF)
+async def test_scheduling_asked_off_in_other_words_switches_the_schedule_only(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+    text: str,
+    expected: tuple[str, str],
+) -> None:
+    response = await converse(hass, text)
+
+    assert reached(response) == SET_SCHEDULE, speech(response)
+    assert switches(hass) == expected
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(("text", "expected"), SCHEDULING_ON)
+async def test_scheduling_asked_on_in_other_words_switches_the_schedule_only(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+    text: str,
+    expected: tuple[str, str],
+) -> None:
+    await set_schedule(hass, "switches", False)
+
+    response = await converse(hass, text)
+
+    assert reached(response) == SET_SCHEDULE, speech(response)
+    assert switches(hass) == expected
+    assert fake_target.calls == []
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 # --- Titles --------------------------------------------------------------------------
 
 
@@ -620,6 +671,36 @@ async def test_interval_title_with_template_characters_is_escaped(
     )
     assert reached(response) == SET_SCHEDULE
     assert speech(response) == "The Morning (weekdays) schedule of Boiler is off."
+    assert switches(hass) == ("off", "on")
+
+
+async def test_an_interval_title_with_yo_is_switched_said_with_ye(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    scheduled: MockConfigEntry,
+) -> None:
+    """A speech recogniser writes ye where Russian prints yo: the title is listed with
+    both, so that either reaches the interval, and the answer gives the title as the
+    interval has it."""
+    (morning,) = (
+        subentry.subentry_id
+        for subentry in scheduled.subentries.values()
+        if subentry.title == "Morning"
+    )
+    await retitle_interval(hass, scheduled, morning, YO_TITLE)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert [value["in"] for value in listed(hass, "en", LIST_INTERVAL)] == [
+        YO_TITLE,
+        fold_yo(YO_TITLE),
+        "Evening",
+    ]
+    response = await converse(
+        hass, f"turn off the {fold_yo(YO_TITLE)} schedule of the Boiler"
+    )
+
+    assert reached(response) == SET_SCHEDULE
+    assert speech(response) == f"The {YO_TITLE} schedule of Boiler is off."
     assert switches(hass) == ("off", "on")
 
 
@@ -943,7 +1024,7 @@ async def test_llm_set_schedule(
     assert whole["speech_slots"] == {
         "target": "Boiler",
         "enabled": False,
-        "interval": None,
+        "intervals": [],
         "count": 2,
     }
     assert switches(hass) == ("off", "off")
@@ -957,7 +1038,7 @@ async def test_llm_set_schedule(
     assert one["speech_slots"] == {
         "target": "Boiler",
         "enabled": True,
-        "interval": "Morning",
+        "intervals": ["Morning"],
         "count": 1,
     }
     assert switches(hass) == ("on", "off")
@@ -1060,7 +1141,7 @@ async def test_llm_finds_the_interval_it_titled_by_its_times_whatever_the_dash(
     )
 
     assert result["response_type"] == "action_done"
-    assert result["speech_slots"]["interval"] == "06:30–07:15, Mon–Sun"
+    assert result["speech_slots"]["intervals"] == ["06:30–07:15, Mon–Sun"]
     assert state_of(hass, MORNING) == "off"
 
 
@@ -1199,6 +1280,6 @@ async def test_llm_leaving_the_interval_blank_means_the_whole_schedule(
         {"name": "Boiler", "enabled": False, "interval": "  "},
     )
 
-    assert result["speech_slots"]["interval"] is None
+    assert result["speech_slots"]["intervals"] == []
     assert result["speech_slots"]["count"] == 2
     assert switches(hass) == ("off", "off")

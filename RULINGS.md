@@ -3139,10 +3139,12 @@ in `docs/followups.md`.
   there is followed like one of the state. A registered target's modes are followed the
   same way, since a firmware update changes the state and not the registry entry.
   A state change that leaves it as it was (on and off, a temperature) builds nothing and
-  reads nothing: no translation is fetched on a state change, since `async_mode_words`
-  runs in the sync only and a `ModeSource` holds the raw modes. Why: the spec's "without
-  churn", for one target at a time. Cost if wrong: one comparison of one target per state
-  change of a target.
+  fetches no translation, since `async_mode_words` runs in the sync only and a
+  `ModeSource` holds the raw modes. Why: the spec's "without churn", for one target at a
+  time. Cost if wrong: one comparison of one target per state change of a target. A
+  target whose state goes and comes back over more than one cooldown (a YAML integration
+  that reloads) is listed without its name and then with it again: the file is written
+  twice and the agent reloads twice, which is what following the state means.
   Tests (`tests/voice/test_voice_follows_targets.py`, and in
   `tests/voice/test_sentence_validation.py` the one below):
   `test_a_yaml_switch_renamed_by_its_state_is_listed_by_its_new_name`,
@@ -3154,6 +3156,8 @@ in `docs/followups.md`.
   `test_a_thermostat_with_no_name_to_be_said_adds_no_sentences`,
   `test_the_hvac_modes_of_a_thermostat_with_no_name_change_nothing`,
   `test_a_target_switching_on_and_off_rewrites_nothing`,
+  `test_a_registry_change_that_leaves_what_the_file_says_rewrites_nothing`,
+  `test_a_target_whose_last_timer_is_removed_is_no_longer_followed`,
   `test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing`,
   `test_a_state_change_after_the_entry_is_unloaded_writes_nothing` and
   `test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences`.

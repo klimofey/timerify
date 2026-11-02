@@ -85,13 +85,15 @@ async def test_a_yaml_switch_renamed_by_its_state_is_listed_by_its_new_name(
     assert outs(listed(hass, "en")) == ["Pump"]
     reloads = conversation_reloads(hass)
 
-    pump.write("off", friendly_name="Well pump")
-    await hass.async_block_till_done()
-    assert outs(listed(hass, "en")) == ["Pump"]
-    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+    with builds_counted() as builds:
+        pump.write("off", friendly_name="Well pump")
+        await hass.async_block_till_done()
+        assert outs(listed(hass, "en")) == ["Pump"]
+        await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
     assert outs(listed(hass, "en")) == ["Well pump"]
     assert len(reloads) == 1
+    assert builds.call_count == 1, "the count sees a build; the tests of zero can fail"
     heard = await converse(hass, "turn on the well pump for 10 minutes")
     assert reached(heard) == "TimerifyRun"
     assert pump.calls == [("turn_on", pump.entity_id)]
@@ -360,7 +362,70 @@ async def test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing(
     assert reloads == []
 
 
+@pytest.mark.usefixtures("assist")
+async def test_a_registry_change_that_leaves_what_the_file_says_rewrites_nothing(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_vent: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """An integration that changes the translation key of a switch, whose modes nobody
+    says, or the supported features that the registry keeps of a fan that has a state,
+    which the state overrules, says nothing new to the file. Each change is looked at
+    (the target is compared) and neither is built."""
+    await setup_target()
+    await setup_target(target=fake_vent.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+    before = managed_file(hass, "en").read_text("utf-8")
+    reloads = conversation_reloads(hass)
+    registry = er.async_get(hass)
+
+    with (
+        builds_counted() as builds,
+        patch(f"{FILES}.target_voice", wraps=target_voice) as looked_at,
+    ):
+        registry.async_update_entity(fake_target.entity_id, translation_key="boiler")
+        registry.async_update_entity(fake_vent.entity_id, supported_features=1)
+        await hass.async_block_till_done()
+        await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert looked_at.call_count == 2
+    assert builds.call_count == 0
+    assert managed_file(hass, "en").read_text("utf-8") == before
+    assert reloads == []
+
+
 # Leaving
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_target_whose_last_timer_is_removed_is_no_longer_followed(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    pump: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The timer of the pump is removed and the file loses it. Its integration may go on
+    reporting a name for the pump, which the file has no use for: nothing is built."""
+    await setup_target()
+    pump_timer = await setup_target(target=pump.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+    assert outs(listed(hass, "en")) == ["Boiler", "Pump"]
+    await hass.config_entries.async_remove(pump_timer.entry_id)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+    assert outs(listed(hass, "en")) == ["Boiler"]
+    reloads = conversation_reloads(hass)
+
+    with builds_counted() as builds:
+        pump.write("off", friendly_name="Well pump")
+        await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert builds.call_count == 0
+    assert outs(listed(hass, "en")) == ["Boiler"]
+    assert reloads == []
 
 
 @pytest.mark.usefixtures("assist")

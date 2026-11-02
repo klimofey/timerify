@@ -264,7 +264,8 @@ class SentenceFiles:
         await self._async_first_sync()
 
     async def _async_first_sync(self) -> None:
-        """Follow what the names depend on, then write the files.
+        """Follow what the files say (the names, the HVAC modes and the mode lists of
+        the targets, the titles of the intervals), then write the files.
 
         The following starts first: the writing awaits the executor and the built-in
         agent, and a timer set up or a target renamed meanwhile would otherwise be
@@ -403,7 +404,8 @@ class SentenceFiles:
 
     @callback
     def _changed(self) -> None:
-        """Something that the names depend on may have changed: write again soon."""
+        """What the files say (the names, the HVAC modes and the mode lists of the
+        targets, the titles of the intervals) may have changed: write again soon."""
         if not self._hass.is_stopping:
             self._changes += 1
             self._debouncer.async_schedule_call()

@@ -400,7 +400,7 @@ def test_a_list_with_another_number_of_texts_said_is_refused() -> None:
 
     with pytest.raises(
         InvalidSentences,
-        match=f"{LIST_TARGET} lists 2 values, and 1 texts are said",
+        match=f"{LIST_TARGET} lists 2 values, but the said texts number 1",
     ):
         validate("en", built.data, said)
 

@@ -434,8 +434,8 @@ def _check_names(
     texts = said[list_name]
     if len(texts) != len(values):
         raise InvalidSentences(
-            f"{list_name} lists {len(values)} values, and {len(texts)} texts are said"
-            " for them"
+            f"{list_name} lists {len(values)} values, but the said texts number"
+            f" {len(texts)}"
         )
     for value, parsed, text in zip(values, slot_list.values, texts, strict=True):
         if _text_of(parsed.text_in) != normalize_text(text):

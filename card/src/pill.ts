@@ -7,7 +7,7 @@ import { styleMap } from "lit/directives/style-map.js";
 import type { CardConfig } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant } from "./hass";
-import { popupAnnounced, renderIcon, renderStatus } from "./layout";
+import { isPressable, popupAnnounced, renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
 import type { TimerView } from "./timer";
@@ -29,14 +29,15 @@ export function renderPill(
   now: number,
 ): TemplateResult {
   const filled = Math.round(view.progress * 1000) / 10;
+  const pressable = isPressable(config);
   return html`
     <ha-card class="pill ${view.state}">
       <div
         class="body"
-        role="button"
-        tabindex="0"
+        role=${ifDefined(pressable ? "button" : undefined)}
+        tabindex=${ifDefined(pressable ? "0" : undefined)}
         aria-haspopup=${ifDefined(popupAnnounced(config))}
-        aria-labelledby="label"
+        aria-labelledby=${ifDefined(pressable ? "label" : undefined)}
         @click=${binding.click}
         @keydown=${binding.keydown}
         @keyup=${binding.keyup}

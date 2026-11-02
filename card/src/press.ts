@@ -14,6 +14,10 @@
 // Home Assistant's own handler does, and until then `data-held` on the card tells the user
 // that letting go will act.
 //
+// A press ends wherever its pointer comes up or is taken away, even off the card. A dialog that
+// opens under a pointer that is still down gets its release, and the card must not go on telling
+// the user that letting go will act.
+//
 // What the card does is asked for at the moment of each press, so that a card whose config
 // changes is pressed as the new config says.
 import type { ReactiveController, ReactiveControllerHost } from "lit";
@@ -62,6 +66,8 @@ export class PressController implements ReactiveController {
   #swallowClick = false;
   /** A click that waits for a second one, to be a tap if none comes. */
   #doubleTapTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The pointer of the press came up or was taken away somewhere else than on the body. */
+  readonly #pointerLost = (event: PointerEvent): void => this.#abortPress(event);
 
   /** `actions` is asked for at every press: what the card does can change with its config. */
   constructor(host: ReactiveControllerHost & HTMLElement, actions: () => PressActions) {
@@ -74,6 +80,14 @@ export class PressController implements ReactiveController {
     this.#spaceDown = false;
     this.#swallowClick = false;
     this.#stopWaitingForDoubleTap();
+    this.#endPress();
+  }
+
+  /**
+   * Ends the press that is going on, if any, without acting on it. For a tap that opens a
+   * dialog while the pointer is still down: the release will land on the dialog, not here.
+   */
+  cancelPress(): void {
     this.#endPress();
   }
 
@@ -169,6 +183,9 @@ export class PressController implements ReactiveController {
     this.#swallowClick = false;
     this.#endPress();
     this.#pointer = event.pointerId;
+    // The body hears the pointer come up first; these hear it where the body cannot.
+    window.addEventListener("pointerup", this.#pointerLost);
+    window.addEventListener("pointercancel", this.#pointerLost);
     this.#holdTimer = setTimeout(() => {
       this.#holdTimer = undefined;
       this.#held = true;
@@ -188,6 +205,8 @@ export class PressController implements ReactiveController {
     this.#holdTimer = undefined;
     this.#pointer = undefined;
     this.#held = false;
+    window.removeEventListener("pointerup", this.#pointerLost);
+    window.removeEventListener("pointercancel", this.#pointerLost);
     this.#host.removeAttribute(HELD);
   }
 }

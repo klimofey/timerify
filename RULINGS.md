@@ -3353,7 +3353,14 @@ in `docs/followups.md`.
   the window is the double tap alone, and Enter and Space tap at once. A long press exists only
   when `hold` is not `none`, on either layout, and the pill's icon pulses while letting go would
   act, as the round tile's ring does. The body of the card announces `aria-haspopup="dialog"`
-  only when `tap` is `popup`.
+  only when `tap` is `popup`. It is a button with a tab stop only while at least one of the
+  three presses is not `none`, as the tile card of Home Assistant is only while it has an
+  action; with all three `none` it is neither, and a tap that is `none` beside a press that
+  acts keeps it a button. A press ends wherever its pointer comes up or is taken away, even off
+  the card, and a tap that opens the pop-up ends the press at once: a long press that starts
+  while a tap waits for a second one may find the pop-up open under the pointer when the wait
+  ends, the release then lands on the dialog, and the card must not go on pulsing. A long press
+  that starts during the wait, and a tap that opens nothing, both still act as set.
   Why: the `ui_action` selector writes only the standard actions (its list is typed
   `UiAction[]` and its labels are Home Assistant's own words for them), so "open the pop-up",
   "run" and "stop" cannot be offered by it; and a custom value in it would be shown with no
@@ -3382,9 +3389,14 @@ in `docs/followups.md`.
   Tests: `card/test/press.test.ts` (a tap opens the pop-up by default on both layouts; a single
   tap still opens it when a double tap is set; a double tap does the double tap action alone;
   two taps further apart than the window are two taps; Enter and Space act at once; the wait is
-  dropped when the card leaves the page or is set again; a long press acts on the pill when set,
-  and a round tile set to nothing leaves it alone; each choice; `hass-action` with the target
-  and only the actions set, for each press, and nothing before the lookup has found the timer),
+  dropped when the card leaves the page, and a click after the card is set again is counted once;
+  a long press acts on the pill when set, and a round tile set to nothing leaves it alone; each
+  choice; `hass-action` with the target and only the actions set, for each press, and nothing
+  before the lookup has found the timer, and the event heard on the page from inside a shadow
+  root; no button and no tab stop with all three presses `none`, and both with one that acts; a
+  long press that starts during the wait stops pulsing when the tap opens the pop-up, and still
+  acts when the tap opens nothing; a pointer that comes up or is cancelled off the card ends the
+  press, another finger's does not, and no listener is left when the card leaves the page),
   `card/test/config.test.ts` (the defaults, the six choices, the refusals), `card/test/editor.test.ts`
   (the Interactions group, its labels and helper in both languages, the shape check),
   `card/test/round.test.ts` unchanged (the long press of 1.0.0 under its default); end to end

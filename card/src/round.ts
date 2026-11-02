@@ -7,7 +7,7 @@ import { ifDefined } from "lit/directives/if-defined.js";
 import type { CardConfig } from "./config";
 import { formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
-import { popupAnnounced, renderIcon, renderStatus } from "./layout";
+import { isPressable, popupAnnounced, renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 
@@ -42,14 +42,15 @@ export function renderRound(
   now: number,
 ): TemplateResult {
   const middle = SIZE / 2;
+  const pressable = isPressable(config);
   return html`
     <ha-card class="round ${view.state}">
       <div
         class="body"
-        role="button"
-        tabindex="0"
+        role=${ifDefined(pressable ? "button" : undefined)}
+        tabindex=${ifDefined(pressable ? "0" : undefined)}
         aria-haspopup=${ifDefined(popupAnnounced(config))}
-        aria-labelledby="label"
+        aria-labelledby=${ifDefined(pressable ? "label" : undefined)}
         @click=${binding.click}
         @keydown=${binding.keydown}
         @keyup=${binding.keyup}

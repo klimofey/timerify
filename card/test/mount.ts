@@ -7,16 +7,18 @@ import { NUMBER, type FakeHass } from "./fake-hass";
 
 /**
  * Puts a card with this config on the page the way a dashboard does, and waits until it has
- * shown what Timerify answered.
+ * shown what Timerify answered. A dashboard holds its cards inside the shadow roots of its own
+ * elements: `parent` is where the card goes, the page itself unless a scenario says otherwise.
  */
 export async function mountCard(
   hass: FakeHass,
   config: Record<string, unknown> = { entity: NUMBER },
+  parent: ParentNode = document.body,
 ): Promise<TimerifyCard> {
   const card = document.createElement("timerify-card") as TimerifyCard;
   card.setConfig(config);
   card.hass = hass;
-  document.body.append(card);
+  parent.append(card);
   await card.updateComplete;
   return card;
 }

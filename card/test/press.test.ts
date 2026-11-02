@@ -24,14 +24,14 @@ const setToZero = { domain: "number", service: "set_value", data: { value: 0 }, 
 
 const isOpen = (card: TimerifyCard) => popupOf(card).shadowRoot?.querySelector("dialog")?.open;
 
-/** A pointer event as a browser makes it for a mouse that is the primary pointer. */
-const pointer = (type: string) =>
+/** A pointer event as a browser makes it for a mouse, which is the primary pointer (id 1). */
+const pointer = (type: string, pointerId = 1) =>
   new PointerEvent(type, {
     bubbles: true,
     composed: true,
     cancelable: true,
-    isPrimary: true,
-    pointerId: 1,
+    isPrimary: pointerId === 1,
+    pointerId,
     pointerType: "mouse",
   });
 
@@ -103,7 +103,8 @@ describe("a tap", () => {
 
   it("does nothing when it is set to nothing", async () => {
     const hass = fakeHass();
-    const card = await mountCard(hass, { ...PILL, tap: "none" });
+    // A long press is set, so that the body is still a button to press.
+    const card = await mountCard(hass, { ...PILL, tap: "none", hold: "run" });
 
     await click(card);
     await popupOf(card).updateComplete;
@@ -358,15 +359,22 @@ describe("a press set to a Home Assistant action", () => {
     expect(isOpen(card)).toBe(false);
   });
 
-  it("fires hass-action as an event that crosses the card's shadow root", async () => {
-    const card = await mountCard(fakeHass(), { ...PILL, tap: "action" });
-    const event = vi.fn();
-    document.body.addEventListener("hass-action", event);
+  it("fires hass-action so that it reaches the page from inside a dashboard's shadow roots", async () => {
+    // A dashboard holds the card inside the shadow roots of its own elements, and Home
+    // Assistant's handler listens far above them.
+    const view = document.createElement("div");
+    document.body.append(view);
+    const root = view.attachShadow({ mode: "open" });
+    const card = await mountCard(fakeHass(), { ...PILL, tap: "action" }, root);
+    const paths: EventTarget[][] = [];
+    const listener = (event: Event) => paths.push(event.composedPath());
+    document.addEventListener("hass-action", listener);
+    onTestFinished(() => document.removeEventListener("hass-action", listener));
 
     await click(card);
 
-    expect(event).toHaveBeenCalledOnce();
-    document.body.removeEventListener("hass-action", event);
+    expect(paths).toHaveLength(1);
+    expect(paths[0]).toEqual(expect.arrayContaining([card, root, view, document]));
   });
 
   it("tells Home Assistant which press it is, and hands it every action the user set", async () => {
@@ -451,7 +459,173 @@ describe("how the card describes a tap", () => {
       acts.remove();
     }
   });
+});
 
+describe("whether the card is a button", () => {
+  /** The part that is pressed, found by its place and not by the role this test is about. */
+  const pressedPart = (card: TimerifyCard) =>
+    card.shadowRoot?.querySelector<HTMLElement>(".body") ?? null;
+
+  it("is no button and no tab stop when no press does anything", async () => {
+    for (const layout of ["pill", "round"] as const) {
+      const hass = fakeHass();
+      const card = await mountCard(hass, {
+        entity: NUMBER,
+        layout,
+        tap: "none",
+        double_tap: "none",
+        hold: "none",
+      });
+
+      expect(card.shadowRoot?.querySelector('[role="button"]'), layout).toBeNull();
+      const body = pressedPart(card);
+      expect(body, layout).not.toBeNull();
+      expect(body?.hasAttribute("tabindex"), layout).toBe(false);
+      expect(body?.hasAttribute("aria-labelledby"), layout).toBe(false);
+
+      // A click on it, with a mouse, still does nothing.
+      body?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+      await card.updateComplete;
+      expect(isOpen(card), layout).toBe(false);
+      expect(hass.calls, layout).toEqual([]);
+      card.remove();
+    }
+  });
+
+  it("is a button with a tab stop while any press does something, even when the tap does not", async () => {
+    const cards = [
+      { ...PILL, tap: "none", hold: "run" },
+      { ...PILL, tap: "none", double_tap: "stop" },
+      // The round tile holds to start or stop unless it is told not to.
+      { ...ROUND, tap: "none" },
+      { ...PILL, tap: "run" },
+    ];
+    for (const config of cards) {
+      const card = await mountCard(fakeHass(), config);
+
+      const body = bodyOf(card);
+      expect(body.getAttribute("tabindex"), JSON.stringify(config)).toBe("0");
+      expect(body.getAttribute("aria-labelledby"), JSON.stringify(config)).toBe("label");
+      card.remove();
+    }
+  });
+});
+
+describe("a hold that starts while a tap waits for a second one", () => {
+  const config = { ...PILL, double_tap: "run", hold: "run" } as const;
+
+  it("is let go of when the waiting tap opens the pop-up under the pointer", async () => {
+    const hass = fakeHass();
+    const card = await mountCard(hass, config);
+    const body = bodyOf(card);
+
+    // A tap, and within the wait a second press that the user keeps down.
+    await click(card);
+    await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS / 2);
+    body.dispatchEvent(pointer("pointerdown"));
+    await wait(card, DOUBLE_TAP_MS / 2);
+    expect(isOpen(card)).toBe(true);
+
+    // The pop-up is over the pointer now: the card does not go on telling that letting go acts.
+    await wait(card, 2 * HOLD_MS);
+    expect(card.hasAttribute("data-held")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // The release lands on the dialog.
+    popupOf(card).shadowRoot?.querySelector("dialog")?.dispatchEvent(pointer("pointerup"));
+    expect(card.hasAttribute("data-held")).toBe(false);
+    expect(hass.calls).toEqual([]);
+  });
+
+  it("lets the next long press act as usual", async () => {
+    const hass = fakeHass();
+    const card = await mountCard(hass, config);
+    await click(card);
+    await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS / 2);
+    bodyOf(card).dispatchEvent(pointer("pointerdown"));
+    await wait(card, DOUBLE_TAP_MS / 2);
+    popupOf(card).shadowRoot?.querySelector("dialog")?.dispatchEvent(pointer("pointerup"));
+
+    await pressFor(card, HOLD_MS);
+
+    expect(hass.calls).toEqual([ran]);
+    expect(card.hasAttribute("data-held")).toBe(false);
+  });
+
+  it("still acts on release when the waiting tap does not open anything", async () => {
+    const hass = fakeHass();
+    const card = await mountCard(hass, { ...config, tap: "stop" });
+
+    await click(card);
+    await vi.advanceTimersByTimeAsync(DOUBLE_TAP_MS / 2);
+    bodyOf(card).dispatchEvent(pointer("pointerdown"));
+    await vi.advanceTimersByTimeAsync(HOLD_MS);
+    expect(card.hasAttribute("data-held")).toBe(true);
+    bodyOf(card).dispatchEvent(pointer("pointerup"));
+    await click(card);
+    await wait(card, 10 * DOUBLE_TAP_MS);
+
+    // The tap came when the wait was over, and the hold when the pointer came up.
+    expect(hass.calls).toEqual([stopped, ran]);
+    expect(card.hasAttribute("data-held")).toBe(false);
+  });
+});
+
+describe("a pointer that is lost", () => {
+  it.each(["pointerup", "pointercancel"])(
+    "stops the card from telling that letting go acts when it ends off the card: %s",
+    async (type) => {
+      const hass = fakeHass();
+      const card = await mountCard(hass, ROUND);
+      bodyOf(card).dispatchEvent(pointer("pointerdown"));
+      await vi.advanceTimersByTimeAsync(HOLD_MS);
+      expect(card.hasAttribute("data-held")).toBe(true);
+
+      document.body.dispatchEvent(pointer(type));
+
+      expect(card.hasAttribute("data-held")).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+      expect(hass.calls).toEqual([]);
+    },
+  );
+
+  it("is not ended by another finger coming up elsewhere", async () => {
+    const card = await mountCard(fakeHass(), ROUND);
+    bodyOf(card).dispatchEvent(pointer("pointerdown"));
+    await vi.advanceTimersByTimeAsync(HOLD_MS);
+
+    document.body.dispatchEvent(pointer("pointerup", 2));
+    expect(card.hasAttribute("data-held")).toBe(true);
+
+    document.body.dispatchEvent(pointer("pointerup"));
+    expect(card.hasAttribute("data-held")).toBe(false);
+  });
+
+  it("leaves no listener on the page behind when the card leaves it during a press", async () => {
+    const added = vi.spyOn(window, "addEventListener");
+    const removed = vi.spyOn(window, "removeEventListener");
+    onTestFinished(() => {
+      added.mockRestore();
+      removed.mockRestore();
+    });
+    const card = await mountCard(fakeHass(), ROUND);
+    bodyOf(card).dispatchEvent(pointer("pointerdown"));
+    await vi.advanceTimersByTimeAsync(HOLD_MS);
+
+    card.remove();
+
+    const forPointer = (spy: typeof added) =>
+      spy.mock.calls.filter(([type]) => type === "pointerup" || type === "pointercancel");
+    const kept = forPointer(added).filter(
+      ([type, listener]) =>
+        !forPointer(removed).some(([gone, same]) => gone === type && same === listener),
+    );
+    // The card did listen on the page for the press, and took every listener away again.
+    expect(forPointer(added)).not.toHaveLength(0);
+    expect(kept).toEqual([]);
+    expect(card.hasAttribute("data-held")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
 });
 
 describe("a press the card does not know", () => {

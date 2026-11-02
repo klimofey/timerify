@@ -23,6 +23,14 @@ export const popupAnnounced = (config: CardConfig): "dialog" | undefined =>
   config.tap === "popup" ? "dialog" : undefined;
 
 /**
+ * Whether the body does anything when it is pressed. A body whose tap, double tap and long
+ * press are all set to nothing is no button and has no tab stop, as in Home Assistant's own
+ * tile card; one that does something on any press is both.
+ */
+export const isPressable = (config: CardConfig): boolean =>
+  config.tap !== "none" || config.double_tap !== "none" || config.hold !== "none";
+
+/**
  * What the card says under the name while nothing counts: the state of the target in the
  * user's language, or that the timer is unavailable. A timer that has a value and is only
  * waiting to be found says nothing yet, so a page that has just opened shows no flicker.
@@ -83,9 +91,11 @@ export const commonStyles = css`
     /* Inset reaches the padding box; the card's border is part of what a press hits. */
     margin: calc(-1 * var(--ha-card-border-width, 1px));
     border-radius: var(--timerify-radius);
-    cursor: pointer;
     /* No flash of the browser's own highlight on a tap, as in the tile card. */
     -webkit-tap-highlight-color: transparent;
+  }
+  .body[role="button"] {
+    cursor: pointer;
   }
   .body:focus-visible {
     outline: 2px solid var(--primary-color);

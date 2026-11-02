@@ -72,7 +72,8 @@ export class TimerifyCard extends LitElement {
   #lookingUp = false;
   #askAgain = false;
   /** How both layouts are pressed: what a press does is what the config says at that moment. */
-  readonly #binding = new PressController(this, () => this.#pressActions()).binding();
+  readonly #press = new PressController(this, () => this.#pressActions());
+  readonly #binding = this.#press.binding();
   /** The pill's chip: adds its minutes to the timer, whatever the card's clock says. */
   readonly #addChipMinutes = (): void => {
     const { _config: config, hass } = this;
@@ -231,6 +232,8 @@ export class TimerifyCard extends LitElement {
     }
     switch (config[press]) {
       case "popup":
+        // A pointer may still be down on the card, and its release will land on the dialog.
+        this.#press.cancelPress();
         this.#popup?.open();
         break;
       case "run":

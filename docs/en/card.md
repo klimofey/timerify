@@ -121,6 +121,8 @@ You can set what a tap, a double tap and a long press do. These are the defaults
 | Double tap | Nothing. |
 | Long press | On the round tile, starts or stops the timer. On the pill, nothing. |
 
+In the visual editor, the three presses are the fields **Tap behavior**, **Double tap behavior** and **Hold behavior**. The last one sets the long press.
+
 Each press can be set to one of six choices. The visual editor names them as the first column does. The second column is the value for YAML.
 
 | Choice | Value | What it does |
@@ -142,9 +144,9 @@ Enter and Space do what a tap does, at once. The keyboard has no double tap and 
 
 ### Home Assistant actions
 
-Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. They are more info, toggle, navigate, open a URL, perform an action and Assist. The field under the press lists them. The field is used only when its press is set to **Home Assistant action**.
+Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action** and **Assist**. The field is used only when its press is set to **Home Assistant action**.
 
-- The action acts on the device that the timer runs, not on the **Run for** number. More info opens the dialog of the device. Toggle switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
+- The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
 - Leave the field on **Default**, and Home Assistant opens the dialog of the device.
 - The card does nothing until it has found its timer, which takes a moment after the page loads.
 

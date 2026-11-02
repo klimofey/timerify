@@ -18,7 +18,7 @@ Home Assistant читает список модулей для загрузки,
 
 - Это ошибка интерфейса Home Assistant ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890)). С ней встречается каждая такая карточка.
 - Она исправлена в интерфейсе, начиная с версии 20261028.0 ([pull request #54444](https://github.com/home-assistant/frontend/pull/54444)). Ожидается, что этот интерфейс будет в Home Assistant 2026.11.
-- Timerify не обходит её. Версии 1.0.0 по-прежнему нужен только Home Assistant 2026.10.4. Если поднять минимум до 2026.11, проблема исчезнет ([задача #7](https://github.com/klimofey/timerify/issues/7)).
+- Timerify не обходит её. Timerify по-прежнему нужен только Home Assistant 2026.10.4. Если поднять минимум до 2026.11, проблема исчезнет ([задача #7](https://github.com/klimofey/timerify/issues/7)).
 
 ## Два вида карточки
 

@@ -158,7 +158,7 @@ The id is in the response of `timerify.add_command`. It is also in the `commands
 
 ## Events
 
-Timerify fires three events. The [triggers](automations.md) are built on them. A YAML `event` trigger can use them too.
+Timerify fires three events. The [triggers](automations.md#triggers) are built on them. A YAML `event` trigger can use them too.
 
 | Event | Data | When it fires |
 | --- | --- | --- |

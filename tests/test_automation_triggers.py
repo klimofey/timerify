@@ -10,13 +10,12 @@ connection, then run automations that use the triggers as the editor writes them
 
 import logging
 from collections.abc import Sequence
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.trigger import async_get_all_descriptions
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -68,11 +67,16 @@ async def watch(
 
 
 async def test_the_triggers_are_described_for_the_editor(
-    hass: HomeAssistant, client: MockHAClientWebSocket
+    client: MockHAClientWebSocket,
 ) -> None:
-    """The editor shows each trigger with the entities it can be aimed at, which are
-    the "Run for" numbers of Timerify, and with no fields to fill in."""
-    descriptions = await async_get_all_descriptions(hass)
+    """The editor subscribes to the trigger platforms and gets each trigger with the
+    entities it can be aimed at, which are the "Run for" numbers of Timerify, and with
+    no fields to fill in. The `client` fixture sets Timerify up before it connects, so
+    the platform is there with no timer yet."""
+    await client.send_json_auto_id({"type": "trigger_platforms/subscribe"})
+    result = await client.receive_json()
+    assert result["success"] is True, result
+    descriptions: dict[str, Any] = (await client.receive_json())["event"]
 
     for key in TIMERIFY_TRIGGERS:
         assert descriptions[key] == {
@@ -340,6 +344,42 @@ async def test_a_timer_added_later_is_covered_by_the_device_trigger(
     assert [record.data for record in records] == [{"entity_id": run_for_of(hass, two)}]
 
 
+async def turn_automation(hass: HomeAssistant, service: str, entity_id: str) -> None:
+    """Turn the automation off or on, as the user does on its page."""
+    await hass.services.async_call(
+        "automation", service, {"entity_id": entity_id}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+
+async def test_an_automation_that_is_turned_off_hears_nothing(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user turns the automation off. The boiler's countdown ends and the
+    automation does not run. Turned on again, it hears the next end."""
+    await setup_target()
+    records = await watch(
+        hass, "countdown_ended", {"device_id": fake_target.device_id}, ["entity_id"]
+    )
+    [automation] = hass.states.async_entity_ids("automation")
+    await turn_automation(hass, "turn_off", automation)
+    await set_number(hass, NUMBER, 10)
+
+    await advance(hass, freezer, minutes=10)
+
+    assert records == []
+
+    await turn_automation(hass, "turn_on", automation)
+    await set_number(hass, NUMBER, 10)
+
+    await advance(hass, freezer, minutes=10)
+
+    assert [record.data for record in records] == [{"entity_id": NUMBER}]
+
+
 async def start_home_assistant(
     hass: HomeAssistant,
     fake_target: FakeTarget,
@@ -347,17 +387,18 @@ async def start_home_assistant(
     key: str,
     fields: Sequence[str],
     stored: dict[str, Any],
+    boiler: Literal["on", "off"] = "on",
 ) -> tuple[MockConfigEntry, list[ServiceCall]]:
     """Start Home Assistant the way it starts: the timer is set up from its file and
     the automation is added while it is not running, and the boiler's own integration
-    brings the boiler up, switched on, before Home Assistant announces that it has
-    started. Return the timer's entry and what the automation records."""
+    brings the boiler up, in the state `boiler`, before Home Assistant announces that
+    it has started. Return the timer's entry and what the automation records."""
     hass.set_state(CoreState.not_running)
     hass.states.async_remove(TARGET_ID)
     entry = await setup_target(stored=stored)
     records = await watch(hass, key, {"device_id": fake_target.device_id}, fields)
     assert records == []
-    await fake_target.set_state("on")
+    await fake_target.set_state(boiler)
     await hass.async_start()
     await hass.async_block_till_done()
     assert hass.state is CoreState.running
@@ -391,6 +432,30 @@ async def test_a_countdown_that_ended_while_down_triggers_once_at_start_up(
     await restart_after(hass, freezer, entry, minutes=5)
 
     assert len(records) == 1
+
+
+async def test_a_boiler_already_off_at_start_up_still_gets_the_expired_end(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler was switched off while Home Assistant was down, after its countdown
+    had run out. The automation still hears, once, that the countdown expired, and
+    nothing is sent to a boiler that is already off."""
+    _, records = await start_home_assistant(
+        hass,
+        fake_target,
+        setup_target,
+        "countdown_ended",
+        ["entity_id", "reason"],
+        payload(end=at(-5)),
+        boiler="off",
+    )
+
+    assert [record.data for record in records] == [
+        {"entity_id": NUMBER, "reason": "expired"}
+    ]
+    assert fake_target.calls == []
 
 
 async def test_a_command_that_came_due_while_down_triggers_at_start_up(

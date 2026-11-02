@@ -9,7 +9,7 @@ added, deleted or moved to another area needs no tracking.
 """
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, ClassVar, cast, override
+from typing import Any, ClassVar, cast, override
 
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers.target import (
@@ -52,8 +52,7 @@ class TimerEventTrigger(Trigger):
     def __init__(self, hass: HomeAssistant, config: TriggerConfig) -> None:
         """Keep the target as the automation names it, to be resolved at each event."""
         super().__init__(hass, config)
-        if TYPE_CHECKING:
-            assert config.target is not None
+        assert config.target is not None  # The schema requires a target.
         self._selection = TargetSelection(config.target)
 
     @override

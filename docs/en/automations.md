@@ -31,7 +31,7 @@ For example, to run the boiler for 20 minutes, pick **Run** and set **Minutes** 
 | --- | --- |
 | **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. |
 | **Countdown ended** | The countdown runs out, Timerify stops it, or the device is switched off outside Timerify. |
-| **Pending command came due** | A pending command is carried out at its time. A command that came too late after a restart does not fire it. The log names it. |
+| **Pending command came due** | A pending command is carried out at its time. A command to turn on whose run is already over does not fire it. |
 
 The [Modes](timers.md#modes) section explains **Loose** mode.
 
@@ -50,7 +50,7 @@ Every trigger gives the automation some variables. You can use them in condition
 The reason is one of three words:
 
 - `expired`: the countdown ran out.
-- `stopped`: Timerify stopped it. You set **Run for** to 0, used **Stop**, or pressed **Turn off**. A voice request or a pending command can stop it too.
+- `stopped`: Timerify stopped it. You set **Run for** to 0, used **Stop**, or pressed **Turn off**. A voice request or a pending command to turn off can stop it too.
 - `turned_off`: someone switched the device off outside Timerify, by hand or in its own app.
 
 The [Events](services.md#events) section lists every cause of `stopped`.
@@ -77,7 +77,7 @@ An automation that turns the device on again when its countdown ends should chec
 
 A countdown that ended while Home Assistant was down triggers **Countdown ended** once, when Home Assistant has started. The reason is `expired`. The device is turned off then, if it is still on. A countdown that still runs does not trigger again.
 
-A pending command that came due while Home Assistant was down triggers **Pending command came due** at that time too.
+A pending command that came due while Home Assistant was down triggers **Pending command came due** at that time too. The exception is a command to turn on whose run is already over. [Restarts and outages](pending-commands.md#restarts-and-outages) explains it.
 
 ## A device with two timers
 

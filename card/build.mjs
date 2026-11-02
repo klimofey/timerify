@@ -1,3 +1,4 @@
+// @ts-check
 // Bundles src/timerify-card.ts into the one ES module the integration serves.
 //
 //   node build.mjs           writes custom_components/timerify/frontend/timerify-card.js
@@ -22,6 +23,10 @@ const bundleFile = fileURLToPath(
  * whole file and drop what is not imported, but it names the identifiers of the bundle after
  * the letters its sources use most, and it counts the letters of the whole file. So a text
  * changed outside `common`, which the card never shows, would rename identifiers.
+ *
+ * The file is matched by its name, not by the path the card imports it from: the bundle test
+ * points that import at a copy named translations/en.json, and the copy has to be cut down the
+ * same way. Any module of that name is cut to `common`.
  * @returns {import("esbuild").Plugin}
  */
 function commonStringsOnly() {
@@ -41,11 +46,13 @@ function commonStringsOnly() {
 }
 
 /**
+ * Bundles `entryPoint` with the options of the script.
  * @param {string} entryPoint the module to bundle
- * @returns {import("esbuild").BuildOptions} the options of the build, the same for every caller
+ * @param {import("esbuild").Plugin[]} [extraPlugins] plugins that run before the script's own
+ * @returns {Promise<Uint8Array>} the bytes of the one file esbuild produces
  */
-export function bundleOptions(entryPoint) {
-  return {
+export async function buildBundle(entryPoint, extraPlugins = []) {
+  const { outputFiles } = await build({
     absWorkingDir: cardDirectory,
     entryPoints: [entryPoint],
     bundle: true,
@@ -56,20 +63,21 @@ export function bundleOptions(entryPoint) {
     charset: "utf8",
     sourcemap: false,
     write: false,
-    plugins: [commonStringsOnly()],
-  };
-}
-
-async function main() {
-  const { outputFiles } = await build(bundleOptions(entryPoint));
+    plugins: [...extraPlugins, commonStringsOnly()],
+  });
   const [bundle] = outputFiles;
   if (outputFiles.length !== 1 || bundle === undefined) {
     throw new Error(`Expected one output file, esbuild produced ${outputFiles.length}`);
   }
+  return bundle.contents;
+}
+
+async function main() {
+  const bundle = await buildBundle(entryPoint);
 
   if (process.argv.includes("--check")) {
     const committed = await readFile(bundleFile).catch(() => undefined);
-    if (committed === undefined || !Buffer.from(bundle.contents).equals(committed)) {
+    if (committed === undefined || !Buffer.from(bundle).equals(committed)) {
       console.error(
         `${bundleFile} is not what the sources in card/ build to: run npm --prefix card run build`,
       );
@@ -77,7 +85,7 @@ async function main() {
     }
   } else {
     await mkdir(dirname(bundleFile), { recursive: true });
-    await writeFile(bundleFile, bundle.contents);
+    await writeFile(bundleFile, bundle);
   }
 }
 

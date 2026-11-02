@@ -5,9 +5,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { build, type Plugin } from "esbuild";
+import type { Plugin } from "esbuild";
 import { beforeAll, describe, expect, it } from "vitest";
-import { bundleOptions } from "../build.mjs";
+import { buildBundle } from "../build.mjs";
 
 type Strings = Record<string, unknown>;
 
@@ -27,9 +27,8 @@ function readStringsFrom(file: string): Plugin {
 }
 
 /**
- * The fingerprint of the bundle the build script's own options give when the strings of the
- * card are `strings`. The file is written outside the repository, under the name the card
- * imports.
+ * The fingerprint of the bundle the build script makes when the strings of the card are
+ * `strings`. The file is written outside the repository, under the name the card imports.
  */
 async function bundleWith(strings: Strings): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "timerify-bundle-"));
@@ -37,16 +36,8 @@ async function bundleWith(strings: Strings): Promise<string> {
     const file = join(directory, "translations", "en.json");
     await mkdir(dirname(file));
     await writeFile(file, JSON.stringify(strings));
-    const options = bundleOptions(entryPoint);
-    const { outputFiles } = await build({
-      ...options,
-      plugins: [readStringsFrom(file), ...(options.plugins ?? [])],
-    });
-    const [bundle] = outputFiles ?? [];
-    if (outputFiles?.length !== 1 || bundle === undefined) {
-      throw new Error(`Expected one output file, esbuild produced ${outputFiles?.length}`);
-    }
-    return createHash("sha256").update(bundle.contents).digest("hex");
+    const bundle = await buildBundle(entryPoint, [readStringsFrom(file)]);
+    return createHash("sha256").update(bundle).digest("hex");
   } finally {
     await rm(directory, { recursive: true });
   }

@@ -15,7 +15,7 @@ A timer attaches a countdown to an entity you already have. A plain switch, such
 7. In Strict mode, set the default duration. It cannot be longer than the maximum.
 8. If your house has a Workday sensor, pick the one this timer follows, or leave it empty. Schedules use it.
 
-![The form that adds a timer: the entity, the mode and Count runtime](../screenshots/smoke-2-add-timer.png)
+![The form that adds a timer: the entity, the mode, Count runtime, Maximum of Run for and Turn off button](../screenshots/smoke-2-add-timer.png)
 
 The timer appears on the device page of the entity. The **Add integration** button on the Integrations tab lists Timerify too, as "Timerify (Helper)". The other item of the menu, **Voice settings**, sets up the voice sentences for Assist. The [Voice page](voice.md#use-the-voice-settings-entry) describes it.
 

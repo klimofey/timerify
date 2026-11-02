@@ -106,6 +106,39 @@ async def test_switching_the_boiler_on_by_hand_in_loose_mode_fires_nothing(
     assert fired == []
 
 
+async def test_a_loose_turn_on_inside_a_window_starts_a_countdown(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Loose mode gives a turn-on by hand no countdown, but inside a window the run has
+    one to the window's end, and that is a start: the event fires once, with the end.
+    The same turn-on after the window is over fires nothing, as it always did."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(mode="loose")
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    started = async_capture_events(hass, EVENT_COUNTDOWN_STARTED)
+
+    await fake_target.set_state("on")
+
+    assert [e.data for e in started] == [
+        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15")}
+    ]
+
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:20"))
+    fired = record_events(hass)
+
+    await fake_target.set_state("on")
+
+    assert fired == []
+
+
 async def test_the_end_of_the_countdown_fires_countdown_ended_expired(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,

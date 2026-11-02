@@ -157,9 +157,10 @@ expansion_rules:
   timerify_own_span: "({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})"
 # A clock time, which core_commands.yaml says after the command, before it, and after how
 # long it runs and the settings ("turn on the boiler at 7:30", "tomorrow at 7 turn on the
-# boiler", "turn on the AC for an hour at 7:30"). An hour from 1 to 12 with no "am", "pm"
-# or part of the day is the nearer of its two times, and the hour of 0 or 13 to 23 is that
-# of the 24-hour clock: the handler works that out. A part of the day is said after the
+# boiler", "turn on the AC for an hour at 7:30"). An hour from 1 to 12 with no "am", "pm",
+# part of the day or leading zero is the nearer of its two times, and the hour of 0 or 13
+# to 23, or one written with a leading zero ("07:30"), is that of the 24-hour clock: the
+# handler works that out from the text of the slot. A part of the day is said after the
 # time ("at 7 in the morning") or before it, with a day or "in the" ("tomorrow morning at
 # 7", "in the morning at 7").
 # After the settings of a thermostat or a water heater the time must not be a bare hour or

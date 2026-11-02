@@ -393,6 +393,46 @@ async def test_window_stopped_by_hand_is_stored_as_suppressed(
     )
 
 
+async def test_a_turn_on_inside_a_window_keeps_its_end_across_a_restart(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The boiler is switched on by hand at ten to seven, inside a window that ends at
+    quarter past, with a default duration of twenty minutes. The end the turn-on got is
+    on file as the user's own, and Home Assistant restarting leaves it where it was."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    await fake_target.set_state("on")
+    assert saved(hass_storage, entry) == payload(
+        end=iso(SUNDAY, "07:15"),
+        started_at=iso(SUNDAY, "06:50"),
+        windows=[
+            window_json(
+                interval,
+                local(SUNDAY, "06:30"),
+                local(SUNDAY, "07:15"),
+                started=True,
+                suppressed=True,
+            )
+        ],
+    )
+
+    await restart(hass, entry)
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert fake_target.calls == [TURN_ON]
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
 @pytest.mark.parametrize(
     ("stored", "complaint"),
     [

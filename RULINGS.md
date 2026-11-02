@@ -320,12 +320,14 @@ not repeated beside its successor.
   `unknown_command`**, so the snapshot stays the single source of truth. Cost if wrong:
   none.
 - **A loose-mode command to turn on without minutes that came due during downtime is
-  carried out however late.** An open run has no end, so "for whatever is left of it"
-  never runs out (§5.7), and P1 makes a command a firm promise: "turn the boiler on at
-  07:00" with Home Assistant back at 18:00 turns it on at 18:00, with no countdown.
-  Strict mode counts the default duration from the command's time, so a stale one is
-  dropped; a command to turn off is always carried out. Cost if wrong: a boiler started
-  hours late; the user can cancel the command, or give it minutes.
+  carried out however late, unless a schedule window was open at its time.** An open run
+  has no end, so "for whatever is left of it" never runs out (§5.7), and P1 makes a command
+  a firm promise: "turn the boiler on at 07:00" with Home Assistant back at 18:00 turns it
+  on at 18:00, with no countdown. Strict mode counts the default duration from the
+  command's time, so a stale one is dropped; a command to turn off is always carried out.
+  With a window open at the command's time the run lasts to the window's end in either
+  mode (`_open_run_end`, #58), so it is dropped when that has passed too. Cost if wrong: a
+  boiler started hours late; the user can cancel the command, or give it minutes.
 - **One alarm sits at `next_wakeup`, the earliest of the end, the first command, the start
   of every window not yet started and the end of every window**, and the core's `tick`
   (formerly `expire`) handles all four kinds of due items. One wake-up path for all of
@@ -347,7 +349,9 @@ not repeated beside its successor.
   "execute or drop" and "apply R3/R4" as separate steps, and skipping them would leave a
   strict target that is found on after a restart without a countdown. A realignment that
   stops the timer at start-up does count: it must hide R4 from the report of the same
-  observation, or a stopped strict target would get the default duration. Cost if wrong:
+  observation, or a stopped strict target would get the default duration. R4 and R5 end the run
+  that a turn-on by hand gets where `_open_run_end` says: the default duration in strict mode,
+  the end of the window that is open in either mode (#58). Cost if wrong:
   none found.
 - **The controller notifies the entities when `end`, `commands` or the switched-off
   intervals changed, and each entity gates its own write.** The "Next command" sensor must
@@ -388,10 +392,12 @@ only the final behaviour is written.
   zeroing during a started window keeps the target off until the next window: R3 (also
   when the timer was idle, so a loose target that someone switches off during a started
   window stays off), a stop from the card, Run for 0, the end of a manual run, an off
-  command, a realignment that stops. The timer is never handed to a suppressed window.
-  Why: R8 "manual wins", and a restart must behave like no restart. A window that starts
-  after the zeroing is not suppressed. Cost if wrong: a user who stops the boiler from the
-  card and expects a restart to bring the window back.
+  command, a realignment that stops. The timer is never handed to a suppressed window. A
+  turn-on that names no duration, after the zeroing, is the user's own run: it ends at the
+  window's end and leaves the mark where it is (#58). Why: R8 "manual wins", and a
+  restart must behave like no restart. A window that starts after the zeroing is not
+  suppressed. Cost if wrong: a user who stops the boiler from the card and expects a
+  restart to bring the window back.
 - **S1 judges "the target already runs" by the desired state, not by delivery.** At a
   window start the interval's settings are owed (turn-on only) only if the target is not
   wanted running as of that item: the fold's wish so far is "off", or, before any wish,
@@ -445,7 +451,10 @@ only the final behaviour is written.
   pushed; a window end hands the timer over before the timer's own end can end it, at that
   item's instant, and with no other window open it does nothing there, so a window that
   opens at that very instant extends the timer without an off. A timer someone changed is
-  never realigned. A realignment with nothing to change gets no effects, so it is
+  never realigned. The latest end among the windows that are open and started, suppressed
+  ones included, is also the end of a turn-on that names no duration (`_open_run_end`, #58);
+  that run is the user's, not the schedule's. A realignment with nothing to change gets no
+  effects, so it is
   idempotent; one that finds the end drifted from its window without an edit (possible
   only after the one-day cap, which the windows respect) pulls it back. This replaced the
   plan's "a realign to stop does not hand the timer to an overlapping window". Why: §5.5,
@@ -471,8 +480,9 @@ only the final behaviour is written.
   realignment follows, so the timer stops, or passes to another open window, at once. Cost
   if wrong: none.
 - **A loose open run is cut at a window's end when the window starts during it.** S1 sets
-  the timer, and a timer above zero means "off at zero" in loose mode. Cost if wrong:
-  loose users may expect the run to continue.
+  the timer, and a timer above zero means "off at zero" in loose mode. A loose turn-on
+  while a window is open gets the same cut from the start: a countdown to the window's end
+  (#58). Cost if wrong: loose users may expect the run to continue.
 - **A window is capped at `MAX_MINUTES`, and an occurrence that the change of the clock
   swallows is skipped; wall times convert with `fold=0`.** The spec is silent on a wall
   time that does not exist. zoneinfo's own rule, no private Home Assistant helpers: a time
@@ -675,7 +685,8 @@ those of the spec.
   command.** The first plan left these to core and let Timerify observe the change as a
   manual one; that was reversed because §5 R9 names "voice 'turn on X' routed to Timerify".
   On is R9 for a device that is off (loose mode: an open run; strict mode: the default
-  duration; a device that already runs keeps its countdown, see the next entry)
+  duration; while a schedule window is open, in either mode, a run to the window's end,
+  #58; a device that already runs keeps its countdown, see the next entry)
   and off sets the timer to zero and turns the target off, through the controller, as the
   services do, so an unavailable target keeps its wish (R10) and the answer is Timerify's. The phrasings are
   core's own name-only ones, so a phrasing with an area, a floor or a kind of device stays
@@ -696,7 +707,10 @@ those of the spec.
   running (`TimerCore.wanted_running`: a countdown that is not over, else the wish that the
   target has not confirmed yet, else the target last seen on; a target that is away while
   its countdown runs counts) keeps its countdown, or its run without one, in either mode.
-  R9 applies only to a target that is off, as before. The rule is in one place,
+  R9 applies only to a target that is off, as before. What it is for a target that is off
+  is `TimerCore._open_run_end`: the end of the window that is open, or the default duration
+  in strict mode if that ends later, or without a window the default duration in strict mode
+  and an open run in loose mode (#58). The rule is in one place,
   `TimerCore.run_open` and its twin for a pending command, and holds for every way of
   asking without a duration: "turn on the boiler" and the name alone, the tool
   `timerify__run` without hours and minutes, the service `timerify.run` without minutes,
@@ -1316,7 +1330,7 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   with the timer.** §6.3 asks for a fill that shows progress, which needs the length of the
   countdown. A restart keeps it. Cost if wrong: an attribute to keep in step with the card.
 - **`started_at` is written only by `_set_end(end, *, began, by=None)`:** the time of the set,
-  of R4 or of a strict bare run; a command's own time; a window's start, also when the window
+  of R4, of R5 inside a window or of a bare run; a command's own time; a window's start, also when the window
   extends a manual countdown (S1), which makes the fill full again; and, for adding time,
   subtracting it and the realignment of S2, the kept beginning, `_kept_beginning(at)`, which is
   `min(kept, at)` for the instant the writer works at (a bare run of a target that already runs
@@ -1422,8 +1436,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
 - **A tap opens the pop-up in both layouts, and a hold on the round layout runs the timer with
   no duration through `timerify.run`, or stops it while it runs; the pill has no hold.**
   `timerify.run` with no duration is R9: in strict mode the default duration, in loose mode an
-  open run, and a target that already runs keeps its countdown. A running timer, with or without
-  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
+  open run, in either mode the end of the schedule window that is open (in strict mode the
+  default duration instead, if that ends later), and a target that already runs keeps its
+  countdown. A running timer, with or without a countdown, is stopped by
+  `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
   press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
   uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
@@ -2497,8 +2513,9 @@ in `docs/followups.md`.
   the registry when the event is fired, so a renamed Run for is named by its new id.
   `ends_at` is the end in the form of the Ends at state: UTC, to the second.
   - **A start** is a timer with no end getting one (Run, Add time on an idle timer, Run for,
-    a strict-mode manual on, a pending "on", a window that opens on an idle timer). A loose
-    run without a countdown starts none. A move of a running end, however it is made (Run
+    a manual on in strict mode or inside a window, a pending "on", a window that opens on an
+    idle timer). A loose run without a countdown starts none; one inside a window has a
+    countdown to the window's end, and starts it. A move of a running end, however it is made (Run
     for, Add time, Run with minutes, a pending "on", a window that ends later), announces
     neither a start nor an end. The pending command that came due in the middle of it is
     still announced. A start that the same step moves, because more than one write of the
@@ -2849,12 +2866,28 @@ in `docs/followups.md`.
   `clock_minute`, `clock_part`, `clock_day`) would only confuse a model. Cost if wrong: a
   model that is shown a second way to plan a command at a time chooses between two tools
   that do the same.
-  - **Reading (owner's decision, 2026-11-02).** An hour from 1 to 12 said with no "am",
-    "pm" and no Russian word for a part of the day is the nearer of its two times ahead:
-    "at 7" at 18:00 is 19:00 today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow;
-    the same goes for "at 7:30". An hour of 0 or from 13 to 23 is on the 24-hour clock.
-    "Am" and "pm" and the Russian "utra", "dnya", "vechera" and "nochi" fix the half
-    (`hour_of_day`; "nochi" is the small hours for 1 to 5 and the evening for 6 to 11).
+  - **Reading (owner's decisions, 2026-11-02 and 2026-11-03, issue #57).** An hour from 1
+    to 12 said with no "am", "pm" and no Russian word for a part of the day, and written
+    with no leading zero, is the nearer of its two times ahead: "at 7" at 18:00 is 19:00
+    today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow; the same goes for "at 7:30"
+    and for an hour said in words ("seven thirty"). An hour of 0 or from 13 to 23 is on the
+    24-hour clock, and so is an hour written with a leading zero: "at 07:30" and "at 07"
+    are the next 07:30 and 07:00, today or tomorrow, whichever comes first, so "at 07:30" at
+    08:00 is 07:30 tomorrow, where "at 7:30" is 19:30 today. "Am" and "pm" and the Russian
+    "utra", "dnya", "vechera" and "nochi" fix the half (`hour_of_day`; "nochi" is the small
+    hours for 1 to 5 and the evening for 6 to 11) and win over the zero: "at 07:30 pm" and
+    "at 07 in the evening" are 19:30 and 19:00. "Written with a leading zero" is decided by
+    the text the sentence matched for the hour, which begins with "0" and has more than one
+    character ("007" and "012" count; "0" and "00" are the hour 0, on the 24-hour clock
+    already). hassil keeps that text beside the value, in the slot's `text`
+    (`{"value": 7, "text": "07"}`), and `ClockCommandHandler.when` passes the decision to
+    `clock_moment` as `zero`, which skips the nearer-of-two step as an hour of 0 or 13 to 23
+    does; the sentences are unchanged. An hour said in words has no zero, and a caller that
+    gives no text says no zero. Why: "07:30" is how the 24-hour clock is written, "pm" and
+    "am" say the 12-hour one, and a bare "7:30" says neither, so only that keeps the
+    nearer-of-two reading. Cost if wrong: a speaker who writes "07:30" meaning the evening
+    one, and leaves out "pm", hears tomorrow's 07:30 in the answer, and says "pm" or
+    drops the zero to get 19:30.
     With a day word the same rule works on that date, so "tomorrow at 7" is 07:00. Without
     one the time is the next, today or tomorrow, and a time equal to now is tomorrow. "Today"
     at a time that has passed is refused by the controller (`command_in_past`), since the
@@ -2865,20 +2898,24 @@ in `docs/followups.md`.
     the second 01:30 (`schedule.wall_moments`; a schedule window, which has no "now",
     still starts at the first). Cost if wrong: a speaker who says "at 7" at 18:00 meaning
     tomorrow morning hears "19:00" in the answer and must say "in the morning" or "am"
-    (Russian: "utra") to get 07:00. The answer always says the time that was chosen.
+    (Russian: "utra") to get 07:00, or write "07". The answer always says the time that was
+    chosen.
   - **The minutes after a separator are exactly two digits (the final review of part D).**
     After ":", "." or a space the minutes are "00" to "59": "at 7:05",
     "at 7.05" and "at 7 05" are 07:05, and "at 7.5" and "at 7:5" are not a time at all.
     Why: nobody writes 07:05 as "7.5", which reads as seven and a half if anything, and
     "turn on the AC at 22.5 for an hour" (a temperature said first) was planned for 22:05.
     The sources say the minutes with the rule `timerify_clock_minute`, the text list
-    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since a
-    range list reads "5" and "05" alike) or the number words `timerify_clock_minute_words`
-    (a range with `digits: false`, so spelled minutes work as before: "seven thirty"); both
-    fill `clock_minute`. In Russian the minutes said with their word ("v 7 chasov 5 minut")
-    keep the range `timerify_clock_minutes`, where one digit is no ambiguity. Minutes of
-    one digit spelled as words ("seven five") are unchanged. Cost if wrong: a person who
-    writes "7:5" is told that it was not understood, and nothing is kept. Tests:
+    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since
+    a range list matches "5" and "05" alike and gives the same `value` for both; the slot's
+    `text` keeps the characters, which is how the hour tells its zero, but only after the
+    match, and a minute of one digit must not match at all) or the number words
+    `timerify_clock_minute_words` (a range with `digits: false`, so spelled minutes work as
+    before: "seven thirty"); both fill `clock_minute`. In Russian the minutes said with
+    their word ("v 7 chasov 5 minut") keep the range `timerify_clock_minutes`, where one
+    digit is no ambiguity. Minutes of one digit spelled as words ("seven five") are
+    unchanged. Cost if wrong: a person who writes "7:5" is told that it was not
+    understood, and nothing is kept. Tests:
     `test_a_minute_of_one_digit_after_a_separator_is_no_time`,
     `test_a_temperature_said_before_how_long_is_no_time_of_day`,
     `test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs`,
@@ -2947,11 +2984,11 @@ in `docs/followups.md`.
     AC for an hour at 21" stays a run at 21 degrees), so in the `climate` and `water_heater`
     blocks of `TimerifyRun` the rule `timerify_clock_after_extras` is
     `<timerify_exact_clock>`: a time with minutes, "o'clock", "am" or "pm", "noon" or
-    "midnight", not a bare hour or "H.MM". The generator copies that override into the
-    clock blocks of those scopes (`Scope.rules`). Before the settings, and in every other
-    block, any form works. Russian needs no override: it says a time with "v" and a
-    temperature with "na" or nothing. Cost if wrong: "turn on the AC for an hour at 7"
-    sets 7 degrees, as it did.
+    "midnight", not a bare hour (written "7" or "07") or "H.MM". The generator copies that
+    override into the clock blocks of those scopes (`Scope.rules`). Before the settings,
+    and in every other block, any form works. Russian needs no override: it says a time
+    with "v" and a temperature with "na" or nothing. Cost if wrong: "turn on the AC for an
+    hour at 7" sets 7 degrees, as it did.
   - **The generator writes the blocks of both intents with one function.** `timed_sentences`
     (which replaced `delayed_sentences`) says the command with the time after it, for a
     command to turn on also with the settings first and the time after them, and with the
@@ -2981,6 +3018,15 @@ in `docs/followups.md`.
   `test_a_bare_hour_said_early_is_that_hour_this_morning`,
   `test_an_hour_past_twelve_is_a_24_hour_clock`,
   `test_tomorrow_with_a_bare_hour_is_the_morning_one`,
+  `test_an_hour_with_a_leading_zero_is_the_morning`,
+  `test_a_part_of_the_day_wins_over_a_leading_zero`,
+  `test_tomorrow_at_an_hour_with_a_leading_zero_is_the_morning_one`,
+  `test_today_at_an_hour_with_a_leading_zero_that_has_passed_is_refused`,
+  `test_hour_zero_and_an_hour_said_in_words_are_unchanged`,
+  `test_the_text_of_the_hour_tells_whether_it_was_written_with_a_zero`,
+  `test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock`,
+  `test_a_thermostat_reads_a_leading_zero_in_a_time_after_its_settings`,
+  `test_a_bare_hour_after_the_settings_is_no_time_with_a_zero_either`,
   `test_a_clock_time_already_past_today_means_tomorrow`,
   `test_today_at_a_time_that_has_passed_is_refused`,
   `test_a_wall_time_the_clock_skips_happens_an_hour_later`,
@@ -3711,3 +3757,95 @@ in `docs/followups.md`.
   last card loaded`, which also keeps the option names in the language of the last card, and
   `words the helpers in English until the editor's strings have reached the frontend`) and
   `tests/test_translations.py::test_card_strings_name_their_own_language`.
+
+## Release 1.1.1
+
+The decisions of the 1.1.1 release (`docs/superpowers/specs/2026-11-03-release-1.1.1-design.md`),
+in the form they have now. What is still open is a GitHub issue of klimofey/timerify, listed
+in `docs/followups.md`.
+
+### Engine and reliability
+
+- **A turn-on that names no duration, while a schedule window is open, runs to the window's
+  end (#58, the owner's rule).** `TimerCore._open_run_end(at)` is the one place that says
+  how long such a run lasts. `latest` is the latest end of the windows that are open at `at`
+  (their start has been folded and `at` is inside them), or none. Strict mode: the later of
+  `at` plus the default duration and `latest`, so the window never shortens a run. Loose
+  mode: `latest`, and with no window open none, a run without a countdown as before. With
+  overlapping windows the end is the latest of them. A duration that is named is kept.
+  After the window the turn-on is what it always was. This replaced the spec's S5 (the
+  original design, "Assistant's call"): the window does not stretch a run that someone
+  started by hand. Tests:
+  `test_a_turn_on_by_hand_inside_a_window_runs_to_its_end`,
+  `test_a_default_duration_that_ends_later_than_the_window_is_kept`,
+  `test_a_loose_turn_on_inside_a_window_gets_a_countdown_to_its_end`,
+  `test_a_turn_on_inside_overlapping_windows_runs_to_the_latest_end` and
+  `test_a_turn_on_after_the_window_has_ended_is_unchanged` (entity level), and
+  `test_manual_on_during_a_window_runs_to_its_end` with its neighbours in `test_core.py`.
+  Cost if wrong: a user who wants the default duration inside a window says "for N
+  minutes", or sets Run for.
+- **Every turn-on that names no duration follows the rule, not only one by hand at the
+  device.** The wall switch and the device's app (R4, R5: `_follow_external_change`), a bare
+  "turn on the boiler" to Assist, the card's run, the `timerify.run` action and the Run
+  entity without minutes (R9: `run_open`), and a pending "on" without minutes when it falls
+  due (`_command_end`) are one kind of act (R9, above), and a person expects the same result
+  from the switch on the wall and from "turn on the boiler". A late command is judged by the
+  window that was open at its time, so one whose window has ended too is dropped, as a
+  command with minutes is. A target found on at start-up, or back from unavailable as on,
+  goes through the same path as one switched on from outside, as it did (the start-up
+  report), so a loose target found on without a countdown inside a window now gets one. A
+  window that starts in the instant of the report still sets the timer first, and the
+  report is not followed (the catch-up rule of phase 2). Tests:
+  `test_run_open_inside_a_window_runs_to_its_end`,
+  `test_a_command_to_turn_on_without_minutes_inside_a_window_runs_to_its_end`,
+  `test_a_late_command_to_turn_on_runs_to_the_end_of_the_window_it_fell_in`,
+  `test_a_late_command_whose_window_has_ended_too_is_dropped`,
+  `test_a_target_found_on_inside_a_window_runs_to_its_end`,
+  `test_a_report_as_a_window_opens_leaves_the_window_in_charge`,
+  `test_a_bare_run_inside_a_window_runs_to_its_end` and
+  `test_a_pending_turn_on_without_minutes_inside_a_window_runs_to_its_end`. Cost if wrong:
+  a bare "turn on" to Assist inside a window runs longer than the default duration, as the
+  switch on the wall does.
+- **The run stays the user's.** The end is written with `by=None`: `scheduled_by` stays
+  None (S3), so the window only decides how long the run is. Editing, deleting or switching
+  off the interval later does not move it, and the end of the window inside the run leaves
+  it as it is; schedules rule 3 stays true as written, a turn-on is a change of yours.
+  Nothing else changes: `_realign`, `_start_window` and the store are as they were, and no
+  stored field is added, so there is no migration. The other reading, that the schedule
+  carries the run (a third writer passing `by`, so that S2 follows edits), needed the
+  suppressed marks of the carrying windows cleared or another filter in `_realign`, and
+  made a turn-on no longer a change of the user's. Tests:
+  `test_editing_the_interval_leaves_a_turn_on_inside_its_window_alone`,
+  `test_deleting_or_switching_off_the_interval_leaves_a_turn_on_alone` and
+  `test_a_turn_on_inside_a_window_keeps_its_end_across_a_restart`. Cost if wrong: a user
+  who edits the interval after turning the boiler on, and expects the run to follow it,
+  turns the boiler on again.
+- **Suppressed windows count for the end.** Rule 4 holds the target off after a manual off,
+  it does not close the window: a window that was started and is still active counts
+  whether or not a zeroing suppressed it, and the mark stays as it is. Without that the
+  rule would not hold after a manual off, which is when a turn-on by hand inside a window
+  happens. Test: `test_a_turn_on_after_a_manual_off_in_the_same_window_runs_to_its_end` and
+  `test_manual_on_after_a_manual_off_in_a_window_runs_to_its_end`. Cost if wrong: none
+  found.
+- **A loose run that gets a countdown from a window is a countdown like any other.** "Ends
+  at" shows it and the "Countdown started" trigger and the `timerify_countdown_started`
+  event fire, once, with the window's end (a start is a timer with no end getting one);
+  the run ends with "Countdown ended", reason `expired`. A loose turn-on outside a window
+  starts none, as before. Test: `test_a_loose_turn_on_inside_a_window_starts_a_countdown`.
+  Cost if wrong: an automation on "Countdown started" runs for a loose boiler that someone
+  turned on inside a window.
+
+### Voice
+
+- **An hour written with a leading zero is the morning (#57, the owner's decision of
+  2026-11-03).** The ruling was rewritten in place, in the "Reading (owner's decisions,
+  2026-11-02 and 2026-11-03, issue #57)" entry of the clock commands under Release 1.1.0,
+  `### Voice`, because it replaced the reading of 2026-11-02; read it there. The two
+  changes of this release meet in "turn on the boiler at 07", a pending turn-on that names
+  no length of time: the hour decides only when the command falls due (`Command.at`), and
+  the window rule above decides only how long it then runs (`_open_run_end`), so neither
+  reads the other. A bare "turn on the boiler" to Assist follows the window rule like any
+  other bare turn-on. Tests (`tests/voice/test_turn_on_inside_a_window.py`):
+  `test_a_bare_turn_on_inside_a_window_runs_to_its_end` and
+  `test_a_turn_on_at_a_clock_time_inside_a_window_runs_to_its_end`. Cost if wrong: none
+  found.

@@ -73,7 +73,7 @@ The Russian column is transliterated because this page is in English. The real s
 **Turn on or off by name**
 
 - These are the bare "turn on the boiler" and "turn off the boiler". For a device that has a timer, they are Timerify's commands, not Home Assistant's.
-- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one.
+- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one. While a schedule window is open, both modes run it to the end of the window instead. In **Strict** mode the default duration is kept when it ends later.
 - Turning on a device that is running leaves it as it is. Its countdown keeps its end, whoever set it. The answer says how long is left.
 - Turning off stops the countdown.
 - A device that is unavailable keeps what you asked for. It is switched when it is back.
@@ -104,9 +104,11 @@ The Russian column is transliterated because this page is in English. The real s
 - "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
 - You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
 - In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
-- An hour from 1 to 12 without any of these is the nearer of its two times ahead. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
+- Without any of these, an hour from 1 to 12 is the nearer of its two times ahead. That holds for "7", "7:30" and "seven thirty", which have no leading zero. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
 - With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
 - The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
+- An hour written with a leading zero is on the 24-hour clock too. "At 07:30" and "at 07" are the next 07:30 and 07:00, whichever comes first, today or tomorrow. Said at 08:00, "at 07:30" means 07:30 tomorrow, but "at 7:30" means 19:30 today. When you speak, your speech recognition decides whether the hour is written with a zero. When you type "07", the zero counts. A part of the day can still decide, as the next point says.
+- If you say "am", "pm" or a part of the day, it decides, and the zero does not matter. "At 07:30 pm" is 19:30, and "at 07 in the evening" is 19:00.
 - "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
 - With a day word, "midnight" is the one that ends that day. "Today at midnight" is tonight's 00:00, and "tomorrow at midnight" is the one after tomorrow. "Tomorrow at 12 am" and "tomorrow at 0:00" are the start of tomorrow.
 - With a day word, the small hours said with "night" belong to the night that follows that day. That means "at night" or "night" with the hours 12 and 1 to 5. "Tomorrow night at 2" and "tomorrow at 2 at night" are 02:00 the day after tomorrow. "Tomorrow night at 12" is the same as "tomorrow at midnight". "Today at 2 at night" is the coming 02:00. Said before 06:00, it is the night in progress while that time is ahead: at 00:30 it is 02:00 today. "Tomorrow at 2 am" is 02:00 tomorrow, and "tomorrow night at 11" is 23:00 tomorrow.
@@ -114,7 +116,7 @@ The Russian column is transliterated because this page is in English. The real s
 - A time that the change of the clock skips happens later by the length of the gap, as in [the schedules](schedules.md#clock-changes-and-time-zones). A time that it repeats happens twice. Timerify takes the first of the two that is still ahead.
 - A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer names the limit.
-- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
+- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour ("at 7" or "at 07") and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
 
 **What is planned**
 
@@ -243,7 +245,7 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 | Tool | What it does |
 | --- | --- |
 | `timerify__time_left` | Tells how long is left, and when the device turns off. Or that it is off, unavailable, or on without a timer. |
-| `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, and a device that is running keeps its countdown. |
+| `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, or to the end of a schedule window that is open. A device that is running keeps its countdown. |
 | `timerify__add_time` | Adds hours and minutes to the countdown. |
 | `timerify__stop` | Stops the timer and turns the device off. |
 | `timerify__delayed_command` | Plans to turn on or off later. You give a delay in weeks, days, hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |

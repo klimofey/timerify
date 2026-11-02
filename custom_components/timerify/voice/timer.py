@@ -52,9 +52,10 @@ class RunHandler(TimerifyIntentHandler):
     """Turn on the boiler for 45 minutes: turn the target on, with the settings it
     takes, and count the time down. With a duration it replaces the countdown that was
     there, so it is destructive. Without one it is the bare turn-on of R9: a target
-    that is off runs for the default duration (strict mode) or without a countdown
-    (loose mode), and one that is wanted running keeps its countdown; either way the
-    answer says how it stands."""
+    that is off runs to the end of the schedule window that is open, if one is (#58;
+    strict mode keeps the default duration when it ends later), otherwise for the
+    default duration (strict mode) or without a countdown (loose mode). One that is
+    wanted running keeps its countdown; either way the answer says how it stands."""
 
     intent_type = "TimerifyRun"
     tool_name = "timerify__run"
@@ -63,8 +64,9 @@ class RunHandler(TimerifyIntentHandler):
         "Turns a device on and runs its Timerify timer: the device turns off by itself"
         " when the time is up. 'hours' and 'minutes' add up to how long, from 1 minute"
         " to 24 hours; give neither to turn a device that is off on for its usual"
-        " time, or without a timer, while a device that is already running keeps its"
-        " timer and the result says how long is left. Settings are optional, and a"
+        " time, or without a timer, or to the end of a schedule window that is open,"
+        " while a device that is already running keeps its timer and the result says"
+        " how long is left. Settings are optional, and a"
         " device takes only its own: 'hvac_mode' and 'temperature' of a thermostat,"
         " 'fan_mode' of a thermostat, 'preset_mode' of a fan, 'operation_mode' and"
         " 'temperature' of a water heater, 'brightness_pct' of a light, 'percentage'"

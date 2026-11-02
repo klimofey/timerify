@@ -20,6 +20,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.timerify.const import (
     MAX_MINUTES,
     WINDOW_SEARCH_DAYS,
+    Mode,
     freeze_settings,
 )
 from custom_components.timerify.core import Window
@@ -58,6 +59,7 @@ from .helpers import (
     restart_after,
     saved,
     set_number,
+    set_switch,
     state_of,
     timerify_info,
     timerify_warnings,
@@ -643,7 +645,7 @@ async def test_interval_added_during_its_window_starts_now(
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
-# --- By hand, and across restarts (S4, S5, §5.7) -----------------------------------
+# --- By hand, and across restarts (S4, §5.7) -----------------------------------
 
 
 async def test_manual_off_keeps_the_boiler_off_until_the_next_window_across_a_restart(
@@ -678,17 +680,42 @@ async def test_manual_off_keeps_the_boiler_off_until_the_next_window_across_a_re
     assert state_of(hass, SENSOR) == iso(MONDAY, "07:15")
 
 
-async def test_manual_on_during_a_window_runs_the_default_duration(
+async def test_a_turn_on_by_hand_inside_a_window_runs_to_its_end(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """S5: after switching the boiler off, switching it on again at ten to seven is an
-    ordinary manual start, which runs for the default 45 minutes, not to the end of the
-    window."""
+    """The boiler is switched off at twenty to seven and on again at ten to seven, with
+    the window open to quarter past and a default duration of twenty minutes: it runs
+    to the end of the window, not to ten past seven."""
     await open_sunday(hass, freezer)
-    entry = await setup_target()
+    entry = await setup_target(default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+
+    await fake_target.set_state("on")
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, NUMBER) == "25"
+    await advance_to(hass, freezer, local(SUNDAY, "07:10"))
+    assert state_of(hass, TARGET_ID) == "on"
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_a_default_duration_that_ends_later_than_the_window_is_kept(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The same turn-on at ten to seven with the default duration of 45 minutes: the
+    window does not shorten it, so the boiler runs to 07:35."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=45)
     await add_interval(hass, entry, start="06:30", end="07:15")
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
     await advance_to(hass, freezer, local(SUNDAY, "06:40"))
@@ -701,6 +728,218 @@ async def test_manual_on_during_a_window_runs_the_default_duration(
     await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     assert fake_target.calls == [TURN_ON]
     await advance_to(hass, freezer, local(SUNDAY, "07:35"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_a_turn_on_after_a_manual_off_in_the_same_window_runs_to_its_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Rule 4 holds the boiler off after a manual off, but it does not take the window
+    away: the boiler stays off until it is switched on, and then it runs to the end of
+    the window, which turns it off."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "off"
+
+    await fake_target.set_state("on")
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_a_loose_turn_on_inside_a_window_gets_a_countdown_to_its_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """In Loose mode a turn-on by hand has no countdown of its own, but inside a window
+    it gets one to the window's end, where Timerify turns the boiler off."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(mode="loose")
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    assert state_of(hass, SENSOR) == "unknown"
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+
+    await fake_target.set_state("on")
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, NUMBER) == "25"
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_a_turn_on_inside_overlapping_windows_runs_to_the_latest_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """From 06:30 to 07:15 and from 06:45 to 07:40: a turn-on by hand at five to seven
+    runs to 07:40, the later of the two ends."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await add_interval(hass, entry, start="06:45", end="07:40")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:45"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:55"))
+
+    await fake_target.set_state("on")
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:40")
+    await advance_to(hass, freezer, local(SUNDAY, "07:40"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+@pytest.mark.parametrize(
+    ("mode", "ends_at"),
+    [("strict", iso(SUNDAY, "07:40")), ("loose", "unknown")],
+)
+async def test_a_turn_on_after_the_window_has_ended_is_unchanged(
+    mode: Mode,
+    ends_at: str,
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Once the window is over a turn-on by hand is as it always was: the default
+    duration of twenty minutes in Strict mode, no countdown in Loose mode."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(mode=mode, default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    await advance_to(hass, freezer, local(SUNDAY, "07:20"))
+
+    await fake_target.set_state("on")
+
+    assert state_of(hass, SENSOR) == ends_at
+
+
+async def test_a_bare_run_inside_a_window_runs_to_its_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Run without minutes is the same turn-on as the wall switch makes, so it runs to
+    the end of the window too. Run for five minutes keeps the five minutes it names."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+
+    await call_service(hass, "run", {"entity_id": NUMBER})
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+    await fake_target.set_state("off")
+    await call_service(hass, "run", {"entity_id": NUMBER}, minutes=5)
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "06:55")
+
+
+async def test_a_pending_turn_on_without_minutes_inside_a_window_runs_to_its_end(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A command to turn the boiler on at ten to seven, with no minutes, runs it to the
+    end of the window when it comes due."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await add_command(hass, NUMBER, action="on", at="2026-01-04 06:50:00")
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert fake_target.calls == [TURN_ON, TURN_ON]
+
+
+async def test_editing_the_interval_leaves_a_turn_on_inside_its_window_alone(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The run that a turn-on by hand got is a change of yours (rule 3), so moving the
+    end of the window later does not move the end of the run."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    await fake_target.set_state("on")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+    await edit_interval(hass, entry, interval, end="07:30")
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+@pytest.mark.parametrize("how", ["delete", "switch_off"])
+async def test_deleting_or_switching_off_the_interval_leaves_a_turn_on_alone(
+    how: str,
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The run that a turn-on by hand got is yours (rule 3) whatever becomes of the
+    interval: deleting it, or switching it off, leaves the end as it was and the
+    boiler running until then."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    await fake_target.set_state("on")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+    if how == "delete":
+        hass.config_entries.async_remove_subentry(entry, interval)
+        await hass.async_block_till_done()
+    else:
+        await set_switch(hass, "switch.boiler_schedule_06_30_07_15_mon_sun", False)
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, TARGET_ID) == "on"
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 

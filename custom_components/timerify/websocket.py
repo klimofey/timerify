@@ -96,8 +96,10 @@ class TimerInfo(TypedDict):
     target: str
     mode: Mode
     default_duration: int | None
-    """The minutes a bare run lasts in strict mode; none in loose mode, where a bare
-    run has no end."""
+    """The minutes a bare run lasts in strict mode when no schedule window is open;
+    none in loose mode, where such a run has no end. A window that is open ends a bare
+    run at its own end instead, and in strict mode a default duration that ends later
+    is kept."""
     ends_at: str
     """The entity id of the "Ends at" sensor, which every timer that was set up has."""
     next_command: str

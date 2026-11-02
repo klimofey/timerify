@@ -131,10 +131,11 @@ expansion_rules:
   timerify_own_delay: "через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})"
 # A clock time, which core_commands.yaml says after the command, before it, and after how
 # long it runs and the settings. An hour from 1 to 12 with no word for the part of the
-# day is the nearer of its two times, and the hour of 0 or 13 to 23 is that of the 24-hour
-# clock: the handler works that out. A time is said with "в" and a temperature with "на",
-# so the time after the settings of a thermostat needs no narrower rule than the one after
-# the command.
+# day and no leading zero is the nearer of its two times, and the hour of 0 or 13 to 23,
+# or one written with a leading zero ("в 07:30"), is that of the 24-hour clock: the
+# handler works that out from the text of the slot. A time is said with "в" and a
+# temperature with "на", so the time after the settings of a thermostat needs no narrower
+# rule than the one after the command.
 # The minutes after a separator are two digits (timerify_clock_minute), so that "в 7.5"
 # is no time.
   timerify_clock_after_command: "<timerify_clock>"

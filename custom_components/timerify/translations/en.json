@@ -320,11 +320,11 @@
     },
     "run": {
       "name": "Run",
-      "description": "Turns the entity on, for the minutes given. Without minutes, an entity that is off runs for the default duration in strict mode and without a countdown in loose mode, and one that is already running keeps its countdown. The settings given are applied if the entity supports them.",
+      "description": "Turns the entity on, for the minutes given. Without minutes, an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. One that is already running keeps its countdown. The settings given are applied if the entity supports them.",
       "fields": {
         "minutes": {
           "name": "Minutes",
-          "description": "How long to run, in whole minutes, up to a day. Without it an entity that is off runs for the default duration in strict mode and without a countdown in loose mode, and one that is already running keeps its countdown."
+          "description": "How long to run, in whole minutes, up to a day. Without it an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. One that is already running keeps its countdown."
         },
         "hvac_mode": {
           "name": "HVAC mode",
@@ -391,7 +391,7 @@
         },
         "minutes": {
           "name": "Minutes",
-          "description": "How long a command to turn on runs, in whole minutes, up to a day. Without it the entity runs for the default duration in strict mode and without a countdown in loose mode. A command to turn off takes none."
+          "description": "How long a command to turn on runs, in whole minutes, up to a day. Without it the entity runs to the end of the schedule window that is open then, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. A command to turn off takes none."
         },
         "hvac_mode": {
           "name": "HVAC mode",

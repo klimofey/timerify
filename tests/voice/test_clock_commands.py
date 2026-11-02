@@ -8,12 +8,15 @@ a Russian letter.
 
 An hour from 1 to 12 said with no "am", "pm" or Russian word for the time of day is the
 nearer of its morning and evening times that is still ahead (the owner's decision of
-2026-11-02); the hour of 0 or from 13 to 23 is that of the 24-hour clock.
+2026-11-02); the hour of 0 or from 13 to 23 is that of the 24-hour clock, and so is an
+hour written with a leading zero, "07:30" (the owner's decision of 2026-11-03). A part
+of the day still chooses the half.
 """
 
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
@@ -21,11 +24,16 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.timerify.voice.commands import DayPart, hour_of_day
+from custom_components.timerify.voice.commands import (
+    DayPart,
+    clock_moment,
+    hour_of_day,
+)
 
 from ..conftest import FakeTarget, SetupTarget
 from ..helpers import (
     AC_NEXT,
+    JERUSALEM,
     NEXT,
     NUMBER,
     SENSOR,
@@ -47,6 +55,7 @@ from .helpers import (
     refusal_of,
     samples,
     speech,
+    spoken_number,
     spoken_rule,
     spoken_values,
     translated,
@@ -154,6 +163,43 @@ def russian_form(
     ]
     assert len(forms) == 1, (pattern, forms)
     return forms[0]
+
+
+def clock_sentence(
+    language: str, time: str, *, day: str | None = None, part: str | None = None
+) -> str:
+    """The sentence that turns the Boiler on at `time` in `language`, with the hour
+    written as `time` writes it: "7:30", "07:30", "07".
+
+    `day` is a value of the list of days ("0" today, "1" tomorrow) and `part` a word of
+    the list of parts of the day, both said as the shipped files say them. Russian is
+    read from the shipped sentences, which the sampler can only fill with an hour as a
+    plain number, so the hour is written as `time` writes it afterwards.
+    """
+    if language == "en":
+        said = "turn on the boiler"
+        if day is not None:
+            said += f" {spoken_values('en', 'timerify_clock_days')[day][0]}"
+        said += f" at {time}"
+        return said if part is None else f"{said} {part}"
+    hour, separator, minutes = time.partition(":")
+    plain = f"{int(hour)}{separator}{minutes}"
+    numbers = {
+        **NUMBERS,
+        "timerify_clock_hours": int(hour),
+        "timerify_half_day_hours": int(hour),
+    }
+    texts: dict[str, str] = {}
+    pattern = rf"\S+ {re.escape(plain)}"
+    if day is not None:
+        day_word = spoken_values("ru", "timerify_clock_days")[day][0]
+        texts["timerify_clock_days"] = day_word
+        pattern = rf"{re.escape(day_word)} {pattern}"
+    if part is not None:
+        texts["timerify_day_parts"] = part
+        pattern += rf" {re.escape(part)}"
+    form = russian_form(pattern, numbers, texts)
+    return turn_on_at("ru", form.replace(plain, time, 1))
 
 
 # --- The forms of English ----------------------------------------------------------
@@ -475,6 +521,51 @@ async def test_a_thermostat_takes_an_exact_time_after_its_settings(
 
 
 @pytest.mark.usefixtures("assist")
+async def test_a_thermostat_reads_a_leading_zero_in_a_time_after_its_settings(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """After the settings "07:30" is a time as "7:30" is, and it is the morning one."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+    await advance_to(hass, freezer, local(SUNDAY, "08:00"))
+
+    response = await converse(hass, "turn on the AC for an hour at 07:30")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, AC_NEXT) == at(MONDAY, "07:30")
+    assert fake_full_ac.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize("hour", ["7", "07"])
+async def test_a_bare_hour_after_the_settings_is_no_time_with_a_zero_either(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    hour: str,
+) -> None:
+    """A zero does not make a bare number after the settings of a thermostat a time: it
+    stays what it was before there were clock times, the temperature, and nothing is
+    kept. The AC takes 16 to 30 degrees, so 7 is refused as a temperature, which is
+    how it shows that it was read as one."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, f"turn on the AC for an hour at {hour}")
+
+    assert reached(response) == RUN, speech(response)
+    assert refusal_of(response) == (
+        "7 is not a valid Temperature: it must be between 16 and 30."
+    )
+    assert fake_full_ac.call_data == []
+    assert state_of(hass, AC_NEXT) == "unknown"
+
+
+@pytest.mark.usefixtures("assist")
 @pytest.mark.parametrize(
     "said",
     [
@@ -659,6 +750,141 @@ async def test_tomorrow_with_a_bare_hour_is_the_morning_one(
     assert {reached(tomorrow), reached(today)} == {CLOCK}
     assert first == at(MONDAY, "07:00")
     assert second == at(SUNDAY, "19:00")
+
+
+# --- The reading of an hour written with a leading zero (the owner's decision) -----
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+@pytest.mark.parametrize(
+    ("now", "time", "days", "clock"),
+    [
+        ("08:00", "07:30", 1, "07:30"),
+        ("08:00", "7:30", 0, "19:30"),
+        ("08:00", "07", 1, "07:00"),
+        ("08:00", "7", 0, "19:00"),
+        ("06:00", "07", 0, "07:00"),
+        ("06:00", "07:30", 0, "07:30"),
+        ("20:00", "07", 1, "07:00"),
+        ("20:00", "07:30", 1, "07:30"),
+    ],
+)
+async def test_an_hour_with_a_leading_zero_is_the_morning(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    language: str,
+    now: str,
+    time: str,
+    days: int,
+    clock: str,
+) -> None:
+    """Written "07:30" or "07" the hour is on the 24-hour clock, so at eight in the
+    morning it is tomorrow's 07:30, not tonight's 19:30. Written "7:30" or "7" it is the
+    nearer of its morning and evening times, as before."""
+    said = clock_sentence(language, time)
+
+    response = await say_at(hass, freezer, SUNDAY, now, said, language)
+
+    assert reached(response) == CLOCK, said
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+    assert clock in speech(response)
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+@pytest.mark.parametrize(("time", "clock"), [("07:30", "19:30"), ("07", "19:00")])
+async def test_a_part_of_the_day_wins_over_a_leading_zero(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    language: str,
+    time: str,
+    clock: str,
+) -> None:
+    """The evening is the evening whether the hour is written "07" or "7": said at eight
+    in the morning, "07:30 pm" and "07 in the evening" are tonight's, with every word
+    that means the afternoon or the evening."""
+    words = spoken_values(language, "timerify_day_parts")["pm"]
+    assert words
+
+    for word in words:
+        said = clock_sentence(language, time, part=word)
+        response = await say_at(hass, freezer, SUNDAY, "08:00", said, language)
+
+        assert reached(response) == CLOCK, said
+        assert state_of(hass, NEXT) == at(SUNDAY, clock), said
+        await cancel_pending(hass, NUMBER, NEXT)
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_tomorrow_at_an_hour_with_a_leading_zero_is_the_morning_one(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    language: str,
+) -> None:
+    said = clock_sentence(language, "07", day="1")
+
+    response = await say_at(hass, freezer, SUNDAY, "08:00", said, language)
+
+    assert reached(response) == CLOCK, said
+    assert state_of(hass, NEXT) == at(MONDAY, "07:00")
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_today_at_an_hour_with_a_leading_zero_that_has_passed_is_refused(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    language: str,
+) -> None:
+    """At eight in the morning "today at 07:30" is a time that has passed: it is not
+    moved to tonight's 19:30 as "today at 7:30" is, and nothing is kept."""
+    said = clock_sentence(language, "07:30", day="0")
+
+    response = await say_at(hass, freezer, SUNDAY, "08:00", said, language)
+
+    assert reached(response) == CLOCK, said
+    assert refusal_of(response) == translated(
+        language, "exceptions", "command_in_past", "message"
+    ).format(at="07:30")
+    assert state_of(hass, NEXT) == "unknown"
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("language", ["en", "ru"])
+async def test_hour_zero_and_an_hour_said_in_words_are_unchanged(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    language: str,
+) -> None:
+    """The hour 0 was on the 24-hour clock already: "00:30" is the next half past
+    midnight. An hour said as a word has no digits to start with a zero, so "seven
+    thirty" is still the nearer of 07:30 and 19:30."""
+    midnight = await say_at(
+        hass, freezer, SUNDAY, "08:00", clock_sentence(language, "00:30"), language
+    )
+
+    assert reached(midnight) == CLOCK, speech(midnight)
+    assert state_of(hass, NEXT) == at(MONDAY, "00:30")
+    await cancel_pending(hass, NUMBER, NEXT)
+    if language == "en":
+        sentences = ["turn on the boiler at seven thirty"]
+    else:
+        sentences = [
+            clock_sentence("ru", "7:30").replace("7:30", f"{word} 30")
+            for word in spoken_number("ru", 7)
+        ]
+    assert sentences
+    for said in sentences:
+        response = await say_at(hass, freezer, SUNDAY, "08:00", said, language)
+
+        assert reached(response) == CLOCK, said
+        assert state_of(hass, NEXT) == at(SUNDAY, "19:30"), said
+        await cancel_pending(hass, NUMBER, NEXT)
 
 
 @pytest.mark.parametrize(
@@ -1438,6 +1664,64 @@ async def test_noon_and_midnight_are_the_only_times_with_no_hour(
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
 
 
+@pytest.mark.parametrize(
+    ("hour", "text", "now", "days", "clock"),
+    [
+        (7, "07", "08:00", 1, "07:00"),
+        (7, "007", "08:00", 1, "07:00"),
+        (7, " 07", "08:00", 1, "07:00"),
+        (7, "7", "08:00", 0, "19:00"),
+        (7, "seven", "08:00", 0, "19:00"),
+        (7, None, "08:00", 0, "19:00"),
+        (12, "012", "20:00", 1, "12:00"),
+        (12, "12", "20:00", 1, "00:00"),
+        (0, "0", "08:00", 1, "00:00"),
+        (0, "00", "08:00", 1, "00:00"),
+    ],
+    ids=[
+        "07",
+        "007",
+        "07 after a space",
+        "7",
+        "a word",
+        "no text",
+        "012",
+        "12",
+        "0",
+        "00",
+    ],
+)
+async def test_the_text_of_the_hour_tells_whether_it_was_written_with_a_zero(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    hour: int,
+    text: str | None,
+    now: str,
+    days: int,
+    clock: str,
+) -> None:
+    """A zero is a text of more than one character that begins with one, apart from the
+    space the agent may keep before a number; the value of the hour is the same with
+    it or without. A caller that gives no text, as an LLM agent would, says no zero."""
+    await advance_to(hass, freezer, local(SUNDAY, now))
+    slot = {"value": hour} if text is None else {"value": hour, "text": text}
+
+    await intent.async_handle(
+        hass,
+        "test",
+        CLOCK,
+        {
+            "name": {"value": "Boiler"},
+            "action": {"value": "on"},
+            "clock_hour": slot,
+            "clock_minute": {"value": 0},
+        },
+    )
+
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
 # --- The rules the handler reads ---------------------------------------------------
 
 
@@ -1457,6 +1741,44 @@ def test_the_hour_of_the_day_follows_the_part_it_is_said_with(
     evening add 12 but to 12, which stays; the night is the small hours for 1 to 5 and
     the evening for 6 to 11."""
     assert {hour: hour_of_day(hour, part) for hour in table} == table
+
+
+@pytest.mark.parametrize(
+    ("now", "hour", "part", "zero", "days", "clock"),
+    [
+        ("08:00", 7, None, True, 1, "07:30"),
+        ("20:00", 7, None, True, 1, "07:30"),
+        ("08:00", 7, None, False, 0, "19:30"),
+        ("20:00", 7, None, False, 1, "07:30"),
+        ("08:00", 1, None, True, 1, "01:30"),
+        ("20:00", 1, None, True, 1, "01:30"),
+        ("08:00", 1, None, False, 0, "13:30"),
+        ("08:00", 12, None, True, 0, "12:30"),
+        ("20:00", 12, None, True, 1, "12:30"),
+        ("08:00", 12, None, False, 0, "12:30"),
+        ("20:00", 12, None, False, 1, "00:30"),
+        ("08:00", 7, "pm", True, 0, "19:30"),
+        ("08:00", 7, "am", True, 1, "07:30"),
+        ("08:00", 7, "night", True, 0, "19:30"),
+    ],
+)
+def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
+    now: str, hour: int, part: DayPart | None, zero: bool, days: int, clock: str
+) -> None:
+    """The nearer of two times is for an hour from 1 to 12 with no part and no zero. A
+    zero fixes the hour as it is, so 12 is noon and not the nearer of noon and midnight,
+    and a part of the day still chooses the half."""
+    moment = clock_moment(
+        local(SUNDAY, now),
+        ZoneInfo(JERUSALEM),
+        hour,
+        30,
+        part,
+        None,
+        zero=zero,
+    )
+
+    assert moment == local(SUNDAY + timedelta(days=days), clock)
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:

@@ -248,9 +248,13 @@ class ClockCommandHandler(DelayedCommandHandler):
     and these slots would only confuse a model. The rest is the delayed command's.
 
     "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
-    is not the bare 12 of "at 12", which is the nearer of the two. With a day word,
-    midnight is the one that ends the day: "tomorrow at midnight" is the 00:00 after
-    tomorrow, and "today at midnight" is tonight's.
+    is not the bare 12 of "at 12", which is the nearer of the two.
+
+    With a day word, a time of the night's small hours (midnight, and 12 or 1 to 5 said
+    with "night") is in the night that follows that day: "tomorrow at midnight" and
+    "tomorrow night at 12" are the 00:00 after tomorrow, "tomorrow at 2 at night" is
+    the 02:00 after it, and "today at 2 at night" is the coming 02:00. "Am" says a
+    half of the clock, not a night: "tomorrow at 2 am" is 02:00 tomorrow.
     """
 
     intent_type = "TimerifyCommandAt"
@@ -286,8 +290,13 @@ class ClockCommandHandler(DelayedCommandHandler):
             if part not in ("am", "pm") or minute is not None:
                 raise probatio.Invalid("expected an hour, or noon or midnight")
             hour = _HALF_DAY
-            if part == "am" and day is not None:
-                day += 1
+            in_the_night_after = part == "am"
+        else:
+            in_the_night_after = (
+                part == "night" and hour_of_day(hour, part) < _NIGHT_ENDS
+            )
+        if in_the_night_after and day is not None:
+            day += 1
         return clock_moment(
             dt_util.utcnow(),
             dt_util.get_default_time_zone(),

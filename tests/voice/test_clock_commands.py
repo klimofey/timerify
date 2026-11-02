@@ -736,6 +736,47 @@ async def test_midnight_with_a_day_is_the_one_that_ends_the_day(
 
 
 @pytest.mark.parametrize(
+    ("said", "now", "day", "clock"),
+    [
+        ("tomorrow night at 2", "06:00", 2, "02:00"),
+        ("tomorrow at 2 at night", "06:00", 2, "02:00"),
+        ("at 2 at night tomorrow", "06:00", 2, "02:00"),
+        ("tomorrow night at 5:30", "06:00", 2, "05:30"),
+        ("tomorrow night at 12", "06:00", 2, "00:00"),
+        ("tomorrow at midnight", "06:00", 2, "00:00"),
+        ("today at 2 at night", "20:00", 1, "02:00"),
+        ("today at 2 at night", "06:00", 1, "02:00"),
+        ("the day after tomorrow at 2 at night", "06:00", 3, "02:00"),
+        ("tomorrow night at 6", "06:00", 1, "18:00"),
+        ("tomorrow night at 11:30", "06:00", 1, "23:30"),
+        ("tomorrow at 2 am", "06:00", 1, "02:00"),
+        ("tomorrow morning at 2", "06:00", 1, "02:00"),
+        ("tomorrow at 0:00", "06:00", 1, "00:00"),
+        ("at 2 at night", "20:00", 1, "02:00"),
+        ("at 2 at night", "00:30", 0, "02:00"),
+    ],
+)
+async def test_the_night_with_a_day_word_is_the_night_that_follows_that_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    now: str,
+    day: int,
+    clock: str,
+) -> None:
+    """The small hours of a night said with a day belong to the night after that day,
+    as midnight does: "tomorrow at 2 at night" is 02:00 the day after tomorrow, and
+    "today at 2 at night" is the coming 02:00, never refused. The evening hours of the
+    night (6 to 11) and "am" are the day itself. Without a day word the next time that
+    is ahead is the one."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
+
+
+@pytest.mark.parametrize(
     ("now", "moment"),
     [
         (datetime(2026, 10, 24, 21, 30, tzinfo=UTC), "2026-10-24T22:30:00+00:00"),
@@ -918,6 +959,73 @@ async def test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day(
 
     assert reached(response) == CLOCK, speech(response)
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), "00:00")
+
+
+@pytest.mark.parametrize(
+    ("day", "part", "hour", "now", "days", "clock"),
+    [
+        ("1", "night", 2, "06:00", 2, "02:00"),
+        ("1", "night", 12, "06:00", 2, "00:00"),
+        ("1", "night", 5, "06:00", 2, "05:00"),
+        ("0", "night", 2, "20:00", 1, "02:00"),
+        ("0", "night", 2, "06:00", 1, "02:00"),
+        ("2", "night", 2, "06:00", 3, "02:00"),
+        ("1", "night", 6, "06:00", 1, "18:00"),
+        ("1", "night", 11, "06:00", 1, "23:00"),
+        ("1", "am", 2, "06:00", 1, "02:00"),
+    ],
+)
+@pytest.mark.parametrize("day_first", [True, False])
+async def test_the_russian_night_with_a_day_is_the_night_that_follows_that_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    day: str,
+    part: str,
+    hour: int,
+    now: str,
+    days: int,
+    clock: str,
+    day_first: bool,
+) -> None:
+    """As in English: with the word for today, tomorrow or the day after, the word for
+    the night and an hour of the small hours (12 or 1 to 5) is the night after that
+    day, whichever comes first in the sentence. The word for the morning is a half of
+    the clock: tomorrow at 2 in the morning is 02:00 tomorrow."""
+    day_word = spoken_values("ru", "timerify_clock_days")[day][0]
+    part_word = spoken_values("ru", "timerify_day_parts")[part][0]
+    texts = {"timerify_clock_days": day_word, "timerify_day_parts": part_word}
+    numbers = {**NUMBERS, "timerify_half_day_hours": hour}
+    time = rf"\S+ {hour} {re.escape(part_word)}"
+    pattern = (
+        rf"{re.escape(day_word)} {time}"
+        if day_first
+        else rf"{time} {re.escape(day_word)}"
+    )
+    form = russian_form(pattern, numbers, texts)
+
+    response = await say_at(hass, freezer, SUNDAY, now, turn_on_at("ru", form), "ru")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+async def test_the_russian_start_of_a_day_is_said_with_the_hour_0(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, clock_boiler: MockConfigEntry
+) -> None:
+    """The 00:00 that starts tomorrow is "tomorrow at 0:00": the hour 0 is the 24-hour
+    clock's, with a day word as without one."""
+    day_text = spoken_values("ru", "timerify_clock_days")["1"][0]
+    texts = {"timerify_clock_days": day_text}
+    numbers = {**NUMBERS, "timerify_clock_hours": 0, "timerify_clock_minutes": 0}
+    form = russian_form(rf"{re.escape(day_text)} \S+ 0:0", numbers, texts)
+
+    response = await say_at(
+        hass, freezer, SUNDAY, "06:00", turn_on_at("ru", form), "ru"
+    )
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(MONDAY, "00:00")
 
 
 # --- What the sentences do not say, and what core's gazetteer took -----------------

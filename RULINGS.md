@@ -2782,7 +2782,24 @@ in `docs/followups.md`.
     with ("tomorrow at 12 am" is tomorrow's 00:00), and noon is 12:00 of its day. The same
     in Russian for "polnoch'". Why: "midnight of Friday" is most often said for the end of
     Friday, and "today at midnight" would otherwise always be a time that has passed.
-    Cost if wrong: a speaker who means the start of the day says "12 am".
+    Cost if wrong: a speaker who means the start of the day says "12 am" ("0:00").
+  - **The night with a day word is the night that follows that day, in both languages.**
+    The small hours said with "night" (the hour 12 and 1 to 5, with English "at night" or
+    "night" before or after the hour, Russian "nochi") are, with a day word, in the night
+    after that day, as midnight is (the owner's ruling, 2026-11-02, after the review of the
+    fix round): said on Sunday, "tomorrow night at 2", "tomorrow at 2 at night" and
+    "zavtra v 2 nochi" are Tuesday 02:00; "tomorrow night at 12" and "zavtra v 12 nochi" are
+    Tuesday 00:00, the moment of "tomorrow at midnight"; "today at 2 at night" and
+    "segodnya v 2 nochi" said at 20:00 are the coming 02:00, Monday's, and are not refused.
+    "Am" and "utra" are halves of the clock, not nights: "tomorrow at 2 am" is Monday 02:00.
+    The evening hours of the night (6 to 11) are the day itself ("tomorrow night at 11" is
+    Monday 23:00), and a night with no day word keeps the next-ahead reading. The handler
+    adds the day where the resolved hour of a `night` part is before `_NIGHT_ENDS`
+    (`ClockCommandHandler.when`), the same step as for midnight. Why: "tomorrow night at 2"
+    is said for the small hours after tomorrow's evening, and the device would run a day
+    early; the plan's first reading, which anchored the night to the start of the day,
+    contradicted the reason of the midnight ruling. Cost if wrong: a speaker who means 02:00
+    at the start of tomorrow says "tomorrow at 2 am" ("zavtra v 2 utra").
   - **Noon and midnight fill the part of the day, not the hour.** "At noon" is
     `clock_part: pm` with no hour, "at midnight" is `clock_part: am`, and the handler takes
     a missing hour to be 12. The first design had the words fill `clock_hour` with 12 and
@@ -2821,6 +2838,9 @@ in `docs/followups.md`.
   `test_a_part_of_the_day_said_in_words_names_the_half_it_means`,
   `test_a_thermostat_takes_a_part_of_the_day_after_its_settings`,
   `test_midnight_with_a_day_is_the_one_that_ends_the_day`,
+  `test_the_night_with_a_day_word_is_the_night_that_follows_that_day`,
+  `test_the_russian_night_with_a_day_is_the_night_that_follows_that_day`,
+  `test_the_russian_start_of_a_day_is_said_with_the_hour_0`,
   `test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day`,
   `test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead`,
   `test_a_wall_time_is_one_moment_but_when_the_clock_goes_back`,

@@ -2338,3 +2338,43 @@ in `docs/followups.md`.
   is labelled `upstream`; reporting it to Home Assistant is the owner's call.
   Cost if wrong: none for the timers, their schedules or their entities, which are always
   right on the server; the Timerify page lists the old state until it is loaded again.
+
+### Automations
+
+- **Timerify's actions and triggers are offered by target, not in the Device block.** The
+  Device block of a device asks the integration that owns the device and the domain of each
+  of its entities (`ha/components/device_automation/__init__.py:232-294`: the owner at
+  :254-261, the entity domains at :245-247 and :262-263; `RegistryEntry.domain` is the
+  domain of the entity id, not the platform, `ha/helpers/entity_registry.py:255` and
+  :288-291). A device belongs to one config entry (`ha/helpers/device_registry.py:404`),
+  and Timerify puts its entities on the target's device without owning it. So on the
+  boiler's device the block asks the boiler's integration and `number`, `sensor`, `switch`
+  and `button`, never `timerify`. Timerify owns only the device it made for a target that is
+  on none.
+  The editor's **By target** tab matches the `target` of every service and trigger against
+  the entities of the picked device: the integration and domain filters
+  (`ha/components/websocket_api/automation.py:52-83`), with the entities that have an entity
+  category left out of a device or area target (:128-131), and the lookup at :223-285. The
+  tab is the frontend string `ui.panel.config.automation.editor.tabs.target`, "By target".
+  So there is no `device_action` or `device_trigger` platform: one way for every timer,
+  wherever its entities are. The owner accepted this at plan review (#38, #39) and
+  confirmed it on 2026-11-02: no Device block, also not for the device Timerify made.
+  Why: the owner's wish is to pick the boiler and choose an action or a trigger. The Device
+  block cannot offer that for a device another integration owns.
+  Cost if wrong: a user who looks only in the Device block finds the number's and the
+  button's actions there and not Timerify's. The docs send them to **By target**.
+  Tests: `test_the_boilers_device_offers_timerifys_actions_by_target`,
+  `test_the_device_made_for_a_switch_offers_them_too`.
+- **Stop is a service of its own, `timerify.stop`, the stop of Run for 0.** It calls
+  `async_set_minutes(0)`, as the Turn off button and voice do. So it ends a countdown, turns
+  off a loose device that runs without one, holds a started window until its next
+  occurrence (S4), and sends nothing to a device that is off. It has no fields. A target
+  names its timers, as for every service.
+  Why: #38 asks for Stop beside Run and Add time. `number.set_value` with 0 is not one of
+  Timerify's actions, and the button is optional.
+  Cost if wrong: none known.
+  Tests: `test_stop_ends_the_countdown_and_turns_the_boiler_off`,
+  `test_stop_turns_off_a_loose_boiler_without_a_countdown`,
+  `test_stop_leaves_a_boiler_that_is_off_alone`,
+  `test_stop_aimed_at_one_channel_leaves_the_other_running`,
+  `test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on`.

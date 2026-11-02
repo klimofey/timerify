@@ -217,6 +217,48 @@ async def test_run_loose_turns_on_without_countdown(
     assert state_of(hass, SENSOR) == "unknown"
 
 
+async def test_stop_ends_the_countdown_and_turns_the_boiler_off(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """Stop does what setting Run for to 0 does: the countdown is gone and so is the
+    heat."""
+    await setup_target()
+    await set_number(hass, NUMBER, 45)
+
+    await call_service(hass, "stop", {"entity_id": NUMBER})
+
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert state_of(hass, NUMBER) == "0"
+    assert state_of(hass, SENSOR) == "unknown"
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_stop_turns_off_a_loose_boiler_without_a_countdown(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A loose boiler that someone switched on by hand has no countdown to end, and
+    Stop turns it off all the same."""
+    await setup_target(mode="loose")
+    await fake_target.set_state("on")
+
+    await call_service(hass, "stop", {"entity_id": NUMBER})
+
+    assert fake_target.calls == [TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_stop_leaves_a_boiler_that_is_off_alone(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """With nothing running, Stop has nothing to end and sends the boiler nothing."""
+    await setup_target()
+
+    await call_service(hass, "stop", {"entity_id": NUMBER})
+
+    assert fake_target.calls == []
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 @pytest.mark.parametrize(
     ("service", "data", "left"),
     [("add_time", {"minutes": 20}, "20"), ("run", {}, "45")],
@@ -408,6 +450,8 @@ async def test_services_are_described_for_the_ui(hass: HomeAssistant) -> None:
     target = {"entity": [{"integration": DOMAIN, "domain": ["number"]}]}
     assert descriptions["add_time"]["target"] == target
     assert descriptions["run"]["target"] == target
+    assert descriptions["stop"]["target"] == target
+    assert descriptions["stop"].get("fields", {}) == {}
     minutes = descriptions["add_time"]["fields"]["minutes"]
     assert minutes["required"] is True
     assert minutes["selector"]["number"]["min"] == -MAX_MINUTES

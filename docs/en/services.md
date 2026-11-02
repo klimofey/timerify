@@ -1,11 +1,12 @@
 # Actions
 
-Timerify adds four actions to Home Assistant. This page lists them with their fields and limits.
+Timerify adds five actions to Home Assistant. This page lists them with their fields and limits.
 
 | Action | Name in the form | What it does |
 | --- | --- | --- |
 | `timerify.add_time` | **Add time** | Moves the end of the countdown. |
 | `timerify.run` | **Run** | Turns the device on. |
+| `timerify.stop` | **Stop** | Ends the countdown and turns the device off. |
 | `timerify.add_command` | **Add command** | Keeps a pending command. |
 | `timerify.cancel_command` | **Cancel command** | Removes a pending command. |
 
@@ -75,6 +76,18 @@ data:
 | `operation_mode` | Operation mode | Water heater | One of the entity's operation modes, except `off`. The heater must support operation modes. |
 
 Other kinds of devices have no settings. If you ask for a setting that the device does not have, Timerify refuses. Timerify does not check the temperature step that the entity reports. A device may round 22.3 to 22.5.
+
+## Stop
+
+`timerify.stop` ends the countdown and turns the device off. It also turns off a device that runs without a countdown in **Loose** mode. A device that is off is left as it is.
+
+It has no fields. It does the same as setting **Run for** to 0, or pressing **Turn off**.
+
+```yaml
+action: timerify.stop
+target:
+  entity_id: number.boiler_run_for
+```
 
 ## Add command
 

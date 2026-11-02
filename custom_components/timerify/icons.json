@@ -37,6 +37,9 @@
     "run": {
       "service": "mdi:timer-play-outline"
     },
+    "stop": {
+      "service": "mdi:timer-stop-outline"
+    },
     "add_command": {
       "service": "mdi:clock-plus-outline"
     },

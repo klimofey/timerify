@@ -93,6 +93,10 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         the service was given."""
         await self._controller.async_run(minutes, settings)
 
+    async def async_stop(self) -> None:
+        """End the countdown and turn the target off, as setting Run for to 0 does."""
+        await self._controller.async_set_minutes(0)
+
     async def async_add_command(
         self,
         action: Literal["on", "off"],

@@ -92,6 +92,11 @@ run:
               max: 100
               mode: slider
               unit_of_measurement: "%"
+stop:
+  target:
+    entity:
+      integration: timerify
+      domain: number
 add_command:
   target:
     entity:

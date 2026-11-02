@@ -369,6 +369,10 @@
         }
       }
     },
+    "stop": {
+      "name": "Stop",
+      "description": "Ends the countdown of a timer and turns the entity off, as setting Run for to 0 does. It also turns off an entity that runs without a countdown in loose mode. An entity that is off is left as it is."
+    },
     "add_command": {
       "name": "Add command",
       "description": "Keeps a command to turn the entity on or off at a time you choose, a number of minutes from now or at a moment. A command to turn on can run for some minutes and set the entity up with the settings given. It is carried out at its time whatever state the entity is in then, and using the entity by hand does not cancel it. The response holds the command's id, which cancels it.",

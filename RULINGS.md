@@ -1495,7 +1495,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   that error in English. Cost if wrong: the editor's option labels and helper come from the last
   strings a card loaded, and are English when none has (issue #9).
   Changed in 1.1.0: the text under the fields no longer comes from `lastLoaded()`: see "The
-  editor's helper texts are made with the `localize` the frontend gives" under Release 1.1.0.
+  editor's helper texts are made with the `localize` that the frontend hands to
+  `computeHelper`, and the language of that `localize` is read from the card's own
+  `card_language` string; only the names of a select's options still come from `lastLoaded()`
+  (#9)." under Release 1.1.0.
 
 ### The editor and the picker
 
@@ -3642,6 +3645,9 @@ in `docs/followups.md`.
   own language.
   Cost if wrong: a translation file with a wrong tag in `card_language` would format its lengths
   in another language; the test refuses it. One more key stays in step in every language file.
+  In a language Timerify has no strings for, the labels of the preset options follow the
+  profile's language and the helper follows English, so the presets field can show two
+  formats.
   If the frontend ever gives `getConfigForm` a `hass`, or sets `localizeValue`, the option names
   can follow it too, and `speaking()` goes. #9 stays open for that, labelled `upstream`.
   Tests: `card/test/editor.test.ts` (`words the presets helper in the editor's language before

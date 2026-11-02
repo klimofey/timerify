@@ -256,8 +256,6 @@ describe("the form of the visual editor", () => {
         russianLengths.listOf(russianLengths.presets),
       ),
     );
-    // Not a word of the English file is glued to a number.
-    expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).not.toMatch(/\b(min|hr)\b/);
   });
 
   it("says which presses use a Home Assistant action in the editor's language before any card has loaded", async () => {

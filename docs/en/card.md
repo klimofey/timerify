@@ -97,7 +97,7 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 - The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field, and does its default.
 - A value that the form accepts but the card cannot use, such as a preset of 0, stays in the form. The preview shows the card's message. Only a value of the wrong kind sends the editor to YAML. An example is presets that are not a list.
 - A card written by hand without a layout is a pill. But the form does not preselect it, because Home Assistant's editor does not apply the defaults of a form.
-- Home Assistant itself translates the names of the fields. Some words are not translated that way: the names of the two layouts, the six choices of a press, the labels of the preset options and the text under the fields. They are in the language of the last card that the page loaded. Before any card has loaded, they are in English.
+- Home Assistant itself translates the names of the fields. Some words are not translated that way: the two layouts, the six press choices and the labels of the presets. They are in the language of the last card that the page loaded. Before any card has loaded on the page, they are in English.
 
 ## The pop-up
 
@@ -252,7 +252,7 @@ The card's module is served to everyone, because the browser loads it before any
 
 The card's own words, its buttons and messages, are in English and Russian, in the language of your profile. For any other language they are in English. Times, durations and numbers are written by the browser for your language, so they are right in every language. The names and states of entities are Home Assistant's.
 
-In the visual editor, the names of the layouts, the presets and the press choices come from the last Timerify card that your browser loaded. Until a card has loaded since you opened Home Assistant, they can be in English.
+The visual editor takes some names from the last card that the page loaded. These are the names of the layouts, the presets and the press choices. Before any card has loaded on the page, they are in English.
 
 ---
 

@@ -14,7 +14,7 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..controller import TimerifyConfigEntry, command_when
 from ..core import Command
-from ..schedule import wall_moment
+from ..schedule import wall_moments
 from ..services import command_time
 from ..target import target_name
 from .base import (
@@ -209,7 +209,7 @@ def clock_moment(
     day: int | None,
 ) -> datetime:
     """The moment, in UTC, that a clock time said at `now` means on the wall clock of
-    `zone`; `day` is the day word said with it, in days from today (0, 1 or 2), or None.
+    `zone`; `day` is the day word said with it, in days from today, or None.
 
     An hour from 1 to 12 said with no part is the nearer of its morning and evening
     times that is ahead; any other hour is that of the 24-hour clock, and a part fixes
@@ -217,18 +217,24 @@ def clock_moment(
     tomorrow, and a time equal to `now` is tomorrow's. With one it is on that date, and
     the earlier of the times an hour can mean is taken unless it has passed today and
     the other has not. A time that has passed is returned as it is: the controller
-    refuses it. The wall time follows `schedule.wall_moment`.
+    refuses it.
+
+    The wall time follows `schedule.wall_moment`: a time the clock skips happens later
+    by the gap. A time the clock repeats happens twice, and of its two moments the
+    earliest that is ahead is taken, so "1:30" said at 01:45 in the first pass of the
+    night is the second 01:30.
     """
     if part is None and 1 <= hour <= _HALF_DAY:
         hours = [hour % _HALF_DAY, hour % _HALF_DAY + _HALF_DAY]
     else:
         hours = [hour_of_day(hour, part)]
     today = now.astimezone(zone).date()
-    moments = [
-        wall_moment(today + timedelta(days=ahead), time(h, minute), zone)
+    moments = sorted(
+        moment
         for ahead in ((0, 1) if day is None else (day,))
         for h in hours
-    ]
+        for moment in wall_moments(today + timedelta(days=ahead), time(h, minute), zone)
+    )
     return min((moment for moment in moments if moment > now), default=moments[0])
 
 
@@ -242,7 +248,9 @@ class ClockCommandHandler(DelayedCommandHandler):
     and these slots would only confuse a model. The rest is the delayed command's.
 
     "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
-    is not the bare 12 of "at 12", which is the nearer of the two.
+    is not the bare 12 of "at 12", which is the nearer of the two. With a day word,
+    midnight is the one that ends the day: "tomorrow at midnight" is the 00:00 after
+    tomorrow, and "today at midnight" is tonight's.
     """
 
     intent_type = "TimerifyCommandAt"
@@ -265,14 +273,28 @@ class ClockCommandHandler(DelayedCommandHandler):
 
     @override
     def when(self, slots: Mapping[str, Any]) -> datetime | timedelta:
-        """The moment the clock slots say, on the clock of the house."""
+        """The moment the clock slots say, on the clock of the house.
+
+        Raises `probatio.Invalid` for slots that no sentence makes: a time with no hour
+        that is not noon or midnight, which the agents answer as not understood.
+        """
+        part = slots.get("clock_part", {}).get("value")
+        day = slots.get("clock_day", {}).get("value")
+        hour = slots.get("clock_hour", {}).get("value")
+        minute = slots.get("clock_minute", {}).get("value")
+        if hour is None:
+            if part not in ("am", "pm") or minute is not None:
+                raise probatio.Invalid("expected an hour, or noon or midnight")
+            hour = _HALF_DAY
+            if part == "am" and day is not None:
+                day += 1
         return clock_moment(
             dt_util.utcnow(),
             dt_util.get_default_time_zone(),
-            slots.get("clock_hour", {}).get("value", _HALF_DAY),
-            slots.get("clock_minute", {}).get("value", 0),
-            slots.get("clock_part", {}).get("value"),
-            slots.get("clock_day", {}).get("value"),
+            hour,
+            0 if minute is None else minute,
+            part,
+            day,
         )
 
 

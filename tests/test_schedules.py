@@ -26,6 +26,7 @@ from custom_components.timerify.core import Window
 from custom_components.timerify.schedule import (
     Interval,
     days_around,
+    wall_moments,
     weekday_window,
     window_on,
 )
@@ -1212,6 +1213,28 @@ def test_window_in_the_hour_the_clock_repeats_starts_at_its_first_time() -> None
     assert window is not None
     assert window.start == datetime(2026, 10, 24, 22, 30, tzinfo=UTC)
     assert window.end == datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
+
+
+def test_a_wall_time_is_one_moment_but_when_the_clock_goes_back() -> None:
+    """06:30 is one moment on a plain day, and so is 02:30 on 2026-03-27 in Jerusalem,
+    which does not exist and happens at 03:30: the clock skipping it does not make it
+    two. 01:30 on 2026-10-25 is on the wall twice, and both moments are told, the
+    first one first."""
+    zone = ZoneInfo(JERUSALEM)
+
+    assert wall_moments(SUNDAY, time(6, 30), zone) == [
+        datetime(2026, 1, 4, 4, 30, tzinfo=UTC)
+    ]
+    assert wall_moments(date(2026, 3, 27), time(2, 30), zone) == [
+        datetime(2026, 3, 27, 0, 30, tzinfo=UTC)
+    ]
+    assert wall_moments(date(2026, 10, 25), time(1, 30), zone) == [
+        datetime(2026, 10, 24, 22, 30, tzinfo=UTC),
+        datetime(2026, 10, 24, 23, 30, tzinfo=UTC),
+    ]
+    assert wall_moments(date(2026, 10, 25), time(2, 30), zone) == [
+        datetime(2026, 10, 25, 0, 30, tzinfo=UTC)
+    ]
 
 
 def test_window_never_lasts_longer_than_a_day() -> None:

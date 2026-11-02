@@ -100,16 +100,19 @@ The Russian column is transliterated because this page is in English. The real s
 - The time can come after the command or before it: "at 7:30 turn on the boiler".
 - You can add a day: "today", "tomorrow" or "the day after tomorrow". Say it before the time or after it: "tomorrow at 7" or "at 7 tomorrow".
 - You can say the time as "7:30", "7.30" or "7 30", or in words, such as "seven thirty". "7 o'clock", "noon" and "midnight" work too.
-- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
-- An hour from 1 to 12 without any of these is the nearer of its two times ahead. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am" or "pm" to choose the other one.
+- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
+- You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
+- In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
+- An hour from 1 to 12 without any of these is the nearer of its two times ahead. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
 - With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
 - The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
 - "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
+- With a day word, "midnight" is the one that ends that day. "Today at midnight" is tonight's 00:00, and "tomorrow at midnight" is the one after tomorrow. "Tomorrow at 12 am" is the start of tomorrow.
 - Without a day, a time is the next one: today if it is still ahead, tomorrow if it has passed. With the word "today", a time that has passed is refused, and the answer names it.
-- A time that the change of the clock skips or repeats follows [the rule of the schedules](schedules.md#clock-changes-and-time-zones).
+- A time that the change of the clock skips happens later by the length of the gap, as in [the schedules](schedules.md#clock-changes-and-time-zones). A time that it repeats happens twice. Timerify takes the first of the two that is still ahead.
 - A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer names the limit.
-- A thermostat or a water heater reads a bare number after its settings as a temperature, such as "turn on the AC for an hour at 21". So after the settings, say the time with minutes or with "o'clock", "am", "pm", "noon" or "midnight", such as "at 7:30". Before the settings, every form works. Russian needs no such care, because its time starts with "v".
+- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
 
 **What is planned**
 

@@ -84,6 +84,24 @@ def wall_moment(day: date, clock: time, zone: tzinfo) -> datetime:
     return datetime.combine(day, clock, zone).astimezone(UTC)
 
 
+def wall_moments(day: date, clock: time, zone: tzinfo) -> list[datetime]:
+    """Every moment it is `clock` on `day` on the wall clock of `zone`, in UTC, the
+    earliest first.
+
+    That is one moment, `wall_moment`, but for a wall time that comes twice because the
+    clock goes back: both of its moments.
+    """
+    first = wall_moment(day, clock, zone)
+    again = datetime.combine(day, clock, zone).replace(fold=1).astimezone(UTC)
+    # A wall time the clock skips is read at the second offset as a moment before the
+    # gap, which is not that wall time: only a time that comes twice is told by it.
+    if again != first and again.astimezone(zone).replace(tzinfo=None) == (
+        datetime.combine(day, clock)
+    ):
+        return [first, again]
+    return [first]
+
+
 def window_on(interval: Interval, day: date, zone: tzinfo) -> Window | None:
     """The occurrence of `interval` that starts on `day` on the wall clock of `zone`;
     None when the change of the clock swallows it.

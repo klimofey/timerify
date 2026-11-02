@@ -12,7 +12,7 @@ nearer of its morning and evening times that is still ahead (the owner's decisio
 """
 
 import re
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -475,6 +475,39 @@ async def test_for_an_hour_at_50_stays_a_temperature_for_a_water_heater(
 
 
 @pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    ("said", "day", "clock"),
+    [
+        ("turn on the AC for an hour at 7 in the evening", SUNDAY, "19:00"),
+        ("turn on the AC for an hour at 7:30 in the morning", SUNDAY, "07:30"),
+        ("turn on the AC for an hour tomorrow morning at 7", MONDAY, "07:00"),
+        ("turn on the AC for an hour in the evening at 7", SUNDAY, "19:00"),
+    ],
+)
+async def test_a_thermostat_takes_a_part_of_the_day_after_its_settings(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    said: str,
+    day: date,
+    clock: str,
+) -> None:
+    """A part of the day tells a time from a temperature, whether it comes after the
+    hour or before it, so no bare number is taken for 7 degrees there."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, said)
+
+    assert reached(response) == CLOCK, speech(response)
+    assert fake_full_ac.call_data == []
+    command = pending(hass, AC_NEXT)[0]
+    assert command["minutes"] == 60
+    assert state_of(hass, AC_NEXT) == at(day, clock)
+
+
+@pytest.mark.usefixtures("assist")
 async def test_a_thermostat_takes_any_time_before_its_settings(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
@@ -617,6 +650,120 @@ async def test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_neare
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
 
 
+@pytest.mark.parametrize(
+    ("said", "now", "day", "clock"),
+    [
+        ("at 7 in the morning", "18:00", 1, "07:00"),
+        ("at 7 in the morning", "06:00", 0, "07:00"),
+        ("at 7 in the afternoon", "06:00", 0, "19:00"),
+        ("at 7 in the evening", "06:00", 0, "19:00"),
+        ("at 7:30 in the evening", "06:00", 0, "19:30"),
+        ("at 7 at night", "06:00", 0, "19:00"),
+        ("at 2 at night", "06:00", 1, "02:00"),
+        ("at 12 at night", "13:00", 1, "00:00"),
+        ("at 7.30 in the evening", "06:00", 0, "19:30"),
+        ("at 7 in the evening tomorrow", "06:00", 1, "19:00"),
+        ("tomorrow at 7 in the morning", "18:00", 1, "07:00"),
+        ("tomorrow morning at 7", "18:00", 1, "07:00"),
+        ("tomorrow evening at 7", "06:00", 1, "19:00"),
+        ("tomorrow afternoon at 3:15", "06:00", 1, "15:15"),
+        ("tomorrow night at 11:30", "06:00", 1, "23:30"),
+        ("tomorrow morning at 7 o'clock", "18:00", 1, "07:00"),
+        ("at 7 tomorrow morning", "18:00", 1, "07:00"),
+        ("at 7.30 tomorrow evening", "06:00", 1, "19:30"),
+        ("the day after tomorrow morning at 7", "18:00", 2, "07:00"),
+        ("today evening at 7", "06:00", 0, "19:00"),
+        ("in the morning at 7", "18:00", 1, "07:00"),
+        ("in the evening at 7:30", "06:00", 0, "19:30"),
+        ("tomorrow in the morning at 7", "18:00", 1, "07:00"),
+    ],
+)
+async def test_a_part_of_the_day_said_in_words_names_the_half_it_means(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    now: str,
+    day: int,
+    clock: str,
+) -> None:
+    """ "In the morning", "in the evening", "tomorrow morning" fix the half of the day
+    as "am" and "pm" do: they are what a speaker whose "at 7" was read as the evening
+    says to get the morning, and core's gazetteer turned the boiler on at once for
+    them."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    ("said", "now", "day", "clock"),
+    [
+        ("at midnight", "13:00", 1, "00:00"),
+        ("at midnight", "00:10", 1, "00:00"),
+        ("today at midnight", "13:00", 1, "00:00"),
+        ("today at midnight", "00:10", 1, "00:00"),
+        ("today at midnight", "23:30", 1, "00:00"),
+        ("at midnight today", "13:00", 1, "00:00"),
+        ("tomorrow at midnight", "13:00", 2, "00:00"),
+        ("at midnight tomorrow", "13:00", 2, "00:00"),
+        ("the day after tomorrow at midnight", "13:00", 3, "00:00"),
+        ("tomorrow at 12 am", "13:00", 1, "00:00"),
+        ("tomorrow at noon", "13:00", 1, "12:00"),
+        ("today at noon", "11:00", 0, "12:00"),
+    ],
+)
+async def test_midnight_with_a_day_is_the_one_that_ends_the_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    now: str,
+    day: int,
+    clock: str,
+) -> None:
+    """Said alone, "at midnight" is the next 00:00. With a day word it is the 00:00 that
+    ends that day: "today at midnight" is tonight's and is never refused, and "tomorrow
+    at midnight" is the one after tomorrow. "12 am" is the start of the day it names,
+    and noon is 12:00 of it."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
+
+
+@pytest.mark.parametrize(
+    ("now", "moment"),
+    [
+        (datetime(2026, 10, 24, 21, 30, tzinfo=UTC), "2026-10-24T22:30:00+00:00"),
+        (datetime(2026, 10, 24, 22, 45, tzinfo=UTC), "2026-10-24T23:30:00+00:00"),
+        (datetime(2026, 10, 24, 23, 45, tzinfo=UTC), "2026-10-25T11:30:00+00:00"),
+    ],
+    ids=["before the night", "first pass of 01:45", "second pass of 01:45"],
+)
+async def test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    now: datetime,
+    moment: str,
+) -> None:
+    """On 2026-10-25 the clock in Jerusalem goes back from 02:00 to 01:00, so 01:30 is
+    on the wall twice, at 22:30 and at 23:30 UTC. "At 1:30" is the first from 00:30.
+    Said at 01:45 in the first pass, the first 01:30 has passed and the second is
+    ahead: it is the nearer of the times "1:30" can mean. Said at 01:45 in the second
+    pass, both have passed and the next is 13:30."""
+    await advance_to(hass, freezer, now)
+
+    response = await converse(hass, "turn on the boiler at 1:30")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == moment
+
+
 # --- Russian -----------------------------------------------------------------------
 
 
@@ -707,25 +854,70 @@ async def test_russian_day_parts_mean_the_hours_they_name(
         await cancel_pending(hass, NUMBER, NEXT)
 
 
-@pytest.mark.parametrize(("part", "clock"), [("pm", "12:00"), ("am", "00:00")])
+@pytest.mark.parametrize(
+    ("part", "now", "days", "clock"),
+    [
+        ("pm", "13:00", 1, "12:00"),
+        ("pm", "11:00", 0, "12:00"),
+        ("am", "13:00", 1, "00:00"),
+        ("am", "11:00", 1, "00:00"),
+    ],
+)
 async def test_the_russian_words_for_noon_and_midnight_name_their_time(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     clock_boiler: MockConfigEntry,
     part: str,
+    now: str,
+    days: int,
     clock: str,
 ) -> None:
-    """The word for noon is 12:00 and the word for midnight 00:00, said in the afternoon
-    too, where a bare 12 would be the midnight that is nearer."""
+    """The word for noon is 12:00 and the word for midnight 00:00, said before noon or
+    after it, where a bare 12 would be the midnight or the noon that is nearer."""
     word = spoken_values("ru", "timerify_clock_words")[part][0]
     form = russian_form(rf"\S+ {re.escape(word)}", texts={"timerify_clock_words": word})
+
+    response = await say_at(hass, freezer, SUNDAY, now, turn_on_at("ru", form), "ru")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("day", "days", "day_first"),
+    [
+        ("0", 1, True),
+        ("0", 1, False),
+        ("1", 2, True),
+        ("1", 2, False),
+        ("2", 3, True),
+    ],
+)
+async def test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    day: str,
+    days: int,
+    day_first: bool,
+) -> None:
+    """As in English: with the word for today, tomorrow or the day after, the word for
+    midnight is the 00:00 that ends that day, whichever comes first in the sentence."""
+    midnight = re.escape(spoken_values("ru", "timerify_clock_words")["am"][0])
+    word = re.escape(spoken_values("ru", "timerify_clock_days")[day][0])
+    texts = {
+        "timerify_clock_words": spoken_values("ru", "timerify_clock_words")["am"][0],
+        "timerify_clock_days": spoken_values("ru", "timerify_clock_days")[day][0],
+    }
+    pattern = rf"{word} \S+ {midnight}" if day_first else rf"\S+ {midnight} {word}"
+    form = russian_form(pattern, texts=texts)
 
     response = await say_at(
         hass, freezer, SUNDAY, "13:00", turn_on_at("ru", form), "ru"
     )
 
     assert reached(response) == CLOCK, speech(response)
-    assert state_of(hass, NEXT) == at(MONDAY, clock)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), "00:00")
 
 
 # --- What the sentences do not say, and what core's gazetteer took -----------------
@@ -738,6 +930,13 @@ async def test_the_russian_words_for_noon_and_midnight_name_their_time(
         "turn on the boiler tomorrow at 7",
         "turn on the boiler at noon",
         "turn off the boiler at 7",
+        "turn on the boiler at 7 in the morning",
+        "turn on the boiler at 7 in the evening",
+        "turn on the boiler tomorrow morning at 7",
+        "turn on the boiler tomorrow at 7 in the morning",
+        "turn on the boiler in the morning at 7",
+        "turn off the boiler at 7 in the morning",
+        "turn off the boiler tomorrow evening at 7",
     ],
 )
 async def test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now(
@@ -781,6 +980,74 @@ async def test_a_time_that_is_none_is_not_understood(
     assert fake_target.calls == []
 
 
+@pytest.mark.parametrize(
+    "slots",
+    [
+        {},
+        {"clock_day": 1},
+        {"clock_part": "night"},
+        {"clock_minute": 30},
+        {"clock_part": "pm", "clock_minute": 30},
+    ],
+    ids=["nothing", "a day only", "night", "minutes only", "noon with minutes"],
+)
+async def test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+) -> None:
+    """Noon and midnight are a part of the day with no hour; no sentence makes any
+    other time without one. Slots that say it, from a caller that is not a sentence,
+    are refused as invalid, not read as the nearer of noon and midnight, and nothing is
+    kept or switched."""
+    said = {"name": "Boiler", "action": "on", **slots}
+
+    with pytest.raises(intent.InvalidSlotInfo):
+        await intent.async_handle(
+            hass,
+            "test",
+            CLOCK,
+            {key: {"value": value} for key, value in said.items()},
+        )
+
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    ("slots", "day", "clock"),
+    [
+        ({"clock_part": "pm"}, 1, "12:00"),
+        ({"clock_part": "am"}, 1, "00:00"),
+        ({"clock_part": "pm", "clock_day": 1}, 1, "12:00"),
+        ({"clock_part": "am", "clock_day": 0}, 1, "00:00"),
+    ],
+    ids=["noon", "midnight", "noon tomorrow", "midnight today"],
+)
+async def test_noon_and_midnight_are_the_only_times_with_no_hour(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+    day: int,
+    clock: str,
+) -> None:
+    """The part of the day with no hour that the sentences of noon and midnight make is
+    read as such, from the handler as from a sentence."""
+    await advance_to(hass, freezer, local(SUNDAY, "13:00"))
+    said = {"name": "Boiler", "action": "on", **slots}
+
+    await intent.async_handle(
+        hass,
+        "test",
+        CLOCK,
+        {key: {"value": value} for key, value in said.items()},
+    )
+
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=day), clock)
+
+
 # --- The rules the handler reads ---------------------------------------------------
 
 
@@ -814,6 +1081,12 @@ def time_of(form: str) -> str:
     return re.sub(days, "", form).replace("at ", "", 1).strip()
 
 
+def says_a_part_of_the_day(form: str) -> bool:
+    """Whether a form of the English clock says the part of the day as a word before the
+    hour or after it: "tomorrow morning at 7", "at 7 in the evening"."""
+    return re.search(r"\b(morning|afternoon|evening|night)\b", form) is not None
+
+
 def is_dotted(time: str) -> bool:
     """Whether a time is said with a dot between its hours and minutes."""
     return re.search(r"\d\.\d", time) is not None
@@ -823,7 +1096,9 @@ def test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time(
     None
 ):
     """After the settings of a thermostat a time must not be said as a temperature is
-    ("at 21", "at 7.30"). Every other form is allowed there, and none is added."""
+    ("at 21", "at 7.30"). Every other form is allowed there, and none is added. A part
+    of the day as a word before the hour is no temperature, so "tomorrow morning at 7"
+    and "in the evening at 7.30" are allowed there."""
     words = {"timerify_day_parts": "pm", "timerify_clock_days": "tomorrow"}
     clock = spoken("en", "timerify_clock", words)
     exact = spoken("en", "timerify_exact_clock", words)
@@ -832,7 +1107,10 @@ def test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time(
 
     assert exact < clock
     assert left_out == {
-        form for form in clock if time_of(form) == "7" or is_dotted(time_of(form))
+        form
+        for form in clock
+        if not says_a_part_of_the_day(form)
+        and (time_of(form) == "7" or is_dotted(time_of(form)))
     }
     assert {
         "at 7:30",
@@ -840,6 +1118,9 @@ def test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time(
         "at noon",
         "at 7 o'clock",
         "tomorrow at 7:30",
+        "tomorrow morning at 7",
+        "in the morning at 7",
+        "at 7.30 tomorrow morning",
     } <= exact
     assert not {"at 7", "at 7.30", "tomorrow at 7"} & exact
 
@@ -851,3 +1132,4 @@ def test_russian_needs_no_narrower_clock_after_the_settings() -> None:
 
     assert sources == spoken("ru", "timerify_clock_after_command")
     assert sources == spoken("ru", "timerify_clock_before_command")
+    assert any(is_dotted(form) for form in sources)

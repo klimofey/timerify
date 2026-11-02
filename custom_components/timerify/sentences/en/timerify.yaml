@@ -108,9 +108,12 @@ expansion_rules:
   timerify_clock_after_command: <timerify_clock>
   timerify_clock_after_extras: <timerify_clock_after_command>
   timerify_clock_before_command: <timerify_clock>
-  timerify_clock: (<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>])
-  timerify_exact_clock: (<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>])
+  timerify_clock: (<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)
+  timerify_exact_clock: (<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)
   timerify_clock_day: '{timerify_clock_days:clock_day}'
+  timerify_clock_part_of_day: (<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>)
+  timerify_clock_when: (<timerify_clock_day> {timerify_clock_part_words:clock_part}|[<timerify_clock_day>] in the {timerify_clock_part_words:clock_part})
+  timerify_part_hour: ({timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour})
   timerify_clock_time: (<timerify_exact_time>|<timerify_loose_time>)
   timerify_exact_time: ({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_clock_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})
   timerify_loose_time: ({timerify_clock_hours:clock_hour}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part})
@@ -168,10 +171,20 @@ lists:
       to: 59
   timerify_day_parts:
     values:
-    - in: (am|a.m.)
+    - in: (am|a.m.|in the morning)
       out: am
-    - in: (pm|p.m.)
+    - in: (pm|p.m.|in the afternoon|in the evening)
       out: pm
+    - in: at night
+      out: night
+  timerify_clock_part_words:
+    values:
+    - in: morning
+      out: am
+    - in: (afternoon|evening)
+      out: pm
+    - in: night
+      out: night
   timerify_clock_words:
     values:
     - in: noon

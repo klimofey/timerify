@@ -2691,12 +2691,16 @@ in `docs/followups.md`.
   English and leaves Russian green). These do switch:
   - turn on, the dangerous direction, since in Loose mode the device then runs without a
     countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later"
-    (alone), "in the morning", "on monday" and "2 days ahead";
-  - turn off: "tonight", "tomorrow", "tomorrow morning" and "this evening".
-  The clock times "at 7", "tomorrow at 7" and "at noon" were in both lists; they are
-  Timerify's now (`TimerifyCommandAt`, "A clock time is a sentence-only intent, not a
-  tool." below), so they switch nothing and are pinned by
-  `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`.
+    (alone), "in the morning", "on monday", "2 days ahead" and "by 7";
+  - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "by 7".
+  The clock times "at 7", "tomorrow at 7", "at noon", "at 7 in the morning", "at 7 in
+  the evening", "tomorrow morning at 7", "tomorrow at 7 in the morning" and "in the
+  morning at 7" were in both lists (the last four, and the turn off "at 7 in the
+  morning", found in the review of #19); they are Timerify's now (`TimerifyCommandAt`,
+  "A clock time is a sentence-only intent, not a tool." below), so they switch nothing and
+  are pinned by `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`. "By 7"
+  means "be on by then", which has no sentence of Timerify's (Decision 5 has no form for
+  it), so it stays here.
   Why: each phrasing found is then refused or done as asked, instead of switching the
   device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
   Russian is not affected, since the gazetteer has no Russian.
@@ -2750,16 +2754,45 @@ in `docs/followups.md`.
     one the time is the next, today or tomorrow, and a time equal to now is tomorrow. "Today"
     at a time that has passed is refused by the controller (`command_in_past`), since the
     speaker named the day. The wall time is `schedule.wall_moment`, the schedules' rule: a
-    time the clock skips happens later by the gap, one it repeats is its first. Cost if
-    wrong: a speaker who says "at 7" at 18:00 meaning tomorrow morning hears "19:00" in the
-    answer and must say "am" (Russian: "utra") to get 07:00. The answer always says the
-    time that was chosen.
+    time the clock skips happens later by the gap. A time it repeats (01:30 on the night
+    the clock goes back) is on the wall twice, and of its two moments the earliest that is
+    still ahead is taken, across both passes: "at 1:30" said at 01:45 in the first pass is
+    the second 01:30 (`schedule.wall_moments`; a schedule window, which has no "now",
+    still starts at the first). Cost if wrong: a speaker who says "at 7" at 18:00 meaning
+    tomorrow morning hears "19:00" in the answer and must say "in the morning" or "am"
+    (Russian: "utra") to get 07:00. The answer always says the time that was chosen.
+  - **Parts of the day in English words are Timerify's.** "In the morning" is `am`, "in the
+    afternoon" and "in the evening" are `pm`, "at night" is `night` (the small hours for 1 to
+    5, the evening for 6 to 11, as in Russian), said after the time ("at 7 in the
+    morning"); and the part as a word goes before it, after a day or after "in the"
+    ("tomorrow morning at 7", "in the evening at 7:30", "at 7.30 tomorrow evening"). Why:
+    they are what a speaker whose "at 7" was read as the evening says next, and core's
+    gazetteer switched the target at once for them; the plan's policy (Decision 4) takes a
+    found phrasing over. The forms before the hour are in `timerify_exact_clock` too, since
+    a part of the day before "at 7" cannot be a temperature. Russian has no gazetteer: its
+    "zavtra utrom v 7" (a day, a part of the day as an adverb, the hour) is taken by core's
+    sentences for an area or a floor called "7" and refused ("no zone 7"), and nothing is
+    switched, so it is not taken over here; it is a followup for the owner to decide.
+    Cost if wrong: a form of the part of the day that is not here ("this morning at 7",
+    "tonight at 7") is not understood, and nothing is switched.
+  - **Midnight with a day word is the one that ends that day.** Alone, "at midnight" is the
+    next 00:00. "Today at midnight" is tonight's 00:00 (the 00:00 of tomorrow's date), and
+    is never refused; "tomorrow at midnight" is the 00:00 after tomorrow; "the day after
+    tomorrow at midnight" the one after that. "12 am" is the start of the day it is said
+    with ("tomorrow at 12 am" is tomorrow's 00:00), and noon is 12:00 of its day. The same
+    in Russian for "polnoch'". Why: "midnight of Friday" is most often said for the end of
+    Friday, and "today at midnight" would otherwise always be a time that has passed.
+    Cost if wrong: a speaker who means the start of the day says "12 am".
   - **Noon and midnight fill the part of the day, not the hour.** "At noon" is
     `clock_part: pm` with no hour, "at midnight" is `clock_part: am`, and the handler takes
     a missing hour to be 12. The first design had the words fill `clock_hour` with 12 and
     0; but "noon" said at 13:00 then came out as a bare 12, which is the nearer of noon and
     midnight, and so it meant midnight. So `clock_hour` is optional in the slot schema and
-    the words are lists of parts. A bare "at 12" stays the nearer of the two. Cost if wrong:
+    the words are lists of parts. A bare "at 12" stays the nearer of the two. A missing
+    hour is valid for nothing else: the handler raises `probatio.Invalid`, which the
+    agents answer as not understood (`InvalidSlotInfo`), for slots with no hour and a part
+    that is not `am` or `pm`, for minutes without an hour, and for no time at all, instead
+    of reading them as the nearer of noon and midnight. Cost if wrong:
     none; this is a correction of the interface the plan described, found by the tests
     `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer` and
     `test_the_russian_words_for_noon_and_midnight_name_their_time`.
@@ -2785,6 +2818,13 @@ in `docs/followups.md`.
   `test_a_command_to_turn_on_at_a_time_may_say_how_long_it_runs`,
   `test_turn_on_at_a_time_for_a_while_with_settings`,
   `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer`,
+  `test_a_part_of_the_day_said_in_words_names_the_half_it_means`,
+  `test_a_thermostat_takes_a_part_of_the_day_after_its_settings`,
+  `test_midnight_with_a_day_is_the_one_that_ends_the_day`,
+  `test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day`,
+  `test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead`,
+  `test_a_wall_time_is_one_moment_but_when_the_clock_goes_back`,
+  `test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understood`,
   `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`,
   `test_a_bare_hour_said_in_the_evening_is_that_hour_tonight`,
   `test_a_bare_hour_said_early_is_that_hour_this_morning`,

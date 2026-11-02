@@ -70,6 +70,7 @@ from ..helpers import (
     state_of,
 )
 from .helpers import (
+    SETTING_LISTS,
     assist_api,
     call_tool,
     converse,
@@ -79,6 +80,7 @@ from .helpers import (
     refusal_of,
     samples,
     speech,
+    spoken_number,
     talk,
     translated,
     with_voice_settings,
@@ -94,9 +96,6 @@ COOL_24 = [COOL, TEMPERATURE_24]
 TANK_NUMBER = "number.tank_run_for"
 WITH_AND = "<timerify_duration_with_and>"
 """What a thermostat and a water heater make of how long a command runs."""
-SETTING_LISTS = ("timerify_hvac_mode", "timerify_mode")
-"""The lists of the words for a setting: a sample that leaves them out is a sentence for
-a target that is turned on without any setting, as the boiler is."""
 DELAY_VALUES = {"hours": 2, "minutes": 15, "seconds": 30}
 """What the samples say for each unit of a delay."""
 
@@ -512,6 +511,53 @@ async def test_turn_on_a_week_and_a_minute_ahead_is_refused_with_the_limit(
     assert state_of(hass, NEXT) == "unknown"
 
 
+async def test_turn_on_in_one_hundred_twenty_minutes_keeps_a_command(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The minutes of a delay may be said as words, past a hundred as in a duration."""
+    response = await converse(hass, "turn on the boiler in one hundred twenty minutes")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert state_of(hass, NEXT) == at(120)
+    assert speech(response) == "Boiler turns on at 11:00."
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize(
+    ("counted", "slot"),
+    [("timerify_hours", "delay_hours"), ("timerify_minutes", "delay_minutes")],
+)
+async def test_a_delay_past_100_can_be_said_in_words(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+    counted: str,
+    slot: str,
+) -> None:
+    """Each form of 120 in words (a language has several, for its cases) is heard as
+    120 hours or minutes of a delay, as the digits are."""
+    (text, *_) = samples(
+        language,
+        DELAYED_COMMAND,
+        takeover=True,
+        numbers={counted: 120},
+        absent=SETTING_LISTS,
+        admitting="switch",
+    )
+    forms = spoken_number(language, 120)
+    assert forms
+
+    for form in forms:
+        spoken = text.replace("120", form)
+        response = await converse(hass, spoken, language)
+
+        assert reached(response) == DELAYED_COMMAND, spoken
+        assert response.intent is not None, spoken
+        assert response.intent.slots[slot]["value"] == 120, spoken
+        await cancel_pending(hass, NUMBER, NEXT)
+
+
 @pytest.mark.parametrize(
     "numbers",
     [{"timerify_hours": 169}, {"timerify_long_minutes": 10081}],
@@ -534,6 +580,7 @@ async def test_a_delay_beyond_a_week_in_one_unit_is_not_understood(
         takeover=True,
         numbers=numbers,
         absent=SETTING_LISTS,
+        admitting="switch",
     )
     assert texts
 
@@ -565,19 +612,14 @@ async def test_russian_delays_past_100_reach_the_handler(
     """In Russian too, a delay of 120 hours, 120 minutes or 2000 minutes is counted by
     Timerify's own lists and reaches the handler with what was said, whatever the
     command, and whether it is kept, set or refused there."""
-    # The sentences are those of every kind of device; the boiler is a switch, and the
-    # ones for covers and valves ("open") are not about it.
-    texts = [
-        text
-        for text in samples(
-            "ru",
-            DELAYED_COMMAND,
-            takeover=True,
-            numbers={counted: count},
-            absent=SETTING_LISTS,
-        )
-        if readings("ru", text, name="Boiler", domain="switch", takeover=True)
-    ]
+    texts = samples(
+        "ru",
+        DELAYED_COMMAND,
+        takeover=True,
+        numbers={counted: count},
+        absent=SETTING_LISTS,
+        admitting="switch",
+    )
     assert texts
     said: set[tuple[str, int]] = set()
 
@@ -1004,7 +1046,9 @@ def wanted_later(block: CommandBlock, shapes: Sequence[str]) -> set[str]:
     first, followed by them."""
     sentences: set[str] = set()
     for shape in shapes:
-        named = re.sub(r"\{timer_(\w+):\1\}", lambda slot: DELAY_LISTS[slot[1]], shape)
+        named = re.sub(
+            r"\{timer_(\w+):\1\}", lambda found: DELAY_LISTS[found[1]], shape
+        )
         alone = named.replace(COMMAND_SLOT, command_group(block))
         if block.action == "off":
             sentences.add(alone)
@@ -1213,6 +1257,23 @@ def test_a_scope_carries_every_rule_of_its_block(language: str) -> None:
             assert block["expansion_rules"]["timerify_duration"] == WITH_AND
         else:
             assert "timerify_duration" not in block["expansion_rules"]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_delay_counts_its_hours_and_minutes_as_a_duration_does(
+    language: str,
+) -> None:
+    """The lists of a delay are those a duration is counted with, in the sources of the
+    language: if the minutes are split in another way there, the delay follows in the
+    same change, or a duration would hear a count that a delay does not."""
+    rules = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))[
+        "expansion_rules"
+    ]
+
+    minutes = DELAY_LISTS["minutes"].replace(":delay_minutes}", ":minutes}")
+    hours = DELAY_LISTS["hours"].replace(":delay_hours}", ":hours}")
+    assert minutes == rules["timerify_minutes_count"]
+    assert rules["timerify_hours_part"].startswith(hours)
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)

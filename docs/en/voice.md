@@ -85,7 +85,7 @@ The Russian column is transliterated because this page is in English. The real s
 - A command to turn on can say how long the device then runs, and its settings. An example is "turn on the AC in 15 minutes for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then. It replaces the end, whether the device had a countdown or not. For a device that is off, nothing changes, and the answer says so.
 - A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these limits is refused with a message.
-- You can say a delay as long as a week, as for "Run for a time": up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay beyond the limit of a command is understood and refused, and the answer names the limit.
+- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count beyond a week is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
 
 **What is planned**

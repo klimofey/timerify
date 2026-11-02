@@ -58,6 +58,7 @@ from ..helpers import (
 from .helpers import (
     HOUR_CLASSES,
     MINUTE_CLASSES,
+    SETTING_LISTS,
     PluralClasses,
     assert_one_form_per_class,
     assist_api,
@@ -84,9 +85,6 @@ STOP = "TimerifyStop"
 LAMP_NUMBER = "number.lamp_run_for"
 TANK_NUMBER = "number.tank_run_for"
 VENT_NUMBER = "number.vent_run_for"
-SETTING_LISTS = ("timerify_hvac_mode", "timerify_mode")
-"""The lists of the words for a setting: a sample that leaves them out is a sentence for
-a target that is turned on without any setting."""
 COOL = ("set_hvac_mode", {"hvac_mode": "cool"})
 TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]

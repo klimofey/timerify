@@ -26,6 +26,7 @@ from hassil.intents import (
     SlotList,
     TextSlotList,
 )
+from hassil.parse_expression import parse_sentence
 from hassil.recognize import recognize_all
 from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
@@ -73,6 +74,9 @@ LATE_EVENING: Final = local(date(2026, 1, 5), "23:00")
 """From this time every count of hours up to 24 ends the next day, and every count of
 minutes below 60 ends the same day, so that answers to different counts differ in
 nothing but the count."""
+SETTING_LISTS: Final = ("timerify_hvac_mode", "timerify_mode")
+"""The lists of the words for a setting: a sample that leaves them out is a sentence for
+a target that is turned on without any setting."""
 
 
 @dataclass(frozen=True)
@@ -584,10 +588,24 @@ def _intents_of(language: str, takeover: bool = False) -> Intents:
     return Intents.from_dict(merged)
 
 
+def _domains_of(context: Mapping[str, Any]) -> list[str]:
+    """The domains a context of a block of sentences names, if any."""
+    domains = context.get("domain")
+    return [domains] if isinstance(domains, str) else list(domains or [])
+
+
 def _required_domains(data: IntentData) -> list[str]:
     """The domains a block of sentences is for (its `requires_context`), if any."""
-    required = data.requires_context.get("domain")
-    return [required] if isinstance(required, str) else list(required or [])
+    return _domains_of(data.requires_context)
+
+
+def _admits(data: IntentData, domain: str) -> bool:
+    """Whether a block of sentences is for the targets of `domain`: it requires no
+    domain or requires this one, and does not exclude it."""
+    required = _required_domains(data)
+    return (not required or domain in required) and domain not in _domains_of(
+        data.excludes_context
+    )
 
 
 def _one_value(
@@ -635,10 +653,13 @@ def samples(
     takeover: bool = False,
     optionals: bool = True,
     requiring: str | None = None,
+    admitting: str | None = None,
 ) -> list[str]:
     """Sentences of the intent as a user would say them, a bounded number: those of
     `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`; with `requiring`, only the
-    blocks that are for a target of that domain alone (`requires_context`).
+    blocks that are for a target of that domain alone (`requires_context`); with
+    `admitting`, only the blocks that a target of that domain can be said with: those
+    that require it or no domain, and do not exclude it (`excludes_context`).
 
     Every list is cut down to one value (see `_one_value`) and every sentence
     template is sampled twice: once as its first expansion with the optional parts
@@ -655,6 +676,8 @@ def samples(
     found: list[str] = []
     for data in intents.intents[intent_type].data:
         if requiring is not None and requiring not in _required_domains(data):
+            continue
+        if admitting is not None and not _admits(data, admitting):
             continue
         slot_lists = _one_value(
             {**intents.slot_lists, **data.slot_lists},
@@ -850,6 +873,19 @@ def spoken_rule(language: str, rule_name: str, numbers: Mapping[str, int]) -> li
             language=language,
         )
     ]
+
+
+def spoken_number(language: str, number: int) -> list[str]:
+    """Every way `number` is said in words in `language`, as the built-in agent hears
+    it: the forms of its cases and genders, the same ones that a range list of words
+    matches. Words are read from the library that builds them, so that a test can say
+    them without writing them."""
+    spoken = RangeSlotList(name="number", start=number, stop=number, digits=False)
+    return sorted(
+        sample_sentence(
+            parse_sentence("{number}"), {"number": spoken}, language=language
+        )
+    )
 
 
 def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:

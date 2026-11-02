@@ -302,7 +302,7 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
         for slot in _SLOT.findall(shape.replace(COMMAND_SLOT, "")):
             if not _DELAY_SLOT.fullmatch(slot):
                 raise ValueError(f"A delayed command with {slot} in it: {shape!r}")
-        delay = _DELAY_SLOT.sub(lambda slot: DELAY_LISTS[slot[1]], shape)
+        delay = _DELAY_SLOT.sub(lambda found: DELAY_LISTS[found[1]], shape)
         if shape.startswith(f"{COMMAND_SLOT} "):
             after.append(_flat(delay.removeprefix(f"{COMMAND_SLOT} ")))
         elif shape.endswith(f" {COMMAND_SLOT}"):

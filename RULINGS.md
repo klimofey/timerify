@@ -2598,8 +2598,11 @@ in `docs/followups.md`.
   countdown, so it reaches 24 hours. A delay past one is refused with the texts that
   exist, which name the limit: `command_too_far` ("A command can be set at most 7 days
   ahead.") and `duration_out_of_range` ("A timer runs for 1 min to 24 h."). A count past a
-  week in one unit is not understood, as for durations. Why: one bound for every count,
-  already measured for cost (the duration entry of "What can be said"), and no new string.
+  week in one unit is not understood, as for durations. A test ties `DELAY_LISTS` to the
+  rules of the sources that count a duration (`timerify_minutes_count`,
+  `timerify_hours_part`), so that a change in how the minutes are split reaches the delays
+  with it. Why: one bound for every count, already measured for cost (the duration entry
+  of "What can be said"), and no new string.
   Cost if wrong: "in 200 hours" is not understood.
   Tests: `test_turn_on_in_2000_minutes_keeps_a_command`,
   `test_turn_on_in_150_hours_keeps_a_command`,
@@ -2607,5 +2610,8 @@ in `docs/followups.md`.
   `test_turn_off_in_120_minutes_sets_the_timer`,
   `test_turn_off_in_2000_minutes_is_refused_with_the_limit`,
   `test_russian_delays_past_100_reach_the_handler`,
-  `test_a_delay_beyond_a_week_in_one_unit_is_not_understood` and
+  `test_turn_on_in_one_hundred_twenty_minutes_keeps_a_command`,
+  `test_a_delay_past_100_can_be_said_in_words`,
+  `test_a_delay_beyond_a_week_in_one_unit_is_not_understood`,
+  `test_a_delay_counts_its_hours_and_minutes_as_a_duration_does` and
   `test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_device`.

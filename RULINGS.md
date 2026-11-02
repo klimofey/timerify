@@ -2849,12 +2849,28 @@ in `docs/followups.md`.
   `clock_minute`, `clock_part`, `clock_day`) would only confuse a model. Cost if wrong: a
   model that is shown a second way to plan a command at a time chooses between two tools
   that do the same.
-  - **Reading (owner's decision, 2026-11-02).** An hour from 1 to 12 said with no "am",
-    "pm" and no Russian word for a part of the day is the nearer of its two times ahead:
-    "at 7" at 18:00 is 19:00 today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow;
-    the same goes for "at 7:30". An hour of 0 or from 13 to 23 is on the 24-hour clock.
-    "Am" and "pm" and the Russian "utra", "dnya", "vechera" and "nochi" fix the half
-    (`hour_of_day`; "nochi" is the small hours for 1 to 5 and the evening for 6 to 11).
+  - **Reading (owner's decisions, 2026-11-02 and 2026-11-03, issue #57).** An hour from 1
+    to 12 said with no "am", "pm" and no Russian word for a part of the day, and written
+    with no leading zero, is the nearer of its two times ahead: "at 7" at 18:00 is 19:00
+    today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow; the same goes for "at 7:30"
+    and for an hour said in words ("seven thirty"). An hour of 0 or from 13 to 23 is on the
+    24-hour clock, and so is an hour written with a leading zero: "at 07:30" and "at 07"
+    are the next 07:30 and 07:00, today or tomorrow, whichever comes first, so "at 07:30" at
+    08:00 is 07:30 tomorrow, where "at 7:30" is 19:30 today. "Am" and "pm" and the Russian
+    "utra", "dnya", "vechera" and "nochi" fix the half (`hour_of_day`; "nochi" is the small
+    hours for 1 to 5 and the evening for 6 to 11) and win over the zero: "at 07:30 pm" and
+    "at 07 in the evening" are 19:30 and 19:00. "Written with a leading zero" is decided by
+    the text the sentence matched for the hour, which begins with "0" and has more than one
+    character ("007" and "012" count; "0" and "00" are the hour 0, on the 24-hour clock
+    already). hassil keeps that text beside the value, in the slot's `text`
+    (`{"value": 7, "text": "07"}`), and `ClockCommandHandler.when` passes the decision to
+    `clock_moment` as `zero`, which skips the nearer-of-two step as an hour of 0 or 13 to 23
+    does; the sentences are unchanged. An hour said in words has no zero, and a caller that
+    gives no text says no zero. Why: "07:30" is how the 24-hour clock is written, "pm" and
+    "am" say the 12-hour one, and a bare "7:30" says neither, so only that keeps the
+    nearer-of-two reading. Cost if wrong: a speaker who writes "07:30" meaning the evening
+    one, and leaves out "pm", hears tomorrow's 07:30 in the answer, and says "pm" or
+    drops the zero to get 19:30.
     With a day word the same rule works on that date, so "tomorrow at 7" is 07:00. Without
     one the time is the next, today or tomorrow, and a time equal to now is tomorrow. "Today"
     at a time that has passed is refused by the controller (`command_in_past`), since the
@@ -2865,18 +2881,22 @@ in `docs/followups.md`.
     the second 01:30 (`schedule.wall_moments`; a schedule window, which has no "now",
     still starts at the first). Cost if wrong: a speaker who says "at 7" at 18:00 meaning
     tomorrow morning hears "19:00" in the answer and must say "in the morning" or "am"
-    (Russian: "utra") to get 07:00. The answer always says the time that was chosen.
+    (Russian: "utra") to get 07:00, or write "07". The answer always says the time that was
+    chosen.
   - **The minutes after a separator are exactly two digits (the final review of part D).**
     After ":", "." or a space the minutes are "00" to "59": "at 7:05",
     "at 7.05" and "at 7 05" are 07:05, and "at 7.5" and "at 7:5" are not a time at all.
     Why: nobody writes 07:05 as "7.5", which reads as seven and a half if anything, and
     "turn on the AC at 22.5 for an hour" (a temperature said first) was planned for 22:05.
     The sources say the minutes with the rule `timerify_clock_minute`, the text list
-    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since a
-    range list reads "5" and "05" alike) or the number words `timerify_clock_minute_words`
-    (a range with `digits: false`, so spelled minutes work as before: "seven thirty"); both
-    fill `clock_minute`. In Russian the minutes said with their word ("v 7 chasov 5 minut")
-    keep the range `timerify_clock_minutes`, where one digit is no ambiguity. Minutes of
+    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since
+    a range list matches "5" and "05" alike and gives the same `value` for both; the slot's
+    `text` keeps the characters, which is how the hour tells its zero, but only after the
+    match, and a minute of one digit must not match at all) or the number words
+    `timerify_clock_minute_words` (a range with `digits: false`, so spelled minutes work as
+    before: "seven thirty"); both fill `clock_minute`. In Russian the minutes said with
+    their word ("v 7 chasov 5 minut") keep the range `timerify_clock_minutes`, where one
+    digit is no ambiguity. Minutes of
     one digit spelled as words ("seven five") are unchanged. Cost if wrong: a person who
     writes "7:5" is told that it was not understood, and nothing is kept. Tests:
     `test_a_minute_of_one_digit_after_a_separator_is_no_time`,
@@ -2947,7 +2967,7 @@ in `docs/followups.md`.
     AC for an hour at 21" stays a run at 21 degrees), so in the `climate` and `water_heater`
     blocks of `TimerifyRun` the rule `timerify_clock_after_extras` is
     `<timerify_exact_clock>`: a time with minutes, "o'clock", "am" or "pm", "noon" or
-    "midnight", not a bare hour or "H.MM". The generator copies that override into the
+    "midnight", not a bare hour (written "7" or "07") or "H.MM". The generator copies that override into the
     clock blocks of those scopes (`Scope.rules`). Before the settings, and in every other
     block, any form works. Russian needs no override: it says a time with "v" and a
     temperature with "na" or nothing. Cost if wrong: "turn on the AC for an hour at 7"
@@ -2981,6 +3001,15 @@ in `docs/followups.md`.
   `test_a_bare_hour_said_early_is_that_hour_this_morning`,
   `test_an_hour_past_twelve_is_a_24_hour_clock`,
   `test_tomorrow_with_a_bare_hour_is_the_morning_one`,
+  `test_an_hour_with_a_leading_zero_is_the_morning`,
+  `test_a_part_of_the_day_wins_over_a_leading_zero`,
+  `test_tomorrow_at_an_hour_with_a_leading_zero_is_the_morning_one`,
+  `test_today_at_an_hour_with_a_leading_zero_that_has_passed_is_refused`,
+  `test_hour_zero_and_an_hour_said_in_words_are_unchanged`,
+  `test_the_text_of_the_hour_tells_whether_it_was_written_with_a_zero`,
+  `test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock`,
+  `test_a_thermostat_reads_a_leading_zero_in_a_time_after_its_settings`,
+  `test_a_bare_hour_after_the_settings_is_no_time_with_a_zero_either`,
   `test_a_clock_time_already_past_today_means_tomorrow`,
   `test_today_at_a_time_that_has_passed_is_refused`,
   `test_a_wall_time_the_clock_skips_happens_an_hour_later`,

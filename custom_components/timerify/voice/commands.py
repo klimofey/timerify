@@ -207,24 +207,28 @@ def clock_moment(
     minute: int,
     part: DayPart | None,
     day: int | None,
+    *,
+    zero: bool = False,
 ) -> datetime:
     """The moment, in UTC, that a clock time said at `now` means on the wall clock of
-    `zone`; `day` is the day word said with it, in days from today, or None.
+    `zone`; `day` is the day word said with it, in days from today, or None; `zero` is
+    whether the hour was written with a leading zero ("07").
 
-    An hour from 1 to 12 said with no part is the nearer of its morning and evening
-    times that is ahead; any other hour is that of the 24-hour clock, and a part fixes
-    the half of the day. Without a day word the time is the next one, today or
-    tomorrow, and a time equal to `now` is tomorrow's. With one it is on that date, and
-    the earlier of the times an hour can mean is taken unless it has passed today and
-    the other has not. A time that has passed is returned as it is: the controller
-    refuses it.
+    An hour from 1 to 12 said with no part and no zero is the nearer of its morning and
+    evening times that is ahead; any other hour is that of the 24-hour clock, and a
+    part fixes the half of the day. A zero says the 24-hour clock as the hour 0 and the
+    hours 13 to 23 do, so "07:30" is the morning one, and a part still wins over it.
+    Without a day word the time is the next one, today or tomorrow, and a time equal to
+    `now` is tomorrow's. With one it is on that date, and the earlier of the times an
+    hour can mean is taken unless it has passed today and the other has not. A time
+    that has passed is returned as it is: the controller refuses it.
 
     The wall time follows `schedule.wall_moment`: a time the clock skips happens later
     by the gap. A time the clock repeats happens twice, and of its two moments the
     earliest that is ahead is taken, so "1:30" said at 01:45 in the first pass of the
     night is the second 01:30.
     """
-    if part is None and 1 <= hour <= _HALF_DAY:
+    if part is None and not zero and 1 <= hour <= _HALF_DAY:
         hours = [hour % _HALF_DAY, hour % _HALF_DAY + _HALF_DAY]
     else:
         hours = [hour_of_day(hour, part)]
@@ -238,6 +242,18 @@ def clock_moment(
     return min((moment for moment in moments if moment > now), default=moments[0])
 
 
+def _written_with_a_zero(hour: Mapping[str, Any]) -> bool:
+    """Whether the hour slot was matched from text with a leading zero: "07", "007".
+
+    The built-in agent gives a number it matched from digits as its `value` and the
+    characters it matched as its `text`, and the value is the same for "7" and "07".
+    An hour said in words, or a slot with no text (a caller that is not a sentence),
+    has no zero.
+    """
+    text = str(hour.get("text", "")).strip()
+    return len(text) > 1 and text.startswith("0")
+
+
 class ClockCommandHandler(DelayedCommandHandler):
     """Turn on the boiler at 7:30, turn it off at 23:00: the command of a delayed
     command, at a time of day.
@@ -247,6 +263,10 @@ class ClockCommandHandler(DelayedCommandHandler):
     LLM agent has no such tool (`offered_as_tool`): the tool of the delayed command
     takes `at`, a moment, and these slots would only confuse a model. The rest is the
     delayed command's.
+
+    An hour written with a leading zero, "07:30", is on the 24-hour clock, as the hour
+    0 and the hours 13 to 23 are: the text of the slot tells it from "7:30", whose hour
+    is the nearer of its two times. A part of the day, "07:30 pm", still wins.
 
     "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
     is not the bare 12 of "at 12", which is the nearer of the two.
@@ -299,7 +319,9 @@ class ClockCommandHandler(DelayedCommandHandler):
         """
         part = slots.get("clock_part", {}).get("value")
         day = slots.get("clock_day", {}).get("value")
-        hour = slots.get("clock_hour", {}).get("value")
+        hour_slot = slots.get("clock_hour", {})
+        hour = hour_slot.get("value")
+        zero = _written_with_a_zero(hour_slot)
         minute = slots.get("clock_minute", {}).get("value")
         if hour is None:
             if part not in ("am", "pm") or minute is not None:
@@ -316,11 +338,11 @@ class ClockCommandHandler(DelayedCommandHandler):
         if in_the_night_after and day is not None:
             if day == 0:
                 # Said in the small hours, "today" names the night in progress.
-                moment = clock_moment(now, zone, hour, minute, part, 0)
+                moment = clock_moment(now, zone, hour, minute, part, 0, zero=zero)
                 if moment > now:
                     return moment
             day += 1
-        return clock_moment(now, zone, hour, minute, part, day)
+        return clock_moment(now, zone, hour, minute, part, day, zero=zero)
 
 
 def command_slots(command: Command, now: datetime) -> dict[str, Any]:

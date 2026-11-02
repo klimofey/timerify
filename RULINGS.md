@@ -1247,7 +1247,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   licence notice has to travel with it; `/timerify` is kept free for a later sidebar page;
   converting line endings would break the byte check, and a one-line file would flood every
   diff. Cost if wrong: an error in the browser points into the minified file, and a reader
-  reads the TypeScript.
+  reads the TypeScript. Changed in 1.1.0: see "The server answers the card's address with the
+  bytes it read at start-up, from memory, not with the file on disk: `card.CardView`, a
+  `HomeAssistantView` registered once by `async_register_card`, replaces the static path (#30)."
+  under Release 1.1.0.
 - **The module defines `timerify-card` and adds itself to `window.customCards` inside one "not
   defined yet" guard, and the entry is added to the array, which is never replaced.** The
   frontend reuses the array, and a second copy of the module (a resource a user added by hand
@@ -1335,7 +1338,12 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   server's clock. The time left never goes below 0:00 and the fill stays between empty and full
   when the browser's clock runs ahead or behind; the end time shown is the server's; every
   action goes to the server. Cost if wrong: a device with a wrong clock shows a time left that
-  is wrong by as much; a server offset is issue #8.
+  is wrong by as much; a server offset is issue #8. Changed in 1.1.0: see "The card counts by the
+  server's clock: `timerify/timer` stamps every answer with `server_time`
+  (`dt_util.utcnow().isoformat()`), `lookupTimer` measures the offset as
+  `Date.parse(server_time) - (sent + received) / 2` and keeps it in the found lookup as
+  `clockOffset`, and every "now" of the card reads `serverNow(lookup)`, which is `Date.now()` plus
+  that offset (#8)." under Release 1.1.0.
 - **Clock times: the same local day shows the time, the next six days the short weekday and the
   time, later ones the date and the time.** They honour `locale.time_zone` (`server` is
   `hass.config.time_zone`) and `time_format` (`12`, `24`, `system`, which is the browser's
@@ -1402,12 +1410,24 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   (the intervals), each with `target: {entity_id}` and with `notifyOnError` left on.** It reads
   only the states of the entities that `timerify/timer` names and the target's, and
   `hass.entities` for the picker's stub. It adds no state writes and nothing counts down on the
-  server (§2). Cost if wrong: none; whatever the card does can be done by an automation.
+  server (§2). Cost if wrong: none; whatever the card does can be done by an automation. Changed
+  in 1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take
+  one of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the
+  choice `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or
+  `hold_action`, which the card hands to Home Assistant's own handler as a `hass-action` event
+  (#36)." and "The card has an optional Turn off button, `show_turn_off` (default `false`): while
+  the target runs, with a countdown or without one, the pill shows it beside its name, before the
+  chip, and the round tile below its name; pressing it calls `timerify.stop` and nothing else
+  (#37)." under Release 1.1.0.
 - **A tap opens the pop-up in both layouts, and a hold on the round layout runs the timer with
   no duration through `timerify.run`, or stops it while it runs; the pill has no hold.**
   `timerify.run` with no duration is R9: in strict mode the default duration, in loose mode an
   open run, and a target that already runs keeps its countdown. A running timer, with or without
-  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none.
+  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
+  press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
+  choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
+  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
+  hands to Home Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **A tap is the `click` event of the card's body (a mouse, a finger, the keyboard and assistive
   technology all produce it); a hold is added on top of it.** The hold fires on release after
   at least 500 ms, as Home Assistant's own handler does, and swallows the click that follows
@@ -1418,7 +1438,12 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   says that letting go will act. A visible focus ring (`:focus-visible`) shows keyboard users
   where they are on the card. The pill has no hold: with a mouse a long press there is a tap,
   and on touch it does nothing. Cost if wrong: a user may expect a long press on the pill to
-  act; there is none for keyboard users either, who start and stop through the pop-up.
+  act; there is none for keyboard users either, who start and stop through the pop-up. Changed in
+  1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one
+  of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice
+  `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which
+  the card hands to Home Assistant's own handler as a `hass-action` event (#36)." under
+  Release 1.1.0.
 - **The body is an empty layer that covers the whole card, border included, under the content,
   as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
   `aria-labelledby` the name and the status text, and, on the pill, the fill; the round tile's
@@ -1740,7 +1765,9 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   with a second one could not give it `voice == "percent"` (a row has at most one setting for
   each meaning), and it would need a field of its own. Cost if wrong: that field. A bundle that
   is newer than the server's answer, between a HACS update and the restart, has no key to read
-  (#30).
+  (#30). Changed in 1.1.0: see "The server answers the card's address with the bytes it read at
+  start-up, from memory, not with the file on disk: `card.CardView`, a `HomeAssistantView`
+  registered once by `async_register_card`, replaces the static path (#30)." under Release 1.1.0.
 - **`card/src/popup.ts` stays one element while it does not grow.** It is about 600 lines,
   about 200 of them the styles, and it has one job; splitting it now adds files that must
   agree on one state, and removes nothing. If it grows, the order is: move the styles out
@@ -3249,7 +3276,7 @@ in `docs/followups.md`.
   path did, on purpose. It sends no `ETag` and no `Last-Modified`: the static path made them
   from the file on disk (its inode, size and time), which after an update describe other
   bytes than the ones served; and because the address carries the key of the bytes, a
-  browser asks again only when a month has passed, once, for a file of 49 KB, which a
+  browser asks again only when a month has passed, once, for a file of about 65 KB, which a
   `304` would save. It does not answer a `Range` request (a module load sends none) and,
   like the static path, not a `HEAD` request. It does not compress, as the static path did
   not: one fetch per browser and version does not pay for a compressor on the event loop.
@@ -3380,18 +3407,40 @@ in `docs/followups.md`.
   more-info dialog, so a press set to `action` with no action does that; the selector's own
   "Default" choice writes no key. The `visible` condition of a form field, which would hide an
   action while its press is not `action`, is not in the developer documentation, so the six
-  fields are always shown and the helper under each action says when it is used. The wait for a
+  fields are always shown and the helper under each action says when it is used. The six fields
+  sit in an `expandable` group with `flatten: true`, which keeps them at the top level of the
+  config (without it they would be written under an `interactions` key). That key belongs to
+  the frontend and is not in the form schema the developer documentation describes, so the card
+  relies on a key that Home Assistant could change. The end-to-end test `sets what a tap does in
+  the Interactions group` (`editor.spec.ts`) guards it: it reads the saved config for a
+  top-level `tap`. If a release drops the key, the fallback is `name: ""` with a `title`, which
+  keeps the fields at the top level and loses the translated title of the group. The wait for a
   double tap is the price of having one: a card without it taps at once, as before. The
   keyboard has neither gesture, and the docs say to keep the pop-up on the tap for it. The
   `PressController` asks the card what to do at every press, instead of being given it once, so
   that a card whose layout or config changes is pressed as its new config says; one controller
   serves both layouts.
+  Clearing a press in the visual editor, with the cross of its drop-down, was tried in the Home
+  Assistant of the end-to-end tests (2026.10.4): it drops the key, both from the config that the
+  preview's `setConfig` gets and from the saved dashboard. Home Assistant does not write an
+  empty string, so the card has no empty choice to read as unset, and a `tap: ""` written by
+  hand stays `card_error_press`. The action selector has no cross: its own Default, which is how
+  a user takes an action back, writes no key either, so neither kind of field needs a rule in
+  `parseConfig`.
+  The body of a card that can be pressed (the one that has `role="button"`) says `touch-action:
+  manipulation`, because Safari zooms the page on a double tap unless the element says that it
+  does not, and the card now offers a double tap. The value leaves panning and pinch-zoom to the
+  user. WebKit's zoom is the reason for the rule, and no test drives WebKit: the end-to-end
+  tests run only in Chromium, with a mouse, which does not zoom on a double tap, so they and
+  the vitest scenario read the computed style, not the zoom.
   Cost if wrong: the `action` choice with no action opens a dialog the user may not expect, and
   a form field is empty until the user sets it, because the form does not apply the default
   (the same as the layout); the default of `hold` depends on the layout, so the stub config of
   the picker does not write it. If Home Assistant documents `visible`, the actions can be hidden
   with their presses. A user who sets a double tap on a card with a tap that opens the
-  pop-up waits a quarter of a second for it.
+  pop-up waits a quarter of a second for it. A double tap on an iPhone or an iPad may still
+  zoom the page if Safari ignores `touch-action: manipulation` on the body; no test drives
+  WebKit, so this is for a device check before a release.
   Tests: `card/test/press.test.ts` (a tap opens the pop-up by default on both layouts; a single
   tap still opens it when a double tap is set; a double tap does the double tap action alone;
   two taps further apart than the window are two taps; Enter and Space act at once; the wait is
@@ -3406,10 +3455,16 @@ in `docs/followups.md`.
   `card/test/config.test.ts` (the defaults, the six choices, the refusals), `card/test/editor.test.ts`
   (the Interactions group, its labels and helper in both languages, the shape check),
   `card/test/round.test.ts` (the long press of 1.0.0 under its default, which stops with
-  `timerify.stop` since the Turn off entry below); end to end
+  `timerify.stop` since the Turn off entry below), `card/test/card.test.ts` (`is not zoomed by a
+  double tap where the card can be pressed, and is left alone where not`: the body says
+  `touch-action: manipulation` on both layouts, and does not when all three presses are
+  `none`); end to end
   `opens the more-info dialog of the device, and starts nothing` (`round.spec.ts`), `runs the
-  timer on a double tap` and `opens the pop-up on a single tap` (`pill.spec.ts`), and `sets what a
-  tap does in the Interactions group` (`editor.spec.ts`, which also reads the group in Russian).
+  timer on a double tap` and `opens the pop-up on a single tap` (`pill.spec.ts`), `sets what a
+  tap does in the Interactions group` (`editor.spec.ts`, which also reads the group in Russian),
+  `goes back to opening the pop-up when what a tap does is cleared` and `leaves the action out
+  when it is put back to Default` (`editor.spec.ts`), and `is not zoomed by a double tap, which
+  Safari does unless the body says otherwise` (`pill.spec.ts` and `round.spec.ts`).
 
 - **The card has an optional Turn off button, `show_turn_off` (default `false`): while the target
   runs, with a countdown or without one, the pill shows it beside its name, before the chip, and the

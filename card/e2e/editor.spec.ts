@@ -108,6 +108,13 @@ const menuChoice = (page: Page, key: string, words: Record<string, string> = eng
   page.getByRole("menuitem", { name: words[key], exact: true });
 
 /**
+ * The cross that clears a drop-down of the form once it holds a choice. It has no name of its
+ * own, so it is found by its place: in the field that carries the label.
+ */
+const clearOf = (page: Page, label: string) =>
+  page.locator(`ha-picker-field[aria-label="${english[label]}"]`).locator(".clear");
+
+/**
  * A yes-or-no field of the form, found by the words beside it: the switch has no name of its
  * own, its label is the text of the field it sits in. (Playwright's click on the switch is
  * refused: the switch's own thumb is in the way.)
@@ -225,6 +232,78 @@ test.describe("the card in Home Assistant's editor", () => {
           layout: "pill",
           presets: DEFAULT_PRESETS,
           tap: "run",
+        },
+      ]);
+  });
+
+  test("goes back to opening the pop-up when what a tap does is cleared", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+    await page.getByText(english["card_editor_interactions"], { exact: true }).click();
+    await behaviour(page, "card_editor_tap").click();
+    await menuChoice(page, "card_editor_press_run").click();
+    const clear = clearOf(page, "card_editor_tap");
+    await expect(clear).toBeVisible();
+
+    await clear.click();
+
+    // Home Assistant drops the key: it does not write an empty choice, which the card would
+    // refuse. The preview shows the card, with no complaint about the press.
+    await expect(clear).toBeHidden();
+    await expect(page.locator("timerify-card ha-card.pill")).toBeVisible();
+    await expect(page.getByText(english["card_error_press"])).toHaveCount(0);
+    await saveCard(page);
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+        },
+      ]);
+    await page.getByRole("button", { name: "Done" }).click();
+    await tap(page, page.locator("timerify-card"));
+    await expect(page.locator("timerify-card dialog")).toBeVisible();
+  });
+
+  test("leaves the action out when it is put back to Default", async ({ page, state, ws }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+    await page.getByText(english["card_editor_interactions"], { exact: true }).click();
+    await behaviour(page, "card_editor_tap").click();
+    await menuChoice(page, "card_editor_press_action").click();
+    await behaviour(page, "card_editor_tap_action").click();
+    await page.getByRole("menuitem", { name: "Toggle", exact: true }).click();
+
+    await behaviour(page, "card_editor_tap_action").click();
+    await page.getByRole("menuitem", { name: "Default (More info)", exact: true }).click();
+
+    // The action selector has no cross: its own Default is how a user takes an action back,
+    // and Home Assistant writes no key for it, as for a press that is cleared.
+    await expect(page.locator("timerify-card ha-card.pill")).toBeVisible();
+    await expect(page.getByText(english["card_error_action"])).toHaveCount(0);
+    await saveCard(page);
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          tap: "action",
         },
       ]);
   });

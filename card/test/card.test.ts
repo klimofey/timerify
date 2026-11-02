@@ -733,6 +733,29 @@ describe("its body", () => {
       card.remove();
     }
   });
+
+  it("is not zoomed by a double tap where the card can be pressed, and is left alone where not", async () => {
+    // Safari zooms the page on a double tap unless the element says `touch-action:
+    // manipulation`, which leaves panning and pinch-zoom to the user. The card offers a double
+    // tap, so its body says it whenever a press can reach it; a body that nothing can press
+    // is left to the browser.
+    const touchActionOf = (card: TimerifyCard) => {
+      const body = card.shadowRoot?.querySelector(".body");
+      return body ? getComputedStyle(body).touchAction : undefined;
+    };
+    const nothing = { tap: "none", double_tap: "none", hold: "none" };
+    for (const layout of ["pill", "round"]) {
+      const pressable = await mountCard(fakeHass(), { entity: NUMBER, layout });
+      expect(touchActionOf(pressable), layout).toBe("manipulation");
+      pressable.remove();
+
+      const idle = await mountCard(fakeHass(), { entity: NUMBER, layout, ...nothing });
+      expect(touchActionOf(idle), `${layout} with every press set to nothing`).not.toBe(
+        "manipulation",
+      );
+      idle.remove();
+    }
+  });
 });
 
 describe("its size", () => {

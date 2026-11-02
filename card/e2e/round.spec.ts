@@ -37,6 +37,19 @@ test.describe("the round card in Home Assistant", () => {
     );
   });
 
+  test("is not zoomed by a double tap, which Safari does unless the body says otherwise", async ({
+    page,
+  }) => {
+    // Chromium has no double-tap zoom, so this reads what the browser makes of the rule that
+    // keeps WebKit from it: panning and pinch-zoom stay, the double tap is the card's.
+    const { strict } = cardsOf(page);
+    const body = strict.locator(".body");
+    await expect(body).toBeVisible();
+    expect(await body.evaluate((element) => getComputedStyle(element).touchAction)).toBe(
+      "manipulation",
+    );
+  });
+
   test("opens the pop-up on a tap, also on the border of the card", async ({ page, state, ws }) => {
     const { strict } = cardsOf(page);
     const dialog = strict.locator("dialog");

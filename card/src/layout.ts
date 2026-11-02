@@ -161,6 +161,11 @@ export const commonStyles = css`
   }
   .body[role="button"] {
     cursor: pointer;
+    /*
+     * A press can reach the body, and a double tap is one of them. Safari zooms the page on a
+     * double tap unless the element says otherwise; this leaves it panning and pinch-zoom.
+     */
+    touch-action: manipulation;
   }
   .body:focus-visible {
     outline: 2px solid var(--primary-color);

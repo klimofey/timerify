@@ -177,15 +177,15 @@ Timerify writes the file again when any of these happens:
 
 - A timer is added, removed or reloaded.
 - A device is renamed or gets another alias.
+- A device reports another name or another list of modes. A firmware update can do that.
 - A schedule interval is added, deleted, renamed or edited.
 
-It writes the file only when its text changes.
+It writes the file only when its text changes. A device that switches on and off, or reports a temperature, changes nothing.
 
 - Timerify checks the file with the parser Home Assistant uses (hassil) before it writes it. It checks every sentence, every list and every name, which has to be matched as it is said. A file that Home Assistant cannot read would break Assist for the whole language. So when a check fails, Timerify leaves the old file as it is and logs an error.
 - Timerify writes only where there is no file, or where the file is its own. Its own file has the first line `# Managed by Timerify. ...`. A `timerify.yaml` of yours at that path is left as it is. That language is not written, and the log says so once.
 - The files are removed when you turn off the option, disable the entry, remove the entry, or stop picking a language. They stay when Home Assistant restarts or the entry reloads.
 - The sentences need Timerify's handlers. **Remove the Voice settings entry, or turn off its option, before you uninstall Timerify.** A file that is left behind makes the built-in agent fail on every phrase of it that matches. That includes the delayed commands it took over from Home Assistant. It fails until you remove the file by hand.
-- Names are listed when a timer is set up or its device changes. A device may change its own list of modes later, for example after a firmware update. That is picked up at the next change. So is a new friendly name of a device that is not in the entity registry.
 
 ### Copy the sentences by hand
 

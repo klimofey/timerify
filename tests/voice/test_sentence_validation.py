@@ -222,8 +222,13 @@ def test_the_text_of_a_file_is_read_as_the_built_in_agent_reads_it() -> None:
     assert read_back("name: yes\nother: 'yes'\n") == {"name": True, "other": "yes"}
 
 
+AIR_CONDITIONER = VoiceName(
+    "AC", "climate", frozenset({"cool", "heat_cool", "fan_only"})
+)
+"""A thermostat that can be turned on in three modes."""
+NAMES_AND_AIR_CONDITIONER = (*NAMES, AIR_CONDITIONER)
+
 SETTINGS = VoiceSettingValues(
-    hvac_sets=frozenset({frozenset({"cool", "heat_cool", "fan_only"})}),
     mode_sources=(
         ModeSource("climate", None, None, None, "fan_mode", ("low",)),
         ModeSource(
@@ -232,12 +237,13 @@ SETTINGS = VoiceSettingValues(
     ),
 )
 """What an air conditioner and a fan with strange presets between them can be turned
-on with."""
+on with, besides the HVAC modes the name of the air conditioner carries."""
 
 
 def built_with_settings(language: str = "en") -> BuiltSentences:
-    """The shipped sentences of `language` with names and `SETTINGS` in them."""
-    return build(load_sources(language), NAMES, SETTINGS)
+    """The shipped sentences of `language` with the names of `NAMES_AND_AIR_CONDITIONER`
+    and `SETTINGS` in them."""
+    return build(load_sources(language), NAMES_AND_AIR_CONDITIONER, SETTINGS)
 
 
 def climate_blocks(data: dict[str, Any]) -> list[dict[str, Any]]:
@@ -286,7 +292,7 @@ def test_the_words_for_a_mode_are_those_of_the_modes_the_thermostats_have(
     the list of the file itself has none."""
     sources = load_sources(language)
 
-    built = build(sources, NAMES, SETTINGS)
+    built = build(sources, NAMES_AND_AIR_CONDITIONER, SETTINGS)
 
     assert built.data["lists"][LIST_HVAC_MODE] == {"values": []}
     blocks = climate_blocks(built.data)
@@ -316,7 +322,12 @@ def test_each_set_of_hvac_modes_adds_its_climate_blocks_once(
     words = sources["lists"][LIST_HVAC_MODE]["values"]
     sets = HVAC_SETS[:count]
 
-    built = build(sources, NAMES, VoiceSettingValues(hvac_sets=frozenset(sets)))
+    thermostats = [
+        VoiceName(f"Thermostat {number}", "climate", modes)
+        for number, modes in enumerate(sets)
+    ]
+
+    built = build(sources, [*NAMES, *thermostats])
 
     assert climate_blocks(built.data) == [
         scoped(block, words, set(modes))
@@ -349,9 +360,7 @@ def test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own(
     """The empty set is a set: a thermostat that can only be off is still run for a
     time, with no word for a mode to say."""
     built = build(
-        load_sources(language),
-        NAMES,
-        VoiceSettingValues(hvac_sets=frozenset({frozenset()})),
+        load_sources(language), [*NAMES, VoiceName("Heater", "climate", frozenset())]
     )
 
     blocks = climate_blocks(built.data)
@@ -359,6 +368,25 @@ def test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own(
     for block in blocks:
         assert block["requires_context"][CONTEXT_HVAC_MODES] == ""
         assert block["lists"][LIST_HVAC_MODE] == {"values": []}
+    validate(language, built.data, built.said)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences(
+    language: str,
+) -> None:
+    """The sentences for a set of HVAC modes are reached through the key a listed name
+    carries. A thermostat whose only name is punctuation is not listed, since it would
+    match anywhere, so its set of modes has no name to reach it by and no copy."""
+    names = [VoiceName("?!", "climate", frozenset({"cool", "heat"})), *NAMES]
+
+    built = build(load_sources(language), names)
+
+    assert climate_blocks(built.data) == []
+    assert all(
+        CONTEXT_HVAC_MODES not in value["context"]
+        for value in built.data["lists"][LIST_TARGET]["values"]
+    )
     validate(language, built.data, built.said)
 
 

@@ -10,7 +10,7 @@ built here, parsed the way the agent parses it, and written only when it passes
 (`validate`).
 
 Everything here is blocking, and runs in the executor, except the functions that read
-what Home Assistant knows (`voice_names`, `interval_names`, `voice_setting_values`,
+what Home Assistant knows (`target_voice`, `target_voices`, `interval_names`,
 `async_mode_words`), which run in the event loop.
 """
 
@@ -152,16 +152,28 @@ class ModeSource:
     """The attribute the modes are values of, which is the name of the setting
     (`fan_mode`, `preset_mode`, `mode`, `operation_mode`)."""
     modes: tuple[str, ...]
-    """The modes as the device names them."""
+    """The modes as the device names them, in the order of their names: the order a
+    device lists them in is not something the file says."""
+
+
+@dataclass(frozen=True)
+class TargetVoice:
+    """What the sentence files say of one target: the names it is called by, and the
+    modes it takes. It is all that decides what a target adds to a file, and so a
+    change of it is what makes the file change."""
+
+    names: tuple[VoiceName, ...]
+    """The names of the target, with the HVAC modes of a thermostat on each. The sets of
+    HVAC modes that get sentences of their own are those of the names that are listed,
+    so that a thermostat that cannot be called by any name brings none."""
+    mode_sources: tuple[ModeSource, ...]
+    """The modes that "mode" means for the target, one source for each setting."""
 
 
 @dataclass(frozen=True)
 class VoiceSettingValues:
     """The values of the settings that the targets support, which a person may say."""
 
-    hvac_sets: frozenset[frozenset[str]] = frozenset()
-    """The sets of HVAC modes the thermostats among the targets can be turned on with,
-    as Home Assistant names the modes: one set for every different one."""
     mode_sources: tuple[ModeSource, ...] = ()
     """The modes of the targets that "mode" means: the fan modes of thermostats, the
     presets of fans, the modes of humidifiers, the operation modes of water heaters."""
@@ -221,28 +233,63 @@ def escape_template(text: str) -> str:
 
 
 @callback
-def voice_names(hass: HomeAssistant) -> list[VoiceName]:
-    """Every name the built-in agent would know the targets of the timers by.
+def target_voice(hass: HomeAssistant, entity_id: str) -> TargetVoice:
+    """What the sentence files say of the target `entity_id`, from its state and its
+    registry entry as they are now.
 
     The names of an entity are its aliases, the computed name among them, as the
     built-in agent lists them, so that a name is matched as it is for any other
-    entity. A target that has no state yet is listed by its registry entry.
+    entity. A target that has no state yet is listed by its registry entry. The modes
+    are those the target takes now, judged as a command is judged, so that nothing is
+    offered that a target would refuse. Nothing is translated here, which makes it
+    cheap enough to ask for every state a target reports.
     """
-    registry = er.async_get(hass)
-    names: list[VoiceName] = []
+    registered = er.async_get(hass).async_get(entity_id)
+    state = hass.states.get(entity_id)
+    if state is not None:
+        aliases = intent.async_get_entity_aliases(hass, registered, state=state)
+    elif registered is not None:
+        aliases = er.async_get_entity_aliases(hass, registered, allow_empty=False)
+    else:
+        aliases = []
+    domain = split_entity_id(entity_id)[0]
+    choices = supported_settings(hass, entity_id)
+    hvac_modes = _hvac_modes(entity_id, choices)
+    sources = dict.fromkeys(
+        ModeSource(
+            domain=domain,
+            platform=None if registered is None else registered.platform,
+            translation_key=None if registered is None else registered.translation_key,
+            device_class=None
+            if state is None
+            else state.attributes.get(ATTR_DEVICE_CLASS),
+            attribute=choice.name,
+            modes=tuple(sorted(choice.options)),
+        )
+        for choice in choices
+        if choice.voice == "mode"
+    )
+    return TargetVoice(
+        names=tuple(VoiceName(alias, domain, hvac_modes) for alias in aliases),
+        mode_sources=tuple(sources),
+    )
+
+
+@callback
+def target_voices(hass: HomeAssistant) -> dict[str, TargetVoice]:
+    """What the sentence files say of each target of the timers, by entity id, in the
+    order of the timers; a target that two timers share is there once."""
+    targets: dict[str, TargetVoice] = {}
     for entry in loaded_timers(hass):
         entity_id = entry.runtime_data.target_entity_id
-        registered = registry.async_get(entity_id)
-        if (state := hass.states.get(entity_id)) is not None:
-            aliases = intent.async_get_entity_aliases(hass, registered, state=state)
-        elif registered is not None:
-            aliases = er.async_get_entity_aliases(hass, registered, allow_empty=False)
-        else:
-            aliases = []
-        domain = split_entity_id(entity_id)[0]
-        hvac_modes = _hvac_modes(entity_id, supported_settings(hass, entity_id))
-        names.extend(VoiceName(alias, domain, hvac_modes) for alias in aliases)
-    return names
+        if entity_id not in targets:
+            targets[entity_id] = target_voice(hass, entity_id)
+    return targets
+
+
+def voice_names(targets: Iterable[TargetVoice]) -> list[VoiceName]:
+    """Every name the built-in agent would know the `targets` by."""
+    return [name for target in targets for name in target.names]
 
 
 def _hvac_modes(
@@ -279,39 +326,13 @@ def interval_names(hass: HomeAssistant, labels: Mapping[str, str]) -> list[Voice
     return list(titles.values())
 
 
-@callback
-def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
-    """The values of the settings that the targets of the timers support now, from their
-    states or, without one, their registry entries: the same judgement a command is
-    judged by, so that nothing is offered that a target would refuse."""
-    registry = er.async_get(hass)
-    hvac_sets: set[frozenset[str]] = set()
-    sources: dict[ModeSource, None] = {}
-    for entry in loaded_timers(hass):
-        entity_id = entry.runtime_data.target_entity_id
-        registered = registry.async_get(entity_id)
-        state = hass.states.get(entity_id)
-        choices = supported_settings(hass, entity_id)
-        if (hvac_modes := _hvac_modes(entity_id, choices)) is not None:
-            hvac_sets.add(hvac_modes)
-        for choice in choices:
-            if choice.voice == "mode":
-                source = ModeSource(
-                    domain=split_entity_id(entity_id)[0],
-                    platform=None if registered is None else registered.platform,
-                    translation_key=(
-                        None if registered is None else registered.translation_key
-                    ),
-                    device_class=(
-                        None
-                        if state is None
-                        else state.attributes.get(ATTR_DEVICE_CLASS)
-                    ),
-                    attribute=choice.name,
-                    modes=choice.options,
-                )
-                sources[source] = None
-    return VoiceSettingValues(frozenset(hvac_sets), tuple(sources))
+def voice_setting_values(targets: Iterable[TargetVoice]) -> VoiceSettingValues:
+    """The values of the settings that the `targets` support, each source of modes once
+    however many targets have it."""
+    sources = dict.fromkeys(
+        source for target in targets for source in target.mode_sources
+    )
+    return VoiceSettingValues(tuple(sources))
 
 
 async def async_mode_words(
@@ -399,23 +420,23 @@ def build(
     punctuation is left out, since it would match anywhere.
 
     Every data block of the sources that requires the domain `climate` alone is
-    replaced by one copy for each of the sets of HVAC modes in `settings`, in the order
-    of their keys. A copy requires the key of its set, so that a thermostat is
-    understood with the words for its own modes and no other, and has a list of those
+    replaced by one copy for each of the sets of HVAC modes that the listed names have,
+    in the order of their keys. A copy requires the key of its set, so that a thermostat
+    is understood with the words for its own modes and no other, and has a list of those
     words of its own, the words of the sources that mean one of the modes. The list of
-    the file itself is empty; without a set no block for thermostats is left. A block
-    that requires `climate` with another domain cannot be copied that way, and raises
-    `InvalidSentences`. A mode is listed as the device names it, said with spaces for
-    underscores, and in each of the words of `mode_words` for it (see
-    `async_mode_words`).
+    the file itself is empty; without a set no block for thermostats is left, and a
+    thermostat that no listed name belongs to has none. A block that requires `climate`
+    with another domain cannot be copied that way, and raises `InvalidSentences`. A mode
+    is listed as the device names it, said with spaces for underscores, and in each of
+    the words of `mode_words` for it (see `async_mode_words`).
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
     said: dict[str, tuple[str, ...]] = {}
+    listed = [(spoken, name) for name in names for spoken in spoken_variants(name.name)]
     lists[LIST_TARGET], said[LIST_TARGET] = _name_list(
         (spoken, {"out": name.name, "context": _context_of(name)})
-        for name in names
-        for spoken in spoken_variants(name.name)
+        for spoken, name in listed
     )
     lists[LIST_INTERVAL], said[LIST_INTERVAL] = _name_list(
         (spoken, {"out": interval.title})
@@ -428,7 +449,7 @@ def build(
         built.get("intents", {}),
         built.get("expansion_rules", {}),
         hvac_words,
-        settings.hvac_sets,
+        {name.hvac_modes for _, name in listed if name.hvac_modes is not None},
     )
     lists[LIST_MODE], said[LIST_MODE] = _name_list(
         _mode_entries(settings.modes, mode_words)

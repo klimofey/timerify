@@ -910,9 +910,9 @@ those of the spec.
   (`hvac_key`), from `supported_settings`, which leaves `off` out; a thermostat with none
   has the empty key, and is still run for a time. `build` replaces every data block of the
   sources that requires the domain `climate` alone (`TimerifyRun`, `TimerifyDelayedCommand`
-  and `TimerifyCommandAt`: three in each language) by one copy for each set in
-  `VoiceSettingValues.hvac_sets`, in the order of the keys. A copy requires its key as well
-  as the domain, and has a list `timerify_hvac_mode` of its own with the words of the
+  and `TimerifyCommandAt`: three in each language) by one copy for each set of HVAC modes
+  that the listed names carry (Decision 10), in the order of the keys. A copy requires its
+  key as well as the domain, and has a list `timerify_hvac_mode` of its own with the words of the
   sources that mean its modes, in their order. The list of the file stays, empty, since
   the rules refer to it; without a set no block for thermostats is left. `build`
   fails closed: it raises `InvalidSentences` for a block that requires `climate` with
@@ -1091,17 +1091,20 @@ those of the spec.
   language, because a reload by language misses the regional caches of the built-in agent;
   every cached language is rebuilt. Cost if wrong: none.
 - **The file is rewritten when a timer is set up, unloaded or reloaded, when a target's
-  entity or device changes its name or aliases, and when a schedule interval is added,
-  deleted or renamed; the changes are debounced.** A change is written one cooldown
+  entity or device changes its name or aliases, when a target reports another name or
+  other modes, and when a schedule interval is added, deleted or renamed; the changes are
+  debounced.** A change is written one cooldown
   (`VOICE_SYNC_COOLDOWN`, one second) after the first of the changes that come in a row,
   never twice within a cooldown, so a burst that lasts longer is written more than once;
   Home Assistant's `Debouncer` does not move its timer for the changes that follow and
   drops a call that falls due while a write runs, so a write that finds a change came in
   during it schedules another. The first write happens before set-up returns when Home
-  Assistant is running, and at start otherwise. A new mode that a device
-  reports later (a firmware update) and a changed friendly name of a target that is not in
-  the registry are picked up at the next trigger (issue #20). Cost if wrong: such
-  a name or mode is missing from the file until then.
+  Assistant is running, and at start otherwise. The state of every target is followed
+  too, so that a new mode that a device reports later (a firmware update) and a changed
+  friendly name of a target that is not in the registry are written as the other changes
+  are, and only when what the file says of the target changed (Decision 10 of the voice
+  part, below). Cost if wrong: such a name or mode is missing from the file until the
+  next change of the kinds above.
 - **The names are listed as the built-in agent lists them: every alias with the computed
   name, with punctuation removed, an empty name left out, and a name with a Russian yo
   listed again with a ye; `in` is escaped only when hassil would read it as a template,
@@ -3110,3 +3113,47 @@ in `docs/followups.md`.
   `test_llm_names_an_interval_by_its_start_time`,
   `test_llm_is_told_every_title_a_start_time_switched` and
   `test_llm_naming_a_renamed_interval_by_its_start_time_is_told_the_titles`.
+- **The file follows the state of every target, and is written only when what it says of
+  a target changed (Decision 10, #20).** `target_voice(hass, entity_id)` is what the file
+  says of one target: `TargetVoice(names, mode_sources)`, frozen. `names` are the
+  `VoiceName`s of the target, each with the HVAC modes of a thermostat (`hvac_modes`, None
+  for any other target), and `mode_sources` the `ModeSource`s of its settings that "mode"
+  means. `target_voices` reads it for the target of each loaded timer, once for a target
+  that two timers share, and `voice_names` and `voice_setting_values` are made of those.
+  The sets of HVAC modes that get a copy of the sentences are taken by `build` from the
+  names it lists, and `VoiceSettingValues` has no `hvac_sets` of its own: it was a second
+  source for what the names already carry, and a thermostat with no name (its aliases
+  taken away, or a name of nothing but punctuation) got a copy that no name could reach.
+  The modes are on the names only, so `TargetVoice` has no `hvac_modes` of its own either.
+  `ModeSource.modes` is sorted, so that a device that lists the same modes in another
+  order says the same. `SentenceFiles._written` holds the `TargetVoice` of each target by
+  entity id, set by `async_sync` from the inputs it used, whether the write succeeded or
+  not. At the same read, `async_sync` replaces its `async_track_state_change_event`
+  subscription with one on those targets (not at the end of the write, so that a state
+  reported during it is compared with what the write is built from), and the unload of the
+  entry ends it. `_check_target` recomputes the target and calls `_changed()` only when it
+  differs from `_written`; the state callback, the entity registry callback and the device
+  registry callback all go through it, so the one rule is "the file says something else of
+  the target". `_ENTITY_CHANGES` gains `capabilities`, `supported_features` and
+  `translation_key`: a target with no state is judged by its registry entry, and a change
+  there is followed like one of the state. A registered target's modes are followed the
+  same way, since a firmware update changes the state and not the registry entry.
+  A state change that leaves it as it was (on and off, a temperature) builds nothing and
+  reads nothing: no translation is fetched on a state change, since `async_mode_words`
+  runs in the sync only and a `ModeSource` holds the raw modes. Why: the spec's "without
+  churn", for one target at a time. Cost if wrong: one comparison of one target per state
+  change of a target.
+  Tests (`tests/voice/test_voice_follows_targets.py`, and in
+  `tests/voice/test_sentence_validation.py` the one below):
+  `test_a_yaml_switch_renamed_by_its_state_is_listed_by_its_new_name`,
+  `test_a_new_mode_a_device_reports_is_listed`,
+  `test_a_registered_thermostat_that_gains_a_fan_mode_is_listed`,
+  `test_a_mode_a_device_stops_reporting_leaves_the_list`,
+  `test_a_thermostat_that_gains_an_hvac_mode_is_understood_with_it`,
+  `test_a_thermostat_with_no_state_follows_the_capabilities_of_its_entry`,
+  `test_a_thermostat_with_no_name_to_be_said_adds_no_sentences`,
+  `test_the_hvac_modes_of_a_thermostat_with_no_name_change_nothing`,
+  `test_a_target_switching_on_and_off_rewrites_nothing`,
+  `test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing`,
+  `test_a_state_change_after_the_entry_is_unloaded_writes_nothing` and
+  `test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences`.

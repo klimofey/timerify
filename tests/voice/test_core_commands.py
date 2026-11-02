@@ -37,6 +37,7 @@ from scripts.generate_core_commands import (
     COMMAND_SLOT,
     DELAY_AFTER_RULE_NAME,
     DELAY_BEFORE_RULE_NAME,
+    DELAY_LISTS,
     DELAYED_COMMAND,
     EXTRAS,
     FILE_NAME,
@@ -63,6 +64,7 @@ from ..helpers import (
     TURN_OFF,
     TURN_ON,
     advance,
+    at,
     call_service,
     set_number,
     state_of,
@@ -75,6 +77,7 @@ from .helpers import (
     reached,
     readings,
     refusal_of,
+    samples,
     speech,
     talk,
     translated,
@@ -91,6 +94,9 @@ COOL_24 = [COOL, TEMPERATURE_24]
 TANK_NUMBER = "number.tank_run_for"
 WITH_AND = "<timerify_duration_with_and>"
 """What a thermostat and a water heater make of how long a command runs."""
+SETTING_LISTS = ("timerify_hvac_mode", "timerify_mode")
+"""The lists of the words for a setting: a sample that leaves them out is a sentence for
+a target that is turned on without any setting, as the boiler is."""
 DELAY_VALUES = {"hours": 2, "minutes": 15, "seconds": 30}
 """What the samples say for each unit of a delay."""
 
@@ -459,6 +465,137 @@ async def test_a_delay_in_seconds_is_exact(
     assert fake_target.calls == [TURN_ON]
 
 
+async def test_turn_on_in_2000_minutes_keeps_a_command(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+) -> None:
+    """A delay is counted in Timerify's own minutes, which reach a week, not in the
+    hundred of Home Assistant's: the command waits for a day and a third, and the answer
+    names the time, on the next day."""
+    response = await converse(hass, "turn on the boiler in 2000 minutes")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert state_of(hass, NEXT) == at(2000)
+    assert speech(response) == "Boiler turns on at 18:20 tomorrow."
+
+    await advance(hass, freezer, minutes=2000)
+
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_turn_on_in_150_hours_keeps_a_command(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The hours of a delay reach a week too: 150 of them are six days and six hours."""
+    response = await converse(hass, "turn on the boiler in 150 hours")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert state_of(hass, NEXT) == at(150 * 60)
+    assert speech(response) == "Boiler turns on at 15:00 in 6 days."
+
+
+async def test_turn_on_a_week_and_a_minute_ahead_is_refused_with_the_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """168 hours is the longest count of hours that can be said, and a minute more is
+    a week and a minute: past what a command can wait. The answer names the limit and
+    no command is kept."""
+    response = await converse(hass, "turn on the boiler in 168 hours and 1 minute")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert refusal_of(response) == translated(
+        "en", "exceptions", "command_too_far", "message"
+    ).format(days="7")
+    assert state_of(hass, NEXT) == "unknown"
+
+
+@pytest.mark.parametrize(
+    "numbers",
+    [{"timerify_hours": 169}, {"timerify_long_minutes": 10081}],
+    ids=["169-hours", "10081-minutes"],
+)
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_a_delay_beyond_a_week_in_one_unit_is_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+    numbers: dict[str, int],
+) -> None:
+    """A count past a week in one unit matches nothing of Timerify's, as for a
+    duration: no command is kept and nothing is switched, not even by the sentences of
+    Home Assistant that a count past a week would otherwise fall to."""
+    texts = samples(
+        language,
+        DELAYED_COMMAND,
+        takeover=True,
+        numbers=numbers,
+        absent=SETTING_LISTS,
+    )
+    assert texts
+
+    for text in texts:
+        response = await converse(hass, text, language)
+
+        assert reached(response) != DELAYED_COMMAND, text
+    assert fake_target.calls == []
+    assert pending(hass, NEXT) == []
+    assert state_of(hass, NUMBER) == "0"
+
+
+@pytest.mark.parametrize(
+    ("counted", "slot", "count"),
+    [
+        ("timerify_hours", "delay_hours", 120),
+        ("timerify_minutes", "delay_minutes", 120),
+        ("timerify_long_minutes", "delay_minutes", 2000),
+    ],
+)
+async def test_russian_delays_past_100_reach_the_handler(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    counted: str,
+    slot: str,
+    count: int,
+) -> None:
+    """In Russian too, a delay of 120 hours, 120 minutes or 2000 minutes is counted by
+    Timerify's own lists and reaches the handler with what was said, whatever the
+    command, and whether it is kept, set or refused there."""
+    # The sentences are those of every kind of device; the boiler is a switch, and the
+    # ones for covers and valves ("open") are not about it.
+    texts = [
+        text
+        for text in samples(
+            "ru",
+            DELAYED_COMMAND,
+            takeover=True,
+            numbers={counted: count},
+            absent=SETTING_LISTS,
+        )
+        if readings("ru", text, name="Boiler", domain="switch", takeover=True)
+    ]
+    assert texts
+    said: set[tuple[str, int]] = set()
+
+    for text in texts:
+        response = await converse(hass, text, "ru")
+
+        assert reached(response) == DELAYED_COMMAND, text
+        assert response.intent is not None, text
+        said |= {
+            (key, heard["value"])
+            for key, heard in response.intent.slots.items()
+            if key.startswith("delay_")
+        }
+        await cancel_pending(hass, NUMBER, NEXT)
+
+    assert said == {(slot, count)}
+
+
 # --- Turning off later -------------------------------------------------------------
 
 
@@ -597,6 +734,37 @@ async def test_turn_off_in_more_than_a_day_is_refused(
 
     response = await converse(hass, "turn off the boiler in 30 hours")
 
+    assert refusal_of(response) == translated(
+        "en", "exceptions", "duration_out_of_range", "message"
+    ).format(max_hours="24")
+    assert state_of(hass, NUMBER) == "45"
+
+
+async def test_turn_off_in_120_minutes_sets_the_timer(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """Two hours is a count of minutes past Home Assistant's hundred, and within the
+    day a countdown can run for."""
+    await converse(hass, "turn on the boiler")
+
+    response = await converse(hass, "turn off the boiler in 120 minutes")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert state_of(hass, SENSOR) == (START + timedelta(minutes=120)).isoformat()
+    assert state_of(hass, NUMBER) == "120"
+
+
+async def test_turn_off_in_2000_minutes_is_refused_with_the_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """2000 minutes is understood, so the answer is the controller's: a countdown runs
+    for a day at most, and the one that was running is left as it was."""
+    await converse(hass, "turn on the boiler")
+
+    response = await converse(hass, "turn off the boiler in 2000 minutes")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
     assert refusal_of(response) == translated(
         "en", "exceptions", "duration_out_of_range", "message"
     ).format(max_hours="24")
@@ -830,12 +998,13 @@ def expanded(
 def wanted_later(block: CommandBlock, shapes: Sequence[str]) -> set[str]:
     """The sentences that say the command of a block of Home Assistant in each shape of
     a delayed command it has, as the file should have them: the hours, minutes and
-    seconds of the delay in slots of their own, and a command to turn on followed by how
-    long it runs and the settings, if the delay comes after it, or before the delay, or
-    after it; or, if the delay comes first, followed by them."""
+    seconds of the delay in slots of their own, counted by the lists that `DELAY_LISTS`
+    gives, and a command to turn on followed by how long it runs and the settings, if
+    the delay comes after it, or before the delay, or after it; or, if the delay comes
+    first, followed by them."""
     sentences: set[str] = set()
     for shape in shapes:
-        named = re.sub(r"\{timer_(\w+):\1\}", r"{timer_\1:delay_\1}", shape)
+        named = re.sub(r"\{timer_(\w+):\1\}", lambda slot: DELAY_LISTS[slot[1]], shape)
         alone = named.replace(COMMAND_SLOT, command_group(block))
         if block.action == "off":
             sentences.add(alone)

@@ -797,9 +797,10 @@ those of the spec.
   hours" gives a day. For the user to hear either, a longer duration has to reach the
   handler, so the sentences understand hours up to 168 and minutes up to 10080, a week in
   each, the same in both languages and equal to the longest delay a command takes; a count
-  beyond a week is not understood, and a test pins that bound too. The tools take any count
-  and the controller decides. Cost if wrong: "for 200 hours" is answered as not understood,
-  not with the limit.
+  beyond a week is not understood, and a test pins that bound too. The delay of a delayed
+  command is counted with the same lists, so the week is its bound too (see Release 1.1.0,
+  Voice). The tools take any count and the controller decides. Cost if wrong: "for 200
+  hours" is answered as not understood, not with the limit.
   The shape of the minutes is a matter of cost. A range that allows number words makes
   hassil build, on the first request in a language, a table of the words of every number in
   it, and that table grows with the range: measured on hassil 3.12 in a fresh process, hours
@@ -2585,3 +2586,26 @@ in `docs/followups.md`.
   `test_for_an_hour_and_30_is_90_minutes_to_a_thermostat`,
   `test_a_delayed_turn_on_of_a_thermostat_reads_hours_and_a_number` and
   `test_a_scope_carries_every_rule_of_its_block`.
+- **A delay is said with the lists of a duration, and refused by the controller with its
+  limit.** The delayed commands of `core_commands.yaml` count the hours of a delay with
+  `timerify_hours` (1 to 168) and its minutes with `timerify_minutes` (1 to 1440, which may
+  be said as words) or `timerify_long_minutes` (1441 to 10080, in digits): the lists a
+  duration uses, filling the slots `delay_hours` and `delay_minutes`. The seconds stay
+  core's `timer_seconds`, 1 to 100. `DELAY_LISTS` of the generator maps each unit of a
+  shape of core to its list, and `delay_rules` applies it; the handler is as it was,
+  since `_delay_of` already sums the three slots (#29). The limits are the controller's: a
+  command to turn on is kept at most 7 days ahead, and a command to turn off sets the
+  countdown, so it reaches 24 hours. A delay past one is refused with the texts that
+  exist, which name the limit: `command_too_far` ("A command can be set at most 7 days
+  ahead.") and `duration_out_of_range` ("A timer runs for 1 min to 24 h."). A count past a
+  week in one unit is not understood, as for durations. Why: one bound for every count,
+  already measured for cost (the duration entry of "What can be said"), and no new string.
+  Cost if wrong: "in 200 hours" is not understood.
+  Tests: `test_turn_on_in_2000_minutes_keeps_a_command`,
+  `test_turn_on_in_150_hours_keeps_a_command`,
+  `test_turn_on_a_week_and_a_minute_ahead_is_refused_with_the_limit`,
+  `test_turn_off_in_120_minutes_sets_the_timer`,
+  `test_turn_off_in_2000_minutes_is_refused_with_the_limit`,
+  `test_russian_delays_past_100_reach_the_handler`,
+  `test_a_delay_beyond_a_week_in_one_unit_is_not_understood` and
+  `test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_device`.

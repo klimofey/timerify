@@ -10,11 +10,15 @@ are written again, for Timerify's intents, from the sentences of the pinned
 `HassTurnOff`), alone, and inside each of the shapes in which `HassStartTimer` says a
 delayed command ("<command> in 15 minutes", "in 15 minutes <command>", with hours,
 minutes and seconds in each combination); the ways to say the delay are written once,
-as two rules of the file that every command refers to. Timerify's sentences name only
-the devices that have a timer, and the built-in agent prefers a custom sentence to its
-own, so a device without one still reaches Home Assistant's. A phrasing that this file
-does not repeat, such as one a newer release of the intents adds, reaches Home
-Assistant's until the file is written again.
+as two rules of the file that every command refers to. Home Assistant counts the hours,
+minutes and seconds of a delay up to 100. These sentences count the hours and minutes
+with Timerify's own lists, the ones a duration uses, which reach a week (`DELAY_LISTS`):
+a delay past the limit of a command is then refused by the controller, and the answer
+names the limit, instead of the sentence not being understood. Timerify's sentences
+name only the devices that have a timer, and the built-in agent prefers a custom
+sentence to its own, so a device without one still reaches Home Assistant's. A
+phrasing that this file does not repeat, such as one a newer release of the intents
+adds, reaches Home Assistant's until the file is written again.
 
 The file is written from the data, not retyped, and what the generator does not
 understand it refuses: a block of the intents with a key it has not been taught could
@@ -105,6 +109,19 @@ EXTRAS_RULE: Final = (
 )
 """What `EXTRAS` is in a block: how long, the settings, or both, in either order, and
 never neither. The settings are those of the block's scope."""
+
+DELAY_LISTS: Final[Mapping[str, str]] = {
+    "hours": "{timerify_hours:delay_hours}",
+    "minutes": (
+        "({timerify_minutes:delay_minutes}|{timerify_long_minutes:delay_minutes})"
+    ),
+    "seconds": "{timer_seconds:delay_seconds}",
+}
+"""What says the count of each unit of a delay, in place of Home Assistant's list of
+`{timer_<unit>:<unit>}` (1 to 100): Timerify's own lists of hours and minutes, the ones
+a duration uses (`sentences/<language>/src/timerify.yaml`), which reach a week; the
+seconds stay Home Assistant's. The slot is `delay_<unit>` for each, since `hours` and
+`minutes` are how long a command to turn on runs."""
 
 _SLOT: Final = re.compile(r"\{[^{}]*\}")
 _DELAY_SLOT: Final = re.compile(r"\{timer_(hours|minutes|seconds):\1\}")
@@ -269,7 +286,8 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
     the name of the rule; a rule only if there is a delay to say in that place.
 
     A delay is said with the slots `delay_hours`, `delay_minutes` and `delay_seconds`,
-    since `hours` and `minutes` are how long a command to turn on runs.
+    since `hours` and `minutes` are how long a command to turn on runs, and its hours
+    and minutes with Timerify's lists (`DELAY_LISTS`).
 
     Raises ValueError for a shape whose command is not at one end and set apart by a
     space, or that has anything but the command and the delay in it.
@@ -284,7 +302,7 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
         for slot in _SLOT.findall(shape.replace(COMMAND_SLOT, "")):
             if not _DELAY_SLOT.fullmatch(slot):
                 raise ValueError(f"A delayed command with {slot} in it: {shape!r}")
-        delay = _DELAY_SLOT.sub(r"{timer_\1:delay_\1}", shape)
+        delay = _DELAY_SLOT.sub(lambda slot: DELAY_LISTS[slot[1]], shape)
         if shape.startswith(f"{COMMAND_SLOT} "):
             after.append(_flat(delay.removeprefix(f"{COMMAND_SLOT} ")))
         elif shape.endswith(f" {COMMAND_SLOT}"):

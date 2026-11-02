@@ -124,6 +124,16 @@ in a row, and the least time between two writings."""
 SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
 """Sent when a timer is set up or unloaded, so that the names of the targets are listed
 again."""
+EVENT_COUNTDOWN_STARTED: Final = "timerify_countdown_started"
+"""Fired when a timer with no countdown begins one. Data: `entity_id`, the timer's Run
+for, and `ends_at`, the end as the Ends at sensor states it (ISO 8601 in UTC)."""
+EVENT_COUNTDOWN_ENDED: Final = "timerify_countdown_ended"
+"""Fired when the countdown of a timer is over. Data: `entity_id`, the timer's Run for,
+and `reason`: `expired`, `stopped` or `turned_off` (`EndReason`)."""
+EVENT_COMMAND_DUE: Final = "timerify_command_due"
+"""Fired when a pending command is carried out at its time. Data: `entity_id`, the
+timer's Run for, `command_id`, as `add_command` answered it, and `action`: `on` or
+`off`. A command dropped for coming too late fires nothing."""
 MANAGED_HEADER: Final = (
     "# Managed by Timerify. Do not edit:"
     " this file is rewritten whenever a timer changes."

@@ -3,7 +3,9 @@ become effects for a controller.
 
 Nothing here touches Home Assistant, the clock or the event loop. Every command
 and every observation of the target takes the current time, updates the snapshot
-and returns the effects the caller must carry out, in order.
+and returns the effects the caller must carry out, in order. What happened to the
+countdown and to the pending commands is told apart from the effects, as announcements
+that the caller takes (`TimerCore.take_announcements`).
 """
 
 from collections.abc import Callable, Iterable
@@ -154,6 +156,38 @@ class CommandDropped:
 type Effect = (
     TurnOn | ApplySettings | TurnOff | Arm | Disarm | Changed | GaveUp | CommandDropped
 )
+
+type EndReason = Literal["expired", "stopped", "turned_off"]
+"""Why a countdown ended: its end was reached, Timerify stopped it (Run for 0, Stop, a
+pending "off", Add time down to zero, a schedule interval switched off while its window
+ran), or the target was switched off outside Timerify."""
+
+
+@dataclass(frozen=True)
+class CountdownStarted:
+    """A countdown began where none ran, to end at `end`."""
+
+    end: datetime
+
+
+@dataclass(frozen=True)
+class CountdownEnded:
+    """The countdown that ran is over, for `reason`."""
+
+    reason: EndReason
+
+
+@dataclass(frozen=True)
+class CommandCameDue:
+    """A pending command was carried out at its time. A command dropped for coming too
+    late (`CommandDropped`) did nothing and is not announced."""
+
+    command: Command
+
+
+type Announcement = CountdownStarted | CountdownEnded | CommandCameDue
+"""Something that happened to the timer which others may want to hear of. Unlike an
+`Effect` it switches nothing."""
 
 
 def next_wakeup(snapshot: Snapshot) -> datetime | None:
@@ -342,11 +376,22 @@ class TimerCore:
         self._settings_allowance = _Allowance(automatic_resends)
         """The same for the owed settings: new settings, a command that sends the ones
         owed, and a new wish to turn on while they are owed start a new one."""
+        self._announcements: list[Announcement] = []
+        """What has happened since the caller last took it (`take_announcements`). Only
+        `_set_end` records a start or an end. Never persisted: a core starts with
+        nothing to say, so a countdown restored from the file is not announced again."""
 
     @property
     def snapshot(self) -> Snapshot:
         """The current state, safe to persist."""
         return self._snapshot
+
+    def take_announcements(self) -> list[Announcement]:
+        """What happened to the timer since the last call, in the order it happened,
+        and forget it. A step returns its effects and leaves its announcements here,
+        so the caller takes them once it has saved the snapshot."""
+        announced, self._announcements = self._announcements, []
+        return announced
 
     def wanted_running(self, now: datetime) -> bool:
         """Whether the target is wanted running as of `now`: a countdown is under way,
@@ -418,7 +463,7 @@ class TimerCore:
             return self._run_until(
                 now, now + self._default_duration, settings, began=now
             )
-        self._clear_end()
+        self._expire_stale_end(now)
         return [self._wakeup(), *self._want("on", settings)]
 
     @_reports_change
@@ -674,7 +719,7 @@ class TimerCore:
                     else:
                         wish = command_wish
                 case "end":
-                    self._end_timer()
+                    self._end_timer(ended_by="expired")
                     wish = "off"
                 case unreachable:
                     assert_never(unreachable)
@@ -780,15 +825,22 @@ class TimerCore:
         at its time as it is (`run_open`).
         """
         if command.action == "off":
+            self._announce(CommandCameDue(command))
             self._end_timer()
             return "off"
         end = self._command_end(command)
         if end is not None and end <= now:
             return None
+        self._announce(CommandCameDue(command))
         if command.minutes is None and self._wants_running(command.at, wish):
             self._owe(command.settings)
             return "on"
-        self._set_end(None if end is None else _capped(now, end), began=command.at)
+        # With no end to write, this clears an end that the command's time reached.
+        self._set_end(
+            None if end is None else _capped(now, end),
+            began=command.at,
+            ended_by="expired",
+        )
         self._owe(command.settings)
         return "on"
 
@@ -813,7 +865,7 @@ class TimerCore:
             self._suppress_windows()
             if self._snapshot.end is None:
                 return []
-            self._clear_end()
+            self._clear_end(ended_by="turned_off")
             return [self._wakeup()]
         if self._mode == "strict" and self._snapshot.end is None:
             return self._run_until(now, now + self._default_duration, began=now)
@@ -828,7 +880,13 @@ class TimerCore:
         began: datetime | None,
     ) -> list[Effect]:
         """Count down to `end`, at most a day from now, or stop if it is not ahead.
-        The countdown began at `began`: now, or when the one that was running did."""
+        The countdown began at `began`: now, or when the one that was running did.
+
+        A countdown whose end is not ahead is over, folded or not (#42): it is
+        announced as expired before anything new, so a stop that follows has none to
+        end, and a new end is a start, not a move.
+        """
+        self._expire_stale_end(now)
         if end <= now:
             return self._stop()
         self._set_end(_capped(now, end), began=began)
@@ -838,9 +896,10 @@ class TimerCore:
         self._end_timer()
         return [self._wakeup(), *self._want("off")]
 
-    def _end_timer(self) -> None:
-        """The countdown is over: there is no end, and nothing to run with."""
-        self._clear_end()
+    def _end_timer(self, *, ended_by: EndReason = "stopped") -> None:
+        """The countdown is over, for `ended_by`: there is no end, and nothing to run
+        with."""
+        self._clear_end(ended_by=ended_by)
         self._clear_settings()
         self._suppress_windows()
 
@@ -859,16 +918,26 @@ class TimerCore:
         *,
         began: datetime | None,
         by: str | None = None,
+        ended_by: EndReason = "stopped",
     ) -> None:
         """The only writer of the end and of the beginning of the countdown it counts
-        down to. `by` names the interval whose window end it is (S1, S2); every other
-        write, whoever made it, leaves the timer to nobody's schedule (S3), and a timer
-        with no end is nobody's.
+        down to, and so the only place that announces a start or an end. `by` names the
+        interval whose window end it is (S1, S2); every other write, whoever made it,
+        leaves the timer to nobody's schedule (S3), and a timer with no end is nobody's.
 
         `began` is when the countdown began: the caller works it out, a countdown that
         goes on with a new end through `_kept_beginning`. None where there is none to
         say, and always None for a timer with no end.
+
+        Going from no end to an end announces a start; going from an end to none
+        announces an end, for `ended_by`. Moving the end announces nothing: it is the
+        same countdown.
         """
+        before = self._snapshot.end
+        if before is None and end is not None:
+            self._announce(CountdownStarted(end))
+        elif before is not None and end is None:
+            self._announce(CountdownEnded(ended_by))
         self._snapshot = replace(
             self._snapshot,
             end=end,
@@ -886,9 +955,19 @@ class TimerCore:
         kept = self._snapshot.started_at
         return None if kept is None else min(kept, at)
 
-    def _clear_end(self) -> None:
+    def _clear_end(self, *, ended_by: EndReason = "stopped") -> None:
         """There is no countdown: no end, no beginning, nobody's schedule."""
-        self._set_end(None, began=None)
+        self._set_end(None, began=None, ended_by=ended_by)
+
+    def _expire_stale_end(self, now: datetime) -> None:
+        """Clear an end that is not ahead of `now`, announcing it as expired: it is no
+        countdown, as `wanted_running` judges it, though nothing folded it yet."""
+        end = self._snapshot.end
+        if end is not None and end <= now:
+            self._clear_end(ended_by="expired")
+
+    def _announce(self, announcement: Announcement) -> None:
+        self._announcements.append(announcement)
 
     def _want(
         self,

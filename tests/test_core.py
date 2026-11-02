@@ -20,7 +20,10 @@ from custom_components.timerify.core import (
     Arm,
     Changed,
     Command,
+    CommandCameDue,
     CommandDropped,
+    CountdownEnded,
+    CountdownStarted,
     Disarm,
     Effect,
     GaveUp,
@@ -4277,3 +4280,324 @@ def test_a_countdown_that_ran_out_is_not_wanted_running() -> None:
 def test_wanted_running_refuses_a_naive_time() -> None:
     with pytest.raises(ValueError, match="now must be timezone-aware"):
         core("strict", "on").wanted_running(NAIVE)
+
+
+# --- Announcements ------------------------------------------------------------------
+#
+# The core tells what happened to the countdown on a channel of its own, apart from the
+# effects: a countdown that begins where none ran, one that is over and why, and a
+# pending command that came due. A change of a running countdown tells nothing.
+
+
+def test_a_countdown_from_idle_is_announced_as_started() -> None:
+    c = core("strict", "off")
+
+    c.set_duration(NOW, minutes(30))
+
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]
+    assert c.take_announcements() == []
+
+
+def test_a_core_that_is_restored_with_a_countdown_has_nothing_to_announce() -> None:
+    """A countdown that was running before the restart is not started again."""
+    restored = Snapshot(end=NOW + minutes(30), started_at=NOW, last_actual="on")
+
+    c = TimerCore("strict", minutes(45), restored)
+    c.observe(NOW + minutes(5), "on", by_us=False)
+
+    assert c.take_announcements() == []
+
+
+def test_changing_a_running_countdown_announces_nothing() -> None:
+    """Moving the end, however it is done, keeps one countdown going: a pending
+    command that comes due in the middle of it is the only thing announced."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]
+
+    c.set_duration(NOW + minutes(5), minutes(60))
+    assert c.take_announcements() == []
+    c.add(NOW + minutes(6), minutes(10))
+    assert c.take_announcements() == []
+    c.add(NOW + minutes(7), minutes(-5))
+    assert c.take_announcements() == []
+    c.run_open(NOW + minutes(8))
+    assert c.take_announcements() == []
+
+    c.set_windows(NOW + minutes(9), [window("x", 15, 90)], configured={"x"})
+    c.tick(NOW + minutes(15))
+    assert c.snapshot.end == NOW + minutes(90)  # the window carries the timer on
+    assert c.take_announcements() == []
+
+    later = cmd(20, "on", minutes=20)
+    c.add_command(NOW + minutes(16), later)
+    c.tick(NOW + minutes(20))
+    assert c.snapshot.end == NOW + minutes(40)  # the command moved it
+    assert c.take_announcements() == [CommandCameDue(later)]
+
+
+def test_the_end_of_a_countdown_is_announced_as_expired() -> None:
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    c.take_announcements()
+
+    c.tick(NOW + minutes(30))
+
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+def test_the_end_of_a_window_that_carries_the_timer_is_expired() -> None:
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 30)], configured={"x"})
+    c.tick(NOW)
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]
+
+    c.tick(NOW + minutes(30))
+
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+STOPS: dict[str, Callable[[TimerCore], object]] = {
+    "zero": lambda c: c.set_duration(NOW + minutes(10), timedelta(0)),
+    "stop": lambda c: c.stop(NOW + minutes(10)),
+    "add_past_the_end": lambda c: c.add(NOW + minutes(10), minutes(-40)),
+    "pending_off": lambda c: (
+        c.add_command(NOW, cmd(10, "off")),
+        c.tick(NOW + minutes(10)),
+    ),
+}
+"""Each way Timerify ends a countdown that started at `NOW` and runs for 30 minutes."""
+
+
+@pytest.mark.parametrize("stop", STOPS)
+def test_ending_a_countdown_by_timerify_is_announced_as_stopped(stop: str) -> None:
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    c.take_announcements()
+
+    STOPS[stop](c)
+
+    news = c.take_announcements()
+    assert news[-1] == CountdownEnded("stopped")
+    assert [n for n in news if isinstance(n, CountdownEnded)] == [news[-1]]
+
+
+def test_disabling_the_interval_of_an_open_window_announces_a_stop() -> None:
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 0, 60)], configured={"x"})
+    c.tick(NOW)
+    c.take_announcements()
+
+    c.set_interval_enabled(NOW + minutes(10), "x", False)
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [CountdownEnded("stopped")]
+
+
+def test_a_manual_off_is_announced_as_turned_off() -> None:
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    c.take_announcements()
+
+    c.observe(NOW + minutes(5), "off", by_us=False)
+
+    assert c.take_announcements() == [CountdownEnded("turned_off")]
+
+
+def test_a_manual_off_of_a_timer_with_no_countdown_announces_nothing() -> None:
+    c = core("loose", "on")
+
+    c.observe(NOW, "off", by_us=False)
+
+    assert c.take_announcements() == []
+
+
+def test_a_report_after_the_end_is_announced_as_expired() -> None:
+    """The countdown ran out before the target said it was off: the end decides, not
+    the report that found it."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    c.take_announcements()
+
+    c.observe(NOW + minutes(31), "off", by_us=False)
+
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+def test_a_pending_off_announces_the_command_then_the_stop() -> None:
+    off = cmd(10, "off")
+    c = holding("strict", "on", off, end=NOW + minutes(30))
+
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [CommandCameDue(off), CountdownEnded("stopped")]
+
+
+def test_a_pending_off_of_a_timer_with_no_countdown_announces_the_command() -> None:
+    off = cmd(10, "off")
+    c = holding("loose", "on", off)
+
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [CommandCameDue(off)]
+
+
+def test_a_pending_on_on_an_idle_timer_announces_the_command_then_the_start() -> None:
+    on = cmd(10, "on", minutes=20)
+    c = holding("strict", "off", on)
+
+    c.tick(NOW + minutes(10))
+
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(30)),
+    ]
+
+
+def test_an_on_with_minutes_due_as_the_countdown_ends_announces_no_end() -> None:
+    """The command moves the end at the very instant the countdown reaches it: the
+    target is not switched off and on, so it is one countdown that goes on."""
+    on = cmd(10, "on", minutes=20)
+    c = holding("strict", "on", on, end=NOW + minutes(10))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert TurnOff() not in fx
+    assert c.snapshot.end == NOW + minutes(30)
+    assert c.take_announcements() == [CommandCameDue(on)]
+
+
+def test_a_bare_on_that_comes_due_as_the_countdown_ends_announces_the_end() -> None:
+    """Loose mode: the command turns the target on with no countdown at the instant
+    the countdown reaches zero, so the countdown is over though the target stays on."""
+    on = cmd(10, "on")
+    c = holding("loose", "on", on, end=NOW + minutes(10))
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert TurnOff() not in fx
+    assert c.take_announcements() == [CommandCameDue(on), CountdownEnded("expired")]
+
+
+def test_a_dropped_command_is_not_announced_as_due() -> None:
+    """The run it asked for was over before it was folded: it did nothing."""
+    late = cmd(-61, minutes=60)
+    c = holding("strict", "off", late)
+
+    fx = c.tick(NOW)
+
+    assert CommandDropped(late) in fx
+    assert c.take_announcements() == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "news"),
+    [("strict", [CountdownStarted(NOW + minutes(45))]), ("loose", [])],
+)
+def test_a_manual_on_announces_a_start_in_strict_mode_only(
+    mode: Mode, news: list[CountdownStarted]
+) -> None:
+    """Strict mode gives a target that is switched on by hand its default countdown;
+    loose mode lets it run with none."""
+    c = core(mode, "off")
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.take_announcements() == news
+
+
+@pytest.mark.parametrize("ended", [-40, -1, 0])
+def test_a_run_given_after_the_end_passed_announces_the_end_first(ended: int) -> None:
+    """An end that is not ahead is no countdown (#42), but the countdown did run out:
+    its end is told before the start of the new one, and the snapshot is the one the
+    step gives to a timer that was folded."""
+    stale = Snapshot(end=NOW + minutes(ended), started_at=NOW - minutes(70))
+    c = TimerCore("strict", minutes(45), stale)
+    idle = TimerCore("strict", minutes(45), Snapshot())
+
+    fx = c.add(NOW, minutes(10))
+
+    assert fx == idle.add(NOW, minutes(10))
+    assert c.snapshot == idle.snapshot
+    assert c.take_announcements() == [
+        CountdownEnded("expired"),
+        CountdownStarted(NOW + minutes(10)),
+    ]
+
+
+def test_a_duration_set_after_the_end_passed_announces_the_end_first() -> None:
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(1)))
+    idle = TimerCore("strict", minutes(45), Snapshot())
+
+    assert c.set_duration(NOW, minutes(10)) == idle.set_duration(NOW, minutes(10))
+
+    assert c.snapshot == idle.snapshot
+    assert c.take_announcements() == [
+        CountdownEnded("expired"),
+        CountdownStarted(NOW + minutes(10)),
+    ]
+
+
+def test_a_zero_given_after_the_end_passed_announces_that_it_expired() -> None:
+    """There is no countdown left to stop: the one that ran out is what is told."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(1)))
+    idle = TimerCore("strict", minutes(45), Snapshot())
+
+    assert c.set_duration(NOW, timedelta(0)) == idle.set_duration(NOW, timedelta(0))
+
+    assert c.snapshot == idle.snapshot
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_a_run_given_after_the_end_passed_in_either_mode_tells_the_end(
+    mode: Mode,
+) -> None:
+    c = TimerCore(mode, minutes(45), Snapshot(end=NOW - minutes(1)))
+    idle = TimerCore(mode, minutes(45), Snapshot())
+
+    assert c.run_open(NOW) == idle.run_open(NOW)
+
+    assert c.snapshot == idle.snapshot
+    expected: list[CountdownEnded | CountdownStarted] = [CountdownEnded("expired")]
+    if mode == "strict":
+        expected.append(CountdownStarted(NOW + minutes(45)))
+    assert c.take_announcements() == expected
+
+
+def test_a_negative_add_after_the_end_passed_leaves_the_end_to_the_tick() -> None:
+    """Nothing is written, so nothing is told yet: the tick that folds the end tells
+    that it expired."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(1)))
+
+    assert c.add(NOW, minutes(-5)) == []
+    assert c.take_announcements() == []
+
+    c.tick(NOW)
+    assert c.take_announcements() == [CountdownEnded("expired")]
+
+
+def test_a_catch_up_that_ends_and_starts_announces_both_in_order() -> None:
+    """Home Assistant was down from before the end of a countdown to after a command:
+    what ended, the command, and the countdown it began."""
+    on = cmd(-10, "on", minutes=30)
+    stored = Snapshot(end=NOW - minutes(60), commands=(on,), last_actual="off")
+    c = TimerCore("strict", minutes(45), stored)
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.take_announcements() == [
+        CountdownEnded("expired"),
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(20)),
+    ]
+
+
+def test_announcements_are_not_effects() -> None:
+    """The effects of a step are what they were; what it announced is apart."""
+    c = core("strict", "off")
+
+    fx = c.set_duration(NOW, minutes(30))
+
+    assert fx == [Arm(NOW + minutes(30)), TurnOn(), Changed()]
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]

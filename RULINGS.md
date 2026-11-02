@@ -2378,3 +2378,62 @@ in `docs/followups.md`.
   `test_stop_leaves_a_boiler_that_is_off_alone`,
   `test_stop_aimed_at_one_channel_leaves_the_other_running`,
   `test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on`.
+- **Countdowns and due commands are announced by the core and fired as Timerify's own
+  events.** The core decides, in `_set_end` (the only writer of the end) and `_run_command`;
+  the controller fires `timerify_countdown_started` (`entity_id`, `ends_at`),
+  `timerify_countdown_ended` (`entity_id`, `reason`) and `timerify_command_due`
+  (`entity_id`, `command_id`, `action`). `entity_id` is the timer's Run for, looked up in
+  the registry when the event is fired, so a renamed Run for is named by its new id.
+  `ends_at` is the end in the form of the Ends at state: UTC, to the second.
+  - **A start** is a timer with no end getting one (Run, Add time on an idle timer, Run for,
+    a strict-mode manual on, a pending "on", a window that opens on an idle timer). A loose
+    run without a countdown starts none. A move of a running end, however it is made (Run
+    for, Add time, Run with minutes, a pending "on", a window that ends later), announces
+    neither a start nor an end. The pending command that came due in the middle of it is
+    still announced.
+  - **An end** has a reason. `expired`: the end was reached, by the alarm, a fold after a
+    restart or a report of the target; a window whose end is the timer's end counts too.
+    `stopped`: Timerify ended it: Run for 0, Stop, the Turn off button, voice and the LLM
+    tools, Add time down to zero, a pending "off", a window taken away by switching or
+    editing its interval. `turned_off`: the target was switched off outside Timerify
+    (`observe` with `by_us=False`). The core already takes a different path for each, so
+    the reason costs nothing to tell.
+  - **A countdown whose end is not ahead of now is no countdown** (#42), whether or not a
+    tick folded it. Run for, Run and Add time (up) on such a timer announce its end as
+    `expired` first and then the start of the new countdown. Run for 0 announces only the
+    expiry: there is nothing left to stop. A zero or negative Add time writes nothing and
+    announces nothing; the tick that folds the end announces it.
+  - **A command that comes due is announced after the drop check** (`CommandDropped` is
+    not: it did nothing, and the log says so), and before the start or end it causes. A
+    pending "off" on a timer with no countdown is announced too. A bare "on" in loose mode
+    that comes due at the very instant the countdown ends leaves the target on with no
+    countdown, so the end is announced as `expired`. A command with minutes that comes due
+    at that instant moves the end (the target is not switched off and on), so it announces
+    no end.
+  - **The announcements are a channel of their own**, `TimerCore.take_announcements`, not
+    effects: they switch nothing, and the effect lists of the steps stay as they were. The
+    core keeps them until the controller takes them, so no step has to return them and none
+    is taken twice.
+  - **They are fired after the save and the refresh of the entities, and before the calls
+    to the target.** An automation sees the new Ends at and Run for, and a slow device does
+    not delay it. A controller that is unloaded fires nothing.
+  - **Start-up announces what it folds.** A countdown that ended while Home Assistant was
+    down fires `expired` at start-up, to the automations that are armed by then (Tech
+    Stack, "Start-up"); a countdown that still runs fires nothing, because the restored core
+    has nothing to say. A command given while Home Assistant is still starting folds its
+    catch-up before automations are armed, so its announcements can reach none. That is
+    Home Assistant's rule that automations do not fire during start-up.
+  - **A timer whose Run for is not in the entity registry fires nothing** and logs a
+    warning: an event that cannot name its timer is of no use to a trigger.
+  Why: #39. A state cannot tell a countdown that ended from one that was stopped, or a
+  start from a move, and the Next command sensor also changes when a command is added or
+  cancelled. The core's decision point is exact, and an event reaches YAML users too.
+  Cost if wrong: a user who wants an event when a countdown is changed has none; an
+  automation that turns the boiler on again when its countdown ends would loop through
+  `stopped` too, so it must check `trigger.reason`. The docs show that.
+  Tests: the announcement tests of `tests/test_core.py` (from
+  `test_a_countdown_from_idle_is_announced_as_started`) and `tests/test_events.py`, among
+  them `test_changing_a_running_countdown_announces_nothing`,
+  `test_moving_run_for_while_it_runs_fires_no_event`,
+  `test_a_countdown_restored_at_start_up_is_not_announced_again`,
+  `test_a_countdown_that_ended_while_down_fires_ended_at_start_up`.

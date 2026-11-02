@@ -1,6 +1,6 @@
 # Actions
 
-Timerify adds five actions to Home Assistant. This page lists them with their fields and limits.
+Timerify adds five actions to Home Assistant. This page lists them with their fields and limits. It also lists the three events that Timerify fires.
 
 | Action | Name in the form | What it does |
 | --- | --- | --- |
@@ -155,6 +155,48 @@ data:
 | `command_id` | text, required | The id of the command to cancel. |
 
 The id is in the response of `timerify.add_command`. It is also in the `commands` attribute of the [Next command sensor](#what-you-can-read-from-a-timer).
+
+## Events
+
+Timerify fires three events. The [triggers](automations.md) are built on them. A YAML `event` trigger can use them too.
+
+| Event | Data | When it fires |
+| --- | --- | --- |
+| `timerify_countdown_started` | `entity_id`, `ends_at` | A timer that was not counting down starts a countdown. |
+| `timerify_countdown_ended` | `entity_id`, `reason` | A countdown is over. |
+| `timerify_command_due` | `entity_id`, `command_id`, `action` | A pending command is carried out at its time. |
+
+`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown, in the form the **Ends at** sensor shows it. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
+
+A countdown ends for one of three reasons. The event names it in `reason`.
+
+- `expired`: the countdown ran out.
+- `stopped`: Timerify stopped it. The cause is one of these:
+  - **Run for** set to 0, **Stop**, or the **Turn off** button.
+  - A voice request.
+  - A pending "off".
+  - **Add time** down to zero.
+  - A schedule interval that you switched off while its window ran.
+- `turned_off`: the device was switched off outside Timerify, for example by hand or in its own app.
+
+An automation about the end of a countdown should check `reason`. Say it starts something when the boiler runs out of time. Without the check, it would also start after **Stop**.
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: timerify_countdown_ended
+    event_data:
+      entity_id: number.boiler_run_for
+      reason: expired
+actions:
+  - action: persistent_notification.create
+    data:
+      message: The boiler ran out of time.
+```
+
+Changing a countdown that runs fires nothing. That covers a new **Run for**, **Run** with minutes, **Add time** and a schedule window that ends later. A pending command that comes due in the middle still fires its event.
+
+A countdown that ended while Home Assistant was down fires its event once Home Assistant has started. A countdown that still runs after a restart fires nothing.
 
 ## What you can read from a timer
 

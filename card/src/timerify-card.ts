@@ -7,7 +7,8 @@ import { ACTION_KEYS, parseConfig, type CardConfig, type Press } from "./config"
 import { CountdownController } from "./countdown";
 import { getConfigForm, getStubConfig } from "./editor";
 import type { HomeAssistant } from "./hass";
-import { commonStyles, isPressable } from "./layout";
+import { commonStyles, isPressable, mushroomStyles } from "./layout";
+import { MushroomController } from "./mushroom";
 import { pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
 import { PressController, type PressActions } from "./press";
@@ -56,6 +57,7 @@ export class TimerifyCard extends LitElement {
     commonStyles,
     pillStyles,
     roundStyles,
+    mushroomStyles,
     css`
       :host {
         display: block;
@@ -112,6 +114,8 @@ export class TimerifyCard extends LitElement {
       () => this.#view?.endsAt,
       () => serverNow(this._lookup),
     );
+    // The card is marked while its config asks for the Mushroom style and Mushroom is there.
+    new MushroomController(this, () => this._config?.mushroom === true);
   }
 
   get hass(): HomeAssistant | undefined {

@@ -17,6 +17,7 @@ import {
   renderTurnOff,
   turnOffAsIcon,
 } from "./layout";
+import { mush } from "./mushroom";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 
@@ -202,5 +203,35 @@ export const roundStyles = css`
       animation: none;
       transform: scale(1.08);
     }
+  }
+  /*
+   * The Mushroom style (see mushroomStyles in layout.ts): the dial, the name and the button
+   * with the spacing of Mushroom around them. The tile is as high as they make it, and never
+   * lower than the rows of the grid it sits in.
+   */
+  :host([data-mushroom]) ha-card.round {
+    height: max(120px, calc(2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight}));
+  }
+  :host([data-mushroom]) ha-card.round.with-turn-off {
+    height: max(
+      184px,
+      calc(2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight} + 4px + ${mush.controlHeight})
+    );
+  }
+  :host([data-mushroom]) .round .content {
+    gap: 0;
+    padding: ${mush.spacing};
+  }
+  :host([data-mushroom]) .progress {
+    stroke: rgb(${mush.activeRgb});
+  }
+  :host([data-mushroom]) .time {
+    color: ${mush.primaryColor};
+    font-size: ${mush.primaryFontSize};
+    font-weight: ${mush.primaryFontWeight};
+    letter-spacing: ${mush.primaryLetterSpacing};
+  }
+  :host([data-mushroom]) .turn-off-slot {
+    height: ${mush.controlHeight};
   }
 `;

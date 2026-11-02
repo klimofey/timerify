@@ -16,6 +16,7 @@ import {
   renderTurnOff,
   turnOffAsIcon,
 } from "./layout";
+import { mush } from "./mushroom";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
 import type { TimerView } from "./timer";
@@ -82,7 +83,7 @@ export function renderPill(
                 ?disabled=${view.state === "unavailable"}
                 @click=${chip}
               >
-                +${formatMinutes(hass, config.chip)}
+                <span class="chip-text">+${formatMinutes(hass, config.chip)}</span>
               </button>
             `}
       </div>
@@ -159,5 +160,28 @@ export const pillStyles = css`
       animation: none;
       transform: scale(1.08);
     }
+  }
+  /*
+   * The Mushroom style (see mushroomStyles in layout.ts): the card is a card of Home Assistant's
+   * own shape, as Mushroom's are, as high as its icon and the spacing around it make it, and
+   * never lower than the row of the grid it sits in.
+   */
+  :host([data-mushroom]) ha-card.pill {
+    --timerify-radius: var(--ha-card-border-radius, var(--ha-border-radius-lg, 12px));
+    height: max(56px, calc(${mush.iconSize} + 2 * ${mush.spacing}));
+  }
+  :host([data-mushroom]) .pill .content {
+    gap: ${mush.spacing};
+    padding: 0 ${mush.spacing};
+  }
+  :host([data-mushroom]) .fill {
+    background: rgb(${mush.activeRgb});
+  }
+  :host([data-mushroom]) .pill .status {
+    color: ${mush.secondaryColor};
+    font-size: ${mush.secondaryFontSize};
+    font-weight: ${mush.secondaryFontWeight};
+    line-height: ${mush.secondaryLineHeight};
+    letter-spacing: ${mush.secondaryLetterSpacing};
   }
 `;

@@ -38,6 +38,7 @@ describe("the config of the card", () => {
       double_tap: "none",
       hold: "none",
       show_turn_off: false,
+      mushroom: false,
     });
     expect([...DEFAULT_PRESETS]).toEqual([15, 30, 45, 60, 120]);
   });
@@ -110,6 +111,7 @@ describe("the config of the card", () => {
       double_tap: "none",
       hold: "none",
       show_turn_off: false,
+      mushroom: false,
     });
   });
 });
@@ -131,6 +133,26 @@ describe("the Turn off button of the card", () => {
         refusal({ entity: NUMBER, show_turn_off: given }).key,
         JSON.stringify(given),
       ).toBe("card_error_show_turn_off");
+    }
+  });
+});
+
+describe("the Mushroom style of the card", () => {
+  it("is off unless the config turns it on", () => {
+    expect(parseConfig({ entity: NUMBER }).mushroom).toBe(false);
+    expect(parseConfig({ entity: NUMBER, mushroom: undefined }).mushroom).toBe(false);
+  });
+
+  it("takes true and false, as the visual editor writes them", () => {
+    expect(parseConfig({ entity: NUMBER, mushroom: true }).mushroom).toBe(true);
+    expect(parseConfig({ entity: NUMBER, mushroom: false }).mushroom).toBe(false);
+  });
+
+  it("refuses anything else, which would be taken for a yes or a no without a word", () => {
+    for (const given of ["true", "yes", 1, 0, null, [true], {}]) {
+      expect(refusal({ entity: NUMBER, mushroom: given }).key, JSON.stringify(given)).toBe(
+        "card_error_mushroom",
+      );
     }
   });
 });
@@ -239,5 +261,11 @@ describe("the errors of a card on a page that is not in English", () => {
     expect(refusal({ entity: NUMBER, show_turn_off: "yes" }).message).toBe(
       russian.card_error_show_turn_off,
     );
+  });
+
+  it("words the error of the Mushroom style in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, mushroom: "yes" }).message).toBe(russian.card_error_mushroom);
   });
 });

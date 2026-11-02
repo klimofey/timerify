@@ -253,6 +253,52 @@ test.describe("the card in Home Assistant's editor", () => {
       ]);
   });
 
+  test("turns the Mushroom style on in the form, and says that Mushroom was not found", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+
+    // This page has no Mushroom: the note is under the field, whatever the field says.
+    await expect(page.getByText(english["card_editor_mushroom_missing"])).toBeVisible();
+    // A press on the words beside the switch turns it, as a press on the switch does. The note
+    // under them is another paragraph of the field.
+    await yesNoField(page, english["card_editor_mushroom"]).locator("p.primary").click();
+    await saveCard(page);
+
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          mushroom: true,
+        },
+      ]);
+  });
+
+  test("does not say that Mushroom was not found when its cards are on the page", async ({
+    page,
+  }) => {
+    await page.evaluate(() =>
+      customElements.define("mushroom-entity-card", class extends HTMLElement {}),
+    );
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+
+    await expect(yesNoField(page, english["card_editor_mushroom"])).toBeVisible();
+    await expect(page.getByText(english["card_editor_mushroom_missing"])).toHaveCount(0);
+  });
+
   test("falls back on the default presets when the last one is taken away", async ({
     page,
     state,

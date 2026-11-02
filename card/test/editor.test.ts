@@ -96,7 +96,7 @@ function pageWithTimers(...numbers: string[]): FakeHass {
 }
 
 describe("the form of the visual editor", () => {
-  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets, a chip, the Turn off button and the presses", async () => {
+  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets, a chip, the Turn off button, the Mushroom style and the presses", async () => {
     const { getConfigForm } = await freshEditor();
 
     const { schema } = await getConfigForm();
@@ -142,6 +142,7 @@ describe("the form of the visual editor", () => {
       // No unit of its own: its label says minutes.
       { name: "chip", selector: { number: { min: 1, max: 1440, mode: "box" } } },
       { name: "show_turn_off", selector: { boolean: {} } },
+      { name: "mushroom", selector: { boolean: {} } },
       interactions(english),
     ]);
     expect(lengths("en").presets).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
@@ -155,7 +156,7 @@ describe("the form of the visual editor", () => {
 
     const localize = localizeFor("ru");
     const labelled = [
-      ...["entity", "layout", "name", "icon", "presets", "chip", "show_turn_off"],
+      ...["entity", "layout", "name", "icon", "presets", "chip", "show_turn_off", "mushroom"],
       ...["interactions", "tap", "double_tap", "hold"],
       ...["tap_action", "double_tap_action", "hold_action"],
     ] as const;
@@ -165,7 +166,7 @@ describe("the form of the visual editor", () => {
       );
     }
     const russianLengths = lengths("ru");
-    const [, layout, , presets, , , group] = form.schema;
+    const [, layout, , presets, , , , group] = form.schema;
     expect(group).toStrictEqual(interactions(russian));
     expect(layout).toMatchObject({
       selector: {
@@ -187,14 +188,14 @@ describe("the form of the visual editor", () => {
         },
       },
     });
-    expect(form.computeHelper({ name: "presets" })).toBe(
+    expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).toBe(
       russian.card_editor_presets_helper.replace(
         "{presets}",
         russianLengths.listOf(russianLengths.presets),
       ),
     );
     // Not a word of the English file is glued to a number.
-    expect(form.computeHelper({ name: "presets" })).not.toMatch(/\b(min|hr)\b/);
+    expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).not.toMatch(/\b(min|hr)\b/);
   });
 
   it("words the presses as Home Assistant's own editor does", async () => {
@@ -226,13 +227,13 @@ describe("the form of the visual editor", () => {
 
     const form = await getConfigForm();
 
-    expect(form.computeHelper({ name: "presets" })).toBe(
+    expect(form.computeHelper({ name: "presets" }, localizeFor("en"))).toBe(
       english.card_editor_presets_helper.replace(
         "{presets}",
         lengths("en").listOf(lengths("en").presets),
       ),
     );
-    expect(form.computeHelper({ name: "presets" })).toBe(
+    expect(form.computeHelper({ name: "presets" }, localizeFor("en"))).toBe(
       "Leave empty for 15 min, 30 min, 45 min, 1 hr, and 2 hr",
     );
     // The label is the frontend's `localize` of the page; before the strings reach it, it says
@@ -248,13 +249,13 @@ describe("the form of the visual editor", () => {
     const form = await getConfigForm();
 
     for (const field of ["tap_action", "double_tap_action", "hold_action"]) {
-      expect(form.computeHelper({ name: field }), field).toBe(english.card_editor_action_helper);
+      expect(form.computeHelper({ name: field }, localizeFor("en")), field).toBe(english.card_editor_action_helper);
     }
     for (const field of [
       ...["entity", "layout", "name", "icon", "chip", "show_turn_off"],
       ...["interactions", "tap", ""],
     ]) {
-      expect(form.computeHelper({ name: field }), field).toBeUndefined();
+      expect(form.computeHelper({ name: field }, localizeFor("en")), field).toBeUndefined();
     }
   });
 
@@ -264,7 +265,7 @@ describe("the form of the visual editor", () => {
 
     const form = await getConfigForm();
 
-    expect(form.computeHelper({ name: "hold_action" })).toBe(russian.card_editor_action_helper);
+    expect(form.computeHelper({ name: "hold_action" }, localizeFor("ru"))).toBe(russian.card_editor_action_helper);
   });
 
   it("refuses a config of the wrong kind, as the card does", async () => {
@@ -279,6 +280,8 @@ describe("the form of the visual editor", () => {
       [{ entity: NUMBER, chip: true }, english.card_error_chip],
       [{ entity: NUMBER, show_turn_off: "yes" }, english.card_error_show_turn_off],
       [{ entity: NUMBER, show_turn_off: 1 }, english.card_error_show_turn_off],
+      [{ entity: NUMBER, mushroom: "yes" }, english.card_error_mushroom],
+      [{ entity: NUMBER, mushroom: 1 }, english.card_error_mushroom],
       [{ entity: NUMBER, tap: 5 }, english.card_error_press],
       [{ entity: NUMBER, hold: ["run"] }, english.card_error_press],
       [{ entity: NUMBER, hold_action: "more-info" }, english.card_error_action],
@@ -297,6 +300,7 @@ describe("the form of the visual editor", () => {
         presets: ["15", "30", 20],
         chip: 10,
         show_turn_off: true,
+        mushroom: true,
         tap: "action",
         tap_action: { action: "more-info" },
         double_tap: "run",
@@ -402,5 +406,35 @@ describe("the card in the card picker", () => {
 
     expect(card?.getConfigForm).toBe(registered.getConfigForm);
     expect(card?.getStubConfig).toBe(registered.getStubConfig);
+  });
+});
+
+// Last in the file: Mushroom's cards stay defined once the first of these defines a stand-in for
+// one of them, so the scenario in which Mushroom is missing comes first.
+describe("the Mushroom style field of the form", () => {
+  it("says Mushroom was not found, in the language of the editor, while its cards are not defined", async () => {
+    const { getConfigForm } = await freshEditor();
+    const form = await getConfigForm();
+
+    expect(form.computeHelper({ name: "mushroom" }, localizeFor("en"))).toBe(
+      english.card_editor_mushroom_missing,
+    );
+    expect(form.computeHelper({ name: "mushroom" }, localizeFor("ru"))).toBe(
+      russian.card_editor_mushroom_missing,
+    );
+    // Before the page's strings have reached the form, it says it in English.
+    const unlocalized = fakeHass({ stringsLoaded: false }).localize;
+    expect(form.computeHelper({ name: "mushroom" }, unlocalized)).toBe(
+      english.card_editor_mushroom_missing,
+    );
+  });
+
+  it("says nothing once Mushroom's cards are defined", async () => {
+    const { getConfigForm } = await freshEditor();
+    const form = await getConfigForm();
+
+    customElements.define("mushroom-entity-card", class extends HTMLElement {});
+
+    expect(form.computeHelper({ name: "mushroom" }, localizeFor("en"))).toBeUndefined();
   });
 });

@@ -14,6 +14,7 @@ import {
 } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant, Localize } from "./hass";
+import { mushroomIsDefined } from "./mushroom";
 import { lastLoaded, loadStrings, localizeName, t, type StringKey } from "./strings";
 
 /** The word each field is labelled with. */
@@ -25,6 +26,7 @@ const LABELS = {
   presets: "card_editor_presets",
   chip: "card_editor_chip",
   show_turn_off: "card_editor_show_turn_off",
+  mushroom: "card_editor_mushroom",
   interactions: "card_editor_interactions",
   tap: "card_editor_tap",
   double_tap: "card_editor_double_tap",
@@ -88,7 +90,7 @@ export interface LovelaceConfigForm {
   /** Throws, with a message for the user, when the form cannot show the config at all. */
   assertConfig(config: unknown): void;
   computeLabel(field: { name: string }, localize: Localize): string;
-  computeHelper(field: { name: string }): string | undefined;
+  computeHelper(field: { name: string }, localize: Localize): string | undefined;
 }
 
 const isLabelled = (name: string): name is keyof typeof LABELS => Object.hasOwn(LABELS, name);
@@ -171,6 +173,7 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       // The label says that these are minutes, so the field has no unit of its own.
       { name: "chip", selector: { number: { min: 1, max: MAX_MINUTES, mode: "box" } } },
       { name: "show_turn_off", selector: { boolean: {} } },
+      { name: "mushroom", selector: { boolean: {} } },
       {
         name: "interactions",
         type: "expandable",
@@ -195,9 +198,14 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
     assertConfig: assertShape,
     computeLabel: ({ name }, localize) =>
       isLabelled(name) ? localize(localizeName(LABELS[name])) : "",
-    computeHelper: ({ name }) => {
+    computeHelper: ({ name }, localize) => {
       if (name === "presets") {
         return t(lastLoaded(), "card_editor_presets_helper", { presets: defaultPresetsText() });
+      }
+      if (name === "mushroom") {
+        // The one helper that is made with the `localize` the frontend gives, in English when it
+        // does not have the card's strings yet.
+        return mushroomIsDefined() ? undefined : t({ localize }, "card_editor_mushroom_missing");
       }
       return isActionField(name) ? t(lastLoaded(), "card_editor_action_helper") : undefined;
     },

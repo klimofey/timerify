@@ -3536,3 +3536,70 @@ in `docs/followups.md`.
   `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
   and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
   Russian).
+
+- **The card has an optional Mushroom style, `mushroom` (default `false`): a card that asks for
+  it, on a page where Mushroom's cards are defined, takes the look of Mushroom's cards by
+  reading Mushroom's theme variables (#41).**
+  The card is marked `data-mushroom` while its config asks for the style and
+  `customElements.get("mushroom-entity-card")` is defined, and the styles under
+  `:host([data-mushroom])` read `var(--mush-<name>, <Mushroom's default>)` for the spacing, the
+  icon's size, shape and symbol, the fonts of the name and the state, the height and radius of
+  the Turn off button and of the chip, the chip's padding, border and background, and the
+  colours of what is on (`--mush-rgb-state-entity`, Mushroom's blue) and of what is off
+  (`--mush-rgb-disabled`, a grey that follows the theme). The names and the default values are
+  in `card/src/mushroom.ts`, in one table. A card without the option, or on a page without
+  Mushroom, is drawn as it always was: the rules are more specific than the card's own and
+  apply only under the attribute, and the tests pin the computed style of both looks.
+  The icon becomes Mushroom's shape (round, tinted blue while the target runs or counts, grey
+  otherwise); the pill takes the radius of a card instead of its round ends, and its height and
+  the round tile's height are those of a Mushroom card with the same icon and spacing, so the
+  card sits in a grid with them. The pop-up is not restyled.
+  Mushroom is a resource of the dashboard and may load before or after the card, so a card
+  that asks for the style and finds none waits. One `customElements.whenDefined` serves every
+  card on the page: it holds a set of the cards that are connected and wait, and a card is
+  taken out of the set when it leaves the page. A card that leaves before Mushroom arrives is
+  not kept alive by the wait and is not redrawn; back on the page it asks again. The wait is
+  not part of the card's `updateComplete`. The visual editor says "Mushroom was not found. The
+  card keeps the Home Assistant look." under the field while Mushroom is not defined (the text
+  is `card_editor_mushroom_missing`, next to `card_editor_mushroom` and `card_error_mushroom`,
+  in English and in Russian).
+  Licence: Mushroom is Apache-2.0 licensed and is not part of this repository or of the
+  bundle. Only the names of its theme variables and their default values are used, written
+  down in the card's own table with its own styles around them; no code of Mushroom is copied
+  and no file of it is committed. Its default values are public in its documentation and its
+  themes, so there is nothing to attribute beyond this note. If Mushroom changes a default,
+  the card keeps the old one until the table is changed; a theme that sets a variable wins
+  over either.
+  A theme that sets Mushroom's variables changes the card too, in the style: that is what the
+  option is for, and the user page says it (`docs/en/card.md`, `docs/ru/card.md`). The cost: a
+  theme that sets a large `--mush-spacing` or `--mush-icon-size` makes the card taller, as it
+  does a Mushroom card. A theme cannot make the Turn off button unreadable: the thresholds
+  that choose between its words and its icon (`WORDS_FROM` in `layout.ts`: 245, 335 and 101
+  px) were written for Home Assistant's spacing and a 40 px icon, and Mushroom's defaults
+  (10 px, 36 px, 42 px control) need less room, so they stay; a theme that makes the parts
+  larger than Home Assistant's can leave the words in a narrower card than they fit. That is
+  left to the theme's author, as the same variables do in Mushroom's own cards.
+  The pictures: `docs/screenshots/card-pill-mushroom.png` and `card-round-mushroom.png` are
+  taken with the real Mushroom 5.2.3, never a stand-in. The manual `screenshots` project of
+  Playwright downloads `mushroom.js` of that release from GitHub, once, into
+  `card/e2e/.mushroom/` (git-ignored), checks its SHA-256 against the one written in
+  `card/e2e/mushroom.ts`, serves it from a port of the machine with a CORS header, and adds it
+  to the dashboard as a Lovelace resource (`lovelace/resources/create`), the way a user adds
+  it; the resource is deleted afterwards. The `e2e` project needs neither the network nor
+  Mushroom: it defines a stand-in for one of Mushroom's cards (the only thing the card looks
+  for) and sets the theme's variables itself. The existing pictures of the card were not
+  changed by this task: the screenshots run drew them again with a few pixels of drift (the
+  "until" time and the end of the ring's arc, which move with the clock of the run), and they
+  were put back.
+  Tests: `card/test/mushroom.test.ts` (the scenarios run in the order of the file, since a
+  custom element cannot be undefined: no option, and the option without Mushroom, are in
+  Home Assistant's look whatever the theme says; the wait does not hold `updateComplete`;
+  Mushroom arriving gives the style to the waiting cards and leaves alone the one that has
+  gone, which takes it when it is back; the style follows the config, survives a move on the
+  page, and reads the theme for spacing, fonts, icon, control and chip),
+  `card/test/config.test.ts`, `card/test/editor.test.ts` (the option, its refusal, the field and
+  the note), and end to end
+  `card/e2e/mushroom.spec.ts` (the look in a real browser before and after Mushroom's cards
+  are defined, a theme's variables, cards without the option, the Turn off button at its
+  narrowest on a 320 px phone in Russian and the words and icon in 6 and 7 columns, in English
+  and in Russian, in the style) and `editor.spec.ts` (the field and the note).

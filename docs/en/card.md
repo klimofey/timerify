@@ -2,7 +2,7 @@
 
 Timerify brings a dashboard card for one timer. It shows the countdown at a glance.
 
-A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor. You can set what a tap, a double tap and a long press do. You can also add a **Turn off** button to the card.
+A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor. You can set what a tap, a double tap and a long press do. You can also add a **Turn off** button to the card, and give it the look of Mushroom's cards.
 
 ## Loading the card
 
@@ -62,6 +62,7 @@ icon: mdi:water-boiler                    # default: the icon of the device, whi
 presets: ["15", "30", "45", "60", "120"]  # the default: the minutes the pop-up offers
 chip: 15                                  # no chip by default: the pill's "+15 min" chip
 show_turn_off: false                      # true shows a Turn off button while the device is on
+mushroom: false                           # true gives the card the look of Mushroom's cards, if Mushroom is installed
 tap: popup                                # popup (the default), run, stop, run_or_stop, action or none
 double_tap: none                          # the same choices, none by default
 hold: none                                # the same choices, run_or_stop on the round tile by default
@@ -78,6 +79,7 @@ tap_action:                               # a Home Assistant action, used when t
 | `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. The pop-up does not show a preset that is longer than the timer's **Maximum of Run for**. Home Assistant would refuse it. |
 | `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
 | `show_turn_off` | `false` | `true` shows a **Turn off** button on the card while the device is on. See [The Turn off button](#the-turn-off-button). |
+| `mushroom` | `false` | `true` gives the card the look of Mushroom's cards, when Mushroom is installed. See [The Mushroom style](#the-mushroom-style). |
 | `tap` | `popup` | What a tap does. One of `popup`, `run`, `stop`, `run_or_stop`, `action` and `none`. See [Presses](#presses). |
 | `double_tap` | `none` | What a double tap does. The same choices. |
 | `hold` | `run_or_stop` on the round tile, `none` on the pill | What a long press does. The same choices. |
@@ -91,6 +93,7 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 
 - It writes presets as text (`"15"`). Write them as text in YAML too, if you edit the card in the form afterwards. A list of numbers (`[15, 30]`) is shown in the form as bare chips ("15", not "15 min"). Its drop-down offers the defaults again, even when they are in the list. Picking one adds a second copy, which the card ignores.
 - Taking the last preset away leaves the list empty, which means the defaults.
+- The **Mushroom style** field says **Mushroom was not found** under it while Mushroom's cards are not loaded on the page. See [The Mushroom style](#the-mushroom-style).
 - The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field, and does its default.
 - A value that the form accepts but the card cannot use, such as a preset of 0, stays in the form. The preview shows the card's message. Only a value of the wrong kind sends the editor to YAML. An example is presets that are not a list.
 - A card written by hand without a layout is a pill. But the form does not preselect it, because Home Assistant's editor does not apply the defaults of a form.
@@ -177,6 +180,36 @@ hold: action
 hold_action:
   action: more-info
 ```
+
+## The Mushroom style
+
+[Mushroom](https://github.com/piitaya/lovelace-mushroom) is a set of cards that many people use on their dashboards. The Mushroom style gives the Timerify card their look, so that it sits well among them. It is off by default.
+
+Turn it on with **Mushroom style** in the visual editor. In YAML, write `mushroom: true`.
+
+![The pill in the Mushroom style: the icon in a round shape and the corners of a card, a countdown at 30:00 with a chip, above a timer that is off](../screenshots/card-pill-mushroom.png)
+
+![The round tile in the Mushroom style: a ring around 30:00, beside a timer that is off, with its icon in a round shape](../screenshots/card-round-mushroom.png)
+
+- The style needs Mushroom. Install it yourself, for example through HACS. Timerify does not install it, and does not use its code.
+- The card looks for Mushroom in your browser. Mushroom counts as there once its cards are loaded. It may load after the card. The card then takes the style at once.
+- Without Mushroom, the card keeps the Home Assistant look. The visual editor says **Mushroom was not found** under the field.
+- The icon stands in a round shape. The shape is tinted while the device is on, and grey while it is off. The pill has the corners of any card, not round ends.
+- The name, the state, the **Turn off** button and the chip take Mushroom's sizes and fonts. The card is as high as a Mushroom card with the same icon.
+- The pop-up keeps its own look.
+
+A theme that sets Mushroom's variables changes the Timerify card too. The card reads them as Mushroom's own cards do. For a variable the theme does not set, it uses the value that Mushroom uses. Set the variables in the theme of Home Assistant, as you do for Mushroom. A larger spacing or icon size makes the card taller.
+
+| Variable | What it changes on the card | Mushroom's value |
+| --- | --- | --- |
+| `--mush-spacing` | The space around the icon and the text, and between them. | `10px` |
+| `--mush-icon-size`, `--mush-icon-border-radius`, `--mush-icon-symbol-size` | The size of the icon's shape, its roundness, and the size of the icon in it. | `36px`, `50%`, `0.667em` |
+| `--mush-card-primary-font-size`, `-font-weight`, `-line-height`, `-letter-spacing`, `-color` | The name, and the time left on the round tile. Each variable starts with `--mush-card-primary`. | `14px`, `500`, `20px`, `0.1px`, the text color |
+| `--mush-card-secondary-font-size`, `-font-weight`, `-line-height`, `-letter-spacing`, `-color` | The state line of the pill. Each variable starts with `--mush-card-secondary`. | `12px`, `400`, `16px`, `0.4px`, the text color |
+| `--mush-control-height`, `--mush-control-border-radius`, `--mush-control-button-ratio`, `--mush-control-icon-size`, `--mush-control-spacing` | The **Turn off** button. | `42px`, `12px`, `1`, `0.5em`, `12px` |
+| `--mush-chip-height`, `--mush-chip-border-radius`, `--mush-chip-padding`, `--mush-chip-font-size`, `--mush-chip-font-weight` | The chip of the pill. The border, background and shadow of the chip have `--mush-chip` variables too. | `36px`, `19px`, `0 0.25em`, `0.3em`, `bold` |
+| `--mush-rgb-state-entity` | The color of the icon, the fill and the ring while the device is on, as three numbers. | `33, 150, 243` |
+| `--mush-rgb-disabled` | The color of the icon while the device is off or unavailable, as three numbers. | `189, 189, 189` in a light theme, `111, 111, 111` in a dark one |
 
 ## What the card does
 

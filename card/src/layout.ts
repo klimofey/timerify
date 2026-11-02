@@ -5,6 +5,7 @@ import { css, html, nothing, type CSSResult, type TemplateResult } from "lit";
 import type { CardConfig } from "./config";
 import { formatClock, formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
+import { mush } from "./mushroom";
 import { t } from "./strings";
 import { hasValue, isRunning, type TimerView } from "./timer";
 
@@ -69,7 +70,9 @@ export const WORDS_FROM = { pill: 245, pillWithChip: 335, round: 101 } as const;
 /**
  * The Turn off button as its icon alone, for a card too narrow for its words: a round button
  * that is a comfortable target for a finger, 40 px. `scope` is the selector of the cards it is
- * for, and the rules go in an `@container` block of the layout's own, where the width is.
+ * for, and the rules go in an `@container` block of the layout's own, where the width is. In
+ * the Mushroom style it is Mushroom's control instead: as high as the theme says, as wide as
+ * that makes it times the ratio of its buttons, and rounded as its controls are.
  */
 export const turnOffAsIcon = (scope: CSSResult) => css`
   ${scope} .turn-off {
@@ -83,6 +86,12 @@ export const turnOffAsIcon = (scope: CSSResult) => css`
   }
   ${scope} .turn-off-icon {
     display: flex;
+  }
+  :host([data-mushroom]) ${scope} .turn-off {
+    width: calc(${mush.controlHeight} * ${mush.controlButtonRatio});
+    height: ${mush.controlHeight};
+    padding: 0;
+    border-radius: ${mush.controlRadius};
   }
 `;
 
@@ -235,3 +244,77 @@ export const commonStyles = css`
   }
 `;
 
+
+/**
+ * What the Mushroom style changes in what the layouts share, where it is on (`data-mushroom`
+ * on the card, see `mushroom.ts`). It only adds to the rules above, with a selector that is
+ * more specific than theirs, so a card that is not in the Mushroom style is what it was. The
+ * icon becomes Mushroom's icon shape, a circle that is tinted while the device is on; the
+ * texts, the chip and the Turn off button take Mushroom's fonts and sizes. What each layout
+ * changes for itself is at the end of its own styles.
+ */
+export const mushroomStyles = css`
+  :host([data-mushroom]) .icon {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: ${mush.iconSize};
+    height: ${mush.iconSize};
+    border-radius: ${mush.iconRadius};
+    background: rgba(${mush.disabledRgb}, 0.2);
+    color: rgb(${mush.disabledRgb});
+    /* The size of the shape is the em of the symbol's size, as in Mushroom. */
+    font-size: ${mush.iconSize};
+    line-height: 0;
+    --mdc-icon-size: ${mush.iconSymbolSize};
+    transition:
+      background-color 280ms ease-in-out,
+      color 280ms ease-in-out;
+  }
+  :host([data-mushroom]) .counting .icon,
+  :host([data-mushroom]) .open .icon {
+    background: rgba(${mush.activeRgb}, 0.2);
+    color: rgb(${mush.activeRgb});
+  }
+  :host([data-mushroom]) .name {
+    color: ${mush.primaryColor};
+    font-size: ${mush.primaryFontSize};
+    font-weight: ${mush.primaryFontWeight};
+    line-height: ${mush.primaryLineHeight};
+    letter-spacing: ${mush.primaryLetterSpacing};
+  }
+  /* Mushroom's chip: a small pill with a border, as high as the theme says. */
+  :host([data-mushroom]) .chip {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: ${mush.chipHeight};
+    padding: ${mush.chipPadding};
+    border: ${mush.chipBorderWidth} solid ${mush.chipBorderColor};
+    border-radius: ${mush.chipRadius};
+    background: ${mush.chipBackground};
+    box-shadow: ${mush.chipBoxShadow};
+    /* The size of the chip is the em of its padding and its text, as in Mushroom. */
+    font-size: ${mush.chipHeight};
+    line-height: 0;
+  }
+  :host([data-mushroom]) .chip-text {
+    font-size: ${mush.chipFontSize};
+    font-weight: ${mush.chipFontWeight};
+    line-height: 1;
+  }
+  /* Mushroom's control: its Turn off button has its height, its radius and its fill. */
+  :host([data-mushroom]) .turn-off {
+    height: ${mush.controlHeight};
+    padding: 0 ${mush.controlSpacing};
+    border-radius: ${mush.controlRadius};
+    background: rgba(var(--rgb-primary-text-color), 0.05);
+  }
+  :host([data-mushroom]) .turn-off-icon {
+    /* The symbol of the control is the em of its height, as in Mushroom. */
+    font-size: ${mush.controlHeight};
+    --mdc-icon-size: ${mush.controlIconSize};
+  }
+`;

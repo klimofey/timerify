@@ -7,56 +7,14 @@
 // words need the most room. View "wide": cards of 12 columns, and one pill on each side of the
 // width where the words begin.
 import type { Locator, Page } from "@playwright/test";
-import type { E2EState } from "./constants";
 import { expect, test } from "./fixtures";
 import { tabToButton } from "./focus";
 import { isReady } from "./ready";
+import { PHONE, TARGET, boxOf, isCutOff, runBothTimers } from "./sizing";
 import { stringsIn } from "./strings";
-import type { HassWs } from "./ws";
 
-/** The width of the narrowest phone a dashboard is meant for. */
-const PHONE = { width: 320, height: 700 };
-/** The side of a button that a finger may press, at least. */
-const TARGET = 40;
 /** The space the pill leaves at its right: its padding and the border of the card. */
 const PILL_EDGE = 13;
-
-interface Box {
-  left: number;
-  right: number;
-  top: number;
-  bottom: number;
-  width: number;
-  height: number;
-}
-
-/** Where a part of the card is on the page, which it must be. */
-async function boxOf(part: Locator): Promise<Box> {
-  const box = await part.boundingBox();
-  if (box === null) {
-    throw new Error("The part of the card should be on the page");
-  }
-  return {
-    left: box.x,
-    right: box.x + box.width,
-    top: box.y,
-    bottom: box.y + box.height,
-    width: box.width,
-    height: box.height,
-  };
-}
-
-/** Whether the part is wider inside than it shows: something of it is cut off. */
-function isCutOff(part: Locator): Promise<boolean> {
-  return part.evaluate((element) => element.scrollWidth > element.clientWidth);
-}
-
-/** The state both timers are put in: the loose one runs with no countdown, the strict one counts. */
-async function run(ws: HassWs, state: E2EState): Promise<void> {
-  const { strict, loose } = state.timers;
-  await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
-  await ws.callService("number", "set_value", { value: 30 }, { entity_id: strict.run_for });
-}
 
 test.describe("the cards with a Turn off button at their narrowest", () => {
   test.use({ locale: "ru-RU" });
@@ -68,7 +26,7 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
   }
 
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-    await run(ws, state);
+    await runBothTimers(ws, state);
     await openDashboard(page, "sizes");
     // The login waits for the sidebar, which a phone hides: the page is narrowed after it, and
     // loaded again, as a phone loads it.
@@ -180,7 +138,7 @@ for (const { language, locale } of LANGUAGES) {
     test.use({ locale });
 
     test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-      await run(ws, state);
+      await runBothTimers(ws, state);
       await openDashboard(page, "wide");
       await expect(page.locator("timerify-card")).toHaveCount(5);
     });

@@ -33,6 +33,8 @@ export interface CardConfig {
   chip?: number;
   /** Whether the card shows a Turn off button while the device is on; the pop-up has its Stop. */
   show_turn_off: boolean;
+  /** Whether the card takes Mushroom's look, when Mushroom is on the page: see `mushroom.ts`. */
+  mushroom: boolean;
   /** What a tap does: it opens the pop-up unless the config says otherwise. */
   tap: PressChoice;
   double_tap: PressChoice;
@@ -115,13 +117,13 @@ function parsePress(raw: unknown, fallback: PressChoice): PressChoice {
   return raw;
 }
 
-/** Whether the Turn off button is shown: not unless the config says `true`. */
-function parseShowTurnOff(raw: unknown): boolean {
+/** An option that is on only when the config says `true`; `error` is what any other kind says. */
+function parseSwitch(raw: unknown, error: StringKey): boolean {
   if (raw === undefined) {
     return false;
   }
   if (typeof raw !== "boolean") {
-    throw new ConfigError("card_error_show_turn_off");
+    throw new ConfigError(error);
   }
   return raw;
 }
@@ -175,6 +177,9 @@ export function assertShape(raw: unknown): void {
   if (given.show_turn_off !== undefined && typeof given.show_turn_off !== "boolean") {
     throw new ConfigError("card_error_show_turn_off");
   }
+  if (given.mushroom !== undefined && typeof given.mushroom !== "boolean") {
+    throw new ConfigError("card_error_mushroom");
+  }
   for (const press of PRESSES) {
     if (given[press] !== undefined && typeof given[press] !== "string") {
       throw new ConfigError("card_error_press");
@@ -201,7 +206,8 @@ export function parseConfig(raw: unknown): CardConfig {
     ...(typeof icon === "string" && icon !== "" && { icon }),
     presets: parsePresets(given.presets),
     ...(chip !== undefined && { chip }),
-    show_turn_off: parseShowTurnOff(given.show_turn_off),
+    show_turn_off: parseSwitch(given.show_turn_off, "card_error_show_turn_off"),
+    mushroom: parseSwitch(given.mushroom, "card_error_mushroom"),
     tap: parsePress(given.tap, "popup"),
     double_tap: parsePress(given.double_tap, "none"),
     // Only the round tile has had a long press, and it keeps it unless the user turns it off.

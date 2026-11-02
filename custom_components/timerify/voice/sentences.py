@@ -8,14 +8,15 @@ agent fail for the whole language, whatever the request, so a file is built here
 the way the agent parses it, and written only when it passes (`validate`).
 
 Everything here is blocking, and runs in the executor, except the functions that read
-what Home Assistant knows (`voice_names`, `interval_names`, `voice_setting_values`),
-which run in the event loop.
+what Home Assistant knows (`voice_names`, `interval_names`, `voice_setting_values`,
+`async_mode_words`), which run in the event loop.
 """
 
 import copy
 import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Final
 
 import yaml
@@ -30,9 +31,11 @@ from hassil.expression import Sequence as SequenceExpression
 from hassil.intents import Intent, Intents, TextSlotList
 from hassil.util import is_template, merge_dict, normalize_text, remove_punctuation
 from home_assistant_intents import get_intents
+from homeassistant.const import ATTR_DEVICE_CLASS
 from homeassistant.core import HomeAssistant, callback, split_entity_id
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import intent
+from homeassistant.helpers.translation import async_get_translations
 
 from ..const import (
     LIST_HVAC_MODE,
@@ -119,19 +122,47 @@ class VoiceTitle:
 
 
 @dataclass(frozen=True)
+class ModeSource:
+    """The modes one target takes, and what Home Assistant needs to find the words that
+    its translations give them: where the target is registered and what it says about
+    itself, as `async_translate_state_attr` takes them."""
+
+    domain: str
+    """The domain of the target."""
+    platform: str | None
+    """The integration that provides the target; None for one that is not registered."""
+    translation_key: str | None
+    """The key the integration translates the target by, if it has one."""
+    device_class: str | None
+    """The device class the state of the target reports, if it does."""
+    attribute: str
+    """The attribute the modes are values of, which is the name of the setting
+    (`fan_mode`, `preset_mode`, `mode`, `operation_mode`)."""
+    modes: tuple[str, ...]
+    """The modes as the device names them."""
+
+
+@dataclass(frozen=True)
 class VoiceSettingValues:
     """The values of the settings that the targets support, which a person may say."""
 
     hvac_modes: frozenset[str] = frozenset()
     """The HVAC modes of the targets, as Home Assistant names them."""
-    modes: frozenset[str] = frozenset()
-    """The modes of the targets that "mode" means, as their devices name them: the fan
-    modes of thermostats, the presets of fans, the modes of humidifiers, the operation
-    modes of water heaters."""
+    mode_sources: tuple[ModeSource, ...] = ()
+    """The modes of the targets that "mode" means: the fan modes of thermostats, the
+    presets of fans, the modes of humidifiers, the operation modes of water heaters."""
+
+    @property
+    def modes(self) -> frozenset[str]:
+        """Every mode of every target, as the devices name them."""
+        return frozenset(mode for source in self.mode_sources for mode in source.modes)
 
 
 NO_SETTING_VALUES: Final = VoiceSettingValues()
 """No target supports a setting that has words."""
+
+NO_MODE_WORDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType({})
+"""No mode has a word of Home Assistant's translations."""
 
 
 def spoken_form(name: str) -> str:
@@ -213,15 +244,86 @@ def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
     """The values of the settings that the targets of the timers support now, from their
     states or, without one, their registry entries: the same judgement a command is
     judged by, so that nothing is offered that a target would refuse."""
+    registry = er.async_get(hass)
     hvac_modes: set[str] = set()
-    modes: set[str] = set()
+    sources: dict[ModeSource, None] = {}
     for entry in loaded_timers(hass):
-        for choice in supported_settings(hass, entry.runtime_data.target_entity_id):
+        entity_id = entry.runtime_data.target_entity_id
+        registered = registry.async_get(entity_id)
+        state = hass.states.get(entity_id)
+        for choice in supported_settings(hass, entity_id):
             if choice.name == "hvac_mode":
                 hvac_modes.update(choice.options)
             elif choice.voice == "mode":
-                modes.update(choice.options)
-    return VoiceSettingValues(frozenset(hvac_modes), frozenset(modes))
+                source = ModeSource(
+                    domain=split_entity_id(entity_id)[0],
+                    platform=None if registered is None else registered.platform,
+                    translation_key=(
+                        None if registered is None else registered.translation_key
+                    ),
+                    device_class=(
+                        None
+                        if state is None
+                        else state.attributes.get(ATTR_DEVICE_CLASS)
+                    ),
+                    attribute=choice.name,
+                    modes=choice.options,
+                )
+                sources[source] = None
+    return VoiceSettingValues(frozenset(hvac_modes), tuple(sources))
+
+
+async def async_mode_words(
+    hass: HomeAssistant, language: str, sources: Sequence[ModeSource]
+) -> dict[str, frozenset[str]]:
+    """For each mode of `sources`, the words Home Assistant's translations give it in
+    `language`; a mode no translation covers has none.
+
+    The language is the one asked for, not the language of the house: a house set to
+    English may ask for a file in Russian. The lookup is that of
+    `async_translate_state_attr`, which reads the language of the house and so cannot be
+    asked for another: the translation of the platform of the entity for its key, then
+    the one of the domain for its device class, then the one of the domain for all its
+    entities. Without a translation in `language`, Home Assistant has its English one
+    in its place, which is what its interface shows in that language.
+    """
+    platforms = {source.platform for source in sources if source.platform is not None}
+    domains = {source.domain for source in sources}
+    entity = await async_get_translations(hass, language, "entity", platforms)
+    component = await async_get_translations(
+        hass, language, "entity_component", domains
+    )
+    words: dict[str, set[str]] = {}
+    for source in sources:
+        for mode in source.modes:
+            if (word := _translated_mode(entity, component, source, mode)) is not None:
+                words.setdefault(mode, set()).add(word)
+    return {mode: frozenset(found) for mode, found in words.items()}
+
+
+def _translated_mode(
+    entity: Mapping[str, str],
+    component: Mapping[str, str],
+    source: ModeSource,
+    mode: str,
+) -> str | None:
+    """The word for `mode` in the `entity` and `entity_component` translations, looked
+    up in the order that `async_translate_state_attr` has."""
+    value = f"state_attributes.{source.attribute}.state.{mode}"
+    if source.platform is not None and source.translation_key is not None:
+        key = (
+            f"component.{source.platform}.entity.{source.domain}"
+            f".{source.translation_key}.{value}"
+        )
+        if key in entity:
+            return entity[key]
+    if source.device_class is not None:
+        key = (
+            f"component.{source.domain}.entity_component.{source.device_class}.{value}"
+        )
+        if key in component:
+            return component[key]
+    return component.get(f"component.{source.domain}.entity_component._.{value}")
 
 
 def load_sources(language: str) -> dict[str, Any]:
@@ -238,6 +340,7 @@ def build(
     names: Sequence[VoiceName],
     settings: VoiceSettingValues = NO_SETTING_VALUES,
     intervals: Sequence[VoiceTitle] = (),
+    mode_words: Mapping[str, frozenset[str]] = NO_MODE_WORDS,
 ) -> BuiltSentences:
     """The sentences of `sources` with the lists of what the targets are called, what
     the schedule intervals are called and what can be turned on in filled in.
@@ -248,8 +351,9 @@ def build(
     name, the title or the mode as it is written by `spoken_variants`: a Russian "yo" in
     it makes two values, with "yo" and with "ye", both meaning the same, and one that is
     nothing but punctuation is left out, since it would match anywhere. The words for an
-    HVAC mode are those of the sources that mean a mode some target supports; the modes
-    are listed as the devices name them, said with spaces for underscores.
+    HVAC mode are those of the sources that mean a mode some target supports; a mode is
+    listed as the device names it, said with spaces for underscores, and in each of the
+    words of `mode_words` for it (see `async_mode_words`).
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
@@ -271,7 +375,9 @@ def build(
             if word["out"] in settings.hvac_modes
         ]
     }
-    lists[LIST_MODE], said[LIST_MODE] = _name_list(_mode_entries(settings.modes))
+    lists[LIST_MODE], said[LIST_MODE] = _name_list(
+        _mode_entries(settings.modes, mode_words)
+    )
     return BuiltSentences(built, said)
 
 
@@ -291,17 +397,47 @@ def _name_list(
     return {"values": values}, tuple(said)
 
 
-def _mode_entries(modes: Iterable[str]) -> list[tuple[str, dict[str, str]]]:
-    """The entries of the list of modes: each said as a person says it, which is as the
-    device names it with a space for each underscore of a name such as `eco_plus`, in
-    each of its spellings, and meaning the mode as the device names it."""
+def _mode_entries(
+    modes: Iterable[str], words: Mapping[str, frozenset[str]]
+) -> list[tuple[str, dict[str, str]]]:
+    """The entries of the list of modes: each mode in the order of the modes, said as
+    the device names it with a space for each underscore of a name such as `eco_plus`,
+    then in each of its `words`, and meaning the mode as the device names it.
+
+    The built-in agent matches the text of a value whatever its case, and takes the
+    first value that has it. So a text that an earlier value has is left out. Every mode
+    is listed by its name before any word is, so a word that is said like another mode
+    is never listed for the wrong one.
+    """
+    claimed: set[str] = set()
+    ordered = sorted(modes)
+    named = {
+        mode: _unclaimed(spoken_variants(mode.replace("_", " ")), claimed)
+        for mode in ordered
+    }
     entries: list[tuple[str, dict[str, str]]] = []
-    for mode in sorted(modes):
+    for mode in ordered:
+        spoken_words = (
+            spoken
+            for word in sorted(words.get(mode, ()))
+            for spoken in spoken_variants(word)
+        )
         entries.extend(
-            (spoken, {"out": mode})
-            for spoken in spoken_variants(mode.replace("_", " "))
+            (text, {"out": mode})
+            for text in (*named[mode], *_unclaimed(spoken_words, claimed))
         )
     return entries
+
+
+def _unclaimed(texts: Iterable[str], claimed: set[str]) -> list[str]:
+    """The `texts` that no value has yet, in their order, as the built-in agent compares
+    them: without a difference of case. They are claimed from here on."""
+    unclaimed: list[str] = []
+    for text in texts:
+        if (key := text.casefold()) not in claimed:
+            claimed.add(key)
+            unclaimed.append(text)
+    return unclaimed
 
 
 def validate(

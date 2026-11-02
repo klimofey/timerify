@@ -849,12 +849,14 @@ those of the spec.
   percentage or humidity; fan mode, preset, humidifier mode or operation mode), so the row
   stays the one description of a domain. The values come from lists that hold only what
   the targets support: the HVAC words are translated per language, and the other modes are
-  the device's strings, said with a space for an underscore ("eco plus 2" for `eco_plus_2`).
-  The request is checked by the same `validate_settings` as the services, which refuses
-  what the device cannot do, by voice and tool alike. Booleans for a number setting and
-  fractions for a whole one are refused there, where every channel passes (`Coerce` would
-  turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard to
-  say must be said as it is written.
+  the device's strings, said with a space for an underscore ("eco plus 2" for `eco_plus_2`)
+  and, in the file the Voice settings entry writes, in the words Home Assistant's
+  translations give them in the language of the file (Decision 7 of the voice part,
+  below). The request is checked by the same `validate_settings` as the services, which
+  refuses what the device cannot do, by voice and tool alike. Booleans for a number setting
+  and fractions for a whole one are refused there, where every channel passes (`Coerce`
+  would turn `true` into 1 % and 2.5 into 2). Cost if wrong: a device whose modes are hard
+  to say must be said as it is written, or in the word the translations give it.
 - **A temperature can be said up to 250, in halves, as words or digits, because the
   sentences do not know the unit of the device.** A house that counts in Fahrenheit sets
   a water heater at 110 to 140 degrees, so a range that ended at 100 made "turn on the
@@ -2907,3 +2909,52 @@ in `docs/followups.md`.
   `test_a_list_that_nothing_is_said_of_is_refused`,
   `test_each_yo_is_a_ye_and_nothing_else_changes` and
   `test_a_letter_with_and_without_the_diaeresis_is_one_in_a_title`.
+- **The modes of the devices are listed in the words Home Assistant's translations give
+  them in the language of each file, and as the device names them (Decision 7, #24).** The
+  Russian file lists the Russian words and the English file the English ones, whatever
+  the language of the house: a house set to English that asks for the Russian file wants
+  Russian words. The modes are the ones "mode" means: the fan mode of a thermostat, the
+  preset of a fan, the mode of a humidifier and the operation mode of a water heater. A
+  `ModeSource` holds the modes of one target and what finds their words: the domain, the
+  platform and translation key of its registry entry, the device class of its state, and
+  the attribute the modes are values of. `async_mode_words` looks the words up through
+  `async_get_translations` (`helpers/translation.py:335-358`), for the language of the
+  file, in the order of `async_translate_state_attr` (`:497-533`): the platform's
+  `component.<platform>.entity.<domain>.<translation_key>.state_attributes.<attribute>.state.<mode>`,
+  then `component.<domain>.entity_component.<device_class>.state_attributes...`, then
+  `component.<domain>.entity_component._.state_attributes...`. That function reads the
+  language of the house and takes no other, so its order is repeated here. No device class
+  of the four domains has words for these attributes today; the step stays because the
+  order is Home Assistant's, and a string it adds is found without a change here. The cache
+  holds English under every other language (`_async_load`, `:208-256`): a mode that has
+  no Russian word but an English one gets the English one, which is what the interface
+  shows in Russian, and it is listed. A mode that no translation covers has no word,
+  and is listed only as the device names it. The words of one mode from several targets
+  are all listed. `_mode_entries` lists, per mode in order, the name with a space for each
+  underscore and then each word, sorted, all through `spoken_variants`. The built-in agent
+  compares texts without a difference of case and takes the first value that has the
+  text, so a text that is listed already is left out, whatever mode has it: the English
+  "Auto" of `auto` is the name again, and every mode is listed by its name before any
+  word is, so a word that is said like another mode cannot mean the wrong one.
+  `SentenceFiles.async_sync` asks for the words of each language it writes, in the event
+  loop, before the executor job that builds the file; `VoiceSettingValues.mode_sources`
+  replaces the set of modes, which stays as the property `modes`. Why: a person who reads
+  a Russian screen says what it shows, not the Latin name the device keeps. Cost if wrong:
+  the Russian file has an English word for a mode that no Russian translation covers.
+  Tests: `test_a_fan_preset_is_listed_in_the_words_of_its_integration`,
+  `test_a_russian_preset_word_runs_the_fan_in_that_preset`,
+  `test_a_thermostat_fan_mode_uses_the_words_of_the_climate_domain`,
+  `test_a_thermostat_that_is_not_registered_is_spoken_to_in_the_climate_words`,
+  `test_a_mode_without_a_russian_word_is_listed_in_the_english_one`,
+  `test_a_file_has_the_words_of_its_own_language_whatever_the_house_speaks`,
+  `test_the_words_listed_are_the_words_home_assistant_shows`,
+  `test_a_humidifier_mode_uses_the_words_of_the_humidifier_domain`,
+  `test_a_water_heater_mode_uses_the_words_of_the_water_heater_domain`,
+  `test_a_device_class_without_words_of_its_own_has_the_words_of_the_domain`,
+  `test_every_language_gets_the_same_modes`,
+  `test_the_words_of_a_mode_are_listed_after_its_name_in_the_order_of_the_words`,
+  `test_a_word_with_a_yo_is_listed_under_both_spellings_like_a_name`,
+  `test_a_word_that_is_the_name_of_its_own_mode_is_listed_once`,
+  `test_a_word_said_like_another_mode_is_left_out`,
+  `test_a_word_that_two_modes_have_is_listed_for_the_first` and
+  `test_a_word_of_a_mode_no_target_has_is_not_listed`.

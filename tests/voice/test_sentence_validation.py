@@ -24,6 +24,7 @@ from custom_components.timerify.spelling import fold_yo
 from custom_components.timerify.voice.sentences import (
     BuiltSentences,
     InvalidSentences,
+    ModeSource,
     VoiceName,
     VoiceSettingValues,
     VoiceTitle,
@@ -41,6 +42,14 @@ NAMES = tuple(VoiceName(name, "switch") for name in ("Boiler", "Boiler (main)"))
 template would read as its own."""
 
 Mutation = Callable[[dict[str, Any]], object]
+
+
+def modes_of_devices(*modes: str) -> VoiceSettingValues:
+    """The settings of a fan that takes the presets `modes`, which no integration has
+    words for."""
+    return VoiceSettingValues(
+        mode_sources=(ModeSource("fan", None, None, None, "preset_mode", modes),)
+    )
 
 
 def built_sentences(language: str = "en") -> BuiltSentences:
@@ -213,7 +222,12 @@ def test_the_text_of_a_file_is_read_as_the_built_in_agent_reads_it() -> None:
 
 SETTINGS = VoiceSettingValues(
     hvac_modes=frozenset({"cool", "heat_cool", "fan_only"}),
-    modes=frozenset({"low", "eco_plus", "Turbo (quiet)"}),
+    mode_sources=(
+        ModeSource("climate", None, None, None, "fan_mode", ("low",)),
+        ModeSource(
+            "fan", None, None, None, "preset_mode", ("eco_plus", "Turbo (quiet)")
+        ),
+    ),
 )
 """What an air conditioner and a fan with strange presets between them can be turned
 on with."""
@@ -256,6 +270,100 @@ def test_the_modes_of_the_devices_are_listed_as_said_and_as_meant() -> None:
     assert built.said[LIST_MODE] == ("Turbo (quiet)", "eco plus", "low")
 
 
+def test_the_words_of_a_mode_are_listed_after_its_name_in_the_order_of_the_words() -> (
+    None
+):
+    """Each mode is said as the device names it first, then in each word, the words in
+    order; a word is escaped as a name is, and means the mode as the device names it."""
+    built = build(
+        load_sources("en"),
+        NAMES,
+        modes_of_devices("eco_plus", "low"),
+        mode_words={
+            "eco_plus": frozenset({"Saver (plus)", "Economy"}),
+            "low": frozenset({"Quiet"}),
+        },
+    )
+
+    assert built.data["lists"][LIST_MODE]["values"] == [
+        {"in": "eco plus", "out": "eco_plus"},
+        {"in": "Economy", "out": "eco_plus"},
+        {"in": r"Saver \(plus\)", "out": "eco_plus"},
+        {"in": "low", "out": "low"},
+        {"in": "Quiet", "out": "low"},
+    ]
+    assert built.said[LIST_MODE] == (
+        "eco plus",
+        "Economy",
+        "Saver (plus)",
+        "low",
+        "Quiet",
+    )
+    validate("en", built.data, built.said)
+
+
+def test_a_word_that_is_the_name_of_its_own_mode_is_listed_once() -> None:
+    """English words are mostly the names of the modes with a capital: the built-in
+    agent does not tell them apart, so the second would only be a copy."""
+    built = build(
+        load_sources("en"),
+        NAMES,
+        modes_of_devices("heat_pump"),
+        mode_words={"heat_pump": frozenset({"Heat pump"})},
+    )
+
+    assert built.data["lists"][LIST_MODE]["values"] == [
+        {"in": "heat pump", "out": "heat_pump"}
+    ]
+
+
+def test_a_word_said_like_another_mode_is_left_out() -> None:
+    """A person who says "turbo" means the mode called turbo, whatever another mode is
+    called in Home Assistant's words."""
+    built = build(
+        load_sources("en"),
+        NAMES,
+        modes_of_devices("strong", "turbo"),
+        mode_words={"strong": frozenset({"Turbo", "Powerful"})},
+    )
+
+    assert [
+        (value["in"], value["out"])
+        for value in built.data["lists"][LIST_MODE]["values"]
+    ] == [
+        ("strong", "strong"),
+        ("Powerful", "strong"),
+        ("turbo", "turbo"),
+    ]
+
+
+def test_a_word_that_two_modes_have_is_listed_for_the_first() -> None:
+    """The built-in agent takes the first value that a text matches: the second would
+    never be reached, and is left out."""
+    built = build(
+        load_sources("en"),
+        NAMES,
+        modes_of_devices("low", "quiet"),
+        mode_words={"low": frozenset({"Soft"}), "quiet": frozenset({"Soft"})},
+    )
+
+    assert [
+        (value["in"], value["out"])
+        for value in built.data["lists"][LIST_MODE]["values"]
+    ] == [("low", "low"), ("Soft", "low"), ("quiet", "quiet")]
+
+
+def test_a_word_of_a_mode_no_target_has_is_not_listed() -> None:
+    built = build(
+        load_sources("en"),
+        NAMES,
+        modes_of_devices("low"),
+        mode_words={"high": frozenset({"Strong"})},
+    )
+
+    assert built.said[LIST_MODE] == ("low",)
+
+
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 def test_the_lists_of_settings_are_empty_without_a_target_that_takes_them(
     language: str,
@@ -268,9 +376,7 @@ def test_the_lists_of_settings_are_empty_without_a_target_that_takes_them(
 
 def test_a_mode_that_is_nothing_but_punctuation_is_left_out() -> None:
     """It would match anywhere, as a name of the same kind would."""
-    built = build(
-        load_sources("en"), NAMES, VoiceSettingValues(modes=frozenset({"!!!", "low"}))
-    )
+    built = build(load_sources("en"), NAMES, modes_of_devices("!!!", "low"))
 
     assert [value["out"] for value in built.data["lists"][LIST_MODE]["values"]] == [
         "low"
@@ -346,7 +452,7 @@ def test_every_value_is_listed_under_both_spellings() -> None:
     built = build(
         load_sources("en"),
         [VoiceName(YO_NAME, "switch")],
-        VoiceSettingValues(modes=frozenset({YO_MODE})),
+        modes_of_devices(YO_MODE),
         [VoiceTitle(YO_TITLE)],
     )
 
@@ -370,6 +476,24 @@ def test_every_value_is_listed_under_both_spellings() -> None:
         LIST_MODE: (spoken_mode, fold_yo(spoken_mode)),
     }
     validate("en", built.data, built.said)
+
+
+def test_a_word_with_a_yo_is_listed_under_both_spellings_like_a_name() -> None:
+    word = f"{YO}lka"
+
+    built = build(
+        load_sources("ru"),
+        NAMES,
+        modes_of_devices("tree"),
+        mode_words={"tree": frozenset({word})},
+    )
+
+    assert [value["in"] for value in built.data["lists"][LIST_MODE]["values"]] == [
+        "tree",
+        word,
+        fold_yo(word),
+    ]
+    validate("ru", built.data, built.said)
 
 
 def test_a_value_without_a_yo_is_listed_once() -> None:

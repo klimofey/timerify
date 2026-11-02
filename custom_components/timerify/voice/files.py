@@ -2,10 +2,11 @@
 them in step with the timers, and takes them away again.
 
 The file of a language is `custom_sentences/<language>/timerify.yaml`. It is the shipped
-sentences with the names of the timers' targets in them and the titles of their schedule
-intervals, and it is rewritten whenever those may have changed. Writing a file and
-removing one are followed by a reload of the built-in agent's sentences, so that the
-change is heard at once.
+sentences with the names of the timers' targets in them, the titles of their schedule
+intervals and the modes of their devices, in the words that Home Assistant translates
+them to in that language, and it is rewritten whenever those may have changed. Writing
+a file and removing one are followed by a reload of the built-in agent's sentences, so
+that the change is heard at once.
 
 The path is the user's directory, and a file at it is Timerify's only if its first line
 is `MANAGED_HEADER`: Timerify writes where there is no file or its own, removes only its
@@ -13,7 +14,7 @@ own, and leaves any other alone.
 """
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from enum import Enum, auto
 from pathlib import Path
@@ -46,6 +47,7 @@ from .sentences import (
     VoiceName,
     VoiceSettingValues,
     VoiceTitle,
+    async_mode_words,
     build,
     interval_names,
     load_sources,
@@ -116,6 +118,7 @@ def _write_if_changed(
     names: Sequence[VoiceName],
     settings: VoiceSettingValues,
     intervals: Sequence[VoiceTitle],
+    mode_words: Mapping[str, frozenset[str]],
 ) -> WriteResult:
     """Build the sentences of `language`, check that the built-in agent can read the
     text that would be written, and write it to `path` unless it is what is there
@@ -127,7 +130,7 @@ def _write_if_changed(
     first_line = _first_line(path)
     if first_line is not None and first_line != MANAGED_HEADER:
         return WriteResult.FOREIGN
-    built = build(load_sources(language), names, settings, intervals)
+    built = build(load_sources(language), names, settings, intervals, mode_words)
     text = render(built.data)
     validate(language, read_back(text), built.said)
     if first_line is not None and path.read_text("utf-8", errors="replace") == text:
@@ -283,9 +286,18 @@ class SentenceFiles:
                 if language not in chosen:
                     changed |= await hass.async_add_executor_job(_remove, [path])
                     continue
+                mode_words = await async_mode_words(
+                    hass, language, settings.mode_sources
+                )
                 try:
                     result = await hass.async_add_executor_job(
-                        _write_if_changed, path, language, names, settings, intervals
+                        _write_if_changed,
+                        path,
+                        language,
+                        names,
+                        settings,
+                        intervals,
+                        mode_words,
                     )
                 except InvalidSentences as err:
                     _LOGGER.error(

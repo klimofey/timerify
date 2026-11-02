@@ -99,6 +99,28 @@ def fake_vent(provide_target: ProvideTarget) -> FakeTarget:
     )
 
 
+@pytest.fixture
+def fake_demo_fan(provide_target: ProvideTarget) -> FakeTarget:
+    """`fan.vent` on a device called Vent, switched off: a fan of the Demo integration,
+    which has Russian words for its presets, with the presets `sleep`, which it has a
+    word for, and `turbo_x`, which no integration has."""
+    return provide_target(
+        "fan.vent",
+        SWITCH_SERVICES,
+        name="Vent",
+        platform="demo",
+        translation_key="demo",
+        capability_attributes={
+            "preset_modes": ["sleep", "turbo_x"],
+            "supported_features": int(
+                FanEntityFeature.TURN_ON
+                | FanEntityFeature.TURN_OFF
+                | FanEntityFeature.PRESET_MODE
+            ),
+        },
+    )
+
+
 HVAC_MODES = ["off", "heat", "cool", "heat_cool", "auto", "dry", "fan_only"]
 """Every mode a thermostat can have, the ones people say a word for."""
 
@@ -137,6 +159,25 @@ def fake_humidifier(provide_target: ProvideTarget) -> FakeTarget:
             "min_humidity": 30,
             "max_humidity": 80,
             "available_modes": ["auto", "eco"],
+            "supported_features": int(HumidifierEntityFeature.MODES),
+        },
+        state_attributes={"humidity": 50, "mode": "eco"},
+    )
+
+
+@pytest.fixture
+def fake_dehumidifier(provide_target: ProvideTarget) -> FakeTarget:
+    """`humidifier.dehumidifier` on a device called Dehumidifier, switched off: a
+    humidifier of the device class `dehumidifier`, with the mode `eco`."""
+    return provide_target(
+        "humidifier.dehumidifier",
+        HUMIDIFIER_SERVICES,
+        name="Dehumidifier",
+        capability_attributes={
+            "min_humidity": 30,
+            "max_humidity": 80,
+            "available_modes": ["eco"],
+            "device_class": "dehumidifier",
             "supported_features": int(HumidifierEntityFeature.MODES),
         },
         state_attributes={"humidity": 50, "mode": "eco"},

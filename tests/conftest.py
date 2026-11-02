@@ -167,6 +167,9 @@ class FakeTarget:
     name: str
     """The name of the entity, and of its device."""
     entity_id: str = TARGET_ID
+    translation_key: str | None = None
+    """The key the integration translates the entity by; None for an entity it does not
+    translate."""
     capability_attributes: dict[str, Any] = field(default_factory=dict)
     """What Home Assistant keeps on every state of the entity, also while it is
     unavailable: the supported features and the lists of modes."""
@@ -258,6 +261,7 @@ class FakeTarget:
                 device_id=self.device_id,
                 original_name=self.name,
                 suggested_object_id=object_id,
+                translation_key=self.translation_key,
             )
         self.write(state)
         await self.hass.async_block_till_done()
@@ -682,6 +686,8 @@ def provide_fake(
     on_device: bool = True,
     device_id: str | None = None,
     registered: bool = True,
+    platform: str | None = None,
+    translation_key: str | None = None,
     capability_attributes: dict[str, Any] | None = None,
     state_attributes: dict[str, Any] | None = None,
 ) -> FakeTarget:
@@ -692,11 +698,15 @@ def provide_fake(
     With a `device_id` the registry entry goes on that device, one that another entity
     made, and no device is made: the channels of a relay share one.
 
+    The entity is provided by `platform`, an integration of its own called after the
+    entity unless one is given, and translated by `translation_key`, if one is given:
+    the words of an integration's translations are found by both.
+
     An entity that is not `registered` has a state and services and no registry entry,
     nor a device, as an entity of YAML without a unique id has.
     """
     domain, object_id = split_entity_id(entity_id)
-    platform = f"{object_id}_maker"
+    platform = platform or f"{object_id}_maker"
     provider = None
     if registered:
         provider = MockConfigEntry(domain=platform)
@@ -719,6 +729,7 @@ def provide_fake(
             device_id=device_id,
             original_name=name,
             suggested_object_id=object_id,
+            translation_key=translation_key,
         )
     target = FakeTarget(
         hass,
@@ -728,6 +739,7 @@ def provide_fake(
         provider,
         name,
         entity_id,
+        translation_key=translation_key,
         capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
         state_attributes=state_attributes or {},
     )
@@ -761,6 +773,8 @@ async def provide_target(
         on_device: bool = True,
         device_id: str | None = None,
         registered: bool = True,
+        platform: str | None = None,
+        translation_key: str | None = None,
         capability_attributes: dict[str, Any] | None = None,
         state_attributes: dict[str, Any] | None = None,
     ) -> FakeTarget:
@@ -773,6 +787,8 @@ async def provide_target(
             on_device=on_device,
             device_id=device_id,
             registered=registered,
+            platform=platform,
+            translation_key=translation_key,
             capability_attributes=capability_attributes,
             state_attributes=state_attributes,
         )

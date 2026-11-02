@@ -163,7 +163,9 @@ This is the way to use, unless you have a reason not to.
 
 Timerify then writes the file `custom_sentences/<language>/timerify.yaml` in your configuration folder, for each language you picked. The file holds the names of your timers' devices. Timerify tells the built-in agent to read the sentences again.
 
-A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. They are written as the devices name them, with a space for an underscore.
+A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. Each of them is listed in two ways. One is the mode as the device names it, with a space for an underscore. The other is the word Home Assistant shows for it in the language of the file. The Russian file has the Russian words, whatever language your house is set to.
+
+Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one.
 
 A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
 
@@ -214,6 +216,7 @@ For each language you want (`en`, `ru`):
    - Give each name its `context: domain`, which is the part of the entity id before the dot. Settings are said only of a device that has them. A thermostat's HVAC mode and temperature need `climate`. A water heater's temperature needs `water_heater`. A name with no domain gets the sentences that fit every device, and nothing more.
    - `timerify_interval` is needed only to switch a schedule interval by its title. The whole schedule needs none.
    - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. A mode that the device does not have is refused when it is said.
+   - List the word Home Assistant shows for a mode as well, if you want to say it. Give it the same `out` as the mode. The entry does this for you, but a copy made by hand holds only what you write.
    - List a name with the Russian letter yo twice: once with yo and once with ye. Both values have the same `out`. Do the same for a title and a mode. Speech recognition often writes ye, and Home Assistant does not treat the two letters as one.
 4. Restart Home Assistant, or call `conversation.reload`.
 
@@ -250,7 +253,6 @@ If the interval is empty, the whole schedule is switched.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
 - **An interval by the title it is made with.** Rename it first.
-- **The modes that a device names in Latin letters**, such as "eco" or "high", in Russian. They are said as written. The HVAC modes have Russian words.
 - **Two thermostats with different HVAC modes.** The words are the modes of all of them. So if you say a mode that only one of them has to the other, it is refused. The answer lists the modes that thermostat has.
 
 ---

@@ -7,10 +7,11 @@
 # and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
 # mode of a thermostat, the preset of a fan, the mode of a humidifier),
-# timerify_interval, the titles of the schedule intervals. The list timerify_hvac_mode has
-# every word for an HVAC mode here, for the copy made by hand. The Voice settings entry
-# empties it, and copies each block for thermostats once for each set of HVAC modes that
-# thermostats have, with a list of its own that has the words for those modes only.
+# timerify_interval, the titles of the schedule intervals and the times that the intervals
+# titled by Timerify start at. The list timerify_hvac_mode has every word for an HVAC mode
+# here, for the copy made by hand. The Voice settings entry empties it, and copies each
+# block for thermostats once for each set of HVAC modes that thermostats have, with a list
+# of its own that has the words for those modes only.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains
@@ -100,13 +101,13 @@ intents:
   TimerifySetSchedule:
     data:
       # The whole schedule of a device, or the interval of a title: on and off are
-      # separate blocks, each fixing what it means. An interval is said by its title,
-      # which timerify_interval holds. The schedule "of" and "for" a device are one, and
-      # on or off comes before the noun or after it, since a phrasing that is left out
-      # here is not left alone: the built-in agent takes "turn off the schedule for the
-      # boiler" for a turn off of the boiler. So does it "turn off scheduling for the
-      # boiler", which is why "scheduling" is a word for the schedule too, and the
-      # article before the noun is optional.
+      # separate blocks, each fixing what it means. An interval is said by its title, or by
+      # the time it starts at while Timerify made its title: timerify_interval holds both.
+      # The schedule "of" and "for" a device are one, and on or off comes before the noun
+      # or after it, since a phrasing that is left out here is not left alone: the
+      # built-in agent takes "turn off the schedule for the boiler" for a turn off of the
+      # boiler. So does it "turn off scheduling for the boiler", which is why "scheduling"
+      # is a word for the schedule too, and the article before the noun is optional.
       - sentences:
           - "<turn> on [<the>] {timerify_target:name} (schedule|scheduling)"
           - "<turn> [<the>] {timerify_target:name} (schedule|scheduling) on"

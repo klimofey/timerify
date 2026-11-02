@@ -51,6 +51,7 @@ from ..const import (
     SUBENTRY_INTERVAL,
 )
 from ..domains import SettingChoice, supported_settings
+from ..schedule import spoken_aliases
 from ..spelling import fold_yo
 from .base import loaded_timers
 
@@ -126,9 +127,11 @@ class VoiceTitle:
     any domain may have an interval of it."""
 
     title: str
-    """The title as the interval has it, which the intent receives. It is also what is
-    said, once `spoken_variants` has made of it what the built-in agent compares with
-    what it hears."""
+    """The text the intent receives: the title as the interval has it, or a time it can
+    be named by instead (`spoken_aliases`), which the timer matches against the title
+    and the times of each of its intervals. It is also what is said, once
+    `spoken_variants` has made of it what the built-in agent compares with what it
+    hears."""
 
 
 @dataclass(frozen=True)
@@ -258,15 +261,20 @@ def _hvac_modes(
 @callback
 def interval_names(hass: HomeAssistant) -> list[VoiceTitle]:
     """Every title the built-in agent would know the schedule intervals of the timers
-    by, each once however many timers have an interval of that title.
+    by, each once however many timers have an interval of that title, and with the
+    title of an interval that Timerify titled, the times it can be said by instead
+    (`spoken_aliases`).
 
     A title is said as a name is, and meant as it is, which names the interval to the
-    timer.
+    timer. A time is meant as it is said too, not as a title: the list is the house's,
+    so a value that meant the title would make "6:30" mean two intervals of two timers.
+    The timer works out which of its own intervals the time names.
     """
     titles: dict[str, VoiceTitle] = {}
     for entry in loaded_timers(hass):
         for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
-            titles.setdefault(subentry.title, VoiceTitle(subentry.title))
+            for name in (subentry.title, *spoken_aliases(subentry)):
+                titles.setdefault(name, VoiceTitle(name))
     return list(titles.values())
 
 

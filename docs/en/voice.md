@@ -132,8 +132,10 @@ The Russian column is transliterated because this page is in English. The real s
 - Switching off while a window runs stops the timer only if the schedule is running it. That means the end of the countdown came from that interval, and nobody has changed the timer since. Otherwise the run is yours, and it stays. If another open window wants the device, that window takes the timer over instead.
 - Switching on inside a window runs the device for the rest of the window. The exception is a timer that already ends later. An interval that is on already is left as it is. So a device that was turned off during its window stays off until the next one.
 - In English, you can say "scheduling" instead of "schedule", and you can leave out "the" before it. Examples are "turn off scheduling for the boiler" and "turn off schedule for the boiler".
-- To switch one interval, say its title, such as "the Morning schedule of the boiler". Give your intervals titles of your own. The title that Timerify makes, such as `06:30–07:15, Sun–Thu`, cannot be said to the built-in agent.
-- A title that two intervals share switches both. A title that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
+- To switch one interval, say its title, such as "the Morning schedule of the boiler".
+- An interval that still has the title Timerify made, such as `06:30–07:15, Sun–Thu`, can be said by its start time. An example is "turn off the 6:30 schedule of the boiler". Say the time as "6:30", "06:30", "6.30" or "06.30". Every interval of the timer that starts then is switched.
+- The days of a title that Timerify made cannot be said. Two intervals that start together are told apart only by a title of your own. An interval you renamed is said by its new title, not by its start time.
+- A title that two intervals share switches both. A title or a start time that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
 
 ### How Assist answers
 
@@ -175,7 +177,7 @@ Timerify writes the file again when any of these happens:
 
 - A timer is added, removed or reloaded.
 - A device is renamed or gets another alias.
-- A schedule interval is added, deleted or renamed.
+- A schedule interval is added, deleted, renamed or edited.
 
 It writes the file only when its text changes.
 
@@ -216,7 +218,8 @@ For each language you want (`en`, `ru`):
 
    - `in` is the name as it is said, with the punctuation that Home Assistant ignores removed. Say it has any of the characters `( ) [ ] { } < > | @`. Then put a backslash before each of them, and before every backslash in it. Home Assistant would otherwise read them as a sentence template. `out` is the name as Home Assistant shows it.
    - Give each name its `context: domain`, which is the part of the entity id before the dot. Settings are said only of a device that has them. A thermostat's HVAC mode and temperature need `climate`. A water heater's temperature needs `water_heater`. A name with no domain gets the sentences that fit every device, and nothing more.
-   - `timerify_interval` is needed only to switch a schedule interval by its title. The whole schedule needs none.
+   - `timerify_interval` is needed only to switch a schedule interval by its title or its start time. The whole schedule needs none.
+   - To say an interval by its start time, list each way of writing the time that you want to say. Write it in quotes, such as `"6:30"`, with the same text in `in` and `out`. Without the quotes, YAML reads it as a number.
    - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. Every thermostat takes every one of them. A mode that a thermostat does not have is refused when it is said.
    - List the word Home Assistant shows for a mode as well, if you want to say it. Give it the same `out` as the mode. The entry does this for you, but a copy made by hand holds only what you write.
    - List a name with the Russian letter yo twice: once with yo and once with ye. Both values have the same `out`. Do the same for a title and a mode. Speech recognition often writes ye, and Home Assistant does not treat the two letters as one.
@@ -245,7 +248,7 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 | `timerify__delayed_command` | Plans to turn on or off later. You give a delay in weeks, days, hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |
 | `timerify__list_commands` | Lists the planned commands, with the ids that cancel them. |
 | `timerify__cancel_commands` | Cancels all the commands, the next one, or one by its id. |
-| `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title. |
+| `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title or its start time. |
 
 If the interval is empty, the whole schedule is switched.
 
@@ -254,7 +257,7 @@ If the interval is empty, the whole schedule is switched.
 - **Taking time off**, such as "10 minutes less". Set the countdown to the new length instead.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
-- **An interval by the title it is made with.** Rename it first.
+- **The days of a title that Timerify made.** The title has them, such as `Sun–Thu`, and they cannot be said. Say the start time, or give the interval a title of your own.
 
 ---
 

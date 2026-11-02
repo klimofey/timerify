@@ -15,7 +15,7 @@ from functools import cached_property
 from typing import Any, Literal, assert_never
 from uuid import uuid4
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import ATTR_ENTITY_ID, EVENT_CORE_CONFIG_UPDATE, Platform
 from homeassistant.core import (
     CALLBACK_TYPE,
@@ -99,7 +99,13 @@ from .issues import (
     async_raise_target_deleted,
     async_warned_settings,
 )
-from .schedule import Interval, title_key, weekday_window, workday_window
+from .schedule import (
+    Interval,
+    spoken_aliases,
+    title_key,
+    weekday_window,
+    workday_window,
+)
 from .store import TimerStore
 from .target import target_name
 
@@ -209,6 +215,12 @@ def _unloaded_error() -> HomeAssistantError:
     return HomeAssistantError(
         translation_domain=DOMAIN, translation_key="timer_unloaded"
     )
+
+
+def _name_keys(subentry: ConfigSubentry) -> set[str]:
+    """What an interval is meant by, as `title_key` compares: its title and, while it
+    has the title Timerify gave it, the times it can be said by (`spoken_aliases`)."""
+    return {title_key(name) for name in (subentry.title, *spoken_aliases(subentry))}
 
 
 class _WorkdayUnknown(Exception):
@@ -561,9 +573,10 @@ class TargetController:
         self, enabled: bool, interval: str | None = None
     ) -> tuple[str, ...]:
         """Switch the whole schedule on or off, or the intervals that carry the title
-        `interval` (compared as `title_key` compares), and return the titles of the
-        intervals that are now as asked, in the order of the schedule, whether or not
-        they were already.
+        `interval` (compared as `title_key` compares) or, while they still have the
+        title Timerify gave them, start at the time `interval` says (`spoken_aliases`),
+        and return the titles of the intervals that are now as asked, in the order of
+        the schedule, whether or not they were already.
 
         Each interval is switched as its own switch switches it
         (`async_set_interval_enabled`), one after the other under one hold of the lock,
@@ -580,12 +593,12 @@ class TargetController:
         """
         async with self._lock:
             self._raise_if_unloaded()
-            every_title = {
-                interval_id: subentry.title
+            every_interval = {
+                interval_id: subentry
                 for interval_id in self._intervals
                 if (subentry := self._entry.subentries.get(interval_id)) is not None
             }
-            if not every_title:
+            if not every_interval:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key="no_schedule",
@@ -593,21 +606,24 @@ class TargetController:
                         "target": target_name(self._hass, self.target_entity_id)
                     },
                 )
-            titles = every_title
+            chosen = every_interval
             if interval is not None:
                 wanted = title_key(interval)
-                titles = {
-                    interval_id: title
-                    for interval_id, title in every_title.items()
-                    if wanted and title_key(title) == wanted
+                chosen = {
+                    interval_id: subentry
+                    for interval_id, subentry in every_interval.items()
+                    if wanted and wanted in _name_keys(subentry)
                 }
-                if not titles:
-                    raise self._unknown_interval(interval, every_title.values())
+                if not chosen:
+                    raise self._unknown_interval(
+                        interval,
+                        (subentry.title for subentry in every_interval.values()),
+                    )
             await self._async_catch_up_while_starting_locked()
-            for interval_id in titles:
+            for interval_id in chosen:
                 self._raise_if_unloaded()
                 await self._async_set_interval_enabled_locked(interval_id, enabled)
-            return tuple(titles.values())
+            return tuple(subentry.title for subentry in chosen.values())
 
     def _unknown_interval(
         self, asked: str, titles: Iterable[str]

@@ -7,10 +7,11 @@
 # and the names to custom_sentences/ru/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
 # mode of a thermostat, the preset of a fan, the mode of a humidifier),
-# timerify_interval, the titles of the schedule intervals. The list timerify_hvac_mode has
-# every word for an HVAC mode here, for the copy made by hand. The Voice settings entry
-# empties it, and copies each block for thermostats once for each set of HVAC modes that
-# thermostats have, with a list of its own that has the words for those modes only.
+# timerify_interval, the titles of the schedule intervals and the times that the intervals
+# titled by Timerify start at. The list timerify_hvac_mode has every word for an HVAC mode
+# here, for the copy made by hand. The Voice settings entry empties it, and copies each
+# block for thermostats once for each set of HVAC modes that thermostats have, with a list
+# of its own that has the words for those modes only.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains
@@ -93,8 +94,9 @@ intents:
   TimerifySetSchedule:
     data:
       # The whole schedule of a device, or the interval of a title: on and off are
-      # separate blocks, each fixing what it means. An interval is said by its title,
-      # which timerify_interval holds, after the noun, since a title cannot be declined.
+      # separate blocks, each fixing what it means. An interval is said by its title, or by
+      # the time it starts at while Timerify made its title: timerify_interval holds both,
+      # after the noun, since a title cannot be declined.
       - sentences:
           - "<timerify_schedule_verb> расписание (у таймера|на таймере|для таймера|таймера) {timerify_target:name}"
           - "<timerify_schedule_verb> (расписание|интервал) {timerify_interval:interval} (у таймера|на таймере|для таймера|таймера) {timerify_target:name}"

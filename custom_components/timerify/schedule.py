@@ -20,6 +20,7 @@ from homeassistant.helpers.translation import async_get_translations
 from .const import (
     CONF_DAYS,
     CONF_END,
+    CONF_GENERATED_TITLE,
     CONF_SETTINGS,
     CONF_START,
     CONF_WEEKDAYS,
@@ -240,6 +241,36 @@ def title_key(title: str) -> str:
     """
     unpunctuated = remove_punctuation(title).translate(_DASHES)
     return " ".join(fold_yo(unpunctuated.casefold()).split())
+
+
+def has_generated_title(subentry: ConfigSubentry) -> bool:
+    """Whether the interval still has the title Timerify gave it, not one its owner
+    wrote: an edit that changes the times and days gives it the new title, a rename
+    ends it."""
+    return subentry.data.get(CONF_GENERATED_TITLE) == subentry.title
+
+
+def start_aliases(start: str) -> tuple[str, ...]:
+    """The ways a speech recogniser writes the time `start`, an `HH:MM`, without a
+    repeat: the hour with and without its leading zero, after a colon and then after a
+    dot. So `06:30` is `6:30`, `06:30`, `6.30` and `06.30`, and `18:00` is `18:00` and
+    `18.00`. They are the same in every language."""
+    clock = time.fromisoformat(start)
+    hours = dict.fromkeys((str(clock.hour), f"{clock.hour:02d}"))
+    return tuple(
+        f"{hour}{separator}{clock.minute:02d}"
+        for separator in (":", ".")
+        for hour in hours
+    )
+
+
+def spoken_aliases(subentry: ConfigSubentry) -> tuple[str, ...]:
+    """The times an interval can be said by instead of its title: `start_aliases` of
+    its start while it has the title Timerify gave it, none once it has been renamed,
+    since its owner's title is the name to say."""
+    if not has_generated_title(subentry):
+        return ()
+    return start_aliases(subentry.data[CONF_START])
 
 
 def _weekdays_label(weekdays: list[str], labels: Mapping[str, str]) -> str:

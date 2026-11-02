@@ -30,7 +30,6 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#20](https://github.com/klimofey/timerify/issues/20) Follow friendly_name and mode-list changes of targets without a registry entry in the voice file
 - [#21](https://github.com/klimofey/timerify/issues/21) Phrasings Timerify lacks can be matched by core's gazetteer and switch the device
-- [#22](https://github.com/klimofey/timerify/issues/22) A spoken form for generated interval titles ("the 6:30 schedule")
 
 ## Tests and tooling
 

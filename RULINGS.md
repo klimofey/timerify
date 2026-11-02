@@ -966,22 +966,28 @@ those of the spec.
   cancels by id says it cancelled one command, and one by "next" or "all" says that, so the
   answer is true to what was done. `async_cancel_command` returns what it cancelled. Cost
   if wrong: none.
-- **The schedule is switched as a whole, or one interval by its title, and the lookup and
-  its refusals live in one place, `controller.async_set_schedule_enabled`.** The voice, the
-  tool and the interval switches share one path (a manual override wins, switching off
-  folds what is due, nothing reloads the entry). The whole schedule is the default; one
-  interval is said by the title it has, and the list of titles is one for the house, not
-  one per timer, so "the Morning schedule of the pump" is understood and refused by the
-  controller when only the boiler has a Morning (a list per timer is expressible, and would
-  multiply the sentences by the timers). Two intervals of one timer with the same title are
-  switched together, since refusing them as ambiguous would make a generated weekday title
-  and weekend title unreachable. The answer counts the intervals that are now as asked,
-  whether or not they already were, because switching is idempotent. Cost if wrong:
-  titles that are said, not generated ones, are what voice can reach (below).
+- **The schedule is switched as a whole, or one interval by its title or, while Timerify
+  made the title, by its start time, and the lookup and its refusals live in one place,
+  `controller.async_set_schedule_enabled`.** The voice, the tool and the interval switches
+  share one path (a manual override wins, switching off folds what is due, nothing reloads
+  the entry). The whole schedule is the default; one interval is said by the title it has
+  or by a start time (Decision 9 of the voice part, below), and the list of titles is one
+  for the house, not one per timer, so "the Morning schedule of the pump" is understood and
+  refused by the controller when only the boiler has a Morning (a list per timer is
+  expressible, and would multiply the sentences by the timers). Two intervals of one timer
+  with the same title, or that start at the same time, are switched together, since
+  refusing them as ambiguous would make a generated weekday title and weekend title
+  unreachable. The answer counts the intervals that are now as asked, whether or not they
+  already were, because switching is idempotent. Cost if wrong: two intervals that start
+  together on different days are switched together, and only a title of the owner's tells
+  them apart.
 - **Titles are compared by `schedule.title_key`: the title as the built-in agent hears it,
   without punctuation and case, every dash a hyphen, the Russian yo a ye (`fold_yo`, the one
   fold of the repository), runs of space one space.** So "morning" means `Morning!` and
-  `06:30-07:15, Mon-Sun` means the generated title with en dashes. The sentence files list a
+  `06:30-07:15, Mon-Sun` means the generated title with en dashes. The asked text is held
+  against the key of the title of each interval and the key of each of its start times
+  (`spoken_aliases`); the key keeps a colon or a dot between digits, so "6:30", "06:30",
+  "6.30" and "06.30" are four keys, and each of them is an alias. The sentence files list a
   title with a yo under both spellings, since the built-in agent cannot be told to fold
   (Decision 6 of the voice part, below). A title of nothing but punctuation has the key
   `""`, which matches nothing: the built-in agent does not know such a title either, so an
@@ -3013,3 +3019,61 @@ in `docs/followups.md`.
   `test_a_word_said_like_another_mode_is_left_out`,
   `test_a_word_that_two_modes_have_is_listed_for_the_first` and
   `test_a_word_of_a_mode_no_target_has_is_not_listed`.
+- **An interval that still has the title Timerify gave it is said by its start time
+  (Decision 9, #22).** The title Timerify makes, `06:30–07:15, Mon–Sun`, is a mouthful and
+  cannot be told from another by a person who hears it, so the time it starts at names the
+  interval. `schedule.has_generated_title` is `CONF_GENERATED_TITLE == title` (the mark the
+  interval flow and the 1.0.0 migration keep: an edit that moves the times gives the title
+  again, a rename ends it). `start_aliases("06:30")` is "6:30", "06:30", "6.30" and "06.30",
+  `start_aliases("18:00")` is "18:00" and "18.00": the hour with and without its leading
+  zero, after a colon and then after a dot, as a recogniser writes it, without repeats, in
+  that order, and the same in every language. `spoken_aliases(subentry)` is those of the
+  start of such an interval and nothing for a renamed one. `interval_names` lists the title
+  of each loaded interval and then its aliases, each text once for the house, and the file
+  lists an alias with itself as the value (`in` and `out` are the text that was said), so
+  the intent receives what was said and the controller works out what it names:
+  `async_set_schedule_enabled` keeps an interval when `title_key(asked)` is the key of its
+  title or of one of its aliases, and switches every one it keeps, as it switches two with
+  one title. A start time that only another timer has is understood, and refused with the
+  titles of this timer, as a title is; so is the start time of a renamed interval of this
+  timer when another timer has it with the title Timerify made. The answer names the
+  interval by its title, as before, the first of them when several were switched; `count`
+  says how many. The description of the LLM tool says the start time may be given. Why: a
+  value that meant a title would make "6:30" ambiguous between two timers, since the list
+  is one for the house. Checked: hassil strips punctuation at the edges of a word
+  only, so `spoken_form` leaves "6:30" and "6.30" as they are, `normalize_text` does too,
+  and `validate` reads each alias back as it was written; the writer quotes the values
+  that YAML would read as numbers (unquoted, `6:30` is the integer 390 and `6.30` the float
+  6.3), which `test_the_file_lists_each_start_time_with_itself_as_the_value` and
+  `test_the_start_times_are_listed_as_the_built_in_agent_reads_them` read back. A
+  phrasing with a time in it is read by one intent: over core's sentences and Timerify's,
+  "turn off the 6:30 schedule of the boiler" is `TimerifySetSchedule` alone and "turn off
+  the boiler at 6:30" is `TimerifyCommandAt` alone, so no tie between intents is left to
+  the order of enumeration (hassil keeps the first of equal scores). The built-in name
+  fallback (the gazetteer) does not act on the phrasings of a start time that is not
+  understood or is refused: with the boiler running, nine wordings of it, on and off, with
+  "of" and "for", "6:30" and "6.30", leave the boiler and the schedule as they were. The
+  manual route lists the times by hand, in quotes. An owner's title that reads as a time,
+  such as "6:30", is the same text as the alias: it is listed once, and asking for it
+  switches the interval that has the title and every one that starts then with a title of
+  Timerify's. Cost if wrong: two intervals that start together on different days are
+  switched together, the days tell them apart only by title, and the answer names the
+  first of them.
+  Tests: `test_start_aliases_are_the_ways_a_recogniser_writes_the_time`,
+  `test_a_generated_title_is_said_by_its_start_time`,
+  `test_every_way_a_recogniser_writes_the_start_time_names_the_interval`,
+  `test_the_file_lists_each_start_time_with_itself_as_the_value`,
+  `test_the_start_times_are_listed_as_the_built_in_agent_reads_them`,
+  `test_the_start_time_switches_every_interval_that_starts_then`,
+  `test_a_start_time_is_listed_once_and_each_timer_switches_its_own`,
+  `test_a_start_time_only_another_timer_has_is_refused`,
+  `test_a_title_the_user_gave_is_not_said_by_its_start_time`,
+  `test_a_renamed_interval_is_refused_when_its_start_time_is_another_timer_s`,
+  `test_an_interval_edited_to_start_later_is_said_by_the_new_time`,
+  `test_a_title_that_reads_as_a_time_is_its_own_name_and_the_time_s_too`,
+  `test_russian_start_time_switches_the_interval`,
+  `test_the_time_in_each_phrase_is_read_by_one_intent_only`,
+  `test_a_start_time_is_not_a_clock_time_and_the_other_way_round`,
+  `test_turning_off_at_a_time_does_not_switch_the_schedule`,
+  `test_llm_names_an_interval_by_its_start_time` and
+  `test_llm_naming_a_renamed_interval_by_its_start_time_is_told_the_titles`.

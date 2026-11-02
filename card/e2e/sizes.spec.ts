@@ -9,6 +9,7 @@
 import type { Locator, Page } from "@playwright/test";
 import type { E2EState } from "./constants";
 import { expect, test } from "./fixtures";
+import { tabToButton } from "./focus";
 import { isReady } from "./ready";
 import { stringsIn } from "./strings";
 import type { HassWs } from "./ws";
@@ -55,12 +56,6 @@ async function run(ws: HassWs, state: E2EState): Promise<void> {
   const { strict, loose } = state.timers;
   await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
   await ws.callService("number", "set_value", { value: 30 }, { entity_id: strict.run_for });
-}
-
-/** Turns on the keyboard's way of showing the focus, which a key press does, and focuses. */
-async function focusByKeyboard(page: Page, button: Locator): Promise<void> {
-  await page.keyboard.press("Shift");
-  await button.focus();
 }
 
 test.describe("the cards with a Turn off button at their narrowest", () => {
@@ -155,8 +150,7 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     const { pill } = cardsOf(page);
     const button = pill.getByRole("button", { name: russian.card_turn_off, exact: true });
 
-    await focusByKeyboard(page, button);
-    await expect(button).toBeFocused();
+    await tabToButton(page, pill, button);
     const ring = await button.evaluate((element) => {
       const style = getComputedStyle(element);
       return { style: style.outlineStyle, width: style.outlineWidth };
@@ -173,65 +167,80 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
   });
 });
 
-test.describe("the cards with a Turn off button, wide", () => {
-  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-    await run(ws, state);
-    await openDashboard(page, "wide");
-    await expect(page.locator("timerify-card")).toHaveCount(5);
-  });
+// The width where the words begin was computed from the Russian word, the longer of the two, so
+// the Russian run is the one that tests it; the English run is cheap, and tests the same width
+// with more room for the name.
+const LANGUAGES = [
+  { language: "en", locale: "en-US" },
+  { language: "ru", locale: "ru-RU" },
+] as const;
 
-  /** The cards of the view, in the order of the dashboard. */
-  function cardsOf(page: Page): Locator[] {
-    const cards = page.locator("timerify-card");
-    return [0, 1, 2, 3, 4].map((index) => cards.nth(index));
-  }
+for (const { language, locale } of LANGUAGES) {
+  test.describe(`the cards with a Turn off button, wide, in ${language}`, () => {
+    test.use({ locale });
 
-  test("show the words of the button, and not its icon, where there is room for them", async ({
-    page,
-  }) => {
-    const [pill, pillWithChip, round, , wider] = cardsOf(page);
+    test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+      await run(ws, state);
+      await openDashboard(page, "wide");
+      await expect(page.locator("timerify-card")).toHaveCount(5);
+    });
 
-    for (const card of [pill, pillWithChip, round, wider]) {
-      await isReady(card);
-      const button = card.getByRole("button", { name: "Turn off", exact: true });
-      await expect(button).toBeVisible();
-      await expect(card.locator(".turn-off-label")).toHaveText("Turn off");
-      await expect(card.locator(".turn-off-icon")).toBeHidden();
-      expect(await isCutOff(card.locator(".content"))).toBe(false);
+    /** The cards of the view, in the order of the dashboard. */
+    function cardsOf(page: Page): Locator[] {
+      const cards = page.locator("timerify-card");
+      return [0, 1, 2, 3, 4].map((index) => cards.nth(index));
     }
+
+    test("show the words of the button, and not its icon, where there is room for them", async ({
+      page,
+    }) => {
+      const word = (await stringsIn(language)).card_turn_off;
+      const [pill, pillWithChip, round, , wider] = cardsOf(page);
+
+      for (const card of [pill, pillWithChip, round, wider]) {
+        await isReady(card);
+        const button = card.getByRole("button", { name: word, exact: true });
+        await expect(button).toBeVisible();
+        await expect(card.locator(".turn-off-label")).toHaveText(word);
+        await expect(card.locator(".turn-off-icon")).toBeHidden();
+        expect(await isCutOff(card.locator(".content"))).toBe(false);
+      }
+    });
+
+    test("show the icon of the button in a card of 6 columns, and its words in one of 7", async ({
+      page,
+    }) => {
+      const [, , , narrow, wider] = cardsOf(page);
+      await isReady(narrow);
+      await isReady(wider);
+
+      await expect(narrow.locator(".turn-off-icon")).toBeVisible();
+      await expect(narrow.locator(".turn-off-label")).toBeHidden();
+      await expect(wider.locator(".turn-off-label")).toBeVisible();
+      await expect(wider.locator(".turn-off-icon")).toBeHidden();
+      // The name keeps room beside the words, which is what the width they begin at is for: in
+      // Russian the word is the longest, and the name has just what the threshold leaves it.
+      expect((await boxOf(wider.locator(".name"))).width).toBeGreaterThanOrEqual(80);
+    });
+
+    test("leave the keyboard on the card when the button with its words goes", async ({
+      page,
+      state,
+      ws,
+    }) => {
+      const word = (await stringsIn(language)).card_turn_off;
+      const [pill] = cardsOf(page);
+      await isReady(pill);
+      const button = pill.getByRole("button", { name: word, exact: true });
+
+      await tabToButton(page, pill, button);
+      await page.keyboard.press("Enter");
+
+      await expect
+        .poll(async () => (await ws.state(state.timers.loose.target))?.state)
+        .toBe("off");
+      await expect(button).toHaveCount(0);
+      await expect(pill.locator(".body")).toBeFocused();
+    });
   });
-
-  test("show the icon of the button in a card of 6 columns, and its words in one of 7", async ({
-    page,
-  }) => {
-    const [, , , narrow, wider] = cardsOf(page);
-    await isReady(narrow);
-    await isReady(wider);
-
-    await expect(narrow.locator(".turn-off-icon")).toBeVisible();
-    await expect(narrow.locator(".turn-off-label")).toBeHidden();
-    await expect(wider.locator(".turn-off-label")).toBeVisible();
-    await expect(wider.locator(".turn-off-icon")).toBeHidden();
-    // The name keeps room beside the words, which is what the width they begin at is for.
-    expect((await boxOf(wider.locator(".name"))).width).toBeGreaterThanOrEqual(80);
-  });
-
-  test("leave the keyboard on the card when the button with its words goes", async ({
-    page,
-    state,
-    ws,
-  }) => {
-    const [pill] = cardsOf(page);
-    await isReady(pill);
-    const button = pill.getByRole("button", { name: "Turn off", exact: true });
-
-    await focusByKeyboard(page, button);
-    await page.keyboard.press("Enter");
-
-    await expect
-      .poll(async () => (await ws.state(state.timers.loose.target))?.state)
-      .toBe("off");
-    await expect(button).toHaveCount(0);
-    await expect(pill.locator(".body")).toBeFocused();
-  });
-});
+}

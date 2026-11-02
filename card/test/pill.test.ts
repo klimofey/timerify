@@ -708,6 +708,20 @@ describe("the Turn off button of the pill", () => {
     expect(button?.getAttribute("title")).toBe(russian.card_turn_off);
   });
 
+  it("marks its card as one with the button, and only then", async () => {
+    const with_ = await mountCard(counting(45), WITH_BUTTON);
+    const without = await mountCard(counting(45), { entity: NUMBER, show_turn_off: false });
+
+    // The styles make the content of a marked card the container its button's form follows;
+    // a card without the button is left as it was.
+    expect(with_.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off")).toBe(
+      true,
+    );
+    expect(
+      without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off"),
+    ).toBe(false);
+  });
+
   it("tells its card whether there is a chip, which the room the words need depends on", async () => {
     const withChip = await mountCard(counting(45), { ...WITH_BUTTON, chip: 15 });
     const without = await mountCard(counting(45), WITH_BUTTON);

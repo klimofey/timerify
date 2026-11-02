@@ -1,6 +1,17 @@
 // Where the keyboard focus is, as a person sees it: the page is made of shadow roots inside
 // shadow roots, and the browser's own answers each stop at the edge of one.
-import type { Locator } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Gets the keyboard focus to a button of a card as a person does: the card's body has it, and
+ * Tab goes on to the next control, the button. (A press of a key also turns on the ring that
+ * shows the focus, which a script's `focus()` does not.)
+ */
+export async function tabToButton(page: Page, card: Locator, button: Locator): Promise<void> {
+  await card.locator(".body").focus();
+  await page.keyboard.press("Tab");
+  await expect(button).toBeFocused();
+}
 
 /**
  * Where the keyboard focus is, as seen through the shadow roots of the whole page: inside the

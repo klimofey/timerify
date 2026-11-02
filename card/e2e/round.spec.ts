@@ -28,6 +28,15 @@ test.describe("the round card in Home Assistant", () => {
     await isReady(loose);
   });
 
+  test("leaves its content as it was when it has no Turn off button", async ({ page }) => {
+    const { strict } = cardsOf(page);
+    const content = strict.locator(".content");
+    await expect(content).toBeVisible();
+    expect(await content.evaluate((element) => getComputedStyle(element).containerType)).toBe(
+      "normal",
+    );
+  });
+
   test("opens the pop-up on a tap, also on the border of the card", async ({ page, state, ws }) => {
     const { strict } = cardsOf(page);
     const dialog = strict.locator("dialog");

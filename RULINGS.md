@@ -3432,14 +3432,17 @@ in `docs/followups.md`.
   to the card and the pop-up needed nothing but the new call. `setMinutes` is left to the
   presets. The round tile that has the button is 184 px high, three rows of the sections grid
   (3 x 56 px and two gaps of 8 px), against 120 px without it: `getGridOptions` answers 3 rows
-  (minimum and maximum too) and `getCardSize` 4. The button's place, a slot of 32 px under the
+  (minimum and maximum too) and `getCardSize` 4. The button's place, a slot of 40 px under the
   name, is kept while the target is off, so the dial and the name do not move when the button
   comes and goes. The pill is as high as before.
   The button is its words on a wide card and its icon alone on a narrow one, and the sizes are
   measured, not guessed. A narrow card shows the power icon (`mdi:power`, 40 px, a target for a
   finger) in a round button that is still named "Turn off" (`aria-label`, and a `title` for the
   pointer); both forms are in the DOM and the styles choose, by a container query on the card's
-  `.content` (`container-type: inline-size`), not by script. Why not just more columns:
+  `.content` (`container-type: inline-size`), not by script. Only the content of a card that
+  has the button is a container (the card has the class `with-turn-off`), so a card without it
+  is laid out exactly as before, in any dashboard layout, including one that sizes a card by
+  its content, where a container's width would not count. Why not just more columns:
   `min_columns` is one number for every screen, and a screen's columns are different widths (a
   section is 12 columns with gaps of 8 px, at most 500 px, narrower on a phone). The words need
   11 columns on a phone 320 px wide, and that would be 11 of 12 on a desktop where 7 are enough.
@@ -3451,6 +3454,10 @@ in `docs/followups.md`.
   word in another language is taken up by the name; a longer word that fills the round tile's
   width needs its number raised. A pill with a chip has a class, `with-chip`, so that its
   threshold is its own. The round tile's slot is 40 px, as the button.
+  At its first size, 6 columns, a pill without a chip shows the icon on every screen (its content
+  is 224 px on a 1280 px desktop, below the 245 px the words need); the words come from 7
+  columns on a wide screen (266 px), and the documentation says so. A pill with a chip starts at
+  9 columns, which is 351 px on a desktop and shows the words there, and the icon on a phone.
   The fewest columns at which the controls end inside the card's padding and nothing overflows,
   by the icon form, in the Home Assistant of the end-to-end tests, in Russian, at 1280 px, 390 px,
   768 px (two sections) and 320 px:
@@ -3471,12 +3478,15 @@ in `docs/followups.md`.
   (by 5 px on each side) and than one of 2 columns on any screen (by 2 px to 18 px), with the
   button or without it: that is the tile's own size, found here and left as it was; it needs a
   higher minimum of the option-off tile, or a dial that shrinks with it (#52).
-  When a keyboard press takes the button away (the user tabs to it, presses Enter, the target
-  goes off and the button leaves), the focus goes to the body of the card, as it does when the
-  pop-up closes, if the body is a button (`isPressable`): the next Tab goes on from the card, not
-  from the top of the dashboard. A card whose three presses are `none` has no focusable body, and
-  then no focus is moved: there is nowhere better to put it. A focus that was not on the button
-  (on the chip, say) stays where it was.
+  When a press that leaves the focus on the button takes the button away (a keyboard user tabs
+  to it, presses Enter, the target goes off and the button leaves), the focus goes to the body
+  of the card, as it does when the pop-up closes, if the body is a button (`isPressable`): the
+  next Tab goes on from the card, not from the top of the dashboard. The rule is "the button had
+  the focus", not "a key was pressed", so a mouse press in Chrome or Firefox, which focus a
+  button they press, and a tap on Android, move the focus to the body too. That is harmless:
+  the focus stays on the same card, and no ring shows without the keyboard. A card whose three
+  presses are `none` has no focusable body, and then no focus is moved: there is nowhere better
+  to put it. A focus that was not on the button (on the chip, say) stays where it was.
   Why: the spec asks that the option make the card and its pop-up show a Turn off button while the
   target is on; the pop-up has its Stop, so the option puts the same command on the card, for a
   user who wants to switch a device off from the dashboard without opening a dialog. One command
@@ -3515,12 +3525,14 @@ in `docs/followups.md`.
   `card/test/press.test.ts` (Start or stop stops with `timerify.stop`), `card/test/config.test.ts`,
   `card/test/editor.test.ts` and `card/test/card.test.ts` (the option, its refusals, the field, the
   sizes with the option on and off); the button is named "Turn off" in both forms, in both
-  languages, and a pill with a chip says so (`pill.test.ts`, `round.test.ts`); end to end
-  `turns off a boiler that runs with no countdown` and `leaves the keyboard on the card when the
-  button goes` (`pill.spec.ts`), the six tests of `sizes.spec.ts` (a pill and a round tile with
-  the button at their narrowest, in Russian, on a 320 px phone, and the keyboard on the icon
-  button; wide cards with the words, a pill of 6 and one of 7 columns, and the keyboard on the
-  words),
+  languages, and a pill with a chip says so, and only a card with the button is marked as one
+  (`pill.test.ts`, `round.test.ts`); end to end `turns off a boiler that runs with no
+  countdown` and `leaves the keyboard on the card when the button goes` (`pill.spec.ts`, the
+  button reached by Tab from the card's body), `leaves its content as it was when it has no Turn
+  off button` (`pill.spec.ts`, `round.spec.ts`: no container), the nine tests of `sizes.spec.ts`
+  (a pill and a round tile with the button at their narrowest, in Russian, on a 320 px phone,
+  and the keyboard on the icon button; and, in English and in Russian, wide cards with the
+  words, a pill of 6 and one of 7 columns, and the keyboard on the words),
   `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
   and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
   Russian).

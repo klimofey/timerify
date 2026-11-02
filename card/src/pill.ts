@@ -41,7 +41,9 @@ export function renderPill(
   const filled = Math.round(view.progress * 1000) / 10;
   const pressable = isPressable(config);
   return html`
-    <ha-card class="pill ${view.state} ${config.chip === undefined ? "" : "with-chip"}">
+    <ha-card
+      class="pill ${view.state} ${config.chip === undefined ? "" : "with-chip"} ${config.show_turn_off ? "with-turn-off" : ""}"
+    >
       <div
         class="body"
         role=${ifDefined(pressable ? "button" : undefined)}

@@ -161,10 +161,15 @@ export const commonStyles = css`
     position: relative;
     box-sizing: border-box;
     height: 100%;
-    /* The width of the content is what the Turn off button chooses its form by. */
-    container-type: inline-size;
     /* A press anywhere on the card reaches the body underneath, except on a control. */
     pointer-events: none;
+  }
+  /*
+   * The width of the content is what the Turn off button chooses its form by, so the content of
+   * a card that has the button is a container, and that of any other card is left as it was.
+   */
+  .with-turn-off .content {
+    container-type: inline-size;
   }
   /* The small buttons that sit on the card beside its body: the pill's chip, and Turn off. */
   .chip,

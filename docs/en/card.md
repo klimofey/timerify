@@ -119,7 +119,7 @@ The pop-up has a **Stop** button. You can also show a **Turn off** button on the
 
 - The button shows while the device is on, with a countdown or without one. While a countdown runs, it shows even if the device is unavailable.
 - It is not shown while the device is off. It is not shown while the timer is unavailable, or before the card has found its timer.
-- On the pill it stands beside the name, before the chip. On the round tile it is below the name. On a narrow card the button shows only a power icon. Screen readers still say **Turn off**, and a tip shows it when you point at the button.
+- On the pill it stands beside the name, before the chip. On the round tile it is below the name. On a narrow card the button shows only a power icon. Screen readers still say **Turn off**, and a tip shows it when you point at the button. A pill without a chip starts 6 columns wide, and at that size the button shows its icon. On a wide screen the word appears from 7 columns.
 - Pressing it does what **Stop** does in the pop-up. It ends the countdown and turns the device off. That is the [**Stop** action](services.md#stop). It also turns off a device that runs without a countdown in **Loose** mode.
 - A press on it is not a tap, a double tap or a long press of the card. The pop-up does not open.
 - It works with or without the timer's own **Turn off button** setting. That setting adds a button to the device page. See [What a timer adds to the device page](timers.md#what-a-timer-adds-to-the-device-page).

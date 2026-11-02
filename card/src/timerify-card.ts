@@ -235,8 +235,10 @@ export class TimerifyCard extends LitElement {
 
   /**
    * The Turn off button goes when the device goes off, and the focus goes with it: to the page,
-   * so that the next Tab would start from the top of the dashboard. Whoever pressed it by
-   * keyboard is left on the body of the card, as the pop-up does when it closes.
+   * so that the next Tab would start from the top of the dashboard. Whoever pressed it, by the
+   * keyboard or by any press that leaves the focus on the button (a click in Chrome or Firefox
+   * does, a tap on Android), is left on the body of the card, as the pop-up does when it
+   * closes. That is harmless for a press that is not the keyboard's: no ring shows without it.
    */
   protected override updated(): void {
     if (this.#turnOffHadFocus && this.shadowRoot?.querySelector(".turn-off") === null) {

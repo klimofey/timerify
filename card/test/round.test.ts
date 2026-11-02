@@ -530,6 +530,18 @@ describe("the Turn off button of the round tile", () => {
   const WITH_BUTTON = { ...ROUND, show_turn_off: true } as const;
   const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
 
+  it("marks its card as one with the button, and only then", async () => {
+    const with_ = await mountCard(counting(45), WITH_BUTTON);
+    const without = await mountCard(counting(45), ROUND);
+
+    expect(with_.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off")).toBe(
+      true,
+    );
+    expect(
+      without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off"),
+    ).toBe(false);
+  });
+
   it("is a button named Turn off, whether the tile shows its words or only its icon", async () => {
     const card = await mountCard(counting(45), WITH_BUTTON);
     const button = turnOffOf(card);

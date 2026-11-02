@@ -8,6 +8,7 @@ import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
+import { tabToButton } from "./focus";
 import { doubleTap, tap, tapBorder } from "./press";
 import { isReady } from "./ready";
 import { hassWs } from "./ws";
@@ -79,6 +80,16 @@ test.describe("the pill in Home Assistant", () => {
     };
     const first = await seconds();
     await expect.poll(seconds).toBeLessThan(first);
+  });
+
+  test("leaves its content as it was when it has no Turn off button", async ({ page }) => {
+    // The content of a card with the button is the container its form follows (sizes.spec.ts);
+    // that of a card without it is no container, whatever page it is on.
+    const content = pillOf(page).locator(".content");
+    await expect(content).toBeVisible();
+    expect(await content.evaluate((element) => getComputedStyle(element).containerType)).toBe(
+      "normal",
+    );
   });
 
   test("opens the pop-up from a tap anywhere on the pill but the chip", async ({ page }) => {
@@ -272,7 +283,7 @@ test.describe("the pill with a Turn off button", () => {
     await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
     await expect(turnOff).toBeVisible();
 
-    await turnOff.focus();
+    await tabToButton(page, pill, turnOff);
     await page.keyboard.press("Enter");
 
     await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("off");

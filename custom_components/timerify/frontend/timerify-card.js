@@ -53,10 +53,15 @@ var tt=globalThis,et=tt.ShadowRoot&&(tt.ShadyCSS===void 0||tt.ShadyCSS.nativeSha
     position: relative;
     box-sizing: border-box;
     height: 100%;
-    /* The width of the content is what the Turn off button chooses its form by. */
-    container-type: inline-size;
     /* A press anywhere on the card reaches the body underneath, except on a control. */
     pointer-events: none;
+  }
+  /*
+   * The width of the content is what the Turn off button chooses its form by, so the content of
+   * a card that has the button is a container, and that of any other card is left as it was.
+   */
+  .with-turn-off .content {
+    container-type: inline-size;
   }
   /* The small buttons that sit on the card beside its body: the pill's chip, and Turn off. */
   .chip,
@@ -121,7 +126,9 @@ var tt=globalThis,et=tt.ShadowRoot&&(tt.ShadyCSS===void 0||tt.ShadyCSS.nativeSha
     }
   }
 `;var $=n=>n??c;var Re={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},He=n=>(...t)=>({_$litDirective$:n,values:t}),ht=class{constructor(t){}get _$AU(){return this._$AM._$AU}_$AT(t,e,o){this._$Ct=t,this._$AM=e,this._$Ci=o}_$AS(t,e){return this.update(t,e)}update(t,e){return this.render(...e)}};var Oe="important",Cn=" !"+Oe,Me=He(class extends ht{constructor(n){if(super(n),n.type!==Re.ATTRIBUTE||n.name!=="style"||n.strings?.length>2)throw Error("The `styleMap` directive must be used in the `style` attribute and must be the only part in the attribute.")}render(n){return Object.keys(n).reduce((t,e)=>{let o=n[e];return o==null?t:t+`${e=e.includes("-")?e:e.replace(/(?:^(webkit|moz|ms|o)|)(?=[A-Z])/g,"-$&").toLowerCase()}:${o};`},"")}update(n,[t]){let{style:e}=n.element;if(this.ft===void 0)return this.ft=new Set(Object.keys(t)),this.render(t);for(let o of this.ft)t[o]==null&&(this.ft.delete(o),o.includes("-")?e.removeProperty(o):e[o]=null);for(let o in t){let i=t[o];if(i!=null){this.ft.add(o);let r=typeof i=="string"&&i.endsWith(Cn);o.includes("-")||r?e.setProperty(o,r?i.slice(0,-11):i,r?Oe:""):e[o]=i}}return x}});function Le(n,t,e,o,i,r,s){let d=Math.round(n.progress*1e3)/10,a=U(t);return u`
-    <ha-card class="pill ${n.state} ${t.chip===void 0?"":"with-chip"}">
+    <ha-card
+      class="pill ${n.state} ${t.chip===void 0?"":"with-chip"} ${t.show_turn_off?"with-turn-off":""}"
+    >
       <div
         class="body"
         role=${$(a?"button":void 0)}

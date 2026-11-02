@@ -926,9 +926,11 @@ those of the spec.
   whether or not they already were, because switching is idempotent. Cost if wrong:
   titles that are said, not generated ones, are what voice can reach (below).
 - **Titles are compared by `schedule.title_key`: the title as the built-in agent hears it,
-  without punctuation and case, every dash a hyphen, the Russian yo a ye, runs of space one
-  space.** So "morning" means `Morning!` and `06:30-07:15, Mon-Sun` means the generated
-  title with en dashes. A title of nothing but punctuation has the key `""`, which matches
+  without punctuation and case, every dash a hyphen, the Russian yo a ye (`fold_yo`, the one
+  fold of the repository), runs of space one space.** So "morning" means `Morning!` and
+  `06:30-07:15, Mon-Sun` means the generated title with en dashes. The sentence files list a
+  title with a yo under both spellings, since the built-in agent cannot be told to fold
+  (Decision 6 of the voice part, below). A title of nothing but punctuation has the key `""`, which matches
   nothing: the built-in agent does not know such a title either, so an LLM cannot ask for it
   and it is reached by the whole schedule or its own switch. Cost if wrong: such an
   interval is not named by an agent.
@@ -1041,9 +1043,11 @@ those of the spec.
   the registry are picked up at the next trigger (issue #20). Cost if wrong: such
   a name or mode is missing from the file until then.
 - **The names are listed as the built-in agent lists them: every alias with the computed
-  name, with punctuation removed, an empty name left out; `in` is escaped only when hassil
-  would read it as a template, `out` is the name as Home Assistant shows it, and
-  `context.domain` is the target's.** What is matched is what Home Assistant matches. A
+  name, with punctuation removed, an empty name left out, and a name with a Russian yo
+  listed again with a ye; `in` is escaped only when hassil would read it as a template,
+  `out` is the name as Home Assistant shows it, and `context.domain` is the target's.**
+  What is matched is what Home Assistant matches, and the ye a speech recogniser writes for
+  a yo (Decision 6 of the voice part, below). A
   lone backslash is literal in hassil, so a name that differs only in characters the
   default agent keeps must be said with them. A name that is nothing but punctuation would
   match anywhere and is left out. Cost if wrong: a name with an odd character is said as it
@@ -2868,3 +2872,28 @@ in `docs/followups.md`.
   `test_the_clock_sentences_add_no_llm_tool`,
   `test_the_file_says_every_command_at_a_clock_time_for_every_kind_of_device` and
   `test_the_generator_refuses_sentences_that_lack_a_way_to_say_the_time`.
+- **A name, a title and a mode with a Russian yo are listed under both spellings, and
+  `fold_yo` is the one fold (Decision 6, #23).** A speech recogniser writes "ye" where
+  Russian prints "yo", and the built-in agent compares what it hears with the file letter
+  by letter and cannot be told to fold. So `build` lists each name, interval title and mode
+  once per spelling (`spoken_variants`: as `spoken_form` has it, and with `fold_yo` of it
+  when that differs), both with the same `out` and context, and the answer gives the name
+  as the device has it. `spelling.fold_yo` makes each yo, small and capital, a ye; it is
+  also what `schedule.title_key` folds with, which the controller and the tools of an LLM
+  agent compare titles by, so the repository folds the letter in one place. `build` returns
+  `BuiltSentences`, the sentences and `said`, the text each value of the three lists is
+  meant to be said as (unescaped, in order), and `validate` holds every value of the file to
+  its text: the text of `in` is no longer a function of `out`, so the check that derived it
+  from `out` could not stay. `spoken_form` is applied once: removing punctuation twice does
+  not always leave what removing it once did, and the built-in agent applies it once to
+  every entity it lists. Why: a name such as the Russian "boiler" is printed with a yo and
+  spoken, and recognised, with a ye. Cost if wrong: the file has one more value per such
+  name, title and mode.
+  Tests: `test_a_russian_name_with_yo_is_matched_said_with_ye`,
+  `test_a_russian_name_with_yo_is_still_matched_as_written`,
+  `test_an_interval_title_with_yo_is_switched_said_with_ye`,
+  `test_every_value_is_listed_under_both_spellings`,
+  `test_a_value_not_read_as_the_text_it_was_built_from_is_refused`,
+  `test_a_list_with_more_values_than_texts_said_is_refused`,
+  `test_each_yo_is_a_ye_and_nothing_else_changes` and
+  `test_a_letter_with_and_without_the_diaeresis_is_one_in_a_title`.

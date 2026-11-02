@@ -31,6 +31,7 @@ from .const import (
     freeze_settings,
 )
 from .core import Window
+from .spelling import fold_yo
 
 _WEEK: Final = len(WEEKDAYS)
 _MIN_RANGE: Final = 3
@@ -223,10 +224,6 @@ _DASHES: Final = str.maketrans(
     )
 )
 """Every dash that a title may be written with, as the hyphen a keyboard has."""
-_YO: Final = "\N{CYRILLIC SMALL LETTER IO}"
-_YE: Final = "\N{CYRILLIC SMALL LETTER IE}"
-"""Russian prints the one for the other, and a speech recogniser does not tell them
-apart."""
 
 
 def title_key(title: str) -> str:
@@ -242,7 +239,7 @@ def title_key(title: str) -> str:
     built-in agent does not know it either.
     """
     unpunctuated = remove_punctuation(title).translate(_DASHES)
-    return " ".join(unpunctuated.casefold().replace(_YO, _YE).split())
+    return " ".join(fold_yo(unpunctuated.casefold()).split())
 
 
 def _weekdays_label(weekdays: list[str], labels: Mapping[str, str]) -> str:

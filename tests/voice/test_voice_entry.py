@@ -43,6 +43,7 @@ from custom_components.timerify.const import (
     VOICE_SYNC_COOLDOWN,
     VOICE_UNIQUE_ID,
 )
+from custom_components.timerify.spelling import fold_yo
 from custom_components.timerify.voice.files import SentenceFiles
 from custom_components.timerify.voice.sentences import (
     InvalidSentences,
@@ -80,6 +81,9 @@ BOILER = {"in": "Boiler", "out": "Boiler", "context": {"domain": "switch"}}
 FAN = {"in": "Fan", "out": "Fan", "context": {"domain": "switch"}}
 AN_OLD_TIME = 1_000_000_000
 """A time, as the seconds since 1970, that no file written during a test has."""
+YO_NAME = "\N{CYRILLIC CAPITAL LETTER IO}lka"
+"""A name with the Russian letter yo, built from the code point so that this file stays
+free of Cyrillic."""
 
 
 async def open_menu(hass: HomeAssistant) -> FlowResult:
@@ -1012,6 +1016,44 @@ async def test_name_left_empty_by_punctuation_is_skipped(
 
 
 @pytest.mark.usefixtures("assist")
+async def test_a_russian_name_with_yo_is_matched_said_with_ye(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A speech recogniser writes ye where Russian prints yo, and the built-in agent
+    compares letter by letter: the name is listed with both, and the answer gives the
+    name as the device has it."""
+    er.async_get(hass).async_update_entity(TARGET_ID, name=YO_NAME)
+    await setup_target()
+
+    await add_voice_entry(hass, languages=("ru",))
+
+    domain = {"domain": "switch"}
+    assert listed(hass, "ru") == [
+        {"in": YO_NAME, "out": YO_NAME, "context": domain},
+        {"in": fold_yo(YO_NAME), "out": YO_NAME, "context": domain},
+    ]
+    (text, *_) = samples("ru", TIME_LEFT, names=(fold_yo(YO_NAME),), numbers={})
+    response = await converse(hass, text, "ru")
+    assert reached(response) == TIME_LEFT
+    assert speech(response).startswith(YO_NAME)
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_russian_name_with_yo_is_still_matched_as_written(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    er.async_get(hass).async_update_entity(TARGET_ID, name=YO_NAME)
+    await setup_target()
+    await add_voice_entry(hass, languages=("ru",))
+
+    (text, *_) = samples("ru", TIME_LEFT, names=(YO_NAME,), numbers={})
+    response = await converse(hass, text, "ru")
+
+    assert reached(response) == TIME_LEFT
+    assert speech(response).startswith(YO_NAME)
+
+
+@pytest.mark.usefixtures("assist")
 async def test_shared_name_is_not_resolved_to_the_other_entity(
     hass: HomeAssistant,
     fake_target: FakeTarget,
@@ -1108,7 +1150,7 @@ async def test_a_language_that_fails_does_not_stop_the_other(
     is named in the log, and the other is written."""
     await setup_target()
 
-    def failing_for_russian(language: str, built: dict[str, Any]) -> None:
+    def failing_for_russian(language: str, *_: object) -> None:
         if language == "ru":
             raise InvalidSentences("this language is broken")
 

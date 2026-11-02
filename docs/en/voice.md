@@ -165,6 +165,8 @@ Timerify then writes the file `custom_sentences/<language>/timerify.yaml` in you
 
 A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. They are written as the devices name them, with a space for an underscore.
 
+A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
+
 Timerify writes the file again when any of these happens:
 
 - A timer is added, removed or reloaded.
@@ -212,6 +214,7 @@ For each language you want (`en`, `ru`):
    - Give each name its `context: domain`, which is the part of the entity id before the dot. Settings are said only of a device that has them. A thermostat's HVAC mode and temperature need `climate`. A water heater's temperature needs `water_heater`. A name with no domain gets the sentences that fit every device, and nothing more.
    - `timerify_interval` is needed only to switch a schedule interval by its title. The whole schedule needs none.
    - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. A mode that the device does not have is refused when it is said.
+   - List a name with the Russian letter yo twice: once with yo and once with ye. Both values have the same `out`. Do the same for a title and a mode. Speech recognition often writes ye, and Home Assistant does not treat the two letters as one.
 4. Restart Home Assistant, or call `conversation.reload`.
 
 Do it again after every update of Timerify, because the sentences change between versions. Do it again after every rename of a device or an interval. A file that is not valid breaks Assist for the whole language. The entry above protects you from that, by checking before it writes. Check yours by reading the log after the reload.

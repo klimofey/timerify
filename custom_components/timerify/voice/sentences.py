@@ -14,7 +14,7 @@ which run in the event loop.
 
 import copy
 import re
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -44,6 +44,7 @@ from ..const import (
     SUBENTRY_INTERVAL,
 )
 from ..domains import supported_settings
+from ..spelling import fold_yo
 from .base import loaded_timers
 
 RULE_PREFIX: Final = "timerify_"
@@ -75,6 +76,19 @@ _SentenceDumper.add_representer(str, _represent_text)
 
 class InvalidSentences(ValueError):
     """Sentences the built-in agent would not load, or would not match as said."""
+
+
+@dataclass(frozen=True)
+class BuiltSentences:
+    """The sentences `build` made, and the text each name in them is meant to be said
+    as."""
+
+    data: dict[str, Any]
+    """The sentences, as the file holds them."""
+    said: Mapping[str, tuple[str, ...]]
+    """For each list of names (`LIST_TARGET`, `LIST_INTERVAL`, `LIST_MODE`), the text
+    each of its values is said as, in their order. It is the text itself, not the
+    escaped one that the file holds, so that `validate` can hold the file to it."""
 
 
 @dataclass(frozen=True)
@@ -130,13 +144,22 @@ def spoken_mode(mode: str) -> str:
     return spoken_form(mode.replace("_", " "))
 
 
-NAME_LISTS: Final[Mapping[str, Callable[[str], str]]] = {
-    LIST_TARGET: spoken_form,
-    LIST_INTERVAL: spoken_form,
-    LIST_MODE: spoken_mode,
-}
-"""The lists of the sentences that hold names as people say them, each with how a value
-is said, which `validate` proves are matched as said."""
+def spoken_variants(text: str) -> tuple[str, ...]:
+    """The ways `text` is listed so that the built-in agent matches it as said: as
+    `spoken_form` has it and, when that has a Russian "yo", with "ye" for it too, since
+    a speech recogniser writes the one for the other and the agent compares letter by
+    letter. Nothing for a text of nothing but punctuation, which would match
+    anywhere."""
+    spoken = spoken_form(text)
+    return _both_spellings(spoken) if spoken else ()
+
+
+def _both_spellings(spoken: str) -> tuple[str, ...]:
+    """`spoken` and, when it has a "yo", the same with "ye" for it. Not `spoken_form`
+    again: removing punctuation twice does not always leave what removing it once
+    did."""
+    folded = fold_yo(spoken)
+    return (spoken, folded) if folded != spoken else (spoken,)
 
 
 def escape_template(text: str) -> str:
@@ -231,34 +254,31 @@ def build(
     names: Sequence[VoiceName],
     settings: VoiceSettingValues = NO_SETTING_VALUES,
     intervals: Sequence[VoiceTitle] = (),
-) -> dict[str, Any]:
+) -> BuiltSentences:
     """The sentences of `sources` with the lists of what the targets are called, what
     the schedule intervals are called and what can be turned on in filled in.
 
     A name is listed under what is said (`in`, escaped so that it is read as text) and
     what it means (`out`), with the domain of its target as context; an interval, which
-    is told apart by its title alone, without a context. The words for an HVAC mode are
-    those of the sources that mean a mode some target supports; the modes are listed as
-    the devices name them, said with spaces for underscores.
+    is told apart by its title alone, without a context. A name, a title or a mode with
+    a Russian "yo" is listed twice, with "yo" and with "ye", both meaning the same. The
+    words for an HVAC mode are those of the sources that mean a mode some target
+    supports; the modes are listed as the devices name them, said with spaces for
+    underscores.
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
-    lists[LIST_TARGET] = {
-        "values": [
-            {
-                "in": escape_template(name.spoken),
-                "out": name.name,
-                "context": {"domain": name.domain},
-            }
-            for name in names
-        ]
-    }
-    lists[LIST_INTERVAL] = {
-        "values": [
-            {"in": escape_template(interval.spoken), "out": interval.title}
-            for interval in intervals
-        ]
-    }
+    said: dict[str, tuple[str, ...]] = {}
+    lists[LIST_TARGET], said[LIST_TARGET] = _name_list(
+        (spoken, {"out": name.name, "context": {"domain": name.domain}})
+        for name in names
+        for spoken in _both_spellings(name.spoken)
+    )
+    lists[LIST_INTERVAL], said[LIST_INTERVAL] = _name_list(
+        (spoken, {"out": interval.title})
+        for interval in intervals
+        for spoken in _both_spellings(interval.spoken)
+    )
     lists[LIST_HVAC_MODE] = {
         "values": [
             word
@@ -266,22 +286,42 @@ def build(
             if word["out"] in settings.hvac_modes
         ]
     }
-    lists[LIST_MODE] = {"values": _mode_values(settings.modes)}
-    return built
+    lists[LIST_MODE], said[LIST_MODE] = _name_list(_mode_entries(settings.modes))
+    return BuiltSentences(built, said)
 
 
-def _mode_values(modes: Iterable[str]) -> list[dict[str, Any]]:
-    """The values of the list of modes: each said as `spoken_mode` says it, and meaning
-    the mode as the device names it. A mode that is nothing but punctuation is left
-    out: it would match anywhere."""
-    return [
-        {"in": escape_template(spoken), "out": mode}
-        for mode in sorted(modes)
-        if (spoken := spoken_mode(mode))
-    ]
+def _name_list(
+    entries: Iterable[tuple[str, Mapping[str, Any]]],
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    """A list of names for the sentences, and the text each of its values is said as.
+
+    An entry is a text as it is said and what it means: the `out` of the value, and its
+    `context` if it has one. The text is escaped, so that it is read as the text it is.
+    """
+    values: list[dict[str, Any]] = []
+    said: list[str] = []
+    for spoken, meaning in entries:
+        values.append({"in": escape_template(spoken), **meaning})
+        said.append(spoken)
+    return {"values": values}, tuple(said)
 
 
-def validate(language: str, built: Mapping[str, Any]) -> None:
+def _mode_entries(modes: Iterable[str]) -> list[tuple[str, dict[str, str]]]:
+    """The entries of the list of modes: each said as `spoken_mode` says it, in each of
+    its spellings, and meaning the mode as the device names it. A mode that is nothing
+    but punctuation is left out: it would match anywhere."""
+    entries: list[tuple[str, dict[str, str]]] = []
+    for mode in sorted(modes):
+        if spoken := spoken_mode(mode):
+            entries.extend(
+                (variant, {"out": mode}) for variant in _both_spellings(spoken)
+            )
+    return entries
+
+
+def validate(
+    language: str, built: Mapping[str, Any], said: Mapping[str, Sequence[str]]
+) -> None:
     """Prove that the built-in agent can load `built` next to its own sentences of
     `language`, and will match the names in it as they are said.
 
@@ -289,7 +329,9 @@ def validate(language: str, built: Mapping[str, Any]) -> None:
     use, and a sentence that is not a template does not fail until it is matched. So
     this also parses every sentence of every intent `built` defines, checks that every
     list and expansion rule they and Timerify's own rules use is there, and that each
-    name is read as exactly the text it stands for.
+    value of the lists of `said` is read as exactly the text that `build` meant to say
+    with it (`BuiltSentences.said`), which is the text itself, in the order of the
+    values.
 
     Raises `InvalidSentences` for the first thing that is wrong.
     """
@@ -302,8 +344,8 @@ def validate(language: str, built: Mapping[str, Any]) -> None:
         intents = Intents.from_dict(merged)
         own_intents = [intents.intents[name] for name in built.get("intents", {})]
         _check_references(intents, own_intents)
-        for list_name, spoken in NAME_LISTS.items():
-            _check_names(intents, built, list_name, spoken)
+        for list_name, texts in said.items():
+            _check_names(intents, built, list_name, texts)
     except InvalidSentences:
         raise
     except Exception as err:
@@ -393,18 +435,17 @@ def _check_names(
     intents: Intents,
     built: Mapping[str, Any],
     list_name: str,
-    spoken: Callable[[str], str],
+    said: Sequence[str],
 ) -> None:
-    """Every name listed in `list_name` is read as the text that it is said as, which
-    is what `spoken` makes of what it means."""
+    """Every name listed in `list_name` is read as the text that it is said as, the
+    texts of `said` being those of the values, in order."""
     slot_list = intents.slot_lists[list_name]
     if not isinstance(slot_list, TextSlotList):
         raise InvalidSentences(f"{list_name} is not a list of names")
-    for value, parsed in zip(
-        built["lists"][list_name]["values"], slot_list.values, strict=True
+    for value, parsed, text in zip(
+        built["lists"][list_name]["values"], slot_list.values, said, strict=True
     ):
-        wanted = normalize_text(spoken(value["out"]))
-        if _text_of(parsed.text_in) != wanted:
+        if _text_of(parsed.text_in) != normalize_text(text):
             raise InvalidSentences(
                 f"{value['out']!r} would not be matched as said: it is listed as"
                 f" {value['in']!r}"

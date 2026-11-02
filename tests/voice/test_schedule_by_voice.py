@@ -19,6 +19,7 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import LIST_INTERVAL, VOICE_SYNC_COOLDOWN
+from custom_components.timerify.spelling import fold_yo
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import (
@@ -63,6 +64,9 @@ OFF = "The schedule of Boiler is off."
 ON = "The schedule of Boiler is on."
 BOILER_INTERVALS = "Morning; Evening"
 """How a refusal lists the titles of the intervals the boiler has."""
+YO_TITLE = "Day\N{CYRILLIC CAPITAL LETTER IO}"
+"""A title with the Russian letter yo, built from the code point so that this file stays
+free of Cyrillic."""
 
 
 @pytest.fixture
@@ -704,6 +708,36 @@ async def test_interval_title_with_template_characters_is_escaped(
     )
     assert reached(response) == SET_SCHEDULE
     assert speech(response) == "The Morning (weekdays) schedule of Boiler is off."
+    assert switches(hass) == ("off", "on")
+
+
+async def test_an_interval_title_with_yo_is_switched_said_with_ye(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    scheduled: MockConfigEntry,
+) -> None:
+    """A speech recogniser writes ye where Russian prints yo: the title is listed with
+    both, so that either reaches the interval, and the answer gives the title as the
+    interval has it."""
+    (morning,) = (
+        subentry.subentry_id
+        for subentry in scheduled.subentries.values()
+        if subentry.title == "Morning"
+    )
+    await retitle_interval(hass, scheduled, morning, YO_TITLE)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert [value["in"] for value in listed(hass, "en", LIST_INTERVAL)] == [
+        YO_TITLE,
+        fold_yo(YO_TITLE),
+        "Evening",
+    ]
+    response = await converse(
+        hass, f"turn off the {fold_yo(YO_TITLE)} schedule of the Boiler"
+    )
+
+    assert reached(response) == SET_SCHEDULE
+    assert speech(response) == f"The {YO_TITLE} schedule of Boiler is off."
     assert switches(hass) == ("off", "on")
 
 

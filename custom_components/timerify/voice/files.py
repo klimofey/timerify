@@ -127,8 +127,9 @@ def _write_if_changed(
     first_line = _first_line(path)
     if first_line is not None and first_line != MANAGED_HEADER:
         return WriteResult.FOREIGN
-    text = render(build(load_sources(language), names, settings, intervals))
-    validate(language, read_back(text))
+    built = build(load_sources(language), names, settings, intervals)
+    text = render(built.data)
+    validate(language, read_back(text), built.said)
     if first_line is not None and path.read_text("utf-8", errors="replace") == text:
         return WriteResult.UNCHANGED
     path.parent.mkdir(parents=True, exist_ok=True)

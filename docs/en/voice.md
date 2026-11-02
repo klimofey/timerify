@@ -88,7 +88,7 @@ The Russian column is transliterated because this page is in English. The real s
 - You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count of hours or minutes beyond a week is not understood at all.
 - You can also say a delay in days or weeks, such as "turn on the boiler in 2 days" or "turn on the boiler in 2 weeks". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 365, and weeks up to 52. You cannot join days or weeks with hours or minutes.
 - "In a day", "in half a day" and "in a week" work too. In Russian they are "cherez den'", "cherez poldnya" and "cherez nedelyu".
-- In English, "from now" works with days, weeks and these words, such as "turn on the boiler 2 days from now". You can say it before the command too: "a week from now turn on the boiler".
+- In English, you can end a delay with "from now", "from today" or "later". It works with days, weeks and these words. Examples are "turn on the boiler 2 days from now" and "turn on the boiler a week later". You can say it before the command too: "a week from now turn on the boiler".
 - The limits above hold for days and weeks. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer names the limit. More than 365 days or 52 weeks is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
 

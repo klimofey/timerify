@@ -2642,12 +2642,16 @@ in `docs/followups.md`.
     (Russian "cherez den'", "cherez poldnya", "cherez nedelyu"). They are a list of fixed
     values, `timerify_delay_words`, that fills `delay_minutes` with 1440, 720 and 10080, as
     `timerify_duration_words` fills `minutes`.
-  - English also says all of these "from now": "turn on the boiler 2 days from now", "a
-    week from now turn on the boiler", "half a day from now". The same slots and words,
-    in the rule `timerify_own_delay` after "in" or "after" and before "from now". Only
-    days, weeks and these words: "5 minutes from now" and "2 hours from now" were never
-    taken by the gazetteer (no device by that name), and Russian has no phrase that is
-    used the same way, so none was added there.
+  - English also says all of these ended by "from now", "from today" or "later": "turn
+    on the boiler 2 days from now", "a week from today", "2 days later", "a week from now
+    turn on the boiler", "half a day later". The same slots and words, in the rule
+    `timerify_own_delay`, after "in" or "after" or before one of those endings. Only days,
+    weeks and these words: "5 minutes from now", "2 hours from today" and "an hour later"
+    were never taken by the gazetteer (no device by that name), and Russian has no phrase
+    that is used the same way, so none was added there. A bare "later" is not a delay: it
+    says no time, so no sentence reads it (`test_a_bare_later_is_not_a_delay`) and it is
+    left to Home Assistant, which turns the device on at once for "turn on the boiler
+    later" and does not understand "turn off the boiler later".
   - `delay_rules` of the generator appends `<timerify_own_delay>`, the rule that says all
     of these, to each rule it writes, when the sentences of the language define it.
   - "scheduling" for "schedule" in the English schedule sentences, with the article before
@@ -2671,18 +2675,21 @@ in `docs/followups.md`.
   sentences loaded (English; Russian has no gazetteer). A phrasing that Timerify's
   sentences meet with an unmatched entity is not handed on, so "in a month", "in a year",
   "in 366 days", "in 53 weeks", "in 400 days", "a month from now", "a year from now",
-  "366 days from now", "53 weeks from now", "in an hour", "in half an hour", "in 2 days
-  and 3 hours", "2 days and 3 hours from now", "a few days from now" and "in 200 hours"
-  switch nothing ("Sorry, I couldn't understand that"). That skip is the mechanism of
+  "a month from today", "a month later", "366 days from now", "366 days later", "53
+  weeks from now", "53 weeks from today", "in an hour", "in half an hour", "in 2 days
+  and 3 hours", "2 days and 3 hours from now", "2 days and 3 hours later", "a few days
+  from now", "a few days later", "the day after tomorrow", "3 days after today" and "in
+  200 hours" switch nothing ("Sorry, I couldn't understand that"). That skip is the
+  mechanism of
   `default_agent.py:704-718`, which Timerify does not control, so tests pin it for the
   count past a year, a month and a year, in sentences of every command: a release that
   changes it fails them (`test_more_than_a_year_of_days_or_weeks_is_not_understood` and
   its siblings; simulating the change by passing no result to the fallback fails them in
   English and leaves Russian green). These do switch:
   - turn on, the dangerous direction, since in Loose mode the device then runs without a
-    countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later",
-    "in the morning", "on monday", "3 days from today", "a week from today", "2 days
-    later", and the clock times "at 7", "tomorrow at 7" and "at noon";
+    countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later"
+    (alone), "in the morning", "on monday", "2 days ahead", and the clock times "at 7",
+    "tomorrow at 7" and "at noon";
   - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "at 7".
   Why: each phrasing found is then refused or done as asked, instead of switching the
   device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
@@ -2697,14 +2704,16 @@ in `docs/followups.md`.
   `test_a_delay_in_days_can_be_said_in_words`,
   `test_every_sentence_that_says_a_delay_in_days_reaches_the_handler`,
   `test_every_sentence_that_says_a_delay_in_weeks_reaches_the_handler`,
-  `test_turn_on_so_long_from_now_keeps_a_command`,
-  `test_turn_on_beyond_a_week_from_now_is_refused_with_the_limit`,
-  `test_turn_off_half_a_day_from_now_sets_the_timer_of_a_running_boiler`,
-  `test_turn_off_beyond_a_day_from_now_is_refused_and_leaves_the_boiler_on`,
-  `test_every_sentence_of_every_command_can_say_the_delay_from_now`,
+  `test_turn_on_so_long_ahead_keeps_a_command`,
+  `test_turn_on_beyond_a_week_ahead_is_refused_with_the_limit`,
+  `test_turn_off_half_a_day_ahead_sets_the_timer_of_a_running_boiler`,
+  `test_turn_off_beyond_a_day_ahead_is_refused_and_leaves_the_boiler_on`,
+  `test_every_sentence_of_every_command_can_end_the_delay_in_other_words`,
+  `test_a_bare_later_is_not_a_delay`,
   `test_more_than_a_year_of_days_or_weeks_is_not_understood`,
-  `test_more_than_a_year_from_now_is_not_understood`,
-  `test_a_month_or_a_year_is_not_understood`,
+  `test_more_than_a_year_ahead_is_not_understood`,
+  `test_in_a_month_or_a_year_is_not_understood`,
+  `test_a_month_or_a_year_ahead_is_not_understood`,
   `test_turn_on_in_a_day_or_a_week_keeps_a_command`,
   `test_turn_off_in_half_a_day_sets_the_timer_of_a_running_boiler`,
   `test_turn_off_in_a_week_is_refused_and_leaves_the_boiler_on`,

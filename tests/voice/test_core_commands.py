@@ -116,11 +116,12 @@ def pending(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
     return commands
 
 
-def from_now(text: str, delay: str) -> str:
-    """`text` with the delay it says after "in" said "from now" instead, in the same
-    place: "turn on the boiler in 2 days" becomes "turn on the boiler 2 days from now".
-    `delay` is the pattern of the words that follow "in", and there must be one."""
-    said, replaced = re.subn(rf"\bin ({delay})\b", r"\1 from now", text)
+def said_after(text: str, delay: str, after: str) -> str:
+    """`text` with the delay it says after "in" ended by `after` instead, in the same
+    place: "turn on the boiler in 2 days" becomes "turn on the boiler 2 days from now"
+    for "from now". `delay` is the pattern of the words that follow "in", and there must
+    be one."""
+    said, replaced = re.subn(rf"\bin ({delay})\b", rf"\1 {after}", text)
     assert replaced == 1, text
     return said
 
@@ -1031,34 +1032,45 @@ async def test_a_week_is_kept_by_a_turn_on_and_two_weeks_are_refused(
     assert fake_target.calls == []
 
 
-# --- "From now" -------------------------------------------------------------------
-# The gazetteer takes "turn on the boiler 2 days from now" for a turn on at once too.
-# Only English has it, and only for days, weeks and the words for them: "5 minutes from
-# now" and "2 hours from now" name no device to it.
+# --- A delay ended by "from now", "from today" or "later" -------------------------
+# The gazetteer takes "turn on the boiler 2 days from now" for a turn on at once too, as
+# it does "2 days from today" and "2 days later". Only English has it, and only for
+# days, weeks and the words for them: "5 minutes from now" and "2 hours from now" name
+# no device to it. A bare "later" says no time and is not a delay.
+
+AFTER_THE_DELAY = pytest.mark.parametrize(
+    "after",
+    ["from now", "from today", "later"],
+    ids=["from-now", "from-today", "later"],
+)
+"""The words that end a delay in days, weeks or a word, in place of "in" before it."""
 
 
+@AFTER_THE_DELAY
 @pytest.mark.parametrize(
     ("text", "ahead"),
     [
-        ("turn on the boiler 2 days from now", timedelta(days=2)),
-        ("turn on the boiler two days from now", timedelta(days=2)),
-        ("turn on the boiler a day from now", timedelta(days=1)),
-        ("turn on the boiler half a day from now", timedelta(hours=12)),
-        ("turn on the boiler a week from now", timedelta(days=7)),
-        ("turn on the boiler 1 week from now", timedelta(days=7)),
-        ("2 days from now turn on the boiler", timedelta(days=2)),
+        ("turn on the boiler 2 days {after}", timedelta(days=2)),
+        ("turn on the boiler two days {after}", timedelta(days=2)),
+        ("turn on the boiler a day {after}", timedelta(days=1)),
+        ("turn on the boiler half a day {after}", timedelta(hours=12)),
+        ("turn on the boiler a week {after}", timedelta(days=7)),
+        ("turn on the boiler 1 week {after}", timedelta(days=7)),
+        ("2 days {after} turn on the boiler", timedelta(days=2)),
     ],
 )
-async def test_turn_on_so_long_from_now_keeps_a_command(
+async def test_turn_on_so_long_ahead_keeps_a_command(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     boiler: MockConfigEntry,
+    after: str,
     text: str,
     ahead: timedelta,
 ) -> None:
-    """A delay said "from now", after the command or before it, keeps the command as
-    "in" does, where the gazetteer would turn the boiler on at once."""
-    response = await converse(hass, text)
+    """A delay ended by "from now", "from today" or "later", after the command or before
+    it, keeps the command as "in" does, where the gazetteer would turn the boiler on at
+    once."""
+    response = await converse(hass, text.format(after=after))
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
     assert response.response_type is intent.IntentResponseType.ACTION_DONE
@@ -1066,20 +1078,25 @@ async def test_turn_on_so_long_from_now_keeps_a_command(
     assert fake_target.calls == []
 
 
+@AFTER_THE_DELAY
 @pytest.mark.parametrize(
     "text",
     [
-        "turn on the boiler 8 days from now",
-        "turn on the boiler 365 days from now",
-        "turn on the boiler 2 weeks from now",
-        "turn on the boiler 52 weeks from now",
-        "2 weeks from now turn on the boiler",
+        "turn on the boiler 8 days {after}",
+        "turn on the boiler 365 days {after}",
+        "turn on the boiler 2 weeks {after}",
+        "turn on the boiler 52 weeks {after}",
+        "2 weeks {after} turn on the boiler",
     ],
 )
-async def test_turn_on_beyond_a_week_from_now_is_refused_with_the_limit(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, text: str
+async def test_turn_on_beyond_a_week_ahead_is_refused_with_the_limit(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    after: str,
+    text: str,
 ) -> None:
-    response = await converse(hass, text)
+    response = await converse(hass, text.format(after=after))
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
     assert refusal_of(response) == translated(
@@ -1089,12 +1106,13 @@ async def test_turn_on_beyond_a_week_from_now_is_refused_with_the_limit(
     assert fake_target.calls == []
 
 
-async def test_turn_off_half_a_day_from_now_sets_the_timer_of_a_running_boiler(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+@AFTER_THE_DELAY
+async def test_turn_off_half_a_day_ahead_sets_the_timer_of_a_running_boiler(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, after: str
 ) -> None:
     await converse(hass, "turn on the boiler")
 
-    response = await converse(hass, "turn off the boiler half a day from now")
+    response = await converse(hass, f"turn off the boiler half a day {after}")
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
     assert state_of(hass, SENSOR) == (START + timedelta(hours=12)).isoformat()
@@ -1102,21 +1120,26 @@ async def test_turn_off_half_a_day_from_now_sets_the_timer_of_a_running_boiler(
     assert fake_target.calls == [TURN_ON]
 
 
+@AFTER_THE_DELAY
 @pytest.mark.parametrize(
     "text",
     [
-        "turn off the boiler 2 days from now",
-        "turn off the boiler a week from now",
-        "turn off the boiler 2 weeks from now",
-        "2 days from now turn off the boiler",
+        "turn off the boiler 2 days {after}",
+        "turn off the boiler a week {after}",
+        "turn off the boiler 2 weeks {after}",
+        "2 days {after} turn off the boiler",
     ],
 )
-async def test_turn_off_beyond_a_day_from_now_is_refused_and_leaves_the_boiler_on(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, text: str
+async def test_turn_off_beyond_a_day_ahead_is_refused_and_leaves_the_boiler_on(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    after: str,
+    text: str,
 ) -> None:
     await converse(hass, "turn on the boiler")
 
-    response = await converse(hass, text)
+    response = await converse(hass, text.format(after=after))
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
     assert refusal_of(response) == translated(
@@ -1126,6 +1149,7 @@ async def test_turn_off_beyond_a_day_from_now_is_refused_and_leaves_the_boiler_o
     assert fake_target.calls == [TURN_ON]
 
 
+@AFTER_THE_DELAY
 @pytest.mark.parametrize(
     ("numbers", "texts", "said", "slots"),
     [
@@ -1137,18 +1161,20 @@ async def test_turn_off_beyond_a_day_from_now_is_refused_and_leaves_the_boiler_o
     ],
     ids=["days", "weeks", "a-day", "half-a-day", "a-week"],
 )
-async def test_every_sentence_of_every_command_can_say_the_delay_from_now(
+async def test_every_sentence_of_every_command_can_end_the_delay_in_other_words(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     boiler: MockConfigEntry,
+    after: str,
     numbers: dict[str, int],
     texts: dict[str, str],
     said: str,
     slots: dict[str, int],
 ) -> None:
     """Whichever sentence says a delay "in 2 days" (before the command, after it, with
-    how long it runs, with the settings) says it "2 days from now" in the same place,
-    and the handler hears the same delay and nothing else. Nothing is switched."""
+    how long it runs, with the settings) says it "2 days from now", "2 days from today"
+    or "2 days later" in the same place, and the handler hears the same delay and
+    nothing else. Nothing is switched."""
     in_texts = samples(
         "en",
         DELAYED_COMMAND,
@@ -1161,7 +1187,7 @@ async def test_every_sentence_of_every_command_can_say_the_delay_from_now(
     assert in_texts
 
     for in_text in in_texts:
-        text = from_now(in_text, said)
+        text = said_after(in_text, said, after)
         response = await converse(hass, text)
 
         assert reached(response) == DELAYED_COMMAND, text
@@ -1173,6 +1199,15 @@ async def test_every_sentence_of_every_command_can_say_the_delay_from_now(
         } == slots, text
         await cancel_pending(hass, NUMBER, NEXT)
     assert fake_target.calls == []
+
+
+def test_a_bare_later_is_not_a_delay() -> None:
+    """ "Later" with a count of days or a word for it is a delay; "later" alone says no
+    time, so no sentence reads it and it is left to Home Assistant (RULINGS.md)."""
+    said = {"name": "Boiler", "domain": "switch", "takeover": True}
+
+    assert readings("en", "turn on the boiler 2 days later", **said)
+    assert readings("en", "turn on the boiler later", **said) == []
 
 
 # --- What is too long to be understood --------------------------------------------
@@ -1228,6 +1263,7 @@ async def test_more_than_a_year_of_days_or_weeks_is_not_understood(
     await assert_not_understood(hass, fake_target, texts, language)
 
 
+@AFTER_THE_DELAY
 @pytest.mark.parametrize(
     ("numbers", "said"),
     [
@@ -1237,15 +1273,16 @@ async def test_more_than_a_year_of_days_or_weeks_is_not_understood(
     ],
     ids=["366-days", "400-days", "53-weeks"],
 )
-async def test_more_than_a_year_from_now_is_not_understood(
+async def test_more_than_a_year_ahead_is_not_understood(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     boiler: MockConfigEntry,
+    after: str,
     numbers: dict[str, int],
     said: str,
 ) -> None:
     texts = [
-        from_now(text, said)
+        said_after(text, said, after)
         for text in samples(
             "en",
             DELAYED_COMMAND,
@@ -1266,18 +1303,34 @@ async def test_more_than_a_year_from_now_is_not_understood(
         "turn off the boiler in a month",
         "turn on the boiler in a year",
         "turn off the boiler in a year",
-        "turn on the boiler a month from now",
-        "turn off the boiler a month from now",
-        "turn on the boiler a year from now",
-        "a month from now turn on the boiler",
     ],
 )
-async def test_a_month_or_a_year_is_not_understood(
+async def test_in_a_month_or_a_year_is_not_understood(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, text: str
 ) -> None:
     """The words for a month and a year are none of the words Timerify knows, so the
     phrase is not understood, and the boiler is not switched."""
     await assert_not_understood(hass, fake_target, [text], "en")
+
+
+@AFTER_THE_DELAY
+@pytest.mark.parametrize(
+    "text",
+    [
+        "turn on the boiler a month {after}",
+        "turn off the boiler a month {after}",
+        "turn on the boiler a year {after}",
+        "a month {after} turn on the boiler",
+    ],
+)
+async def test_a_month_or_a_year_ahead_is_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    after: str,
+    text: str,
+) -> None:
+    await assert_not_understood(hass, fake_target, [text.format(after=after)], "en")
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)

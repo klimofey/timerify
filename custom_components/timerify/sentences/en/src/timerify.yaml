@@ -139,10 +139,10 @@ expansion_rules:
   timerify_for_part: "for <timerify_duration>"
 # A delay in days or weeks, or in a word ("in a day", "in half a day", "in a week"), one
 # more way to say the delay of core_commands.yaml, after "in" or "after" or before "from
-# now" ("turn on the boiler 2 days from now"). Home Assistant has no sentence for any of
-# them, and its gazetteer takes "turn off the boiler in 2 days" for a turn off of the
-# device.
-  timerify_own_delay: "((in|after) <timerify_own_span>|<timerify_own_span> from now)"
+# now", "from today" or "later" ("turn on the boiler 2 days from now"). Home Assistant
+# has no sentence for any of them, and its gazetteer takes "turn off the boiler in 2
+# days" for a turn off of the device. A bare "later" is not a delay and is not said.
+  timerify_own_delay: "((in|after) <timerify_own_span>|<timerify_own_span> (from (now|today)|later))"
   timerify_own_span: "({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a

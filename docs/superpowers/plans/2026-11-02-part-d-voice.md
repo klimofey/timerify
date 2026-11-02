@@ -399,7 +399,7 @@ async def test_tomorrow_with_a_bare_hour_is_the_morning_one(...)   # owner's dec
 - Produces:
   - `spelling.fold_yo(text: str) -> str`: each `"\N{CYRILLIC SMALL LETTER IO}"` a `"\N{CYRILLIC SMALL LETTER IE}"`, and the capitals alike.
   - `schedule.title_key` folds with `fold_yo`.
-  - `sentences.spoken_variants(text: str) -> tuple[str, ...]`: `spoken_form(text)` and `fold_yo` of it, the second only when it differs; `()` for a text of nothing but punctuation. `spoken_mode` keeps replacing underscores first.
+  - `sentences.spoken_variants(text: str) -> tuple[str, ...]`: `spoken_form(text)` and `fold_yo` of it, the second only when it differs; `()` for a text of nothing but punctuation. Callers pass raw text, never `spoken_form` output (Task 6 fix round: `spoken_form` is not idempotent; `spoken_mode` was removed, a mode is passed as `mode.replace("_", " ")`).
   - `BuiltSentences(data: dict[str, Any], said: Mapping[str, tuple[str, ...]])`, frozen: `said` maps `LIST_TARGET`, `LIST_INTERVAL` and `LIST_MODE` to the unescaped spoken text of each of their values, in order. `build(...) -> BuiltSentences`. Each name, title and mode is listed once per variant, with the same `out` and context.
   - `validate(language: str, built: Mapping[str, Any], said: Mapping[str, Sequence[str]]) -> None`: `_check_names` compares the parsed text of each value with `normalize_text` of its `said` text, `zip(..., strict=True)`. `NAME_LISTS` goes.
   - `voice/files.py`: `_write_if_changed` renders `built.data` and validates the read-back text with `built.said`.
@@ -445,7 +445,7 @@ def test_a_value_not_read_as_the_text_it_was_built_from_is_refused() -> None:
   - `ModeSource(domain: str, platform: str | None, translation_key: str | None, device_class: str | None, attribute: str, modes: tuple[str, ...])`, frozen. `attribute` is the `SettingChoice.name` (`fan_mode`, `preset_mode`, `mode`, `operation_mode`). `platform` and `translation_key` come from the registry entry, `device_class` from the state's attribute.
   - `VoiceSettingValues.mode_sources: tuple[ModeSource, ...]`, with a property `modes -> frozenset[str]` (every mode of every source).
   - `async async_mode_words(hass: HomeAssistant, language: str, sources: Sequence[ModeSource]) -> dict[str, frozenset[str]]`: each raw mode to its translated words, by Decision 7's order, through `async_get_translations(hass, language, "entity", platforms)` and `async_get_translations(hass, language, "entity_component", domains)`.
-  - `build(sources, names, settings, intervals, mode_words: Mapping[str, frozenset[str]] = {}) -> BuiltSentences`. `_mode_values(modes, words)`: per mode, sorted, the variants of `spoken_mode(mode)` then of each word, sorted; a value whose casefolded text another mode has already is left out.
+  - `build(sources, names, settings, intervals, mode_words: Mapping[str, frozenset[str]] = {}) -> BuiltSentences`. `_mode_entries(modes, words)`: per mode, sorted, `spoken_variants(mode.replace("_", " "))` then `spoken_variants(word)` of each word, sorted; a value whose casefolded text another mode has already is left out.
   - `tests/conftest.py`: `provide_fake(..., platform: str | None = None, translation_key: str | None = None)`; the registry entry takes that platform (default `<object_id>_maker`, as now) and translation key.
 
 - [ ] **Step 1: Write the failing tests** in `tests/voice/test_voice_entry.py`. The expected words are read from Home Assistant in the test, never written: `word = (await async_get_translations(hass, "ru", "entity", ["demo"]))["component.demo.entity.fan.demo.state_attributes.preset_mode.state.sleep"]`.
@@ -491,7 +491,7 @@ async def test_a_word_said_like_another_mode_is_left_out(...)   # test_sentence_
 - Produces:
   - `const.CONTEXT_HVAC_MODES: Final = "timerify_hvac_modes"`.
   - `sentences.hvac_key(modes: Iterable[str]) -> str`: the modes sorted, joined by a space.
-  - `VoiceName(spoken, name, domain, hvac_modes: frozenset[str] | None = None)`; `build` writes `context: {"domain": ..., CONTEXT_HVAC_MODES: hvac_key(...)}` when set. `voice_names` sets it for every thermostat target, its supported HVAC modes or none.
+  - `VoiceName(name, domain, hvac_modes: frozenset[str] | None = None)` (Task 6 dropped the derived `spoken` field); `build` writes `context: {"domain": ..., CONTEXT_HVAC_MODES: hvac_key(...)}` when set. `voice_names` sets it for every thermostat target, its supported HVAC modes or none.
   - `VoiceSettingValues.hvac_sets: frozenset[frozenset[str]]` replaces `hvac_modes`.
   - `build`: Decision 8. The copies come in the order of `hvac_key`; with no set, the climate blocks go.
 
@@ -544,7 +544,7 @@ def test_each_set_of_hvac_modes_adds_its_climate_blocks_once() -> None:   # test
   - `schedule.start_aliases(start: str) -> tuple[str, ...]`: Decision 9's forms of an `HH:MM`, without repeats, in that order.
   - `schedule.spoken_aliases(subentry: ConfigSubentry) -> tuple[str, ...]`: `start_aliases(subentry.data[CONF_START])` for a generated title, `()` otherwise.
   - The controller's lookup keeps an interval when `title_key(asked)` is its title's key or the key of one of its aliases. The refusal still lists titles.
-  - `interval_names` adds `VoiceTitle(alias, alias)` for each alias of every loaded timer, once.
+  - `interval_names` adds `VoiceTitle(alias)` for each alias of every loaded timer, once.
   - `SetScheduleHandler.description` gains: "An interval that still has the title Timerify gave it can also be named by its start time, such as '6:30'."
 
 - [ ] **Step 1: Write the failing tests** in `tests/voice/test_schedule_by_voice.py`, with intervals that keep their generated titles:

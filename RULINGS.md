@@ -978,13 +978,14 @@ those of the spec.
   repository allows it under `sentences/<language>/` and its subfolders. The generator also
   deletes shipped files it no longer produces, and the drift test asserts the set. Cost if
   wrong: a contributor must run the script, and the failing test says how.
-- **Russian is tested without Cyrillic in the tests: inputs are sampled from the shipped
-  Russian files and the plural forms are proved by classes.** The hook forbids Cyrillic
-  outside the translations and `sentences/ru/`. This proves that the Russian templates
-  parse, reach their handlers and outrank core, and that the three plural forms partition
-  the counts; it does not prove which word goes with which class, nor inflected names. The
-  owner reads the rendered Russian texts of each phase; a swapped "few" and "many" passes
-  the tests. Cost if wrong: a wrong plural noun reaches a user.
+- **Russian is tested without Cyrillic in the test code: inputs are sampled from the shipped
+  Russian files, the plural forms are proved by classes, and the answers for each class of
+  counts are pinned by a fixture.** The hook forbids Cyrillic outside the translations,
+  `sentences/ru/` and `tests/fixtures/ru/` (see Release 1.1.0, Voice). Sampling proves that
+  the Russian templates parse, reach their handlers and outrank core, and the classes that
+  the three plural forms partition the counts; the fixture says which word goes with which
+  count. Inflected names are not proved: the owner reads the rendered Russian texts of
+  each phase. Cost if wrong: a wrong inflected name reaches a user.
 
 ### The Voice settings entry and the sentence files
 
@@ -2504,3 +2505,26 @@ in `docs/followups.md`.
   `test_an_event_fired_by_hand_without_a_timer_is_ignored`,
   `test_a_countdown_that_ended_while_down_triggers_once_at_start_up` and
   `test_a_command_that_came_due_while_down_triggers_at_start_up`.
+
+### Voice
+
+- **Russian answers are pinned by a fixture written by hand, in the one test folder that
+  may hold Cyrillic.** `tests/fixtures/ru/answers.yaml` holds, for every answer that says a
+  count (time left, the answer of Run for, Add time and Stop, the list of planned commands
+  and the cancelling of them) and for each class of counts, the slots of a handler and the
+  Russian text a speaker expects. The text is written from the rules of Russian plurals,
+  never rendered from the templates, so a fixture does not repeat what it checks.
+  `tests/voice/test_russian_answers.py` renders each shipped answer with the slots of a
+  case and compares, and fails if a class of counts (1, 2, 5, 11, 21, and 22 for minutes)
+  has no case. The pre-commit hook allows Cyrillic under `tests/fixtures/ru/`, at any depth,
+  and refuses it everywhere else in `tests/`, a `fixtures/ru/` of another folder included.
+  The owner decided it on 2026-11-01 (#27).
+  Why: the plural classes test (`assert_one_form_per_class`) proves the forms differ, not
+  which goes with which count; a swapped "few" and "many" passed it. The folder is under
+  `tests/`, not `custom_components/`, so HACS does not ship it.
+  Cost if wrong: a Russian answer changed on purpose needs its fixture line changed too.
+  The count of days ("in N days") is not in the fixture; the classes test covers it.
+  Tests: `test_each_russian_answer_reads_as_the_fixture_says`,
+  `test_the_fixture_has_every_count_class_of_every_counted_answer`,
+  `test_cyrillic_is_allowed_in_the_russian_files_of_the_repository` and
+  `test_cyrillic_is_refused_everywhere_else`.

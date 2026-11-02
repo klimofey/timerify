@@ -31,7 +31,7 @@ For example, to run the boiler for 20 minutes, pick **Run** and set **Minutes** 
 
 | Trigger | When it fires |
 | --- | --- |
-| **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. |
+| **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. A **Loose** device switched on inside a schedule window does get a countdown, so it fires it. |
 | **Countdown ended** | The countdown runs out, Timerify stops it, or the device is switched off outside Timerify. |
 | **Pending command came due** | A pending command is carried out at its time. A command to turn on whose run is already over does not fire it. |
 

@@ -39,7 +39,7 @@ data:
 `timerify.run` turns the device on.
 
 - With `minutes` (1 to 1440), the countdown is that long.
-- Without it, a device that is off runs for the default duration in **Strict** mode, and without a countdown in **Loose** mode. A device that is running already keeps its countdown. The [Modes](timers.md#modes) section explains both modes.
+- Without it, a device that is off runs to the end of the schedule window that is open, if there is one. In **Strict** mode the default duration is kept when it ends later. With no window open, it runs for the default duration in **Strict** mode, and without a countdown in **Loose** mode. A device that is running already keeps its countdown. The [Modes](timers.md#modes) section explains both modes.
 
 Settings go along, also to a device that keeps its countdown. A setting that the device does not support is refused before anything happens.
 

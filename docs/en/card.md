@@ -146,7 +146,7 @@ Each press can be set to one of six choices. The visual editor names them as the
 | Choice | Value | What it does |
 | --- | --- | --- |
 | Open the pop-up | `popup` | Opens [the pop-up](#the-pop-up). |
-| Run for the default duration | `run` | Runs the timer, as the [**Run** action](services.md#run) does with no duration. In **Strict** mode the device runs for the default duration. In **Loose** mode it turns on with no countdown. The [Modes](timers.md#modes) section explains both. A timer that already runs keeps its countdown. |
+| Run for the default duration | `run` | Runs the timer, as the [**Run** action](services.md#run) does with no duration. While a schedule window is open, the device runs to the end of the window. Otherwise, in **Strict** mode it runs for the default duration, and in **Loose** mode it turns on with no countdown. The [Modes](timers.md#modes) section explains both. A timer that already runs keeps its countdown. |
 | Stop | `stop` | Stops the timer, as the [**Stop** action](services.md#stop) does. It ends the countdown and turns the device off. |
 | Start or stop | `run_or_stop` | Runs a timer that is idle, as **Run for the default duration** does. Stops a timer that runs, with or without a countdown. A timer that is unavailable does nothing. |
 | Home Assistant action | `action` | Does a [Home Assistant action](#home-assistant-actions) that you choose. |

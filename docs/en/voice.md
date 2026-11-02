@@ -73,7 +73,7 @@ The Russian column is transliterated because this page is in English. The real s
 **Turn on or off by name**
 
 - These are the bare "turn on the boiler" and "turn off the boiler". For a device that has a timer, they are Timerify's commands, not Home Assistant's.
-- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one.
+- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one. While a schedule window is open, both modes run it to the end of the window instead. In **Strict** mode the default duration is kept when it ends later.
 - Turning on a device that is running leaves it as it is. Its countdown keeps its end, whoever set it. The answer says how long is left.
 - Turning off stops the countdown.
 - A device that is unavailable keeps what you asked for. It is switched when it is back.

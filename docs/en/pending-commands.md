@@ -25,7 +25,7 @@ Three rules always hold:
 
 What a command does at its time:
 
-- A command to turn on without minutes runs a device that is off for the default duration in Strict mode. In Loose mode it runs the device without a countdown.
+- A command to turn on without minutes runs a device that is off to the end of the schedule window that is open then, if there is one. In Strict mode the default duration is kept when it ends later. With no window open, it runs the device for the default duration in Strict mode. In Loose mode it runs the device without a countdown.
 - Without minutes, a device that is already running keeps its countdown. The command still sets its settings.
 - A command to turn off turns the device off and stops the countdown.
 - A command to turn on that comes due at the very moment a countdown ends keeps the device on. The device is not switched off and on.
@@ -35,7 +35,7 @@ What a command does at its time:
 - Commands are stored on every change, and they survive a restart.
 - A command that came due while Home Assistant was down is carried out at start-up for what is left of its run. Say you asked at 07:00 for a run of 60 minutes, and Home Assistant is back at 07:20. The device then runs for 40 more minutes.
 - If nothing is left of the run, the command is dropped and the log says so. This is an info line: to see it, choose **Enable debug logging** on the Timerify integration page.
-- A command to turn off is carried out however late. So is a command to turn on without a countdown in Loose mode.
+- A command to turn off is carried out however late. So is a command to turn on without a countdown in Loose mode. That is one with no window open at its time.
 - If several commands came due, they are applied in time order. Only the final state reaches the device. An "on" and the "off" after it that both came due switch nothing.
 - A command that comes due while the device is unavailable changes the countdown at once. The device is switched when it reports again, if the command still matters by then. A run that is already over is never started.
 

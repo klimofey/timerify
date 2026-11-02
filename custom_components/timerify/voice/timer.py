@@ -52,9 +52,10 @@ class RunHandler(TimerifyIntentHandler):
     """Turn on the boiler for 45 minutes: turn the target on, with the settings it
     takes, and count the time down. With a duration it replaces the countdown that was
     there, so it is destructive. Without one it is the bare turn-on of R9: a target
-    that is off runs for the default duration (strict mode) or without a countdown
-    (loose mode), and one that is wanted running keeps its countdown; either way the
-    answer says how it stands."""
+    that is off runs to the end of the schedule window that is open, if one is (#58),
+    otherwise for the default duration (strict mode) or without a countdown (loose
+    mode), and one that is wanted running keeps its countdown; either way the answer
+    says how it stands."""
 
     intent_type = "TimerifyRun"
     tool_name = "timerify__run"

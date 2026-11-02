@@ -522,7 +522,8 @@ def test_manual_on_in_strict_starts_default_duration() -> None:
 
 
 def test_manual_on_in_loose_leaves_timer_idle() -> None:
-    """In loose mode a target switched on by hand just runs, with no countdown (R5)."""
+    """In loose mode a target switched on by hand just runs, with no countdown (R5),
+    unless a window is open (`test_manual_on_in_loose_during_a_window_...`)."""
     c = core("loose", "off")
 
     fx = c.observe(NOW, "on", by_us=False)
@@ -3434,18 +3435,290 @@ def test_restored_started_window_does_not_start_again() -> None:
     assert c.snapshot.end is None
 
 
-def test_manual_on_during_a_window_gets_the_default_duration() -> None:
-    """S5: the window does not stretch a run that someone started by hand."""
-    c = TimerCore(
-        "strict",
-        minutes(45),
-        Snapshot(windows=(window("x", 0, 45, started=True),), last_actual="off"),
+def idle_in_a_window(
+    mode: Mode, default: int, *windows: Window, actual: Actual = "off"
+) -> TimerCore:
+    """A core with no countdown and `windows` that have started, with a default duration
+    of `default` minutes: the state in which a person switches the target on by hand
+    while a window is open."""
+    return TimerCore(
+        mode, minutes(default), Snapshot(windows=windows, last_actual=actual)
     )
+
+
+def test_manual_on_during_a_window_runs_to_its_end() -> None:
+    """#58: a target switched on by hand while a window is open runs to the window's
+    end, which is later than the end of the default duration. The run is the user's
+    (S3): no interval carries it."""
+    c = idle_in_a_window("strict", 20, window("x", 0, 45, started=True))
+
+    fx = c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.scheduled_by is None
+
+
+def test_manual_on_during_a_window_keeps_a_default_duration_that_ends_later() -> None:
+    """The window never shortens a run: the default duration of 45 minutes from ten
+    past ends after the window does."""
+    c = idle_in_a_window("strict", 45, window("x", 0, 45, started=True))
 
     c.observe(NOW + minutes(10), "on", by_us=False)
 
     assert c.snapshot.end == NOW + minutes(55)
     assert c.snapshot.scheduled_by is None
+
+
+def test_manual_on_in_loose_during_a_window_gets_a_countdown_to_its_end() -> None:
+    """Loose mode gives a target that is switched on by hand no countdown, but one that
+    runs inside a window has one to the window's end, announced as a start."""
+    c = idle_in_a_window("loose", 20, window("x", 0, 45, started=True))
+
+    fx = c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(45)), Changed()]
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.scheduled_by is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(45))]
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_manual_on_after_a_manual_off_in_a_window_runs_to_its_end(mode: Mode) -> None:
+    """S4 holds the target off after a manual off, but the window still counts as open
+    for the next turn-on by hand, which runs to its end and leaves the mark of the
+    window alone: nothing but the next occurrence turns the target on by itself."""
+    c = TimerCore(mode, minutes(20), Snapshot(last_actual="off"))
+    c.set_windows(NOW, [window("x", 0, 45)], configured={"x"})
+    c.tick(NOW)
+    c.observe(NOW, "on", by_us=True)
+    c.observe(NOW + minutes(10), "off", by_us=False)
+    assert c.snapshot.end is None
+    assert c.snapshot.windows[0].suppressed
+
+    c.observe(NOW + minutes(20), "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.scheduled_by is None
+    assert c.snapshot.windows[0].suppressed
+    assert c.tick(NOW + minutes(45)) == [Disarm(), TurnOff(), Changed()]
+
+
+def test_manual_on_inside_overlapping_windows_runs_to_the_latest_end() -> None:
+    """With two windows open the run ends with the later one; a window that is over, and
+    one that has not opened, are not counted."""
+    c = idle_in_a_window(
+        "strict",
+        20,
+        window("over", -60, -10, started=True),
+        window("a", 0, 60, started=True),
+        window("b", 30, 120, started=True),
+        window("later", 90, 180),
+    )
+
+    c.observe(NOW + minutes(40), "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(120)
+    assert c.snapshot.scheduled_by is None
+
+
+@pytest.mark.parametrize(
+    ("mode", "end"), [("strict", NOW + minutes(55)), ("loose", None)]
+)
+def test_manual_on_before_a_window_opens_is_as_it_always_was(
+    mode: Mode, end: datetime | None
+) -> None:
+    """A window that opens later is no window yet: the default duration in Strict mode,
+    no countdown in Loose mode."""
+    c = idle_in_a_window(mode, 45, window("x", 30, 75))
+
+    c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert c.snapshot.end == end
+
+
+@pytest.mark.parametrize(
+    ("mode", "end"), [("strict", NOW + minutes(55)), ("loose", None)]
+)
+def test_manual_on_as_a_window_closes_is_as_it_always_was(
+    mode: Mode, end: datetime | None
+) -> None:
+    """A window is open until the instant of its end, not at it."""
+    c = idle_in_a_window(mode, 45, window("x", -30, 10, started=True))
+
+    c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert c.snapshot.end == end
+
+
+def test_manual_on_while_a_countdown_runs_in_a_window_changes_nothing() -> None:
+    """Only a target with no countdown gets one: a run of the user's own keeps its end
+    when the target is reported on."""
+    c = TimerCore(
+        "strict",
+        minutes(20),
+        Snapshot(windows=(window("x", 0, 45, started=True),), last_actual="off"),
+    )
+    c.set_duration(NOW + minutes(10), minutes(5))
+
+    c.observe(NOW + minutes(11), "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(15)
+
+
+def test_a_report_as_a_window_opens_leaves_the_window_in_charge() -> None:
+    """The window that opens in the instant of the report sets the timer first, so the
+    turn-on seen with it is not followed: the interval carries the run."""
+    c = TimerCore("strict", minutes(20), Snapshot(last_actual="off"))
+    c.set_windows(NOW, [window("x", 10, 45)], configured={"x"})
+
+    c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.scheduled_by == "x"
+
+
+@pytest.mark.parametrize("before", [None, "unavailable"])
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_a_target_found_on_inside_a_window_runs_to_its_end(
+    mode: Mode, before: Actual | None
+) -> None:
+    """A target seen on for the first time, at start-up or back from unavailable, is
+    followed like one switched on from outside: inside a window it runs to its end."""
+    c = TimerCore(
+        mode,
+        minutes(20),
+        Snapshot(
+            windows=(window("x", 0, 45, started=True, suppressed=True),),
+            last_actual=before,
+        ),
+    )
+
+    c.observe(NOW + minutes(10), "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.scheduled_by is None
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_run_open_inside_a_window_runs_to_its_end(mode: Mode) -> None:
+    """A turn-on without a duration is the same act as one by hand, so it runs to the
+    window's end too. It is still the user's run."""
+    c = idle_in_a_window(mode, 20, window("x", 0, 45, started=True, suppressed=True))
+
+    fx = c.run_open(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(45)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.scheduled_by is None
+
+
+def test_run_open_inside_a_window_sets_its_settings() -> None:
+    """The settings of a bare turn-on go with it, as with one that names a duration."""
+    c = idle_in_a_window("loose", 20, window("x", 0, 45, started=True))
+
+    fx = c.run_open(NOW + minutes(10), COOL24)
+
+    assert fx == [Arm(NOW + minutes(45)), TurnOn(COOL24), Changed()]
+    assert c.snapshot.owed_settings == COOL24
+
+
+def test_run_open_inside_a_window_keeps_what_a_running_target_has() -> None:
+    """A target that is wanted running keeps its countdown, in a window too."""
+    c = TimerCore("strict", minutes(20), Snapshot(last_actual="off"))
+    c.set_windows(NOW, [window("x", 0, 45)], configured={"x"})
+    c.tick(NOW)
+    c.observe(NOW, "on", by_us=True)
+    c.set_duration(NOW + minutes(5), minutes(10))
+
+    fx = c.run_open(NOW + minutes(8))
+
+    assert fx == []
+    assert c.snapshot.end == NOW + minutes(15)
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_a_command_to_turn_on_without_minutes_inside_a_window_runs_to_its_end(
+    mode: Mode,
+) -> None:
+    """A pending turn-on with no duration is a bare turn-on when it falls due, so it
+    runs to the end of the window that is open then."""
+    c = TimerCore(
+        mode,
+        minutes(20),
+        Snapshot(
+            windows=(window("x", 0, 45, started=True, suppressed=True),),
+            commands=(cmd(10),),
+            last_actual="off",
+        ),
+    )
+
+    fx = c.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(45)), TurnOn(), Changed()]
+    assert c.snapshot.end == NOW + minutes(45)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.scheduled_by is None
+
+
+def test_a_command_to_turn_on_with_minutes_inside_a_window_keeps_them() -> None:
+    """A duration that is named is kept, whatever the window says."""
+    c = TimerCore(
+        "strict",
+        minutes(20),
+        Snapshot(
+            windows=(window("x", 0, 45, started=True),),
+            commands=(cmd(10, minutes=5),),
+            last_actual="off",
+        ),
+    )
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.end == NOW + minutes(15)
+
+
+def test_a_late_command_to_turn_on_runs_to_the_end_of_the_window_it_fell_in() -> None:
+    """A command that came due ten minutes in and is found forty minutes in would have
+    run for twenty minutes and be over; the window it fell in is open until the 45th, so
+    the run goes on to there."""
+    c = TimerCore(
+        "strict",
+        minutes(20),
+        Snapshot(
+            windows=(window("x", 0, 45, started=True),),
+            commands=(cmd(10),),
+            last_actual="off",
+        ),
+    )
+
+    c.tick(NOW + minutes(40))
+
+    assert c.snapshot.end == NOW + minutes(45)
+
+
+@pytest.mark.parametrize("mode", ["strict", "loose"])
+def test_a_late_command_whose_window_has_ended_too_is_dropped(mode: Mode) -> None:
+    """The same command found after the window that was open at its time has ended:
+    nothing is left of its run, so it is dropped, in Loose mode as well."""
+    c = TimerCore(
+        mode,
+        minutes(20),
+        Snapshot(
+            windows=(window("x", 0, 45, started=True),),
+            commands=(cmd(10),),
+            last_actual="off",
+        ),
+    )
+
+    fx = c.tick(NOW + minutes(50))
+
+    assert CommandDropped(cmd(10)) in fx
+    assert c.snapshot.end is None
+    assert c.snapshot.commands == ()
 
 
 def test_overlapping_windows_follow_the_later_end() -> None:
@@ -4621,8 +4894,8 @@ def test_a_dropped_command_is_not_announced_as_due() -> None:
 def test_a_manual_on_announces_a_start_in_strict_mode_only(
     mode: Mode, news: list[CountdownStarted]
 ) -> None:
-    """Strict mode gives a target that is switched on by hand its default countdown;
-    loose mode lets it run with none."""
+    """With no window open, strict mode gives a target that is switched on by hand its
+    default countdown; loose mode lets it run with none."""
     c = core(mode, "off")
 
     c.observe(NOW, "on", by_us=False)

@@ -51,7 +51,7 @@ Each timer has a mode. You choose it when you add the timer, and you can change 
 - **Strict** (the default): the device runs only while a countdown does. You also set a default duration. It is 30 minutes to begin with. If **Maximum of Run for** is smaller, it is that instead.
 - **Loose**: the device may also run without a countdown. A countdown then only means "turn off when it reaches zero".
 
-The default duration is how long a Strict device runs when it is turned on without a length of time.
+The default duration is how long a Strict device runs when it is turned on without a length of time. While a schedule window is open, the run lasts to the end of the window instead, or to the end of the default duration if that is later.
 
 ## What a timer adds to the device page
 
@@ -73,6 +73,7 @@ You, the device's own app, a switch on the wall and an automation can all switch
 - Someone turns the device off: the countdown is cleared. This holds in both modes.
 - Someone turns the device on in Strict mode: a countdown starts for the default duration. So a boiler that you switch on at the wall still turns itself off.
 - Someone turns the device on in Loose mode: the device is left running without a countdown.
+- The exception is a [schedule](schedules.md#how-a-schedule-and-your-own-changes-meet) window that is open at that moment. The countdown then ends with the window, in either mode. In Strict mode it ends with the default duration if that is later.
 
 Starting, changing and stopping the countdown is the only way Timerify itself switches the device. So the rules never contradict each other. A pending command is a change of the countdown that happens later. So is the start of a schedule interval.
 

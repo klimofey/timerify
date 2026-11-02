@@ -34,8 +34,10 @@ class Command:
     """When the command is due (timezone-aware UTC)."""
     action: Literal["on", "off"]
     minutes: int | None = None
-    """How long an "on" runs, counted from `at`; None runs the default duration in
-    strict mode and without a countdown in loose mode. Never set for "off"."""
+    """How long an "on" runs, counted from `at`; None ends the run to the end of the
+    window that is open then, if one is; otherwise it runs the default duration in
+    strict mode and without a countdown in loose mode (`TimerCore._open_run_end`).
+    Never set for "off"."""
     settings: Settings = NO_SETTINGS
     """What an "on" turns the target on with. Never set for "off"."""
 
@@ -450,20 +452,20 @@ class TimerCore:
         """Switch the target on without a duration, with `settings` as `set_duration`
         takes them.
 
-        R9 is for a target that is off: strict mode applies the default duration, and
-        loose mode runs with the timer at zero. A target that is wanted running
-        already (`wanted_running`) keeps what it has, in either mode: its countdown, or
-        its run without one, is not touched, and the timer still belongs to whoever set
-        it (S2, S3). The turn-on is asked for again if it has not reached the target,
-        and `settings` are set.
+        R9 is for a target that is off, and ends the run where `_open_run_end` says:
+        with a window open, at its end; otherwise strict mode applies the default
+        duration, and loose mode runs with the timer at zero. The run is the user's
+        (S3), not the interval's. A target that is wanted running already
+        (`wanted_running`) keeps what it has, in either mode: its countdown, or its run
+        without one, is not touched, and the timer still belongs to whoever set it (S2,
+        S3). The turn-on is asked for again if it has not reached the target, and
+        `settings` are set.
         """
         now = _utc(now)
         if self._wants_running(now, None):
             return self._want("on", settings)
-        if self._mode == "strict":
-            return self._run_until(
-                now, now + self._default_duration, settings, began=now
-            )
+        if (end := self._open_run_end(now)) is not None:
+            return self._run_until(now, end, settings, began=now)
         self._expire_stale_end(now)
         return [self._wakeup(), *self._want("on", settings)]
 
@@ -823,7 +825,8 @@ class TimerCore:
         A command that turns on sets its settings even when the target is running
         (P1), and is the same as setting the timer by hand (P3): one without minutes is
         a bare turn-on, which leaves the countdown of a target that was wanted running
-        at its time as it is (`run_open`).
+        at its time as it is, and ends the run of one that was not where `_open_run_end`
+        says (`run_open`).
         """
         if command.action == "off":
             self._announce(CommandCameDue(command))
@@ -850,17 +853,39 @@ class TimerCore:
 
     def _command_end(self, command: Command) -> datetime | None:
         """When the run of a command that turns on is over, counted from its time;
-        None for a run without a countdown (loose mode, no minutes)."""
+        None for a run without a countdown (loose mode, no minutes, no window open)."""
         if command.minutes is not None:
             return command.at + timedelta(minutes=command.minutes)
-        if self._mode == "strict":
-            return command.at + self._default_duration
-        return None
+        return self._open_run_end(command.at)
+
+    def _open_run_end(self, at: datetime) -> datetime | None:
+        """When a run that starts at `at` and names no duration is over: the turn-on
+        by hand, the bare run, the pending turn-on without minutes (#58).
+
+        While a window is open at `at` the run lasts to the latest end among the open
+        windows. A window counts when its start was folded and `at` is inside it,
+        suppressed or not: switching the target off by hand inside a window holds it off
+        (S4), it does not close the window for the next turn-on. Strict mode keeps the
+        default duration where it ends later. Loose mode has a countdown only to the
+        end of a window, so None, a run without a countdown, is what it gets with no
+        window open.
+        """
+        latest = max(
+            (w.end for w in self._snapshot.windows if w.started and _active(w, at)),
+            default=None,
+        )
+        if self._mode == "loose":
+            return latest
+        by_default = at + self._default_duration
+        return by_default if latest is None else max(by_default, latest)
 
     def _follow_external_change(
         self, now: datetime, actual: Literal["on", "off"]
     ) -> list[Effect]:
-        """Someone else switched the target: the timer follows (R3 to R5)."""
+        """Someone else switched the target: the timer follows (R3 to R5). A target
+        switched on with no countdown gets the run that `_open_run_end` ends: the
+        default duration in strict mode, the end of the open window in either mode, and
+        none in loose mode with no window open. It is the user's run (S3)."""
         self._settle()
         # What our own calls said no longer decides: manual wins.
         self._correction = None
@@ -871,8 +896,8 @@ class TimerCore:
                 return []
             self._clear_end(ended_by="turned_off")
             return [self._wakeup()]
-        if self._mode == "strict" and self._snapshot.end is None:
-            return self._run_until(now, now + self._default_duration, began=now)
+        if self._snapshot.end is None and (end := self._open_run_end(now)) is not None:
+            return self._run_until(now, end, began=now)
         return []
 
     def _run_until(

@@ -3470,7 +3470,7 @@ in `docs/followups.md`.
   The dial of the round tile, 80 px, is wider than a tile of 3 columns on a phone 320 px wide
   (by 5 px on each side) and than one of 2 columns on any screen (by 2 px to 18 px), with the
   button or without it: that is the tile's own size, found here and left as it was; it needs a
-  higher minimum of the option-off tile, a follow-up.
+  higher minimum of the option-off tile, or a dial that shrinks with it (#52).
   When a keyboard press takes the button away (the user tabs to it, presses Enter, the target
   goes off and the button leaves), the focus goes to the body of the card, as it does when the
   pop-up closes, if the body is a button (`isPressable`): the next Tab goes on from the card, not

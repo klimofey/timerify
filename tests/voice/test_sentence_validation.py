@@ -377,6 +377,77 @@ def test_a_block_for_climate_and_another_domain_is_refused() -> None:
         build(sources, NAMES, SETTINGS)
 
 
+@pytest.mark.parametrize(
+    "requires",
+    [{}, {"requires_context": {"domain": "water_heater"}}],
+    ids=["no domain", "another domain"],
+)
+@pytest.mark.parametrize(
+    "sentence",
+    [
+        "run {timerify_target:name} {timerify_hvac_mode:hvac_mode}",
+        "run {timerify_target:name} <timerify_hvac_part>",
+        "run {timerify_target:name} <own_rule>",
+    ],
+    ids=["the list", "a rule of the file", "a rule of the block"],
+)
+def test_a_block_that_says_hvac_words_for_any_other_target_is_refused(
+    sentence: str, requires: dict[str, Any]
+) -> None:
+    """The list of the file is empty, so such a block could never be matched: it is
+    refused, not left in the file to do nothing."""
+    sources = load_sources("en")
+    sources["intents"]["TimerifyRun"]["data"].append(
+        {
+            "sentences": [sentence],
+            "expansion_rules": {"own_rule": "[at] <timerify_hvac_part>"},
+            **requires,
+        }
+    )
+
+    with pytest.raises(InvalidSentences, match="HVAC"):
+        build(sources, NAMES, SETTINGS)
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [{"value": "climate"}, {"value": "climate", "slot": True}, None, ["climate", 1]],
+    ids=["a value", "a value and a slot", "none", "a list of other things"],
+)
+def test_a_domain_that_is_not_a_name_or_a_list_of_names_is_refused(domain: Any) -> None:
+    """A requirement written in the form of hassil that has a value could be for
+    climate, and cannot be told from one that is not: nothing is guessed."""
+    sources = load_sources("en")
+    sources["intents"]["TimerifyRun"]["data"].append(
+        {
+            "sentences": ["run {timerify_target:name}"],
+            "requires_context": {"domain": domain},
+        }
+    )
+
+    with pytest.raises(InvalidSentences, match="requires a domain in a form"):
+        build(sources, NAMES, SETTINGS)
+
+
+def test_a_block_for_another_domain_that_says_no_hvac_word_is_kept() -> None:
+    """The refusal is for the words alone: the blocks for a water heater or a lamp,
+    which the shipped sentences have, are copied into the file as they are."""
+    sources = load_sources("en")
+    shipped = [
+        block
+        for block in sources["intents"]["TimerifyRun"]["data"]
+        if "climate" not in str(block.get("requires_context", {}))
+    ]
+
+    built = build(sources, NAMES, SETTINGS)
+
+    assert [
+        block
+        for block in built.data["intents"]["TimerifyRun"]["data"]
+        if "climate" not in str(block.get("requires_context", {}))
+    ] == shipped
+
+
 def test_a_thermostat_is_listed_with_the_key_of_the_modes_it_has() -> None:
     names = (
         VoiceName("AC", "climate", frozenset({"heat", "cool"})),

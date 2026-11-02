@@ -167,7 +167,7 @@ A name is listed the way Home Assistant lists every entity: with its aliases. Th
 
 Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one. A word that two modes of different devices share is listed for one of them only. The other mode is then said by its own name.
 
-Each thermostat is understood with the HVAC modes it has, and with no others. Say you have an AC that cools and heats, and a small AC that only cools. "Heating" after the name of the small AC is then not understood. Nothing is turned on, and Assist answers that it could not understand you. The same goes for a delayed command and a command at a time. Thermostats with the same modes share their sentences. The file grows a little for each different set of modes.
+Each thermostat is understood with the HVAC modes it has, and with no others. Say you have an AC that cools and heats, and a small AC that only cools. "Heating" after the name of the small AC is then not understood. Nothing is turned on, and Assist answers with an error. The same goes for a delayed command and a command at a time. Thermostats with the same modes share their sentences. The file grows a little for each different set of modes.
 
 A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
 

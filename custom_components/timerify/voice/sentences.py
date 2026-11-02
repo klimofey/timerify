@@ -31,6 +31,7 @@ from hassil.expression import (
 )
 from hassil.expression import Sequence as SequenceExpression
 from hassil.intents import Intent, Intents, TextSlotList
+from hassil.parse_expression import parse_sentence
 from hassil.util import is_template, merge_dict, normalize_text, remove_punctuation
 from home_assistant_intents import get_intents
 from homeassistant.const import ATTR_DEVICE_CLASS
@@ -414,7 +415,12 @@ def build(
     )
     hvac_words = lists.get(LIST_HVAC_MODE, {}).get("values", [])
     lists[LIST_HVAC_MODE] = {"values": []}
-    _scope_climate_blocks(built.get("intents", {}), hvac_words, settings.hvac_sets)
+    _scope_climate_blocks(
+        built.get("intents", {}),
+        built.get("expansion_rules", {}),
+        hvac_words,
+        settings.hvac_sets,
+    )
     lists[LIST_MODE], said[LIST_MODE] = _name_list(
         _mode_entries(settings.modes, mode_words)
     )
@@ -432,6 +438,7 @@ def _context_of(name: VoiceName) -> dict[str, str]:
 
 def _scope_climate_blocks(
     intents: Mapping[str, Any],
+    rules: Mapping[str, str],
     words: Sequence[Mapping[str, Any]],
     hvac_sets: Iterable[frozenset[str]],
 ) -> None:
@@ -440,25 +447,64 @@ def _scope_climate_blocks(
 
     A copy requires the key of its set (`CONTEXT_HVAC_MODES`) as well, and has the list
     of the words for an HVAC mode (`words`) cut down to those that mean a mode of the
-    set.
+    set. The list of the file is empty, so a block that says the words and is not copied
+    could never be matched: it, and any domain requirement that this cannot read, is
+    refused instead of left as it is. `rules` are the expansion rules of the file.
     """
     ordered = sorted(hvac_sets, key=hvac_key)
     for intent_name, definition in intents.items():
         blocks: list[dict[str, Any]] = []
         for block in definition["data"]:
-            domains = block.get("requires_context", {}).get("domain", [])
-            if isinstance(domains, str):
-                domains = [domains]
-            if CLIMATE_DOMAIN not in domains:
-                blocks.append(block)
-            elif len(domains) > 1:
+            domains = _required_domains(intent_name, block)
+            if domains == [CLIMATE_DOMAIN]:
+                blocks.extend(_copy_for_modes(block, words, modes) for modes in ordered)
+                continue
+            if CLIMATE_DOMAIN in domains:
                 raise InvalidSentences(
                     f"A block of {intent_name} is for climate and other domains: it"
                     " cannot be copied for each set of HVAC modes"
                 )
-            else:
-                blocks.extend(_copy_for_modes(block, words, modes) for modes in ordered)
+            if _says_hvac_words(block, rules):
+                raise InvalidSentences(
+                    f"A block of {intent_name} says the words for an HVAC mode and"
+                    " does not require the domain climate alone: it cannot be copied"
+                    " for each set of HVAC modes"
+                )
+            blocks.append(block)
         definition["data"] = blocks
+
+
+def _required_domains(intent_name: str, block: Mapping[str, Any]) -> list[str]:
+    """The domains a data block requires of its target (`requires_context`), none if it
+    requires none. A requirement that is not a domain or a list of domains, such as
+    hassil's form with a `value`, cannot be told from one for climate: it is refused."""
+    domain = block.get("requires_context", {}).get("domain", [])
+    if isinstance(domain, str):
+        return [domain]
+    if isinstance(domain, list) and all(isinstance(item, str) for item in domain):
+        return domain
+    raise InvalidSentences(
+        f"A block of {intent_name} requires a domain in a form that is not read:"
+        f" {domain!r}"
+    )
+
+
+def _says_hvac_words(block: Mapping[str, Any], rules: Mapping[str, str]) -> bool:
+    """Whether a sentence of the data block says a value of the list of the words for an
+    HVAC mode, itself or through the expansion rules it uses, the block's own and those
+    of the file, and the rules they use. A rule that neither has is the core's."""
+    known = {**rules, **block.get("expansion_rules", {})}
+    pending = list(block["sentences"])
+    used: set[str] = set()
+    while pending:
+        for reference in references(parse_sentence(pending.pop()).expression):
+            if isinstance(reference, ListReference):
+                if reference.list_name == LIST_HVAC_MODE:
+                    return True
+            elif reference.rule_name in known and reference.rule_name not in used:
+                used.add(reference.rule_name)
+                pending.append(known[reference.rule_name])
+    return False
 
 
 def _copy_for_modes(

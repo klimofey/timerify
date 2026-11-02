@@ -914,9 +914,13 @@ those of the spec.
   `VoiceSettingValues.hvac_sets`, in the order of the keys. A copy requires its key as well
   as the domain, and has a list `timerify_hvac_mode` of its own with the words of the
   sources that mean its modes, in their order. The list of the file stays, empty, since
-  the rules refer to it; without a set no block for thermostats is left. A block that
-  requires `climate` with another domain makes `build` raise `InvalidSentences`: the
-  sources are Timerify's own and have none. The shipped files, which the manual route
+  the rules refer to it; without a set no block for thermostats is left. `build`
+  fails closed: it raises `InvalidSentences` for a block that requires `climate` with
+  another domain, for a block that says a word for an HVAC mode (the list itself or a rule
+  that reaches it, the block's own or the file's) without requiring `climate` alone, since
+  with the list of the file empty it could never be matched, and for a `domain` that is
+  neither a name nor a list of names (hassil's form with a `value`). The sources are
+  Timerify's own and have none of these. The shipped files, which the manual route
   copies, keep the one block with every word, so there every thermostat takes every word
   and the handler refuses a mode it lacks, truthfully, naming the modes it has. Checked in
   hassil: a data block takes `requires_context` and `lists` of its own
@@ -950,6 +954,9 @@ those of the spec.
   `test_without_a_set_of_hvac_modes_the_sentences_for_thermostats_go`,
   `test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own`,
   `test_a_block_for_climate_and_another_domain_is_refused`,
+  `test_a_block_that_says_hvac_words_for_any_other_target_is_refused`,
+  `test_a_domain_that_is_not_a_name_or_a_list_of_names_is_refused`,
+  `test_a_block_for_another_domain_that_says_no_hvac_word_is_kept`,
   `test_a_thermostat_is_listed_with_the_key_of_the_modes_it_has`,
   `test_each_thermostat_is_listed_with_the_modes_it_has`,
   `test_thermostats_with_the_same_modes_share_their_sentences` and

@@ -101,7 +101,8 @@ expansion_rules:
   timerify_minutes_part: <timerify_minutes_count> minute[s]
   timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: for <timerify_duration>
-  timerify_delay_in_days: (in|after) ({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})
+  timerify_own_delay: ((in|after) <timerify_own_span>|<timerify_own_span> from now)
+  timerify_own_span: ({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})
   timerify_hvac_part: '{timerify_hvac_mode:hvac_mode} [mode]'
   timerify_temperature_part: '[at] {timerify_temperature:temperature} [degree[s]]'
   timerify_percent_part: '[at] {timerify_percent:percent} percent'

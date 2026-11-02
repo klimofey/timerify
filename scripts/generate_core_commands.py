@@ -104,7 +104,7 @@ DELAY_BEFORE_RULE_NAME: Final = "timerify_delay_before_command"
 """The rules, in the file, that say a delay in the ways Home Assistant says it after the
 command and before it ("in 15 minutes", "in an hour and 5 minutes"). Written once, since
 each command in each block says the same delays (`delay_rules`)."""
-OWN_DELAY_RULE: Final = "timerify_delay_in_days"
+OWN_DELAY_RULE: Final = "timerify_own_delay"
 """The rule, in the sentences of a language (`SOURCE_FILE`), that says a delay in days
 or weeks, or in a word such as "a week", which Home Assistant has no sentence for: one
 more way to say a delay, wherever the rules above say one, if the language has it."""

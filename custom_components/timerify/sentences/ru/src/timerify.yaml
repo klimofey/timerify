@@ -124,7 +124,7 @@ expansion_rules:
   timerify_for_part: "на <timerify_duration>"
 # A delay in days or weeks, or in a word (a day, half a day, a week), one more way to say
 # the delay of core_commands.yaml.
-  timerify_delay_in_days: "через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})"
+  timerify_own_delay: "через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.

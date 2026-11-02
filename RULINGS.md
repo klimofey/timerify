@@ -2642,8 +2642,14 @@ in `docs/followups.md`.
     (Russian "cherez den'", "cherez poldnya", "cherez nedelyu"). They are a list of fixed
     values, `timerify_delay_words`, that fills `delay_minutes` with 1440, 720 and 10080, as
     `timerify_duration_words` fills `minutes`.
-  - `delay_rules` of the generator appends `<timerify_delay_in_days>`, the rule that says
-    all of these, to each rule it writes, when the sentences of the language define it.
+  - English also says all of these "from now": "turn on the boiler 2 days from now", "a
+    week from now turn on the boiler", "half a day from now". The same slots and words,
+    in the rule `timerify_own_delay` after "in" or "after" and before "from now". Only
+    days, weeks and these words: "5 minutes from now" and "2 hours from now" were never
+    taken by the gazetteer (no device by that name), and Russian has no phrase that is
+    used the same way, so none was added there.
+  - `delay_rules` of the generator appends `<timerify_own_delay>`, the rule that says all
+    of these, to each rule it writes, when the sentences of the language define it.
   - "scheduling" for "schedule" in the English schedule sentences, with the article before
     the noun optional, since "turn off scheduling for the boiler" has none (and "turn off
     schedule for the boiler", which the gazetteer took too, is then a sentence).
@@ -2664,12 +2670,19 @@ in `docs/followups.md`.
   What still reaches the gazetteer, probed through the built-in agent with Timerify's
   sentences loaded (English; Russian has no gazetteer). A phrasing that Timerify's
   sentences meet with an unmatched entity is not handed on, so "in a month", "in a year",
-  "in 366 days", "in 53 weeks", "in an hour", "in half an hour", "in 2 days and 3 hours"
-  and "in 200 hours" switch nothing ("Sorry, I couldn't understand that"). These do switch:
+  "in 366 days", "in 53 weeks", "in 400 days", "a month from now", "a year from now",
+  "366 days from now", "53 weeks from now", "in an hour", "in half an hour", "in 2 days
+  and 3 hours", "2 days and 3 hours from now", "a few days from now" and "in 200 hours"
+  switch nothing ("Sorry, I couldn't understand that"). That skip is the mechanism of
+  `default_agent.py:704-718`, which Timerify does not control, so tests pin it for the
+  count past a year, a month and a year, in sentences of every command: a release that
+  changes it fails them (`test_more_than_a_year_of_days_or_weeks_is_not_understood` and
+  its siblings; simulating the change by passing no result to the fallback fails them in
+  English and leaves Russian green). These do switch:
   - turn on, the dangerous direction, since in Loose mode the device then runs without a
     countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later",
-    "in the morning", "on monday", "a week from now", "2 days from now", and the clock
-    times "at 7", "tomorrow at 7" and "at noon";
+    "in the morning", "on monday", "3 days from today", "a week from today", "2 days
+    later", and the clock times "at 7", "tomorrow at 7" and "at noon";
   - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "at 7".
   Why: each phrasing found is then refused or done as asked, instead of switching the
   device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
@@ -2684,13 +2697,21 @@ in `docs/followups.md`.
   `test_a_delay_in_days_can_be_said_in_words`,
   `test_every_sentence_that_says_a_delay_in_days_reaches_the_handler`,
   `test_every_sentence_that_says_a_delay_in_weeks_reaches_the_handler`,
+  `test_turn_on_so_long_from_now_keeps_a_command`,
+  `test_turn_on_beyond_a_week_from_now_is_refused_with_the_limit`,
+  `test_turn_off_half_a_day_from_now_sets_the_timer_of_a_running_boiler`,
+  `test_turn_off_beyond_a_day_from_now_is_refused_and_leaves_the_boiler_on`,
+  `test_every_sentence_of_every_command_can_say_the_delay_from_now`,
+  `test_more_than_a_year_of_days_or_weeks_is_not_understood`,
+  `test_more_than_a_year_from_now_is_not_understood`,
+  `test_a_month_or_a_year_is_not_understood`,
   `test_turn_on_in_a_day_or_a_week_keeps_a_command`,
   `test_turn_off_in_half_a_day_sets_the_timer_of_a_running_boiler`,
   `test_turn_off_in_a_week_is_refused_and_leaves_the_boiler_on`,
   `test_a_day_half_a_day_and_a_week_are_said_as_fixed_delays`,
   `test_a_week_is_kept_by_a_turn_on_and_two_weeks_are_refused`,
   `test_the_days_and_weeks_of_a_delay_have_slots_of_their_own`,
-  `test_the_rule_of_the_days_is_a_delay_only_when_the_sources_have_it`,
+  `test_the_own_delay_rule_is_a_delay_only_when_the_sources_have_it`,
   `test_llm_plans_a_command_in_days_and_weeks`,
   `test_turning_off_scheduling_switches_the_schedule_not_the_boiler`,
   `test_scheduling_asked_off_in_other_words_switches_the_schedule_only` and

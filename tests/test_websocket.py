@@ -58,21 +58,6 @@ NO_OFFSET = "2026-01-05T07:00:00"
 
 
 @pytest.fixture
-async def client(
-    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
-) -> MockHAClientWebSocket:
-    """The dashboard's connection, of an admin.
-
-    Timerify is set up first. Setting it up adds the card to the web server's routes,
-    and the test server closes the routes when the first connection is made, which the
-    web server of Home Assistant does not: it takes the routes of integrations that are
-    set up after it has started.
-    """
-    await async_setup_component(hass, DOMAIN, {})
-    return await hass_ws_client(hass)
-
-
-@pytest.fixture
 async def read_only_client(
     hass: HomeAssistant,
     hass_ws_client: WebSocketGenerator,

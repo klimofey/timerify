@@ -34,6 +34,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.typing import (
+    MockHAClientWebSocket,
+    WebSocketGenerator,
+)
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
@@ -651,6 +655,21 @@ def hass_read_only_access_token(
     """The access token of the user who is not an admin, made with the clock at
     `START`; see `hass_access_token`."""
     return hass_read_only_access_token
+
+
+@pytest.fixture
+async def client(
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
+) -> MockHAClientWebSocket:
+    """A websocket connection of an admin, as the editor and the dashboard hold one.
+
+    Timerify is set up first. Setting it up adds the card to the web server's routes,
+    and the test server closes the routes when the first connection is made, which the
+    web server of Home Assistant does not: it takes the routes of integrations that are
+    set up after it has started.
+    """
+    assert await async_setup_component(hass, DOMAIN, {})
+    return await hass_ws_client(hass)
 
 
 def provide_fake(

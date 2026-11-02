@@ -25,6 +25,7 @@ from homeassistant.helpers.event import (
 )
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
 from custom_components.timerify.const import (
     DOMAIN,
@@ -134,6 +135,22 @@ async def add_automation(
         hass, "automation", {"automation": {"triggers": [trigger], "actions": actions}}
     )
     await hass.async_block_till_done()
+
+
+async def components_for_device(
+    client: MockHAClientWebSocket,
+    kind: Literal["services", "triggers"],
+    device_id: str,
+) -> set[str]:
+    """The `kind` (actions or triggers) that the automation editor lists under **By
+    target** once the user picks the device `device_id`, as `domain.name`: the answer
+    of `get_services_for_target` or `get_triggers_for_target`."""
+    await client.send_json_auto_id(
+        {"type": f"get_{kind}_for_target", "target": {"device_id": [device_id]}}
+    )
+    message: dict[str, Any] = await client.receive_json()
+    assert message["success"] is True, message
+    return set(message["result"])
 
 
 def record_action(fields: Sequence[str]) -> dict[str, Any]:

@@ -2354,7 +2354,7 @@ in `docs/followups.md`.
   The editor's **By target** tab matches the `target` of every service and trigger against
   the entities of the picked device: the integration and domain filters
   (`ha/components/websocket_api/automation.py:52-83`), with the entities that have an entity
-  category left out of a device or area target (:128-131), and the lookup at :223-285. The
+  category left out of a device or area target (:128-131), and the lookup at :223-287. The
   tab is the frontend string `ui.panel.config.automation.editor.tabs.target`, "By target".
   So there is no `device_action` or `device_trigger` platform: one way for every timer,
   wherever its entities are. The owner accepted this at plan review (#38, #39) and

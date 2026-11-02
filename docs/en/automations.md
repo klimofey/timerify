@@ -11,7 +11,7 @@ You can use Timerify in an automation without typing YAML. You pick the device, 
 
 A device that Timerify made for an entity that is on no device works the same.
 
-The **Device** group in the same dialog does not list Timerify's actions. It lists only what the device's own integration offers, and the actions of its kinds of entities, such as setting the value of **Run for**. Home Assistant builds that list itself, so Timerify's actions are under **By target** instead.
+The **Device** group on the **By type** tab does not list Timerify's actions. It lists what the device's own integration offers. It also lists the actions of the device's kinds of entities, such as setting the value of **Run for**. Home Assistant builds that list itself, so Timerify's actions are under **By target** instead.
 
 ## Actions
 
@@ -28,3 +28,7 @@ For example, to run the boiler for 20 minutes, pick **Run** and set **Minutes** 
 ## A device with two timers
 
 Say a relay has two channels, each with its own timer. An action aimed at the device acts on both timers. To aim at one, change the target to that channel's **Run for** entity.
+
+Both **Run for** entities have the same name. They differ by their entity id, for example `number.relay_run_for` and `number.relay_run_for_2`. To see the entity ids in the lists, turn on **Display entity IDs in picker** in your profile.
+
+You can also rename an entity, so that the lists show two different names. Open **Settings > Devices & services > Entities**, choose the entity, open its settings and change its **Name**.

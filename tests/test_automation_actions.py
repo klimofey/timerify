@@ -7,17 +7,13 @@ and these scenarios ask the editor's own question through a real websocket conne
 An automation then runs them aimed at the device, as the editor writes them.
 """
 
-from typing import Any, Final
+from typing import Final
 
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_mock_service
-from pytest_homeassistant_custom_component.typing import (
-    MockHAClientWebSocket,
-    WebSocketGenerator,
-)
+from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
 from custom_components.timerify.const import DOMAIN
 
@@ -25,9 +21,11 @@ from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
     NUMBER,
     SENSOR,
+    TARGET_ID,
     TURN_OFF,
     TURN_ON,
     add_automation,
+    components_for_device,
     record_action,
     run_for_of,
     set_number,
@@ -48,30 +46,6 @@ GO: Final = {"trigger": "event", "event_type": "timerify_test_go"}
 """The trigger of the automations here: the test fires its event when it is ready."""
 
 
-@pytest.fixture
-async def client(
-    hass: HomeAssistant, hass_ws_client: WebSocketGenerator
-) -> MockHAClientWebSocket:
-    """The editor's connection, of an admin.
-
-    Timerify is set up first. Setting it up adds the card to the web server's routes,
-    and the test server closes the routes when the first connection is made.
-    """
-    assert await async_setup_component(hass, DOMAIN, {})
-    return await hass_ws_client(hass)
-
-
-async def actions_for_device(client: MockHAClientWebSocket, device_id: str) -> set[str]:
-    """The services the editor lists under **By target** once the user picks the
-    device `device_id`."""
-    await client.send_json_auto_id(
-        {"type": "get_services_for_target", "target": {"device_id": [device_id]}}
-    )
-    message: dict[str, Any] = await client.receive_json()
-    assert message["success"] is True, message
-    return set(message["result"])
-
-
 async def fire_go(hass: HomeAssistant) -> None:
     """Fire the event the automation waits for, and let the automation finish."""
     hass.bus.async_fire("timerify_test_go")
@@ -86,7 +60,7 @@ async def test_the_boilers_device_offers_timerifys_actions_by_target(
     await setup_target()
     assert fake_target.device_id is not None
 
-    actions = await actions_for_device(client, fake_target.device_id)
+    actions = await components_for_device(client, "services", fake_target.device_id)
 
     assert actions >= TIMERIFY_ACTIONS
 
@@ -97,16 +71,24 @@ async def test_a_device_without_a_timer_offers_no_timerify_action(
     provide_target: ProvideTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """The kettle has no timer, so its device lists none of Timerify's actions, while
-    the boiler's, with a timer, does: the list follows the device, not the
-    integration."""
+    """The kettle has no timer, so its device lists none of Timerify's actions: the
+    list follows the device the timer is on, not the integration.
+
+    The fake switches are no entities of a platform, so Home Assistant's lookup knows
+    nothing of them (they are not in `entity_sources`) and the kettle's list is empty
+    whatever Timerify does. The boiler's list, with a timer, is the control: it shows
+    that the lookup finds Timerify's actions where there is a timer.
+    """
     kettle = provide_target("switch.kettle", SWITCH_SERVICES, name="Kettle")
     await setup_target()
     assert fake_target.device_id is not None
     assert kettle.device_id is not None
-    assert await actions_for_device(client, fake_target.device_id) >= TIMERIFY_ACTIONS
+    boiler_actions = await components_for_device(
+        client, "services", fake_target.device_id
+    )
+    assert boiler_actions >= TIMERIFY_ACTIONS
 
-    actions = await actions_for_device(client, kettle.device_id)
+    actions = await components_for_device(client, "services", kettle.device_id)
 
     assert not {action for action in actions if action.startswith(f"{DOMAIN}.")}
 
@@ -125,7 +107,7 @@ async def test_the_device_made_for_a_switch_offers_them_too(
     assert registered is not None
     assert registered.device_id is not None
 
-    actions = await actions_for_device(client, registered.device_id)
+    actions = await components_for_device(client, "services", registered.device_id)
 
     assert actions >= TIMERIFY_ACTIONS
 
@@ -216,15 +198,83 @@ async def test_stop_aimed_at_one_channel_leaves_the_other_running(
     assert state_of(hass, run_for_of(hass, two)) == "30"
 
 
+async def test_a_device_with_two_timers_offers_timerifys_actions_by_target(
+    client: MockHAClientWebSocket,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """The relay's device lists the actions, whatever the number of timers on it."""
+    relay_1, _ = fake_relay
+    await setup_target(target="switch.relay_1")
+    await setup_target(target="switch.relay_2")
+    assert relay_1.device_id is not None
+
+    actions = await components_for_device(client, "services", relay_1.device_id)
+
+    assert actions >= TIMERIFY_ACTIONS
+
+
+async def test_run_aimed_at_the_relay_runs_both_channels(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """An action aimed at the device of a relay with two timers acts on both."""
+    relay_1, relay_2 = fake_relay
+    one = await setup_target(target="switch.relay_1")
+    two = await setup_target(target="switch.relay_2")
+    await add_automation(
+        hass,
+        GO,
+        [
+            {
+                "action": "timerify.run",
+                "target": {"device_id": relay_1.device_id},
+                "data": {"minutes": 20},
+            }
+        ],
+    )
+
+    await fire_go(hass)
+
+    assert relay_1.calls == [("turn_on", "switch.relay_1")]
+    assert relay_2.calls == [("turn_on", "switch.relay_2")]
+    assert state_of(hass, run_for_of(hass, one)) == "20"
+    assert state_of(hass, run_for_of(hass, two)) == "20"
+
+
+async def test_the_run_for_of_two_channels_differ_only_by_entity_id(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """What the target picker offers for a relay with two timers: both numbers are
+    named after the device, so the user tells the channels apart by the entity id (or
+    by renaming one of the entities)."""
+    one = await setup_target(target="switch.relay_1")
+    two = await setup_target(target="switch.relay_2")
+
+    assert [run_for_of(hass, entry) for entry in (one, two)] == [
+        "number.relay_run_for",
+        "number.relay_run_for_2",
+    ]
+    for entry in (one, two):
+        state = hass.states.get(run_for_of(hass, entry))
+        assert state is not None
+        assert state.attributes["friendly_name"] == "Relay Run for"
+
+
 async def test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on(
     hass: HomeAssistant,
     caplog: pytest.LogCaptureFixture,
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """The user deletes the timer an automation stops. Home Assistant skips the
-    missing number and says so in the log, and the steps after Stop still run."""
+    """The user deletes the timer an automation stops, while the boiler runs. Home
+    Assistant skips the missing number and says so in the log, the boiler is left as
+    it is, and the steps after Stop still run."""
     entry = await setup_target()
+    await set_number(hass, NUMBER, 30)
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     records = async_mock_service(hass, "test", "record")
@@ -239,8 +289,9 @@ async def test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on(
 
     await fire_go(hass)
 
-    assert len(records) == 1
-    assert fake_target.calls == []
+    assert [record.data for record in records] == [{"platform": "event"}]
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, TARGET_ID) == "on"
     assert (
         f"Referenced entities {NUMBER} are missing or not currently available"
         in caplog.text

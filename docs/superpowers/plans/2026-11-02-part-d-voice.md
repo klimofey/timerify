@@ -248,13 +248,13 @@ async def test_russian_delays_past_100_reach_the_handler(...)
 ### Task 4: The phrasings the gazetteer took: days and "scheduling" (#21)
 
 **Files:**
-- Modify: both sources (`timerify_delay_in_days`, `timerify_delay_days`; English schedule sentences), `scripts/generate_core_commands.py` (`OWN_DELAY_RULE`, `delay_rules`), the four generated files, `tests/voice/test_core_commands.py` (`wanted_later` and `expanded` take the own delay rule into account), `tests/voice/test_schedule_by_voice.py`, `docs/en/voice.md`, `docs/ru/voice.md`, `RULINGS.md`.
+- Modify: both sources (`timerify_own_delay`, `timerify_delay_days`; English schedule sentences), `scripts/generate_core_commands.py` (`OWN_DELAY_RULE`, `delay_rules`), the four generated files, `tests/voice/test_core_commands.py` (`wanted_later` and `expanded` take the own delay rule into account), `tests/voice/test_schedule_by_voice.py`, `docs/en/voice.md`, `docs/ru/voice.md`, `RULINGS.md`.
 
 **Interfaces:**
 - Consumes: `delay_rules` and `DELAY_LISTS` of Task 3.
 - Produces:
-  - In both sources: list `timerify_delay_days`: `range 1..100, multiplier: 24`; global rule `timerify_delay_in_days`: English `(in|after) {timerify_delay_days:delay_hours}( |-)day[s]`, Russian the word for "in" of the core's delays, the count, and the word for days in its three forms.
-  - Generator: `OWN_DELAY_RULE: Final = "timerify_delay_in_days"`. `delay_rules(data, sources)` appends `<timerify_delay_in_days>` as one more alternative to each rule it writes, when `sources` define it.
+  - In both sources: list `timerify_delay_days`: `range 1..100, multiplier: 24`; global rule `timerify_own_delay`: English `(in|after) {timerify_delay_days:delay_hours}( |-)day[s]`, Russian the word for "in" of the core's delays, the count, and the word for days in its three forms.
+  - Generator: `OWN_DELAY_RULE: Final = "timerify_own_delay"`. `delay_rules(data, sources)` appends `<timerify_own_delay>` as one more alternative to each rule it writes, when `sources` define it.
   - English `TimerifySetSchedule`: every "schedule" of the sentences that name the device becomes `(schedule|scheduling)`.
 
 - [ ] **Step 1: Write the failing tests.** In `tests/voice/test_core_commands.py`:

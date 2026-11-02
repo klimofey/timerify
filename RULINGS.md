@@ -3054,6 +3054,10 @@ in `docs/followups.md`.
   one puts each title in guillemets and sets them apart by commas, the last after the
   word for "and" (`quoted_titles`), with the singular noun and verb for one title
   (raspisanie ... vklyucheno) and the plural from two on (raspisaniya ... vklyucheny).
+  Nothing rewrites the sentence files when the house language changes, so for an interval
+  with no mark only, the file and the controller can disagree on its start times until the
+  next rewrite: the worst is a refusal or "not understood", never a wrong switch (the
+  re-review of Task 9, accepted).
   The Russian texts are pinned by a fixture written by hand,
   `tests/fixtures/ru/schedule_answers.yaml`, which counts titles and not a unit with a
   plural form per count, so it is not in `answers.yaml`. The description of the LLM tool

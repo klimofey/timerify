@@ -134,7 +134,7 @@ The Russian column is transliterated because this page is in English. The real s
 - In English, you can say "scheduling" instead of "schedule", and you can leave out "the" before it. Examples are "turn off scheduling for the boiler" and "turn off schedule for the boiler".
 - To switch one interval, say its title, such as "the Morning schedule of the boiler".
 - An interval that still has the title Timerify made, such as `06:30–07:15, Sun–Thu`, can be said by its start time. An example is "turn off the 6:30 schedule of the boiler". Say the time as "6:30", "06:30", "6.30" or "06.30". Every interval of the timer that starts then is switched, and the answer names each of them.
-- The days of a title that Timerify made cannot be said. Two intervals that start together are told apart only by a title of your own. An interval you renamed is said by its new title, not by its start time. An interval you titled like a time, such as "6:30", is named by that text, and every interval with Timerify's title that starts then is switched with it.
+- The days of a title that Timerify made cannot be said. Two intervals that start together are told apart only by a title of your own. An interval you renamed is said by its new title, not by its start time. An interval you titled like a time, such as "6:30", is named by that text. Every interval with Timerify's title that starts then is switched with it.
 - A title that two intervals share switches both. A title or a start time that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
 
 ### How Assist answers

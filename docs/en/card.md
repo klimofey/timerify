@@ -18,7 +18,7 @@ The dashboard then shows "Configuration error" and "Custom element doesn't exist
 
 - This is a fault of Home Assistant's frontend ([home-assistant/frontend#53890](https://github.com/home-assistant/frontend/issues/53890)). Every such card meets it.
 - It is fixed in the frontend from version 20261028.0 on ([pull request #54444](https://github.com/home-assistant/frontend/pull/54444)). Home Assistant 2026.11 is expected to carry that frontend.
-- Timerify does not work around it. Version 1.0.0 still needs only Home Assistant 2026.10.4. Raising the minimum to 2026.11 would remove the problem ([issue #7](https://github.com/klimofey/timerify/issues/7)).
+- Timerify does not work around it. Timerify still needs only Home Assistant 2026.10.4. Raising the minimum to 2026.11 would remove the problem ([issue #7](https://github.com/klimofey/timerify/issues/7)).
 
 ## The two layouts
 

@@ -72,7 +72,12 @@ What 1.0.0 was checked with before release:
   was an `input_boolean`, which restores its state; a demo switch does not, and the timer
   clears the countdown of a target that is no longer on). It went on to a schedule interval
   that turned the target on at its start, two Assist sentences said to the built-in agent,
-  and the card in the pill and in the round layout.
+  and the card in the pill and in the round layout. At 1.1.0 it went on to the new fields
+  of the timer form (Maximum of Run for, Turn off button), the Turn off button entity
+  turning a running target off, Timerify's actions and triggers under By target in the
+  automation editor, a turn-on at a clock time said to Assist and kept as a pending
+  command, the card's Turn off button in both layouts, and the Interactions group of the
+  card editor (`smoke-2` and `smoke-11` to `smoke-16`).
 
 ## Development
 

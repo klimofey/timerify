@@ -15,13 +15,13 @@ minutes and seconds of a delay up to 100. These sentences count the hours and mi
 with Timerify's own lists, the ones a duration uses, which reach a week (`DELAY_LISTS`):
 a delay past the limit of a command is then refused by the controller, and the answer
 names the limit, instead of the sentence not being understood. Home Assistant has no
-delay in days, and its gazetteer takes "turn off the boiler in 2 days" for a plain turn
-off of the device, so the sentences of the language may define one (`OWN_DELAY_RULE`),
-and each way to say a delay then has it as one more alternative. Timerify's sentences
-name only the devices that have a timer, and the built-in agent prefers a custom
-sentence to its own, so a device without one still reaches Home Assistant's. A
-phrasing that this file does not repeat, such as one a newer release of the intents
-adds, reaches Home Assistant's until the file is written again.
+delay in days or weeks, and its gazetteer takes "turn off the boiler in 2 days" for a
+plain turn off of the device, so the sentences of the language may define them
+(`OWN_DELAY_RULE`), and each way to say a delay then has them as one more alternative.
+Timerify's sentences name only the devices that have a timer, and the built-in agent
+prefers a custom sentence to its own, so a device without one still reaches Home
+Assistant's. A phrasing that this file does not repeat, such as one a newer release of
+the intents adds, reaches Home Assistant's until the file is written again.
 
 The file is written from the data, not retyped, and what the generator does not
 understand it refuses: a block of the intents with a key it has not been taught could
@@ -105,9 +105,9 @@ DELAY_BEFORE_RULE_NAME: Final = "timerify_delay_before_command"
 command and before it ("in 15 minutes", "in an hour and 5 minutes"). Written once, since
 each command in each block says the same delays (`delay_rules`)."""
 OWN_DELAY_RULE: Final = "timerify_delay_in_days"
-"""The rule, in the sentences of a language (`SOURCE_FILE`), that says a delay in days,
-which Home Assistant has no sentence for: one more way to say a delay, wherever the
-rules above say one, if the language defines it."""
+"""The rule, in the sentences of a language (`SOURCE_FILE`), that says a delay in days
+or weeks, or in a word such as "a week", which Home Assistant has no sentence for: one
+more way to say a delay, wherever the rules above say one, if the language has it."""
 EXTRAS: Final = "<timerify_run_extras>"
 """What a command to turn on may say besides when: how long to run, and the settings."""
 EXTRAS_RULE: Final = (
@@ -295,8 +295,8 @@ def delay_rules(data: Mapping[str, Any], sources: Mapping[str, Any]) -> dict[str
     A delay is said with the slots `delay_hours`, `delay_minutes` and `delay_seconds`,
     since `hours` and `minutes` are how long a command to turn on runs, and its hours
     and minutes with Timerify's lists (`DELAY_LISTS`). If the sentences `sources` of the
-    language define the rule of a delay in days (`OWN_DELAY_RULE`), each rule has it as
-    one more way to say a delay.
+    language define the rule of a delay in days or weeks (`OWN_DELAY_RULE`), each rule
+    has it as one more way to say a delay.
 
     Raises ValueError for a shape whose command is not at one end and set apart by a
     space, or that has anything but the command and the delay in it.

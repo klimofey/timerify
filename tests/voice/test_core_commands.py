@@ -82,6 +82,7 @@ from .helpers import (
     samples,
     speech,
     spoken_number,
+    spoken_values,
     talk,
     translated,
     with_voice_settings,
@@ -99,8 +100,11 @@ WITH_AND = "<timerify_duration_with_and>"
 """What a thermostat and a water heater make of how long a command runs."""
 DELAY_VALUES = {"hours": 2, "minutes": 15, "seconds": 30}
 """What the samples say for each unit of a delay."""
-DAYS_LISTS = ("timerify_delay_days", "timerify_delay_long_days")
-"""The lists that count the days of a delay: those a command can wait, those beyond."""
+DAYS_LIST = "timerify_delay_days"
+WEEKS_LIST = "timerify_delay_weeks"
+WORDS_LIST = "timerify_delay_words"
+"""The lists of the delay in days and weeks: the days, the weeks, and the delays that
+are said in words ("a day", "half a day", "a week")."""
 DELAYED_TOOL = "timerify__delayed_command"
 
 
@@ -659,9 +663,10 @@ async def test_russian_delays_past_100_reach_the_handler(
     assert said == {(slot, count)}
 
 
-# --- Delays in days ----------------------------------------------------------------
-# Core's gazetteer takes "in 2 days" for a bare turn on or off of the device, so the
-# days are Timerify's own phrasing: a count of days is a count of hours, 24 to the day.
+# --- Delays in days and weeks ------------------------------------------------------
+# Core's gazetteer takes "in 2 days" or "in a week" for a bare turn on or off of the
+# device, so the long delays are Timerify's own phrasings, understood up to what a
+# person may say and refused with the limit past what a command can wait.
 
 
 async def test_turn_on_in_2_days_keeps_a_command_two_days_ahead(
@@ -707,16 +712,19 @@ async def test_turn_on_in_8_days_is_refused_with_the_limit(
 @pytest.mark.parametrize(
     "text",
     [
-        "turn on the boiler in 100 days",
+        "turn on the boiler in 365 days",
         "turn on the boiler in eight days",
-        "turn on the boiler after one hundred days",
+        "turn on the boiler after three hundred sixty five days",
+        "turn on the boiler in 2 weeks",
+        "turn on the boiler in two weeks",
+        "turn on the boiler after 52 weeks",
     ],
 )
-async def test_a_delay_in_more_days_is_refused_with_the_limit_too(
+async def test_a_delay_in_more_days_or_weeks_is_refused_with_the_limit(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, text: str
 ) -> None:
-    """Up to a hundred days are understood, in digits and in words, so that the answer
-    is the limit and not the gazetteer's turn on."""
+    """A year of days and a year of weeks are understood, in digits and in words, so
+    that the answer is the limit and not the gazetteer's turn on."""
     response = await converse(hass, text)
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
@@ -762,45 +770,52 @@ async def test_a_delay_in_days_can_be_followed_by_how_long_the_boiler_runs(
     assert fake_target.calls == []
 
 
+@pytest.mark.parametrize("count", [2, 21])
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 async def test_a_delay_in_days_can_be_said_in_words(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, language: str
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    language: str,
+    count: int,
 ) -> None:
-    """Each form of 2 in words (a language has several, for its cases) is heard as two
-    days, that is 48 hours, as the digits are."""
+    """Each form of 2 and of 21 in words (a language has several, for its cases and
+    genders) is heard as that many days, as the digits are. 21 is past what a command
+    waits: it reaches the handler, which refuses it."""
     (text, *_) = samples(
         language,
         DELAYED_COMMAND,
         takeover=True,
-        numbers={"timerify_delay_days": 2},
+        numbers={DAYS_LIST: count},
         absent=SETTING_LISTS,
         admitting="switch",
     )
-    forms = spoken_number(language, 2)
+    forms = spoken_number(language, count)
     assert forms
 
     for form in forms:
-        spoken = text.replace("2", form)
+        spoken = text.replace(str(count), form)
         response = await converse(hass, spoken, language)
 
         assert reached(response) == DELAYED_COMMAND, spoken
         assert response.intent is not None, spoken
-        assert response.intent.slots["delay_hours"]["value"] == 48, spoken
+        assert response.intent.slots["delay_days"]["value"] == count, spoken
         await cancel_pending(hass, NUMBER, NEXT)
     assert fake_target.calls == []
 
 
-async def assert_days_reach_the_handler(
-    hass: HomeAssistant, fake_target: FakeTarget, language: str
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_every_sentence_that_says_a_delay_in_days_reaches_the_handler(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, language: str
 ) -> None:
-    """Every sentence of `language` that says a delay in days, for any command, reaches
-    the handler with 48 hours, whether the command is kept, set or refused there, and
-    nothing is switched by any of them."""
+    """Every sentence that says a delay of two days, for any command, reaches the
+    handler with two days and no other delay, whether the command is kept, set or
+    refused there, and nothing is switched by any of them."""
     texts = samples(
         language,
         DELAYED_COMMAND,
         takeover=True,
-        numbers={"timerify_delay_days": 2},
+        numbers={DAYS_LIST: 2},
         absent=SETTING_LISTS,
         admitting="switch",
     )
@@ -819,88 +834,217 @@ async def assert_days_reach_the_handler(
         }
         await cancel_pending(hass, NUMBER, NEXT)
 
-    assert said == {("delay_hours", 48)}
+    assert said == {("delay_days", 2)}
     assert fake_target.calls == []
 
 
-async def test_english_delays_in_days_reach_the_handler(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
-) -> None:
-    await assert_days_reach_the_handler(hass, fake_target, "en")
+# "In a day", "in half a day" and "in a week" are fixed delays, in minutes; "in N weeks"
+# counts weeks. The gazetteer takes each of them for a turn on or off at once.
 
 
-async def test_russian_delays_in_days_reach_the_handler(
+@pytest.mark.parametrize(
+    ("text", "ahead", "speech_ends"),
+    [
+        ("turn on the boiler in a day", timedelta(days=1), "09:00 tomorrow."),
+        ("turn on the boiler in half a day", timedelta(hours=12), "21:00."),
+        ("turn on the boiler after a week", timedelta(days=7), "09:00 in 7 days."),
+        ("turn on the boiler in 1 week", timedelta(days=7), "09:00 in 7 days."),
+    ],
+)
+async def test_turn_on_in_a_day_or_a_week_keeps_a_command(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    text: str,
+    ahead: timedelta,
+    speech_ends: str,
+) -> None:
+    response = await converse(hass, text)
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert state_of(hass, NEXT) == (START + ahead).isoformat()
+    assert speech(response).endswith(speech_ends)
+    assert fake_target.calls == []
+
+
+async def test_turn_off_in_half_a_day_sets_the_timer_of_a_running_boiler(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
 ) -> None:
-    await assert_days_reach_the_handler(hass, fake_target, "ru")
+    await converse(hass, "turn on the boiler")
+
+    response = await converse(hass, "turn off the boiler in half a day")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert state_of(hass, SENSOR) == (START + timedelta(hours=12)).isoformat()
+    assert state_of(hass, NUMBER) == "720"
+    assert fake_target.calls == [TURN_ON]
+
+
+@pytest.mark.parametrize(
+    "text", ["turn off the boiler in a week", "turn off the boiler in 2 weeks"]
+)
+async def test_turn_off_in_a_week_is_refused_and_leaves_the_boiler_on(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, text: str
+) -> None:
+    await converse(hass, "turn on the boiler")
+
+    response = await converse(hass, text)
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert refusal_of(response) == translated(
+        "en", "exceptions", "duration_out_of_range", "message"
+    ).format(max_hours="24")
+    assert state_of(hass, NUMBER) == "45"
+    assert fake_target.calls == [TURN_ON]
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
-def test_the_days_of_a_delay_count_hours_up_to_a_hundred(language: str) -> None:
-    """The days are lists of numbers that fill the slot of the hours with the count
-    times 24, so that no slot, and no argument of the tool, is new: the days a command
-    can wait, and the days beyond, up to a hundred as the delays of Home Assistant."""
-    sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
+async def test_a_day_half_a_day_and_a_week_are_said_as_fixed_delays(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, language: str
+) -> None:
+    """Each way the sentences have to say a day, half a day and a week, for any command,
+    reaches the handler with that many minutes and no other delay, and nothing is
+    switched. The words are read from the shipped lists, in each language."""
+    forms = spoken_values(language, WORDS_LIST)
+    assert set(forms) == {"720", "1440", "10080"}
 
-    counted = [sources["lists"][name]["range"] for name in DAYS_LISTS]
+    for minutes, words in forms.items():
+        assert words
+        for word in words:
+            texts = samples(
+                language,
+                DELAYED_COMMAND,
+                takeover=True,
+                numbers={},
+                texts={WORDS_LIST: word},
+                absent=SETTING_LISTS,
+                admitting="switch",
+            )
+            assert texts, word
+            for text in texts:
+                response = await converse(hass, text, language)
 
-    assert [(c["from"], c["to"], c["multiplier"]) for c in counted] == [
-        (1, 7, 24),
-        (8, 100, 24),
+                assert reached(response) == DELAYED_COMMAND, text
+                assert response.intent is not None, text
+                delays = {
+                    key: heard["value"]
+                    for key, heard in response.intent.slots.items()
+                    if key.startswith("delay_")
+                }
+                assert delays == {"delay_minutes": int(minutes)}, text
+                await cancel_pending(hass, NUMBER, NEXT)
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_every_sentence_that_says_a_delay_in_weeks_reaches_the_handler(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, language: str
+) -> None:
+    """A delay of two weeks, said in any sentence of any command, reaches the handler
+    with two weeks and no other delay, and is refused there with the limit."""
+    texts = samples(
+        language,
+        DELAYED_COMMAND,
+        takeover=True,
+        numbers={WEEKS_LIST: 2},
+        absent=SETTING_LISTS,
+        admitting="switch",
+    )
+    assert texts
+
+    for text in texts:
+        response = await converse(hass, text, language)
+
+        assert reached(response) == DELAYED_COMMAND, text
+        assert response.intent is not None, text
+        assert {
+            key: heard["value"]
+            for key, heard in response.intent.slots.items()
+            if key.startswith("delay_")
+        } == {"delay_weeks": 2}, text
+    assert fake_target.calls == []
+    assert pending(hass, NEXT) == []
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+async def test_a_week_is_kept_by_a_turn_on_and_two_weeks_are_refused(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, language: str
+) -> None:
+    """In a week, said in any sentence of any command, a turn on is kept for 7 days
+    ahead and a turn off is refused with the limit of a countdown; in two weeks both are
+    refused with the limit of their own, in the language of the request. Nothing is
+    switched, nothing is kept past the week."""
+    too_far = translated(language, "exceptions", "command_too_far", "message")
+    countdown = translated(language, "exceptions", "duration_out_of_range", "message")
+    refusals = {too_far.format(days="7"), countdown.format(max_hours="24")}
+    in_a_week = spoken_values(language, WORDS_LIST)["10080"]
+    in_a_week_texts = [
+        text
+        for word in in_a_week
+        for text in samples(
+            language,
+            DELAYED_COMMAND,
+            takeover=True,
+            numbers={},
+            texts={WORDS_LIST: word},
+            absent=SETTING_LISTS,
+            admitting="switch",
+        )
     ]
-    for name in DAYS_LISTS:
-        assert f"{{{name}:delay_hours}}" in sources["expansion_rules"][OWN_DELAY_RULE]
+    in_two_weeks_texts = samples(
+        language,
+        DELAYED_COMMAND,
+        takeover=True,
+        numbers={WEEKS_LIST: 2},
+        absent=SETTING_LISTS,
+        admitting="switch",
+    )
+    kept = refused = 0
+
+    for text in in_a_week_texts:
+        response = await converse(hass, text, language)
+
+        if pending(hass, NEXT):
+            assert state_of(hass, NEXT) == (START + timedelta(days=7)).isoformat(), text
+            kept += 1
+            await cancel_pending(hass, NUMBER, NEXT)
+        else:
+            assert refusal_of(response) == countdown.format(max_hours="24"), text
+            refused += 1
+    for text in in_two_weeks_texts:
+        response = await converse(hass, text, language)
+
+        assert refusal_of(response) in refusals, text
+        assert pending(hass, NEXT) == [], text
+
+    assert kept
+    assert refused
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_the_days_and_weeks_of_a_delay_have_slots_of_their_own(language: str) -> None:
+    """Days and weeks are plain ranges that fill their own slots, and not a range of
+    another unit's slot with a multiplier: hassil keeps the number words of a range by
+    its bounds and not by its multiplier, so a multiplied range would be handed the
+    words of any other range with its bounds, and hand out its own."""
+    sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
+    counted = {
+        name: sources["lists"][name]["range"] for name in (DAYS_LIST, WEEKS_LIST)
+    }
+
+    assert counted[DAYS_LIST] == {"from": 1, "to": 365}
+    assert counted[WEEKS_LIST] == {"from": 1, "to": 52}
+    rule = sources["expansion_rules"][OWN_DELAY_RULE]
+    for said in (
+        "{timerify_delay_days:delay_days}",
+        "{timerify_delay_weeks:delay_weeks}",
+        "{timerify_delay_words:delay_minutes}",
+    ):
+        assert said in rule
     assert f"<{OWN_DELAY_RULE}>" in alternatives(
         shipped(language)["expansion_rules"][DELAY_AFTER_RULE_NAME]
     )
-
-
-def ranges_of(data: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
-    """The lists of numbers of sentences, by name: those of the file and those of each
-    of its blocks."""
-    lists = [data.get("lists", {})] + [
-        block.get("lists", {})
-        for intent_data in data.get("intents", {}).values()
-        for block in intent_data["data"]
-    ]
-    return [
-        (name, found["range"])
-        for each in lists
-        for name, found in each.items()
-        if "range" in found
-    ]
-
-
-@pytest.mark.parametrize("language", VOICE_LANGUAGES)
-def test_no_other_list_of_numbers_has_the_bounds_of_the_days_of_a_delay(
-    language: str,
-) -> None:
-    """hassil keeps the number words of a range by its bounds, not by its multiplier: a
-    range with the bounds of another, read first, is given the other's words and gives
-    its own to it. So the days, which are counted in hours, say "two" as 48 only while
-    no other range that may be said in words has their bounds; with the bounds of a
-    percentage, "forty percent" would be 960. The sentences of Home Assistant are held
-    to the same, since a release of it may add a range."""
-    core = get_intents(language)
-    assert core is not None
-    own = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
-
-    def bounds(counted: Mapping[str, Any]) -> tuple[Any, ...]:
-        return (
-            counted["from"],
-            counted["to"],
-            counted.get("step", 1),
-            counted.get("fractions"),
-        )
-
-    others = [
-        bounds(counted)
-        for name, counted in ranges_of(core) + ranges_of(own)
-        if name not in DAYS_LISTS and counted.get("words", True)
-    ]
-
-    for name in DAYS_LISTS:
-        assert bounds(own["lists"][name]["range"]) not in others, name
 
 
 def test_the_rule_of_the_days_is_a_delay_only_when_the_sources_have_it() -> None:
@@ -927,25 +1071,27 @@ def test_the_rule_of_the_days_is_a_delay_only_when_the_sources_have_it() -> None
         assert alternatives(rule)[:-1] == alternatives(without[name])
 
 
-async def test_llm_delayed_command_takes_no_day_slot(
+async def test_llm_plans_a_command_in_days_and_weeks(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
 ) -> None:
-    """The days are said in hours: the tool plans a delay in hours, minutes and
-    seconds as before, and a model that means two days says 48 hours."""
+    """The tool takes days and weeks as it takes hours: a model that means two days says
+    so, and a delay past what a command waits is refused with the limit."""
     api = await assist_api(hass)
-    tool = next(tool for tool in api.tools if tool.name == DELAYED_TOOL)
 
-    arguments = {str(argument) for argument in tool.parameters.schema}
     planned = await call_tool(
-        api,
-        DELAYED_TOOL,
-        {"name": "Boiler", "action": "on", "delay_hours": 48},
+        api, DELAYED_TOOL, {"name": "Boiler", "action": "on", "delay_days": 2}
+    )
+    too_far = await call_tool(
+        api, DELAYED_TOOL, {"name": "Boiler", "action": "on", "delay_weeks": 2}
     )
 
-    assert {"delay_hours", "delay_minutes", "delay_seconds"} <= arguments
-    assert not {argument for argument in arguments if "day" in argument}
     assert planned["speech_slots"]["in_days"] == 2
     assert state_of(hass, NEXT) == (START + timedelta(hours=48)).isoformat()
+    assert too_far["response_type"] == "error"
+    assert too_far["speech"]["plain"]["speech"] == translated(
+        "en", "exceptions", "command_too_far", "message"
+    ).format(days="7")
+    assert fake_target.calls == []
 
 
 # --- Turning off later -------------------------------------------------------------

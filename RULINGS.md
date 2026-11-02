@@ -2630,62 +2630,68 @@ in `docs/followups.md`.
   `gazetteer.py` differs only in naming `async_get_matcher` (`:222`, `:263`). There is no
   way to keep a custom intent's names out of it, so #21 stays open, labelled upstream, and
   each phrasing found is made Timerify's own (#21):
-  - "in N days", N from 1 to 100, in English ("in" or "after", "day" or "days") and in
-    Russian, as one more way to say a delay, for every command that takes one. The count
-    fills the slot of the hours with its value times 24 (a range with `multiplier: 24`),
-    so no slot is new and the tool of an LLM agent is as it was. The controller refuses
-    what the command cannot wait: "turn on in 8 days" with `command_too_far` (7 days),
-    "turn off in 2 days" with `duration_out_of_range` (24 h). `delay_rules` of the
-    generator appends `<timerify_delay_in_days>` to each rule it writes, when the
-    sentences of the language define it.
-  - "scheduling" for "schedule" in the English schedule sentences, with "the" before the
-    noun optional, since "turn off scheduling for the boiler" has none (and "turn off
+  - A delay in days, N from 1 to 365 ("in" or "after", "day" or "days"; Russian "cherez",
+    "den'", "dnya", "dney"), and in weeks, N from 1 to 52, as one more way to say a delay
+    for every command that takes one. Each count has a slot of its own, `delay_days` and
+    `delay_weeks`, a plain range with no multiplier, and the handler adds the units up
+    (`_UNIT_SECONDS`). So the tool of an LLM agent takes `delay_days` and `delay_weeks` too.
+    A year is understood so that what a command cannot wait is refused with the limit and
+    not left to the gazetteer: "turn on in 8 days" or "in 2 weeks" with `command_too_far`
+    (7 days), "turn off in 2 days" or "in a week" with `duration_out_of_range` (24 h).
+  - A day, half a day and a week, said in a word: "in a day", "in half a day", "in a week"
+    (Russian "cherez den'", "cherez poldnya", "cherez nedelyu"). They are a list of fixed
+    values, `timerify_delay_words`, that fills `delay_minutes` with 1440, 720 and 10080, as
+    `timerify_duration_words` fills `minutes`.
+  - `delay_rules` of the generator appends `<timerify_delay_in_days>`, the rule that says
+    all of these, to each rule it writes, when the sentences of the language define it.
+  - "scheduling" for "schedule" in the English schedule sentences, with the article before
+    the noun optional, since "turn off scheduling for the boiler" has none (and "turn off
     schedule for the boiler", which the gazetteer took too, is then a sentence).
-  - Probed and rejected by the gazetteer, so nothing is switched: "turn off the boiler in
-    200 hours", "turn off the boiler in 2 days and 3 hours", "turn off the boiler's
-    scheduling", "turn on the boiler at 7:30".
-  - Probed and still taken by it, in English: "in 101 days" and more, "in a day", "in half
-    a day", "in a week", "in 2 weeks", "in 3 weeks", "tonight", "tomorrow", "next week",
-    "this evening", "at 7", "tomorrow at 7", "at noon".
+  - A range is not given a multiplier to count days as hours. hassil keeps the number words
+    of a range by its bounds, not by its multiplier: the cache of the trie is keyed by
+    `(start, stop, step, fractions)` per language (`hassil/string_matcher.py:889-904`) and
+    the multiplier is applied when the trie is built (`:1094`). Probed with a percentage
+    and a list of days in one `Intents`, a range of 1 to 100 with `multiplier: 24` is handed
+    the words of the first range of 1 to 100 that was read, and hands out its own: both say
+    "two" as 2 when the percentage is read first (so "in two days" would be two hours), and
+    both say it as 48 when the days are (so "at forty percent" would be 960). Digits are
+    multiplied on the spot and are right either way. Core has the same collision in its own
+    sentences (a `0..100` range with `multiplier: -1` next to plain `0..100` ranges, in
+    every language), so it is an upstream defect, and no bounds that happen to be free
+    today are a safe way around it: a release of Home Assistant, another integration or the
+    user's own sentences can add a range with them. Plain ranges share a trie harmlessly,
+    since the values are the same.
+  What still reaches the gazetteer, probed through the built-in agent with Timerify's
+  sentences loaded (English; Russian has no gazetteer). A phrasing that Timerify's
+  sentences meet with an unmatched entity is not handed on, so "in a month", "in a year",
+  "in 366 days", "in 53 weeks", "in an hour", "in half an hour", "in 2 days and 3 hours"
+  and "in 200 hours" switch nothing ("Sorry, I couldn't understand that"). These do switch:
+  - turn on, the dangerous direction, since in Loose mode the device then runs without a
+    countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later",
+    "in the morning", "on monday", "a week from now", "2 days from now", and the clock
+    times "at 7", "tomorrow at 7" and "at noon";
+  - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "at 7".
   Why: each phrasing found is then refused or done as asked, instead of switching the
-  device. The bound of 100 days, as the delays of Home Assistant count, refuses "in 8 days"
-  with the limit. Cost if wrong: a phrasing not yet found switches the device at once, in
-  English. Russian is not affected, since the gazetteer has no Russian.
+  device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
+  Russian is not affected, since the gazetteer has no Russian.
   Tests: `test_turn_on_in_2_days_keeps_a_command_two_days_ahead`,
   `test_turn_on_in_7_days_is_the_longest_delay_that_is_kept`,
   `test_turn_on_in_8_days_is_refused_with_the_limit`,
-  `test_a_delay_in_more_days_is_refused_with_the_limit_too`,
+  `test_a_delay_in_more_days_or_weeks_is_refused_with_the_limit`,
   `test_turn_off_in_2_days_is_refused_and_leaves_the_boiler_on`,
   `test_a_delay_in_days_can_be_followed_by_how_long_the_boiler_runs`,
   `test_a_thermostat_is_turned_on_in_days_with_its_settings`,
   `test_a_delay_in_days_can_be_said_in_words`,
-  `test_english_delays_in_days_reach_the_handler`,
-  `test_russian_delays_in_days_reach_the_handler`,
-  `test_llm_delayed_command_takes_no_day_slot`,
+  `test_every_sentence_that_says_a_delay_in_days_reaches_the_handler`,
+  `test_every_sentence_that_says_a_delay_in_weeks_reaches_the_handler`,
+  `test_turn_on_in_a_day_or_a_week_keeps_a_command`,
+  `test_turn_off_in_half_a_day_sets_the_timer_of_a_running_boiler`,
+  `test_turn_off_in_a_week_is_refused_and_leaves_the_boiler_on`,
+  `test_a_day_half_a_day_and_a_week_are_said_as_fixed_delays`,
+  `test_a_week_is_kept_by_a_turn_on_and_two_weeks_are_refused`,
+  `test_the_days_and_weeks_of_a_delay_have_slots_of_their_own`,
   `test_the_rule_of_the_days_is_a_delay_only_when_the_sources_have_it`,
+  `test_llm_plans_a_command_in_days_and_weeks`,
   `test_turning_off_scheduling_switches_the_schedule_not_the_boiler`,
   `test_scheduling_asked_off_in_other_words_switches_the_schedule_only` and
   `test_scheduling_asked_on_in_other_words_switches_the_schedule_only`.
-- **The days of a delay are two lists of numbers with bounds that no other range has,
-  because hassil keeps the words of a range by its bounds, not by its multiplier.** The
-  trie of number words is cached by `(start, stop, step, fractions)` per language
-  (`hassil/string_matcher.py:889-904`), and the multiplier is applied when the trie is
-  built (`:1094`). So a range of 1 to 100 with `multiplier: 24` is handed the words of the
-  first range of 1 to 100 that was read, and hands its own to the others: probed with a
-  percentage and a list of days in one `Intents`, both say "two" as 2 when the percentage
-  is read first (so "in two days" would be two hours), and both say it as 48 when the days
-  are (so "at forty percent" would be 960). Digits are multiplied on the spot and are right
-  either way. Core has ranges of 1 to 100 (its timers),
-  and Timerify has one (`timerify_percent`), so the days are `timerify_delay_days` (1 to 7,
-  what a command can wait) and `timerify_delay_long_days` (8 to 100, refused with the limit),
-  which fill the same slot through the rule `timerify_delay_in_days`. A test reads the
-  bounds of every range that may be said in words in the sentences of Home Assistant and of
-  Timerify, and fails if one has those of a list of days. Why: the days must be said in
-  words ("in two days" is taken by the gazetteer) and must not be hours or change another
-  list. Cost if wrong: a range added later, here or in a release of Home Assistant, with
-  the bounds of a list of days, makes "in two days" mean two hours or the days make a
-  number of percent wrong; the test catches it for the sentences it reads, not for a
-  custom sentence of the user's own. The upstream fix is a key that holds the multiplier.
-  Tests: `test_no_other_list_of_numbers_has_the_bounds_of_the_days_of_a_delay`,
-  `test_the_days_of_a_delay_count_hours_up_to_a_hundred` and
-  `test_a_delay_in_days_can_be_said_in_words`.

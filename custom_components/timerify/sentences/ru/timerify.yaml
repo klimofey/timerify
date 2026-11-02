@@ -85,7 +85,7 @@ expansion_rules:
   timerify_minutes_part: <timerify_minutes_count> минут[у|ы]
   timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: на <timerify_duration>
-  timerify_delay_in_days: через ({timerify_delay_days:delay_hours}|{timerify_delay_long_days:delay_hours}) (день|дня|дней)
+  timerify_delay_in_days: через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
   timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
@@ -113,13 +113,19 @@ lists:
   timerify_delay_days:
     range:
       from: 1
-      to: 7
-      multiplier: 24
-  timerify_delay_long_days:
+      to: 365
+  timerify_delay_weeks:
     range:
-      from: 8
-      to: 100
-      multiplier: 24
+      from: 1
+      to: 52
+  timerify_delay_words:
+    values:
+    - in: день
+      out: 1440
+    - in: полдня
+      out: 720
+    - in: неделю
+      out: 10080
   timerify_temperature:
     range:
       from: 1

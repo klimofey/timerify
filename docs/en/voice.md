@@ -49,7 +49,7 @@ The Russian column is transliterated because this page is in English. The real s
 **Run for a time**
 
 - It does the same as setting **Run for**. The countdown is that long, from one minute to 24 hours. It replaces a countdown that runs.
-- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count beyond a week is not understood at all.
+- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count of hours or minutes beyond a week is not understood at all.
 - If a number of minutes follows the hours, with or without "and", it adds to them. "For 1 hour 30" and "for 1 hour and 30" are both 90 minutes. You can leave out the word "minutes".
 - The exception is turning on a thermostat or a water heater for a time. There "for 1 hour 30" means one hour at 30 degrees. Say "and" or "minutes" for the minutes: "for 1 hour and 30" is 90 minutes.
 - A thermostat, a water heater, a light, a fan or a humidifier takes its settings in the same sentence, in any order:
@@ -85,9 +85,10 @@ The Russian column is transliterated because this page is in English. The real s
 - A command to turn on can say how long the device then runs, and its settings. An example is "turn on the AC in 15 minutes for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then. It replaces the end, whether the device had a countdown or not. For a device that is off, nothing changes, and the answer says so.
 - A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these limits is refused with a message.
-- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count beyond a week is not understood at all.
-- You can also say a delay in days, such as "turn on the boiler in 2 days". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 100, and you cannot join them with hours or minutes.
-- The limits above hold for days. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 8 days" is refused too. The answer names the limit.
+- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count of hours or minutes beyond a week is not understood at all.
+- You can also say a delay in days or weeks, such as "turn on the boiler in 2 days" or "turn on the boiler in 2 weeks". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 365, and weeks up to 52. You cannot join days or weeks with hours or minutes.
+- "In a day", "in half a day" and "in a week" work too. In Russian they are "cherez den'", "cherez poldnya" and "cherez nedelyu".
+- The limits above hold for days and weeks. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer names the limit. More than 365 days or 52 weeks is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
 
 **What is planned**
@@ -122,7 +123,7 @@ A few things work the way Home Assistant does, not the way Timerify does.
 
 - "Turn it off" and "them", after a question or a command about a device, are answered by Home Assistant's own commands. They switch the device, and the timer follows. But the answer is Home Assistant's. A device that is unavailable is not switched. Timerify keeps nothing of what you asked.
 - Suppose a sentence of Timerify's names something that is not a device with a timer. Home Assistant then answers "not aware of any device". An example is "what is planned for the fan".
-- Home Assistant can take a wording that Timerify does not have for a plain turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off the boiler in 3 weeks" and "turn off the boiler tonight". Home Assistant then turns the device off at once. It does this in English only. Use the wordings above.
+- Home Assistant can take a wording that Timerify does not have for a plain turn on or turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off the boiler tonight" and "turn on the boiler next week". Home Assistant then switches the device at once. It does this in English only. Use the wordings above.
 - Say two entities have the same name, and one of them has a timer. Then "turn off the boiler" and the other sentences above mean the one with the timer. Likewise, "turn off the boiler schedule" means the schedule of the timer called Boiler. This holds even when another exposed entity is called "Boiler schedule". That entity is reached by other wordings, and by the interface.
 
 ## Set up the sentences for the built-in agent
@@ -209,7 +210,7 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 | `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, and a device that is running keeps its countdown. |
 | `timerify__add_time` | Adds hours and minutes to the countdown. |
 | `timerify__stop` | Stops the timer and turns the device off. |
-| `timerify__delayed_command` | Plans to turn on or off later. You give a delay in hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |
+| `timerify__delayed_command` | Plans to turn on or off later. You give a delay in weeks, days, hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |
 | `timerify__list_commands` | Lists the planned commands, with the ids that cancel them. |
 | `timerify__cancel_commands` | Cancels all the commands, the next one, or one by its id. |
 | `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title. |

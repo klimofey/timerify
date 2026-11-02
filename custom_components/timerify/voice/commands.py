@@ -43,9 +43,10 @@ class DelayedCommandHandler(TimerifyIntentHandler):
     title = "Plan a command for later"
     description = (
         "Plans to turn a device on or off later. 'action' is 'on' or 'off'. Say when"
-        " with either a delay, 'delay_hours', 'delay_minutes' and 'delay_seconds'"
-        " adding up to how long from now, or 'at', a date and time on the clock of the"
-        " house such as '2026-01-05 10:30:00'; never both. A command to turn on is kept"
+        " with either a delay, 'delay_weeks', 'delay_days', 'delay_hours',"
+        " 'delay_minutes' and 'delay_seconds' adding up to how long from now, or 'at',"
+        " a date and time on the clock of the house such as '2026-01-05 10:30:00';"
+        " never both. A command to turn on is kept"
         " until it is due, and may say how long the device then runs, 'hours' and"
         " 'minutes' adding up to 1 minute to 24 hours, and the settings it is turned on"
         " with, as running a device does: 'hvac_mode', 'temperature', 'fan_mode',"
@@ -59,6 +60,8 @@ class DelayedCommandHandler(TimerifyIntentHandler):
     slot_schema: ClassVar[dict[Any, Any]] = {
         probatio.Required("name"): cv.string,
         probatio.Required("action"): probatio.In(["on", "off"]),
+        probatio.Optional("delay_weeks"): whole_slot,
+        probatio.Optional("delay_days"): whole_slot,
         probatio.Optional("delay_hours"): whole_slot,
         probatio.Optional("delay_minutes"): whole_slot,
         probatio.Optional("delay_seconds"): whole_slot,
@@ -111,14 +114,21 @@ class DelayedCommandHandler(TimerifyIntentHandler):
             )
 
 
-_UNIT_SECONDS: Final = {"hours": 3600, "minutes": 60, "seconds": 1}
+_UNIT_SECONDS: Final = {
+    "weeks": 7 * 86400,
+    "days": 86400,
+    "hours": 3600,
+    "minutes": 60,
+    "seconds": 1,
+}
 _LONGEST_DELAY_SECONDS: Final = timedelta.max // timedelta(seconds=1)
 
 
 def _delay_of(slots: Mapping[str, Any]) -> timedelta | None:
-    """How long from now the slots `delay_hours`, `delay_minutes` and `delay_seconds`
-    say together; None when none of them is given. A delay of nothing is a delay: the
-    controller refuses it as a time that is not ahead.
+    """How long from now the slots `delay_weeks`, `delay_days`, `delay_hours`,
+    `delay_minutes` and `delay_seconds` say together; None when none of them is given.
+    A delay of nothing is a delay: the controller refuses it as a time that is not
+    ahead.
 
     A count that no `timedelta` can hold is the longest one that can be: longer than
     any the controller takes, which refuses it as too far.

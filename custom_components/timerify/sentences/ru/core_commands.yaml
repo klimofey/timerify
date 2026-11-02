@@ -142,3 +142,113 @@ intents:
         - valve
       expansion_rules:
         timerify_command: (<close> {timerify_target})
+  TimerifyCommandAt:
+    data:
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_command> <timerify_run_extras> <timerify_clock_after_extras>
+      - <timerify_command> <timerify_clock_after_command> <timerify_run_extras>
+      - <timerify_clock_before_command> <timerify_command> [<timerify_run_extras>]
+      slots:
+        action: 'on'
+      response: delayed
+      excludes_context:
+        domain:
+        - climate
+        - water_heater
+      expansion_rules:
+        timerify_command: (<turn_on> {timerify_target})
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part> [<timerify_percent_part>])
+        timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_command> <timerify_run_extras> <timerify_clock_after_extras>
+      - <timerify_command> <timerify_clock_after_command> <timerify_run_extras>
+      - <timerify_clock_before_command> <timerify_command> [<timerify_run_extras>]
+      slots:
+        action: 'on'
+      response: delayed
+      requires_context:
+        domain:
+        - climate
+      expansion_rules:
+        timerify_command: (<turn_on> {timerify_target})
+        timerify_duration: <timerify_duration_with_and>
+        timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
+        timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_command> <timerify_run_extras> <timerify_clock_after_extras>
+      - <timerify_command> <timerify_clock_after_command> <timerify_run_extras>
+      - <timerify_clock_before_command> <timerify_command> [<timerify_run_extras>]
+      slots:
+        action: 'on'
+      response: delayed
+      requires_context:
+        domain:
+        - water_heater
+      expansion_rules:
+        timerify_command: (<turn_on> {timerify_target})
+        timerify_duration: <timerify_duration_with_and>
+        timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
+        timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_command> <timerify_run_extras> <timerify_clock_after_extras>
+      - <timerify_command> <timerify_clock_after_command> <timerify_run_extras>
+      - <timerify_clock_before_command> <timerify_command> [<timerify_run_extras>]
+      slots:
+        action: 'on'
+      response: delayed
+      requires_context:
+        domain:
+        - cover
+      expansion_rules:
+        timerify_command: (<open> {timerify_target})
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part> [<timerify_percent_part>])
+        timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_command> <timerify_run_extras> <timerify_clock_after_extras>
+      - <timerify_command> <timerify_clock_after_command> <timerify_run_extras>
+      - <timerify_clock_before_command> <timerify_command> [<timerify_run_extras>]
+      slots:
+        action: 'on'
+      response: delayed
+      requires_context:
+        domain:
+        - valve
+      expansion_rules:
+        timerify_command: (<open> {timerify_target})
+        timerify_settings: (<timerify_percent_part> [<timerify_mode_part>]|<timerify_mode_part> [<timerify_percent_part>])
+        timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_clock_before_command> <timerify_command>
+      slots:
+        action: 'off'
+      response: delayed
+      expansion_rules:
+        timerify_command: (<turn_off> {timerify_target})
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_clock_before_command> <timerify_command>
+      slots:
+        action: 'off'
+      response: delayed
+      requires_context:
+        domain:
+        - cover
+      expansion_rules:
+        timerify_command: (<close> {timerify_target})
+    - sentences:
+      - <timerify_command> <timerify_clock_after_command>
+      - <timerify_clock_before_command> <timerify_command>
+      slots:
+        action: 'off'
+      response: delayed
+      requires_context:
+        domain:
+        - valve
+      expansion_rules:
+        timerify_command: (<close> {timerify_target})

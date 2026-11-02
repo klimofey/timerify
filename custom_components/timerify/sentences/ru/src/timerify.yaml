@@ -125,6 +125,18 @@ expansion_rules:
 # A delay in days or weeks, or in a word (a day, half a day, a week), one more way to say
 # the delay of core_commands.yaml.
   timerify_own_delay: "через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})"
+# A clock time, which core_commands.yaml says after the command, before it, and after how
+# long it runs and the settings. An hour from 1 to 12 with no word for the part of the
+# day is the nearer of its two times, and the hour of 0 or 13 to 23 is that of the 24-hour
+# clock: the handler works that out. A time is said with "в" and a temperature with "на",
+# so the time after the settings of a thermostat needs no narrower rule than the one after
+# the command.
+  timerify_clock_after_command: "<timerify_clock>"
+  timerify_clock_after_extras: "<timerify_clock_after_command>"
+  timerify_clock_before_command: "<timerify_clock>"
+  timerify_clock: "(<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])"
+  timerify_clock_day: "{timerify_clock_days:clock_day}"
+  timerify_clock_time: "в ({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -185,6 +197,51 @@ lists:
         out: 720
       - in: "неделю"
         out: 10080
+  # The parts of a clock time, each in the slot the handler of TimerifyCommandAt reads.
+  # The hours of the 24-hour clock are for a time said without a word for the part of the
+  # day, and the hours of the 12-hour clock for one said with it. All are plain ranges.
+  timerify_clock_hours:
+    range:
+      from: 0
+      to: 23
+  timerify_half_day_hours:
+    range:
+      from: 1
+      to: 12
+  timerify_clock_minutes:
+    range:
+      from: 0
+      to: 59
+  # Which half of the day an hour of the 12-hour clock is in: the morning, the afternoon
+  # and the evening (the last two are one half), and the night, which is the small hours
+  # for 1 to 5 and the evening for 6 to 11.
+  timerify_day_parts:
+    values:
+      - in: "утра"
+        out: am
+      - in: "(дня|вечера)"
+        out: pm
+      - in: "ночи"
+        out: night
+  # The times that are said in a word, which name their hour as well as their part of the
+  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
+  # which the handler then takes to be 12, so that "в полдень" is not the bare 12 of "в 12",
+  # which is the nearer of noon and midnight.
+  timerify_clock_words:
+    values:
+      - in: "полдень"
+        out: pm
+      - in: "полночь"
+        out: am
+  # The day a time is said for, in days from today.
+  timerify_clock_days:
+    values:
+      - in: "сегодня"
+        out: 0
+      - in: "завтра"
+        out: 1
+      - in: "послезавтра"
+        out: 2
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the
@@ -258,6 +315,8 @@ responses:
     TimerifyStop:
       default: "{{ timer_now(slots) }}"
     TimerifyDelayedCommand:
+      delayed: "{{ timer_later(slots) }}"
+    TimerifyCommandAt:
       delayed: "{{ timer_later(slots) }}"
     TimerifyListCommands:
       default: |-

@@ -835,11 +835,14 @@ those of the spec.
   tell them apart. The list of planned commands says them ("turn off at 11:00"), so a
   voice user can hear one that a service made. Cost if wrong: a user who wants a command
   to turn off that survives a later "turn on" uses the service.
-- **Commands at a clock time are for an LLM only.** The tool takes `at`, read by the same
-  parser as the service's (`command_time`), with exactly one of a delay and `at`
-  (`command_when`), through the same controller path. The built-in agent's sentences take
-  delays: core has no clock-time shapes to mirror, and §6.4's example is a delay. Cost if
-  wrong: "turn on the boiler at 7:30" has no match (issue #19).
+- **Commands at a clock time are said to the built-in agent by an intent of their own, and
+  to an LLM by the tool's `at`.** The tool takes `at`, read by the same parser as the
+  service's (`command_time`), with exactly one of a delay and `at` (`command_when`),
+  through the same controller path. In 1.0.0 the built-in agent's sentences took delays
+  only, since core has no clock-time shapes to mirror and §6.4's example is a delay; 1.1.0
+  adds the sentences, as `TimerifyCommandAt` (issue #19, Release 1.1.0, Voice: "A clock
+  time is a sentence-only intent, not a tool."). Cost if wrong: a clock time said to the
+  built-in agent is read by the rules of that entry, not by the tool's parser.
 - **Every setting of §5.4 that a target supports can be said, with one word per
   meaning.** The HVAC mode and the temperature have their own words, and "percent" and
   "mode" are single slots that each domain row declares the meaning of (brightness,
@@ -2688,9 +2691,12 @@ in `docs/followups.md`.
   English and leaves Russian green). These do switch:
   - turn on, the dangerous direction, since in Loose mode the device then runs without a
     countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later"
-    (alone), "in the morning", "on monday", "2 days ahead", and the clock times "at 7",
-    "tomorrow at 7" and "at noon";
-  - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "at 7".
+    (alone), "in the morning", "on monday" and "2 days ahead";
+  - turn off: "tonight", "tomorrow", "tomorrow morning" and "this evening".
+  The clock times "at 7", "tomorrow at 7" and "at noon" were in both lists; they are
+  Timerify's now (`TimerifyCommandAt`, "A clock time is a sentence-only intent, not a
+  tool." below), so they switch nothing and are pinned by
+  `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`.
   Why: each phrasing found is then refused or done as asked, instead of switching the
   device. Cost if wrong: a phrasing not yet found switches the device at once, in English.
   Russian is not affected, since the gazetteer has no Russian.
@@ -2725,3 +2731,74 @@ in `docs/followups.md`.
   `test_turning_off_scheduling_switches_the_schedule_not_the_boiler`,
   `test_scheduling_asked_off_in_other_words_switches_the_schedule_only` and
   `test_scheduling_asked_on_in_other_words_switches_the_schedule_only`.
+- **A clock time is a sentence-only intent, not a tool.** "Turn on the boiler at 7:30",
+  "tomorrow at 7", "at 7 pm", "at noon" (issue #19) are the sentences of `TimerifyCommandAt`,
+  with its own handler (`ClockCommandHandler`, a `DelayedCommandHandler` whose `when` is the
+  moment of the time said, where the delayed one's is a delay). It is registered for the
+  built-in agent in `HANDLER_TYPES` and left out of `TOOL_HANDLER_TYPES`, which
+  `llm.async_get_tools` offers. Why: the tool `timerify__delayed_command` already takes `at`,
+  and the sentence slots (`clock_hour`, `clock_minute`, `clock_part`, `clock_day`) would only
+  confuse a model. Cost if wrong: a model that is shown a second way to plan a command at a
+  time chooses between two tools that do the same.
+  - **Reading (owner's decision, 2026-11-02).** An hour from 1 to 12 said with no "am",
+    "pm" and no Russian word for a part of the day is the nearer of its two times ahead:
+    "at 7" at 18:00 is 19:00 today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow;
+    the same goes for "at 7:30". An hour of 0 or from 13 to 23 is on the 24-hour clock.
+    "Am" and "pm" and the Russian "utra", "dnya", "vechera" and "nochi" fix the half
+    (`hour_of_day`; "nochi" is the small hours for 1 to 5 and the evening for 6 to 11).
+    With a day word the same rule works on that date, so "tomorrow at 7" is 07:00. Without
+    one the time is the next, today or tomorrow, and a time equal to now is tomorrow. "Today"
+    at a time that has passed is refused by the controller (`command_in_past`), since the
+    speaker named the day. The wall time is `schedule.wall_moment`, the schedules' rule: a
+    time the clock skips happens later by the gap, one it repeats is its first. Cost if
+    wrong: a speaker who says "at 7" at 18:00 meaning tomorrow morning hears "19:00" in the
+    answer and must say "am" (Russian: "utra") to get 07:00. The answer always says the
+    time that was chosen.
+  - **Noon and midnight fill the part of the day, not the hour.** "At noon" is
+    `clock_part: pm` with no hour, "at midnight" is `clock_part: am`, and the handler takes
+    a missing hour to be 12. The first design had the words fill `clock_hour` with 12 and
+    0; but "noon" said at 13:00 then came out as a bare 12, which is the nearer of noon and
+    midnight, and so it meant midnight. So `clock_hour` is optional in the slot schema and
+    the words are lists of parts. A bare "at 12" stays the nearer of the two. Cost if wrong:
+    none; this is a correction of the interface the plan described, found by the tests
+    `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer` and
+    `test_the_russian_words_for_noon_and_midnight_name_their_time`.
+  - **A thermostat or a water heater, in English, says a time after its settings so that it
+    is not a temperature.** After "for an hour" a bare number is a temperature ("turn on the
+    AC for an hour at 21" stays a run at 21 degrees), so in the `climate` and `water_heater`
+    blocks of `TimerifyRun` the rule `timerify_clock_after_extras` is
+    `<timerify_exact_clock>`: a time with minutes, "o'clock", "am" or "pm", "noon" or
+    "midnight", not a bare hour or "H.MM". The generator copies that override into the
+    clock blocks of those scopes (`Scope.rules`). Before the settings, and in every other
+    block, any form works. Russian needs no override: it says a time with "v" and a
+    temperature with "na" or nothing. Cost if wrong: "turn on the AC for an hour at 7"
+    sets 7 degrees, as it did.
+  - **The generator writes the blocks of both intents with one function.** `timed_sentences`
+    (which replaced `delayed_sentences`) says the command with the time after it, for a
+    command to turn on also with the settings first and the time after them, and with the
+    time before it; `_timed_blocks` writes the blocks of either intent, and `render` adds
+    `TimerifyCommandAt` with `slots.action` and the answer `delayed`, and raises when the
+    sources lack one of the three clock rules. The answer is `timer_later`, as a delay's.
+  Tests: `test_turn_on_at_a_clock_time_keeps_a_command_for_then`,
+  `test_every_english_clock_form_means_its_time`,
+  `test_the_time_may_come_before_the_command`,
+  `test_a_command_to_turn_on_at_a_time_may_say_how_long_it_runs`,
+  `test_turn_on_at_a_time_for_a_while_with_settings`,
+  `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer`,
+  `test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now`,
+  `test_a_bare_hour_said_in_the_evening_is_that_hour_tonight`,
+  `test_a_bare_hour_said_early_is_that_hour_this_morning`,
+  `test_an_hour_past_twelve_is_a_24_hour_clock`,
+  `test_tomorrow_with_a_bare_hour_is_the_morning_one`,
+  `test_a_clock_time_already_past_today_means_tomorrow`,
+  `test_today_at_a_time_that_has_passed_is_refused`,
+  `test_a_wall_time_the_clock_skips_happens_an_hour_later`,
+  `test_turn_off_at_a_clock_time_sets_the_countdown_to_end_then`,
+  `test_turn_off_at_a_time_more_than_a_day_ahead_is_refused`,
+  `test_for_an_hour_at_21_stays_a_temperature_for_a_thermostat`,
+  `test_a_thermostat_takes_an_exact_time_after_its_settings`,
+  `test_russian_clock_forms_reach_the_clock_handler`,
+  `test_russian_day_parts_mean_the_hours_they_name`,
+  `test_the_clock_sentences_add_no_llm_tool`,
+  `test_the_file_says_every_command_at_a_clock_time_for_every_kind_of_device` and
+  `test_the_generator_refuses_sentences_that_lack_a_way_to_say_the_time`.

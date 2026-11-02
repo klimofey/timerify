@@ -28,7 +28,6 @@ One line per issue: its number and its title, under the area it belongs to.
 
 ## Voice
 
-- [#19](https://github.com/klimofey/timerify/issues/19) Assist sentences for commands at a clock time ("turn on the boiler at 7:30")
 - [#20](https://github.com/klimofey/timerify/issues/20) Follow friendly_name and mode-list changes of targets without a registry entry in the voice file
 - [#21](https://github.com/klimofey/timerify/issues/21) Phrasings Timerify lacks can be matched by core's gazetteer and switch the device
 - [#22](https://github.com/klimofey/timerify/issues/22) A spoken form for generated interval titles ("the 6:30 schedule")

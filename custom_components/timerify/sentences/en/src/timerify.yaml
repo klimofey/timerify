@@ -48,6 +48,10 @@ intents:
         expansion_rules:
           # A bare number after the hours is the temperature here; minutes need "and".
           timerify_duration: "<timerify_duration_with_and>"
+          # A bare number after the settings is the temperature too: a time said there
+          # must show that it is one (the delayed commands of core_commands.yaml use
+          # this, not the sentences of this block).
+          timerify_clock_after_extras: "<timerify_exact_clock>"
           timerify_settings: "(<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])\
@@ -58,6 +62,10 @@ intents:
         expansion_rules:
           # A bare number after the hours is the temperature here; minutes need "and".
           timerify_duration: "<timerify_duration_with_and>"
+          # A bare number after the settings is the temperature too: a time said there
+          # must show that it is one (the delayed commands of core_commands.yaml use
+          # this, not the sentences of this block).
+          timerify_clock_after_extras: "<timerify_exact_clock>"
           timerify_settings: "(<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])\
             |<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])\
             |<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))"
@@ -144,6 +152,23 @@ expansion_rules:
 # days" for a turn off of the device. A bare "later" is not a delay and is not said.
   timerify_own_delay: "((in|after) <timerify_own_span>|<timerify_own_span> (from (now|today)|later))"
   timerify_own_span: "({timerify_delay_days:delay_days}( |-)day[s]|{timerify_delay_weeks:delay_weeks}( |-)week[s]|{timerify_delay_words:delay_minutes})"
+# A clock time, which core_commands.yaml says after the command, before it, and after how
+# long it runs and the settings ("turn on the boiler at 7:30", "tomorrow at 7 turn on the
+# boiler", "turn on the AC for an hour at 7:30"). An hour from 1 to 12 with no "am" or
+# "pm" is the nearer of its two times, and the hour of 0 or 13 to 23 is that of the 24-hour
+# clock: the handler works that out. After the settings of a thermostat or a water heater
+# the time must not be a bare hour or hour and minutes with a dot, which the temperature
+# is said as ("for an hour at 21"): those blocks of TimerifyRun say that rule their own
+# way, and the delayed commands take it from them.
+  timerify_clock_after_command: "<timerify_clock>"
+  timerify_clock_after_extras: "<timerify_clock_after_command>"
+  timerify_clock_before_command: "<timerify_clock>"
+  timerify_clock: "(<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>])"
+  timerify_exact_clock: "(<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>])"
+  timerify_clock_day: "{timerify_clock_days:clock_day}"
+  timerify_clock_time: "(<timerify_exact_time>|<timerify_loose_time>)"
+  timerify_exact_time: "({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_clock_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
+  timerify_loose_time: "({timerify_clock_hours:clock_hour}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -204,6 +229,47 @@ lists:
         out: 720
       - in: "a week"
         out: 10080
+  # The parts of a clock time, each in the slot the handler of TimerifyCommandAt reads.
+  # The hours of the 24-hour clock are for a time said without "am" or "pm", and the
+  # hours of the 12-hour clock for one said with them. All are plain ranges.
+  timerify_clock_hours:
+    range:
+      from: 0
+      to: 23
+  timerify_half_day_hours:
+    range:
+      from: 1
+      to: 12
+  timerify_clock_minutes:
+    range:
+      from: 0
+      to: 59
+  # Which half of the day an hour of the 12-hour clock is in.
+  timerify_day_parts:
+    values:
+      - in: "(am|a.m.)"
+        out: am
+      - in: "(pm|p.m.)"
+        out: pm
+  # The times that are said in a word, which name their hour as well as their part of the
+  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
+  # which the handler then takes to be 12, so that "at noon" is not the bare 12 of "at 12",
+  # which is the nearer of noon and midnight.
+  timerify_clock_words:
+    values:
+      - in: "noon"
+        out: pm
+      - in: "midnight"
+        out: am
+  # The day a time is said for, in days from today.
+  timerify_clock_days:
+    values:
+      - in: "today"
+        out: 0
+      - in: "tomorrow"
+        out: 1
+      - in: "[the] day after tomorrow"
+        out: 2
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the
@@ -264,6 +330,8 @@ responses:
     TimerifyStop:
       default: "{{ timer_now(slots) }}"
     TimerifyDelayedCommand:
+      delayed: "{{ timer_later(slots) }}"
+    TimerifyCommandAt:
       delayed: "{{ timer_later(slots) }}"
     TimerifyListCommands:
       default: |-

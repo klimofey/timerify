@@ -74,18 +74,26 @@ class Interval:
         )
 
 
+def wall_moment(day: date, clock: time, zone: tzinfo) -> datetime:
+    """The moment it is `clock` on `day` on the wall clock of `zone`, in UTC.
+
+    A wall time that does not exist on a day the clock goes forward lands later by the
+    length of the gap (02:30 becomes 03:30); one that comes twice when it goes back is
+    its first time.
+    """
+    return datetime.combine(day, clock, zone).astimezone(UTC)
+
+
 def window_on(interval: Interval, day: date, zone: tzinfo) -> Window | None:
     """The occurrence of `interval` that starts on `day` on the wall clock of `zone`;
     None when the change of the clock swallows it.
 
     It ends the next day when the interval ends at or before its start, and never lasts
-    longer than `MAX_MINUTES`. A wall time that does not exist on a day the clock goes
-    forward lands later by the length of the gap (02:30 becomes 03:30); one that comes
-    twice when it goes back is its first time.
+    longer than `MAX_MINUTES`. Its times follow `wall_moment`.
     """
     ends_on = day + timedelta(days=1) if interval.end <= interval.start else day
-    start = datetime.combine(day, interval.start, zone).astimezone(UTC)
-    end = datetime.combine(ends_on, interval.end, zone).astimezone(UTC)
+    start = wall_moment(day, interval.start, zone)
+    end = wall_moment(ends_on, interval.end, zone)
     end = min(end, start + timedelta(minutes=MAX_MINUTES))
     if end <= start:
         return None

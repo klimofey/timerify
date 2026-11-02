@@ -31,6 +31,10 @@ from custom_components.timerify.const import SENTENCES_DIR, VOICE_LANGUAGES
 from custom_components.timerify.domains import SUPPORTED_DOMAINS
 from custom_components.timerify.voice.sentences import read_back
 from scripts.generate_core_commands import (
+    CLOCK_AFTER_EXTRAS_RULE_NAME,
+    CLOCK_AFTER_RULE_NAME,
+    CLOCK_BEFORE_RULE_NAME,
+    CLOCK_COMMAND,
     COMMAND,
     COMMAND_RULE,
     COMMAND_RULE_NAME,
@@ -45,12 +49,14 @@ from scripts.generate_core_commands import (
     SOURCE_FILE,
     TIMERIFY_COMMANDS,
     CommandBlock,
+    clock_blocks,
     command_blocks,
     command_group,
     delay_rules,
     delayed_shapes,
     render,
     run_scopes,
+    timed_sentences,
 )
 
 from ..conftest import FakeTarget, SetupTarget
@@ -1915,6 +1921,202 @@ def test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_devic
     assert gaps(data, shipped(language)) == []
 
 
+def wanted_at(block: CommandBlock) -> set[str]:
+    """The sentences that say the command of a block of Home Assistant at a clock time,
+    as the file should have them: the time after the command, and a command to turn on
+    may say how long it runs and its settings once, before the time or after it, and
+    after the time that comes first; the time before the command too."""
+    command = command_group(block)
+    after = f"<{CLOCK_AFTER_RULE_NAME}>"
+    after_extras = f"<{CLOCK_AFTER_EXTRAS_RULE_NAME}>"
+    before = f"<{CLOCK_BEFORE_RULE_NAME}>"
+    if block.action == "off":
+        return {f"{command} {after}", f"{before} {command}"}
+    return {
+        f"{command} {after}",
+        f"{command} {EXTRAS} {after_extras}",
+        f"{command} {after} {EXTRAS}",
+        f"{before} {command} [{EXTRAS}]",
+    }
+
+
+def clock_gaps(data: Mapping[str, Any], generated: Mapping[str, Any]) -> list[str]:
+    """Where the generated file `generated` does not say at a clock time what Home
+    Assistant says to turn a device on or off by its name, for any kind of device, or
+    says more: the twin of `gaps` for the intent of the commands at a clock time, with
+    the time in the place of the delay."""
+    blocks = command_blocks(data)
+    rules = generated["expansion_rules"]
+    problems: list[str] = []
+    for action in ("on", "off"):
+        own = [block for block in blocks if block.action == action]
+        at_a_time = [
+            block
+            for block in generated["intents"][CLOCK_COMMAND]["data"]
+            if block["slots"]["action"] == action
+        ]
+        for domain in probes(blocks):
+            wanted = {
+                s for block in own if admitted(block, domain) for s in wanted_at(block)
+            }
+            said = {
+                said_sentence
+                for block in at_a_time
+                if admits(block, domain)
+                for s in block["sentences"]
+                for said_sentence in expanded(block, rules, s)
+            }
+            problems += [
+                f"{action} {domain}: {s!r} is not said at a time" for s in wanted - said
+            ]
+            problems += [
+                f"{action} {domain}: {s!r} is said at a time" for s in said - wanted
+            ]
+    return problems
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_the_file_says_every_command_at_a_clock_time_for_every_kind_of_device(
+    language: str,
+) -> None:
+    """Whatever Home Assistant says to turn a device on or off by its name, the file
+    says at a clock time too, with the settings and how long it runs for a command to
+    turn on, in the same places as after a delay, and for the same kinds of device. The
+    answer of the intent is the one of a command for later."""
+    data = get_intents(language)
+    assert data is not None
+    generated = shipped(language)
+
+    assert clock_gaps(data, generated) == []
+    for block in generated["intents"][CLOCK_COMMAND]["data"]:
+        assert block["response"] == "delayed"
+        assert block["slots"].keys() == {"action"}
+
+
+def without_the_first_clock_sentence(generated: dict[str, Any]) -> None:
+    block = generated["intents"][CLOCK_COMMAND]["data"][0]
+    block["sentences"] = block["sentences"][1:]
+
+
+def without_water_heaters_turned_on_at_a_time(generated: dict[str, Any]) -> None:
+    blocks = generated["intents"][CLOCK_COMMAND]["data"]
+    blocks[:] = [
+        block
+        for block in blocks
+        if "water_heater" not in block.get("requires_context", {}).get("domain", [])
+    ]
+
+
+def with_the_last_stop_at_a_time_for_every_device(generated: dict[str, Any]) -> None:
+    generated["intents"][CLOCK_COMMAND]["data"][-1].pop("requires_context")
+
+
+def without_a_command_at_a_time_to_turn_off(generated: dict[str, Any]) -> None:
+    blocks = generated["intents"][CLOCK_COMMAND]["data"]
+    blocks[:] = [block for block in blocks if block["slots"]["action"] == "on"]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        without_the_first_clock_sentence,
+        without_water_heaters_turned_on_at_a_time,
+        with_the_last_stop_at_a_time_for_every_device,
+        without_a_command_at_a_time_to_turn_off,
+    ],
+    ids=lambda mutate: mutate.__name__,
+)
+def test_a_file_that_leaves_a_clock_sentence_out_or_adds_one_is_caught(
+    language: str, mutate: Callable[[dict[str, Any]], None]
+) -> None:
+    """The proof above sees what it is there for: a sentence at a clock time that is
+    missing, a command for a kind of device that is not, a command to turn off that is
+    not, and one for every device that was written for one kind only."""
+    data = get_intents(language)
+    assert data is not None
+    generated = shipped(language)
+    assert clock_gaps(data, generated) == []
+
+    mutate(generated)
+
+    assert clock_gaps(data, generated)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_scope_carries_the_clock_rule_that_it_says_its_own_way(
+    language: str,
+) -> None:
+    """In English a thermostat and a water heater say a time after their settings with
+    minutes, "o'clock", "am", "pm", "noon" or "midnight" (a bare number there is their
+    temperature), and the commands at a clock time of those two say it so. Russian says
+    a time with a preposition of its own, so its commands say it one way everywhere."""
+    thermostats = {"climate", "water_heater"}
+    rule = CLOCK_AFTER_EXTRAS_RULE_NAME
+    blocks = [
+        block
+        for block in shipped(language)["intents"][CLOCK_COMMAND]["data"]
+        if block["slots"]["action"] == "on"
+    ]
+
+    narrowed = {
+        domain
+        for block in blocks
+        if rule in block["expansion_rules"]
+        for domain in block["requires_context"]["domain"]
+    }
+
+    assert narrowed == (thermostats if language == "en" else set())
+    for block in blocks:
+        if rule in block["expansion_rules"]:
+            assert block["expansion_rules"][rule] == "<timerify_exact_clock>"
+
+
+def test_a_time_is_said_only_in_the_places_it_has_a_rule_for() -> None:
+    """The sentences of a block say the command with the time after it, after how long
+    it runs and its settings, and before it, for each place that has a rule; a command
+    to turn off has no extras."""
+    on = CommandBlock("on", ("{name}",), ())
+    off = CommandBlock("off", ("{name}",), ())
+    command = COMMAND_RULE
+
+    assert timed_sentences(on, None, None, None) == []
+    assert timed_sentences(on, "a", "b", "c") == [
+        f"{command} <a>",
+        f"{command} {EXTRAS} <b>",
+        f"{command} <a> {EXTRAS}",
+        f"<c> {command} [{EXTRAS}]",
+    ]
+    assert timed_sentences(on, None, "b", None) == [f"{command} {EXTRAS} <b>"]
+    assert timed_sentences(on, "a", None, None) == [
+        f"{command} <a>",
+        f"{command} <a> {EXTRAS}",
+    ]
+    assert timed_sentences(off, "a", "b", "c") == [f"{command} <a>", f"<c> {command}"]
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [CLOCK_AFTER_RULE_NAME, CLOCK_AFTER_EXTRAS_RULE_NAME, CLOCK_BEFORE_RULE_NAME],
+)
+def test_the_generator_refuses_sentences_that_lack_a_way_to_say_the_time(
+    missing: str,
+) -> None:
+    """A language whose sentences cannot say a time would have a handler for a command
+    at a clock time that no sentence reaches: the generator stops."""
+    data = get_intents("en")
+    assert data is not None
+    sources = read_back((SENTENCES_DIR / "en" / SOURCE_FILE).read_text("utf-8"))
+    blocks = command_blocks(data)
+    scopes = run_scopes(sources)
+    assert clock_blocks(blocks, scopes, sources)
+
+    del sources["expansion_rules"][missing]
+
+    with pytest.raises(ValueError, match=f"do not define {missing}"):
+        clock_blocks(blocks, scopes, sources)
+
+
 def without_the_first_sentence(generated: dict[str, Any]) -> None:
     block = generated["intents"][DELAYED_COMMAND]["data"][0]
     block["sentences"] = block["sentences"][1:]
@@ -2201,8 +2403,8 @@ async def test_llm_plans_a_command_to_turn_off(
 async def test_llm_plans_a_command_at_a_clock_time(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
 ) -> None:
-    """P-5: a tool takes the time of day that the service takes, on the clock of the
-    house, which voice does not say."""
+    """P-5: a tool takes the date and time that the service takes, on the clock of the
+    house; the sentences say a time of day in slots of their own, which no tool has."""
     api = await assist_api(hass)
 
     planned = await call_tool(

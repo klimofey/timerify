@@ -12,6 +12,7 @@ from homeassistant.helpers import intent
 from .base import TimerifyIntentHandler
 from .commands import (
     CancelCommandsHandler,
+    ClockCommandHandler,
     DelayedCommandHandler,
     ListCommandsHandler,
 )
@@ -24,11 +25,20 @@ HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (
     AddTimeHandler,
     StopHandler,
     DelayedCommandHandler,
+    ClockCommandHandler,
     ListCommandsHandler,
     CancelCommandsHandler,
     SetScheduleHandler,
 )
 """Every handler Timerify registers, one per intent type."""
+TOOL_HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = tuple(
+    handler_type
+    for handler_type in HANDLER_TYPES
+    if handler_type is not ClockCommandHandler
+)
+"""The handlers that an LLM agent is offered as tools: every handler but the one that
+only sentences reach. A clock time is said to a model with `at`, a moment, in the tool
+of the delayed command."""
 
 
 @callback

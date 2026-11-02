@@ -2,8 +2,8 @@
 that are planned, and cancel them."""
 
 from collections.abc import Mapping
-from datetime import datetime, timedelta
-from typing import Any, ClassVar, Final, Literal
+from datetime import datetime, time, timedelta, tzinfo
+from typing import Any, ClassVar, Final, Literal, override
 
 import probatio
 from homeassistant.exceptions import ServiceValidationError
@@ -14,6 +14,7 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN
 from ..controller import TimerifyConfigEntry, command_when
 from ..core import Command
+from ..schedule import wall_moment
 from ..services import command_time
 from ..target import target_name
 from .base import (
@@ -72,6 +73,13 @@ class DelayedCommandHandler(TimerifyIntentHandler):
         **SETTING_SLOTS,
     }
 
+    def when(self, slots: Mapping[str, Any]) -> datetime | timedelta:
+        """When the command is due, from the slots: how long from now, or a moment.
+
+        Raises ServiceValidationError (`delay_or_at`) for both and for neither.
+        """
+        return command_when(_delay_of(slots), _clock_time_of(slots))
+
     async def async_handle_timer(
         self,
         intent_obj: intent.Intent,
@@ -81,7 +89,7 @@ class DelayedCommandHandler(TimerifyIntentHandler):
     ) -> None:
         hass = intent_obj.hass
         controller = entry.runtime_data
-        when = command_when(_delay_of(slots), _clock_time_of(slots))
+        when = self.when(slots)
         duration = duration_of(slots)
         settings = settings_of(hass, entry, slots)
         if slots["action"]["value"] == "on":
@@ -158,6 +166,114 @@ def _clock_time_of(slots: Mapping[str, Any]) -> datetime | None:
             translation_domain=DOMAIN, translation_key="invalid_command_time"
         ) from err
     return moment
+
+
+type DayPart = Literal["am", "pm", "night"]
+"""What a speaker says after an hour of the twelve-hour clock to tell its two times
+apart: "am" or the Russian word for the morning, "pm" or the words for the afternoon and
+the evening, and the Russian word for the night."""
+
+_HALF_DAY: Final = 12
+_NIGHT_ENDS: Final = 6
+"""The hour from which a speaker who says "7 at night" means the evening: before it the
+night is the small hours ("2 at night"), from it to noon the hour is a night hour of the
+evening ("11 at night")."""
+
+
+def hour_of_day(hour: int, part: DayPart | None) -> int:
+    """The hour of the 24-hour clock, 0 to 23, that `hour` means said with `part`.
+
+    The morning (`am`) has 12 as 0 and every other hour as it is. The afternoon and the
+    evening (`pm`) have 12 as 12 and every other hour plus 12. The night has 12 as 0,
+    1 to 5 as they are and 6 to 11 plus 12. Without a part the hour is already that of
+    the 24-hour clock.
+    """
+    match part:
+        case None:
+            return hour
+        case "am":
+            return hour % _HALF_DAY
+        case "pm":
+            return hour % _HALF_DAY + _HALF_DAY
+        case "night":
+            evening = _NIGHT_ENDS <= hour < _HALF_DAY
+            return hour % _HALF_DAY + (_HALF_DAY if evening else 0)
+
+
+def clock_moment(
+    now: datetime,
+    zone: tzinfo,
+    hour: int,
+    minute: int,
+    part: DayPart | None,
+    day: int | None,
+) -> datetime:
+    """The moment, in UTC, that a clock time said at `now` means on the wall clock of
+    `zone`; `day` is the day word said with it, in days from today (0, 1 or 2), or None.
+
+    An hour from 1 to 12 said with no part is the nearer of its morning and evening
+    times that is ahead; any other hour is that of the 24-hour clock, and a part fixes
+    the half of the day. Without a day word the time is the next one, today or
+    tomorrow, and a time equal to `now` is tomorrow's. With one it is on that date, and
+    the earlier of the times an hour can mean is taken unless it has passed today and
+    the other has not. A time that has passed is returned as it is: the controller
+    refuses it. The wall time follows `schedule.wall_moment`.
+    """
+    if part is None and 1 <= hour <= _HALF_DAY:
+        hours = [hour % _HALF_DAY, hour % _HALF_DAY + _HALF_DAY]
+    else:
+        hours = [hour_of_day(hour, part)]
+    today = now.astimezone(zone).date()
+    moments = [
+        wall_moment(today + timedelta(days=ahead), time(h, minute), zone)
+        for ahead in ((0, 1) if day is None else (day,))
+        for h in hours
+    ]
+    return min((moment for moment in moments if moment > now), default=moments[0])
+
+
+class ClockCommandHandler(DelayedCommandHandler):
+    """Turn on the boiler at 7:30, turn it off at 23:00: the command of a delayed
+    command, at a time of day.
+
+    It is for the sentences of the built-in agent only, which say the time with
+    `clock_hour`, `clock_minute`, `clock_part` and `clock_day` as a person says it. An
+    LLM agent has no such tool: the tool of the delayed command takes `at`, a moment,
+    and these slots would only confuse a model. The rest is the delayed command's.
+
+    "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
+    is not the bare 12 of "at 12", which is the nearer of the two.
+    """
+
+    intent_type = "TimerifyCommandAt"
+    slot_schema: ClassVar[dict[Any, Any]] = {
+        probatio.Required("name"): cv.string,
+        probatio.Required("action"): probatio.In(["on", "off"]),
+        probatio.Optional("clock_hour"): probatio.All(
+            whole_slot, probatio.Range(min=0, max=23)
+        ),
+        probatio.Optional("clock_minute"): probatio.All(
+            whole_slot, probatio.Range(min=0, max=59)
+        ),
+        probatio.Optional("clock_part"): probatio.In(["am", "pm", "night"]),
+        probatio.Optional("clock_day"): probatio.In([0, 1, 2]),
+        probatio.Optional("hours"): whole_slot,
+        probatio.Optional("minutes"): whole_slot,
+        **PERCENT_SLOT,
+        **SETTING_SLOTS,
+    }
+
+    @override
+    def when(self, slots: Mapping[str, Any]) -> datetime | timedelta:
+        """The moment the clock slots say, on the clock of the house."""
+        return clock_moment(
+            dt_util.utcnow(),
+            dt_util.get_default_time_zone(),
+            slots.get("clock_hour", {}).get("value", _HALF_DAY),
+            slots.get("clock_minute", {}).get("value", 0),
+            slots.get("clock_part", {}).get("value"),
+            slots.get("clock_day", {}).get("value"),
+        )
 
 
 def command_slots(command: Command, now: datetime) -> dict[str, Any]:

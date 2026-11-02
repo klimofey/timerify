@@ -3,7 +3,7 @@
 Every scenario asks the real Assist API for the tools of a request, as a conversation
 agent or the MCP server does, and calls a tool through it. Which tools there are and
 what they say about themselves is checked for every handler Timerify registers
-(`HANDLER_TYPES`), so a handler that is added later is held to the same rules.
+(`TOOL_HANDLER_TYPES`), so a handler that is added later is held to the same rules.
 """
 
 import itertools
@@ -19,8 +19,9 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import DOMAIN
 from custom_components.timerify.llm import async_get_tools, handler_tool
-from custom_components.timerify.voice import HANDLER_TYPES
+from custom_components.timerify.voice import HANDLER_TYPES, TOOL_HANDLER_TYPES
 from custom_components.timerify.voice.base import TimerifyIntentHandler
+from custom_components.timerify.voice.commands import ClockCommandHandler
 from custom_components.timerify.voice.timer import TimeLeftHandler
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
@@ -59,7 +60,7 @@ repeated; so is cancelling commands, since the same call with "next" cancels ano
 command each time it is made (a firm promise, P1), where core's cancel tools name the
 one timer they cancel. None reaches outside Home Assistant."""
 EVERY_HANDLER = pytest.mark.parametrize(
-    "handler", HANDLER_TYPES, ids=lambda handler: handler.tool_name
+    "handler", TOOL_HANDLER_TYPES, ids=lambda handler: handler.tool_name
 )
 
 
@@ -110,10 +111,31 @@ async def test_tools_are_offered_while_a_target_is_exposed(
     api = await assist_api(hass)
 
     tools = timerify_tools(api)
-    assert set(tools) == {handler.tool_name for handler in HANDLER_TYPES}
+    assert set(tools) == {handler.tool_name for handler in TOOL_HANDLER_TYPES}
     assert all(re.fullmatch(r"[a-z0-9_]{1,64}", name) for name in tools)
     assert {tool.integration for tool in tools.values()} == {DOMAIN}
     assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+
+
+async def test_the_clock_sentences_add_no_llm_tool(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    """A command at a clock time is a sentence of the built-in agent: its handler is
+    registered, and the tool of the delayed command, which takes `at`, is what a model
+    plans a command at a clock time with. The slots that sentences say a time with would
+    only confuse a model, so the tools are exactly those of the handlers that are
+    meant to be tools."""
+    api = await assist_api(hass)
+
+    tools = timerify_tools(api)
+
+    assert ClockCommandHandler in HANDLER_TYPES
+    assert ClockCommandHandler not in TOOL_HANDLER_TYPES
+    assert set(HANDLER_TYPES) - set(TOOL_HANDLER_TYPES) == {ClockCommandHandler}
+    assert set(tools) == {handler.tool_name for handler in TOOL_HANDLER_TYPES}
+    assert len(tools) == len(TOOL_HANDLER_TYPES)
+    for tool in tools.values():
+        assert "clock_hour" not in tool.parameters.schema
 
 
 @EVERY_HANDLER
@@ -250,7 +272,9 @@ async def test_tools_follow_the_exposure_to_the_asking_assistant(
     expose(hass, TARGET_ID, True, "cloud.alexa")
 
     api = await assist_api(hass, assistant="cloud.alexa")
-    assert set(timerify_tools(api)) == {handler.tool_name for handler in HANDLER_TYPES}
+    assert set(timerify_tools(api)) == {
+        handler.tool_name for handler in TOOL_HANDLER_TYPES
+    }
 
 
 async def test_no_tools_for_another_llm_api(

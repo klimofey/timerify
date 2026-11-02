@@ -31,6 +31,8 @@ Each sentence has more wordings than the table shows. In English, "the" is optio
 | Turn on or off by name | turn on the boiler, turn off the boiler | vklyuchi Boiler, vyklyuchi Boiler |
 | Turn on later | turn on the boiler in 15 minutes for an hour | vklyuchi Boiler cherez 15 minut na chas |
 | Turn off later | turn off the boiler in 20 minutes | vyklyuchi Boiler cherez 20 minut |
+| Turn on at a time | turn on the boiler at 7:30 | vklyuchi Boiler v 7:30 |
+| Turn off at a time | turn off the boiler at 7:30 | vyklyuchi Boiler v 7:30 |
 | What is planned | what is planned for the boiler | chto zaplanirovano u taymera Boiler |
 | Cancel what is planned | cancel all planned commands for the boiler | otmeni vse zaplanirovannye komandy u taymera Boiler |
 | Cancel the next one | cancel the next planned command for the boiler | otmeni blizhayshuyu zaplanirovannuyu komandu u taymera Boiler |
@@ -91,6 +93,23 @@ The Russian column is transliterated because this page is in English. The real s
 - In English, you can end a delay with "from now", "from today" or "later". It works with days, weeks and these words. Examples are "turn on the boiler 2 days from now" and "turn on the boiler a week later". You can say it before the command too: "a week from now turn on the boiler".
 - The limits above hold for days and weeks. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer names the limit. More than 365 days or 52 weeks is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
+
+**Turn on or off at a time**
+
+- You can name a time of day instead of a delay, such as "turn on the boiler at 7:30" or "turn off the boiler at 23:00". Home Assistant has no such sentences. Timerify adds them for the devices that have a timer.
+- The time can come after the command or before it: "at 7:30 turn on the boiler".
+- You can add a day: "today", "tomorrow" or "the day after tomorrow". Say it before the time or after it: "tomorrow at 7" or "at 7 tomorrow".
+- You can say the time as "7:30", "7.30" or "7 30", or in words, such as "seven thirty". "7 o'clock", "noon" and "midnight" work too.
+- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
+- An hour from 1 to 12 without any of these is the nearer of its two times ahead. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am" or "pm" to choose the other one.
+- With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
+- The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
+- "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
+- Without a day, a time is the next one: today if it is still ahead, tomorrow if it has passed. With the word "today", a time that has passed is refused, and the answer names it.
+- A time that the change of the clock skips or repeats follows [the rule of the schedules](schedules.md#clock-changes-and-time-zones).
+- A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
+- A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer names the limit.
+- A thermostat or a water heater reads a bare number after its settings as a temperature, such as "turn on the AC for an hour at 21". So after the settings, say the time with minutes or with "o'clock", "am", "pm", "noon" or "midnight", such as "at 7:30". Before the settings, every form works. Russian needs no such care, because its time starts with "v".
 
 **What is planned**
 
@@ -216,11 +235,10 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 | `timerify__cancel_commands` | Cancels all the commands, the next one, or one by its id. |
 | `timerify__set_schedule` | Switches the schedule on or off, or one interval by its title. |
 
-An agent can plan a command at a clock time, which the built-in agent's sentences cannot. If the interval is empty, the whole schedule is switched.
+If the interval is empty, the whole schedule is switched.
 
 ## What you cannot say
 
-- **A command at a clock time**, such as "turn on the boiler at 7:30". The built-in agent's sentences take a delay only. An LLM agent can give a time.
 - **Taking time off**, such as "10 minutes less". Set the countdown to the new length instead.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.

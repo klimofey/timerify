@@ -346,6 +346,7 @@ RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyAddTime", "default"): TIMER_CASES,
     ("TimerifyStop", "default"): TIMER_CASES,
     ("TimerifyDelayedCommand", "delayed"): LATER_CASES,
+    ("TimerifyCommandAt", "delayed"): LATER_CASES,
     ("TimerifyListCommands", "default"): LIST_CASES,
     ("TimerifyCancelCommands", "default"): CANCEL_CASES,
     ("TimerifySetSchedule", "default"): SCHEDULE_CASES,
@@ -857,13 +858,19 @@ def _first_sample(
     return None if first is None else first.strip()
 
 
-def spoken_rule(language: str, rule_name: str, numbers: Mapping[str, int]) -> list[str]:
+def spoken_rule(
+    language: str,
+    rule_name: str,
+    numbers: Mapping[str, int],
+    texts: Mapping[str, str] | None = None,
+) -> list[str]:
     """Every text the shipped expansion rule `rule_name` of `language` can be said as,
-    with the lists of numbers it says a value of cut down to the one `numbers` gives:
-    the forms of a part of a sentence (the word for hours after a count), read from the
-    sentence files so that a test can use them without writing them."""
+    with the lists of numbers it says a value of cut down to the one `numbers` gives,
+    and a list of words to its first value or the one `texts` gives: the forms of a part
+    of a sentence (the word for hours after a count), read from the sentence files so
+    that a test can use them without writing them."""
     intents = _intents_of(language)
-    slot_lists = _one_value(dict(intents.slot_lists), (), numbers, {}, ())
+    slot_lists = _one_value(dict(intents.slot_lists), (), numbers, texts or {}, ())
     return [
         text.strip()
         for text in sample_sentence(

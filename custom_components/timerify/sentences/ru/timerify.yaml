@@ -86,6 +86,12 @@ expansion_rules:
   timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: на <timerify_duration>
   timerify_own_delay: через ({timerify_delay_days:delay_days} (день|дня|дней)|{timerify_delay_weeks:delay_weeks} (неделю|недели|недель)|{timerify_delay_words:delay_minutes})
+  timerify_clock_after_command: <timerify_clock>
+  timerify_clock_after_extras: <timerify_clock_after_command>
+  timerify_clock_before_command: <timerify_clock>
+  timerify_clock: (<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])
+  timerify_clock_day: '{timerify_clock_days:clock_day}'
+  timerify_clock_time: в ({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
   timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
@@ -126,6 +132,40 @@ lists:
       out: 720
     - in: неделю
       out: 10080
+  timerify_clock_hours:
+    range:
+      from: 0
+      to: 23
+  timerify_half_day_hours:
+    range:
+      from: 1
+      to: 12
+  timerify_clock_minutes:
+    range:
+      from: 0
+      to: 59
+  timerify_day_parts:
+    values:
+    - in: утра
+      out: am
+    - in: (дня|вечера)
+      out: pm
+    - in: ночи
+      out: night
+  timerify_clock_words:
+    values:
+    - in: полдень
+      out: pm
+    - in: полночь
+      out: am
+  timerify_clock_days:
+    values:
+    - in: сегодня
+      out: 0
+    - in: завтра
+      out: 1
+    - in: послезавтра
+      out: 2
   timerify_temperature:
     range:
       from: 1
@@ -326,6 +366,36 @@ responses:
         {%- endmacro -%}
         {{ timer_now(slots) }}
     TimerifyDelayedCommand:
+      delayed: |-
+        {%- macro plural(n, one, few, many) -%}
+          {%- if n % 10 == 1 and n % 100 != 11 -%}
+            {{ one }}
+          {%- elif n % 10 in [2, 3, 4] and n % 100 not in [12, 13, 14] -%}
+            {{ few }}
+          {%- else -%}
+            {{ many }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro day(n) -%}
+          {%- if n == 1 -%}
+            {{ "завтра " }}
+          {%- elif n == 2 -%}
+            {{ "послезавтра " }}
+          {%- elif n > 2 -%}
+            {{ "через " ~ n ~ " " ~ plural(n, "день", "дня", "дней") ~ " " }}
+          {%- endif -%}
+        {%- endmacro -%}
+        {%- macro timer_later(slots) -%}
+          {%- if slots.outcome == "command_added" -%}
+            {{ slots.target }}: включится {{ day(slots.in_days) }}в {{ slots.at }}.
+          {%- elif slots.outcome == "timer_set" -%}
+            {{ slots.target }}: выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+          {%- else -%}
+            {{ slots.target }}: уже выключено, ничего не изменилось.
+          {%- endif -%}
+        {%- endmacro -%}
+        {{ timer_later(slots) }}
+    TimerifyCommandAt:
       delayed: |-
         {%- macro plural(n, one, few, many) -%}
           {%- if n % 10 == 1 and n % 100 != 11 -%}

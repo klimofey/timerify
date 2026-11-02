@@ -11,7 +11,7 @@ A pending command says "at this time, do this". It can turn the device on, or it
 - Each command is at most 7 days ahead.
 - Each command can be cancelled on its own.
 
-You make a command with the [**Add command** action](services.md#add-command). By voice, [the built-in agent's](voice.md#the-built-in-agent-and-llm-agents) sentences plan a command to turn on, for example "turn on the boiler in 15 minutes". Its "turn off in 20 minutes" sets the countdown instead. You cancel a command with the [**Cancel command** action](services.md#cancel-command), by voice, or in the [pop-up of the dashboard card](card.md#the-pop-up). The [Actions](services.md), [Voice](voice.md) and [Dashboard card](card.md) pages describe these.
+You make a command with the [**Add command** action](services.md#add-command). By voice, [the built-in agent's](voice.md#the-built-in-agent-and-llm-agents) sentences plan a command to turn on, for example "turn on the boiler in 15 minutes" or "turn on the boiler at 7:30". Its "turn off in 20 minutes" sets the countdown instead. You cancel a command with the [**Cancel command** action](services.md#cancel-command), by voice, or in the [pop-up of the dashboard card](card.md#the-pop-up). The [Actions](services.md), [Voice](voice.md) and [Dashboard card](card.md) pages describe these.
 
 ## How a pending command behaves
 

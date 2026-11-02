@@ -16,6 +16,13 @@ export function renderIcon(view: TimerView): TemplateResult {
 }
 
 /**
+ * What the body announces of a tap, to assistive technology: that it opens a dialog, when the
+ * tap is set to open the pop-up, and nothing when it is set to do anything else.
+ */
+export const popupAnnounced = (config: CardConfig): "dialog" | undefined =>
+  config.tap === "popup" ? "dialog" : undefined;
+
+/**
  * What the card says under the name while nothing counts: the state of the target in the
  * user's language, or that the timer is unavailable. A timer that has a value and is only
  * waiting to be found says nothing yet, so a page that has just opened shows no flicker.
@@ -111,6 +118,17 @@ export const commonStyles = css`
   }
   .remaining {
     font-variant-numeric: tabular-nums;
+  }
+  /* What a layout shows while letting go of a long press would act: it pulses. */
+  @keyframes pulse {
+    from {
+      opacity: 1;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0.6;
+      transform: scale(1.08);
+    }
   }
 `;
 

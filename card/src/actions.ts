@@ -44,6 +44,11 @@ export function runWithoutDuration(hass: HomeAssistant, runFor: string): Promise
   return callOnEntity(hass, "timerify", "run", {}, runFor);
 }
 
+/** Stops the timer with Timerify's own action: the countdown ends and the target turns off. */
+export function stop(hass: HomeAssistant, runFor: string): Promise<void> {
+  return callOnEntity(hass, "timerify", "stop", {}, runFor);
+}
+
 /** Turns the switch of a schedule interval on, or off: the interval is then open or not. */
 export function setIntervalEnabled(
   hass: HomeAssistant,

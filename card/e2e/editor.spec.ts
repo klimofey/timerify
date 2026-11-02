@@ -87,6 +87,26 @@ async function saveCard(page: Page): Promise<void> {
 const presetChip = (page: Page, label: string) =>
   page.getByRole("button", { name: label, exact: true });
 
+/** The choices of a press, as the editor words them. */
+const PRESS_CHOICES = [
+  "card_editor_press_popup",
+  "card_editor_press_run",
+  "card_editor_press_stop",
+  "card_editor_press_run_or_stop",
+  "card_editor_press_action",
+  "card_editor_press_none",
+] as const;
+
+/**
+ * The drop-down of what a press does, by its label: an empty one shows its label in its place.
+ */
+const behaviour = (page: Page, label: string, words: Record<string, string> = english) =>
+  page.getByText(words[label], { exact: true });
+
+/** A choice in the drop-down that is open. */
+const menuChoice = (page: Page, key: string, words: Record<string, string> = english) =>
+  page.getByRole("menuitem", { name: words[key], exact: true });
+
 /** The button that takes the chip of a preset away. */
 const removeChip = (page: Page, label: string) =>
   page.getByRole("button", { name: `Remove ${label}` });
@@ -163,6 +183,42 @@ test.describe("the card in Home Assistant's editor", () => {
         },
       ]);
     await expect(page.locator("timerify-card ha-card.round")).toBeVisible();
+  });
+
+  test("sets what a tap does in the Interactions group", async ({ page, state, ws }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+
+    // The group is shut until the user opens it.
+    const group = page.getByText(english["card_editor_interactions"], { exact: true });
+    await expect(group).toBeVisible();
+    await expect(behaviour(page, "card_editor_tap")).toBeHidden();
+    await group.click();
+    for (const press of ["card_editor_tap", "card_editor_double_tap", "card_editor_hold"]) {
+      await expect(behaviour(page, press), press).toBeVisible();
+    }
+
+    await behaviour(page, "card_editor_tap").click();
+    for (const choice of PRESS_CHOICES) {
+      await expect(menuChoice(page, choice), choice).toBeVisible();
+    }
+    await menuChoice(page, "card_editor_press_run").click();
+    await saveCard(page);
+
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          tap: "run",
+        },
+      ]);
   });
 
   test("falls back on the default presets when the last one is taken away", async ({
@@ -280,11 +336,19 @@ test.describe("the card in Home Assistant's editor", () => {
       await pickCard(page, ru);
 
       await expect(page.locator("html")).toHaveAttribute("lang", "ru");
-      for (const field of ["entity", "layout", "name", "icon", "presets", "chip"]) {
+      for (const field of ["entity", "layout", "name", "icon", "presets", "chip", "interactions"]) {
         await expect(
           page.getByText(ru[`card_editor_${field}`], { exact: true }),
           field,
         ).toBeVisible();
+      }
+      await page.getByText(ru["card_editor_interactions"], { exact: true }).click();
+      for (const press of ["card_editor_tap", "card_editor_double_tap", "card_editor_hold"]) {
+        await expect(behaviour(page, press, ru), press).toBeVisible();
+      }
+      await behaviour(page, "card_editor_tap", ru).click();
+      for (const choice of PRESS_CHOICES) {
+        await expect(menuChoice(page, choice, ru), choice).toBeVisible();
       }
       for (const layout of ["pill", "round"]) {
         await expect(

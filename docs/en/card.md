@@ -2,7 +2,7 @@
 
 Timerify brings a dashboard card for one timer. It shows the countdown at a glance.
 
-A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor.
+A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor. You can set what a tap, a double tap and a long press do.
 
 ## Loading the card
 
@@ -30,7 +30,7 @@ On the pill are the icon of the device, its name, and the time left with the mom
 
 The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. The name is below.
 
-The round tile has no chip. You can long-press it. See [The long press of the round tile](#the-long-press-of-the-round-tile).
+The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses).
 
 ![The round layout: a ring two thirds full around 30:00, beside a timer that is off](../screenshots/card-round.png)
 
@@ -61,6 +61,11 @@ name: Boiler                              # default: the name of the device
 icon: mdi:water-boiler                    # default: the icon of the device, which follows its state
 presets: ["15", "30", "45", "60", "120"]  # the default: the minutes the pop-up offers
 chip: 15                                  # no chip by default: the pill's "+15 min" chip
+tap: popup                                # popup (the default), run, stop, run_or_stop, action or none
+double_tap: none                          # the same choices, none by default
+hold: none                                # the same choices, run_or_stop on the round tile by default
+tap_action:                               # a Home Assistant action, used when tap is action
+  action: more-info
 ```
 
 | Option | Default | What it is |
@@ -71,6 +76,10 @@ chip: 15                                  # no chip by default: the pill's "+15 
 | `icon` | the device's icon | An icon such as `mdi:water-boiler`. It does not follow the state. |
 | `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. The pop-up does not show a preset that is longer than the timer's **Maximum of Run for**. Home Assistant would refuse it. |
 | `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
+| `tap` | `popup` | What a tap does. One of `popup`, `run`, `stop`, `run_or_stop`, `action` and `none`. See [Presses](#presses). |
+| `double_tap` | `none` | What a double tap does. The same choices. |
+| `hold` | `run_or_stop` on the round tile, `none` on the pill | What a long press does. The same choices. |
+| `tap_action`, `double_tap_action`, `hold_action` | none | A Home Assistant action, written as settings such as `action: more-info`. It is used when that press is set to `action`. |
 
 An option that the card does not know is ignored. A value that it cannot use is shown as a message on the card, which says what is wrong.
 
@@ -80,13 +89,14 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 
 - It writes presets as text (`"15"`). Write them as text in YAML too, if you edit the card in the form afterwards. A list of numbers (`[15, 30]`) is shown in the form as bare chips ("15", not "15 min"). Its drop-down offers the defaults again, even when they are in the list. Picking one adds a second copy, which the card ignores.
 - Taking the last preset away leaves the list empty, which means the defaults.
+- The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field, and does its default.
 - A value that the form accepts but the card cannot use, such as a preset of 0, stays in the form. The preview shows the card's message. Only a value of the wrong kind sends the editor to YAML. An example is presets that are not a list.
 - A card written by hand without a layout is a pill. But the form does not preselect it, because Home Assistant's editor does not apply the defaults of a form.
-- Home Assistant itself translates the names of the fields. Three things are not translated that way: the names of the two layouts, the labels of the preset options and the text under them. They are in the language of the last card that the page loaded. Before any card has loaded, they are in English.
+- Home Assistant itself translates the names of the fields. Some words are not translated that way: the names of the two layouts, the six choices of a press, the labels of the preset options and the text under the fields. They are in the language of the last card that the page loaded. Before any card has loaded, they are in English.
 
 ## The pop-up
 
-A tap anywhere on the card opens it, the border included. The chip is the exception, because it has its own job. The card is a button for the keyboard and assistive technology too. Focus it with Tab and press Enter or Space.
+By default a tap anywhere on the card opens it, the border included. The chip is the exception, because it has its own job. The card is a button for the keyboard and assistive technology too. Focus it with Tab and press Enter or Space.
 
 The pop-up is a modal dialog. Escape, the **Close** button and a click on the dimmed page behind it close it. From top to bottom it holds:
 
@@ -101,15 +111,55 @@ A timer that is unavailable has nothing to act on. Its presets, plus, minus, Sto
 
 Times follow your profile: its language, its 12 or 24 hour clock and its time zone, the server's or the browser's. A time on the same day is shown as a time. Within the next six days it is shown with the short weekday. Further ahead it is shown with the date. Durations such as "1 hr 30 min" are written for your language.
 
-## The long press of the round tile
+## Presses
 
-Hold the round tile for half a second. The ring starts to pulse, which means that letting go will act.
+You can set what a tap, a double tap and a long press do. These are the defaults:
 
-- A timer that is idle runs, as the [**Run** action](services.md#run) does with no duration. In **Strict** mode the device runs for the default duration. In **Loose** mode it turns on with no countdown. The [Modes](timers.md#modes) section explains both.
-- A timer that runs, with or without a countdown, stops.
-- A timer that is unavailable does nothing.
+| Press | Default |
+| --- | --- |
+| Tap | Opens the pop-up. |
+| Double tap | Nothing. |
+| Long press | On the round tile, starts or stops the timer. On the pill, nothing. |
 
-Letting go early is an ordinary tap. Moving off the tile before letting go cancels the press. The pill has no long press. With a mouse, a long press on it is a tap. With a finger, it does nothing. Keyboard users start and stop through the pop-up.
+Each press can be set to one of six choices. The visual editor names them as the first column does. The second column is the value for YAML.
+
+| Choice | Value | What it does |
+| --- | --- | --- |
+| Open the pop-up | `popup` | Opens [the pop-up](#the-pop-up). |
+| Run for the default duration | `run` | Runs the timer, as the [**Run** action](services.md#run) does with no duration. In **Strict** mode the device runs for the default duration. In **Loose** mode it turns on with no countdown. The [Modes](timers.md#modes) section explains both. A timer that already runs keeps its countdown. |
+| Stop | `stop` | Stops the timer, as the [**Stop** action](services.md#stop) does. It ends the countdown and turns the device off. |
+| Start or stop | `run_or_stop` | Runs a timer that is idle, as **Run for the default duration** does. Stops a timer that runs, with or without a countdown. A timer that is unavailable does nothing. |
+| Home Assistant action | `action` | Does a [Home Assistant action](#home-assistant-actions) that you choose. |
+| Nothing | `none` | Does nothing. |
+
+A long press lasts half a second. The ring of the round tile starts to pulse, and so does the icon of the pill. That means that letting go will act. A timer that is unavailable has nothing to act on, so its ring and icon stay still. Letting go early is an ordinary tap. Moving off the card before letting go cancels the press.
+
+A card whose long press is set to **Nothing** has no long press. With a mouse, a long press on it is a tap. With a finger, it does nothing.
+
+When a double tap is set, a tap waits a quarter of a second to see whether a second one follows. If it does, only the double tap acts. If it does not, the tap acts. So the pop-up opens a moment later than it would without a double tap. Without one, a tap acts at once.
+
+Enter and Space do what a tap does, at once. The keyboard has no double tap and no long press. So keep the pop-up on the tap when people use the keyboard. The other presses are then shortcuts for the mouse and the finger.
+
+### Home Assistant actions
+
+Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. They are more info, toggle, navigate, open a URL, perform an action and Assist. The field under the press lists them. The field is used only when its press is set to **Home Assistant action**.
+
+- The action acts on the device that the timer runs, not on the **Run for** number. More info opens the dialog of the device. Toggle switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
+- Leave the field on **Default**, and Home Assistant opens the dialog of the device.
+- The card does nothing until it has found its timer, which takes a moment after the page loads.
+
+This round tile opens the dialog of the device on a long press, and starts or stops the timer on a tap. A double tap opens the pop-up:
+
+```yaml
+type: custom:timerify-card
+entity: number.boiler_run_for
+layout: round
+tap: run_or_stop
+double_tap: popup
+hold: action
+hold_action:
+  action: more-info
+```
 
 ## What the card does
 
@@ -126,7 +176,10 @@ The card keeps no timer of its own. Everything it shows is read from the states 
 | --- | --- |
 | Runs for a preset, stops | Setting **Run for**, where 0 stops |
 | Adds or takes off time, and the chip | The [**Add time** action](services.md#add-time) |
-| The long press on an idle timer | The [**Run** action](services.md#run) with no duration |
+| A press set to **Run for the default duration**, or to **Start or stop** while the timer is idle | The [**Run** action](services.md#run) with no duration |
+| A press set to **Stop** | The [**Stop** action](services.md#stop) |
+| A press set to **Start or stop** while the timer runs | Setting **Run for** to 0 |
+| A press set to **Home Assistant action** | Home Assistant's own handler of actions, on the device the timer runs |
 | Cancels a command | The [**Cancel command** action](services.md#cancel-command) |
 | Switches an interval | Turning its switch on or off |
 

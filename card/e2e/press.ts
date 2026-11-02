@@ -25,6 +25,15 @@ export async function tap(page: Page, card: Locator): Promise<void> {
 }
 
 /**
+ * Taps the middle of the card twice with the mouse, as a user does who double clicks: two
+ * clicks at once, which the browser follows with its own double click.
+ */
+export async function doubleTap(page: Page, card: Locator): Promise<void> {
+  const box = await boxOf(card);
+  await page.mouse.dblclick(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+/**
  * Presses the middle of the card with the mouse and lets go once the card says that letting
  * go will act (`data-held`, which is what the user sees after half a second), as a user
  * does. There is no fixed wait: the assertion waits for the card, on the browser's own clock:

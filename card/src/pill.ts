@@ -2,11 +2,12 @@
 // left, with the icon, the name, the time left and when it ends, and an optional chip that
 // adds a few minutes.
 import { css, html, nothing, type TemplateResult } from "lit";
+import { ifDefined } from "lit/directives/if-defined.js";
 import { styleMap } from "lit/directives/style-map.js";
 import type { CardConfig } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant } from "./hass";
-import { renderIcon, renderStatus } from "./layout";
+import { popupAnnounced, renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
 import type { TimerView } from "./timer";
@@ -34,11 +35,16 @@ export function renderPill(
         class="body"
         role="button"
         tabindex="0"
-        aria-haspopup="dialog"
+        aria-haspopup=${ifDefined(popupAnnounced(config))}
         aria-labelledby="label"
         @click=${binding.click}
         @keydown=${binding.keydown}
         @keyup=${binding.keyup}
+        @pointerdown=${binding.pointerdown}
+        @pointerup=${binding.pointerup}
+        @pointercancel=${binding.pointercancel}
+        @pointerleave=${binding.pointerleave}
+        @contextmenu=${binding.contextmenu}
       >
         <span class="fill-clip" aria-hidden="true">
           <span class="fill" style=${styleMap({ width: `${filled}%` })}></span>
@@ -136,5 +142,18 @@ export const pillStyles = css`
   .chip:focus-visible {
     outline: 2px solid var(--primary-color);
     outline-offset: 2px;
+  }
+  /*
+   * The pill has a long press only when the config gives it one. While letting go would act,
+   * the icon pulses, as the round tile's ring does; a timer that is unavailable stays still.
+   */
+  :host([data-held]) .pill:not(.unavailable) .icon {
+    animation: pulse 0.8s ease-in-out infinite alternate;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :host([data-held]) .pill:not(.unavailable) .icon {
+      animation: none;
+      transform: scale(1.08);
+    }
   }
 `;

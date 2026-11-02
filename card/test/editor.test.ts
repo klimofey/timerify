@@ -18,6 +18,30 @@ async function freshEditor() {
 
 const DEFAULT_PRESETS = [15, 30, 45, 60, 120];
 
+type Words = Record<string, string>;
+
+/** The six choices of a press, as the form offers them, in the words of `words`. */
+const pressOptions = (words: Words) => [
+  { value: "popup", label: words["card_editor_press_popup"] },
+  { value: "run", label: words["card_editor_press_run"] },
+  { value: "stop", label: words["card_editor_press_stop"] },
+  { value: "run_or_stop", label: words["card_editor_press_run_or_stop"] },
+  { value: "action", label: words["card_editor_press_action"] },
+  { value: "none", label: words["card_editor_press_none"] },
+];
+
+/** The group of the form that holds the three presses, each followed by its action. */
+const interactions = (words: Words) => ({
+  name: "interactions",
+  type: "expandable",
+  flatten: true,
+  icon: "mdi:gesture-tap",
+  schema: ["tap", "double_tap", "hold"].flatMap((press) => [
+    { name: press, selector: { select: { options: pressOptions(words) } } },
+    { name: `${press}_action`, selector: { ui_action: { default_action: "more-info" } } },
+  ]),
+});
+
 /** What Intl writes for a length of time, in a language, as the presets are labelled. */
 function lengths(language: string) {
   const unit = (count: number, name: "hour" | "minute") =>
@@ -72,7 +96,7 @@ function pageWithTimers(...numbers: string[]): FakeHass {
 }
 
 describe("the form of the visual editor", () => {
-  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets and a chip", async () => {
+  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets, a chip and the presses", async () => {
     const { getConfigForm } = await freshEditor();
 
     const { schema } = await getConfigForm();
@@ -117,6 +141,7 @@ describe("the form of the visual editor", () => {
       },
       // No unit of its own: its label says minutes.
       { name: "chip", selector: { number: { min: 1, max: 1440, mode: "box" } } },
+      interactions(english),
     ]);
     expect(lengths("en").presets).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
   });
@@ -128,13 +153,19 @@ describe("the form of the visual editor", () => {
     const form = await getConfigForm();
 
     const localize = localizeFor("ru");
-    for (const field of ["entity", "layout", "name", "icon", "presets", "chip"] as const) {
+    const labelled = [
+      ...["entity", "layout", "name", "icon", "presets", "chip"],
+      ...["interactions", "tap", "double_tap", "hold"],
+      ...["tap_action", "double_tap_action", "hold_action"],
+    ] as const;
+    for (const field of labelled) {
       expect(form.computeLabel({ name: field }, localize), field).toBe(
         russian[`card_editor_${field}`],
       );
     }
     const russianLengths = lengths("ru");
-    const [, layout, , presets] = form.schema;
+    const [, layout, , presets, , group] = form.schema;
+    expect(group).toStrictEqual(interactions(russian));
     expect(layout).toMatchObject({
       selector: {
         select: {
@@ -165,6 +196,29 @@ describe("the form of the visual editor", () => {
     expect(form.computeHelper({ name: "presets" })).not.toMatch(/\b(min|hr)\b/);
   });
 
+  it("words the presses as Home Assistant's own editor does", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass());
+
+    const form = await getConfigForm();
+
+    const localize = localizeFor("en");
+    expect(
+      Object.fromEntries(
+        ["interactions", "tap", "double_tap", "hold"].map((name) => [
+          name,
+          form.computeLabel({ name }, localize),
+        ]),
+      ),
+    ).toEqual({
+      interactions: "Interactions",
+      tap: "Tap behavior",
+      double_tap: "Double tap behavior",
+      hold: "Hold behavior",
+    });
+    expect(english.card_editor_press_none).toBe("Nothing");
+  });
+
   it("speaks English until a card has loaded the user's language", async () => {
     const { getConfigForm, lastLoaded } = await freshEditor();
     expect(lastLoaded()).toBeUndefined();
@@ -187,14 +241,26 @@ describe("the form of the visual editor", () => {
     );
   });
 
-  it("explains only the presets", async () => {
+  it("explains the presets, and which presses use a Home Assistant action", async () => {
     const { getConfigForm } = await freshEditor();
 
     const form = await getConfigForm();
 
-    for (const field of ["entity", "layout", "name", "icon", "chip", ""]) {
+    for (const field of ["tap_action", "double_tap_action", "hold_action"]) {
+      expect(form.computeHelper({ name: field }), field).toBe(english.card_editor_action_helper);
+    }
+    for (const field of ["entity", "layout", "name", "icon", "chip", "interactions", "tap", ""]) {
       expect(form.computeHelper({ name: field }), field).toBeUndefined();
     }
+  });
+
+  it("says in the user's language which presses use a Home Assistant action", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass({ language: "ru" }));
+
+    const form = await getConfigForm();
+
+    expect(form.computeHelper({ name: "hold_action" })).toBe(russian.card_editor_action_helper);
   });
 
   it("refuses a config of the wrong kind, as the card does", async () => {
@@ -207,6 +273,10 @@ describe("the form of the visual editor", () => {
       [{ entity: NUMBER, presets: [{}] }, english.card_error_presets],
       [{ entity: NUMBER, presets: [15, null] }, english.card_error_presets],
       [{ entity: NUMBER, chip: true }, english.card_error_chip],
+      [{ entity: NUMBER, tap: 5 }, english.card_error_press],
+      [{ entity: NUMBER, hold: ["run"] }, english.card_error_press],
+      [{ entity: NUMBER, hold_action: "more-info" }, english.card_error_action],
+      [{ entity: NUMBER, tap_action: [{ action: "more-info" }] }, english.card_error_action],
     ] as const;
 
     for (const [config, message] of wrongKind) {
@@ -220,6 +290,10 @@ describe("the form of the visual editor", () => {
         layout: "round",
         presets: ["15", "30", 20],
         chip: 10,
+        tap: "action",
+        tap_action: { action: "more-info" },
+        double_tap: "run",
+        hold: "none",
       }),
     ).not.toThrow();
   });
@@ -236,6 +310,8 @@ describe("the form of the visual editor", () => {
       [{ entity: NUMBER, chip: 1441 }, english.card_error_chip],
       [{ entity: NUMBER, chip: 0 }, english.card_error_chip],
       [{ entity: NUMBER, layout: "square" }, english.card_error_layout],
+      [{ entity: NUMBER, tap: "toggle" }, english.card_error_press],
+      [{ entity: NUMBER, hold: "" }, english.card_error_press],
       [{ entity: "sensor.boiler_ends_at" }, english.card_error_entity],
       [{ entity: "" }, english.card_error_entity],
       [{}, english.card_error_entity],

@@ -1,11 +1,13 @@
 // The round layout: a ring that shows the share of the countdown that is left, the time left
 // in its centre while it counts (the icon of the timer's target otherwise), and the name below.
-// A press anywhere on the card reaches its body; a long press acts, see `press.ts`.
+// A press anywhere on the card reaches its body; what a press does is set in the config, and a
+// long press starts or stops the timer unless it is set to something else, see `press.ts`.
 import { css, html, type TemplateResult } from "lit";
+import { ifDefined } from "lit/directives/if-defined.js";
 import type { CardConfig } from "./config";
 import { formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
-import { renderIcon, renderStatus } from "./layout";
+import { popupAnnounced, renderIcon, renderStatus } from "./layout";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 
@@ -46,7 +48,7 @@ export function renderRound(
         class="body"
         role="button"
         tabindex="0"
-        aria-haspopup="dialog"
+        aria-haspopup=${ifDefined(popupAnnounced(config))}
         aria-labelledby="label"
         @click=${binding.click}
         @keydown=${binding.keydown}
@@ -161,16 +163,6 @@ export const roundStyles = css`
    * While letting go would act, the ring pulses. A timer that is unavailable has nothing to
    * act on, so its ring stays still.
    */
-  @keyframes pulse {
-    from {
-      opacity: 1;
-      transform: scale(1);
-    }
-    to {
-      opacity: 0.6;
-      transform: scale(1.08);
-    }
-  }
   :host([data-held]) .round:not(.unavailable) .ring {
     animation: pulse 0.8s ease-in-out infinite alternate;
   }

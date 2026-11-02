@@ -576,6 +576,8 @@
     "card_error_layout": "Вид карточки: pill или round",
     "card_error_presets": "Готовые значения — целые минуты от 1 до 1440",
     "card_error_chip": "Быстрая кнопка — целые минуты от 1 до 1440",
+    "card_error_press": "При нажатии, двойном нажатии и длительном нажатии можно выбрать popup, run, stop, run_or_stop, action или none",
+    "card_error_action": "Действие Home Assistant задаётся набором настроек, например action: more-info",
     "card_close": "Закрыть",
     "card_until": "до {time}",
     "card_add_time": "Добавить {duration}",
@@ -598,6 +600,20 @@
     "card_editor_icon": "Значок",
     "card_editor_presets": "Готовые значения (минуты)",
     "card_editor_presets_helper": "Если оставить пустым: {presets}",
-    "card_editor_chip": "Быстрая кнопка (минуты, только капсула)"
+    "card_editor_chip": "Быстрая кнопка (минуты, только капсула)",
+    "card_editor_interactions": "Взаимодействия",
+    "card_editor_tap": "При нажатии",
+    "card_editor_double_tap": "При двойном нажатии",
+    "card_editor_hold": "При длительном нажатии",
+    "card_editor_tap_action": "Действие при нажатии",
+    "card_editor_double_tap_action": "Действие при двойном нажатии",
+    "card_editor_hold_action": "Действие при длительном нажатии",
+    "card_editor_press_popup": "Открыть всплывающее окно",
+    "card_editor_press_run": "Запустить на время по умолчанию",
+    "card_editor_press_stop": "Остановить",
+    "card_editor_press_run_or_stop": "Запустить или остановить",
+    "card_editor_press_action": "Действие Home Assistant",
+    "card_editor_press_none": "Ничего не делать",
+    "card_editor_action_helper": "Используется, когда выше выбрано «Действие Home Assistant»"
   }
 }

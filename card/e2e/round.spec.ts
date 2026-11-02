@@ -1,6 +1,7 @@
 // The round card in a real Home Assistant: a tap opens its pop-up, and a long press starts the
 // timer with no duration, or stops it when it runs, without opening the pop-up. View "round":
-// the strict timer's round card, then the loose timer's.
+// the strict timer's round card, then the loose timer's. A long press that is set to a Home
+// Assistant action does that action: the view "presses" has such a card.
 import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
@@ -109,5 +110,31 @@ test.describe("the round card in Home Assistant", () => {
     // The ring is empty again, and nothing opened.
     await expect(ring).not.toHaveAttribute("stroke-dashoffset", "0");
     await expect(loose.locator("dialog")).toBeHidden();
+  });
+});
+
+test.describe("a round card whose long press is a Home Assistant action", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "presses");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("opens the more-info dialog of the device, and starts nothing", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const round = page.locator("timerify-card").filter({ has: page.locator("ha-card.round") });
+    await isReady(round);
+
+    await hold(page, round);
+
+    // The dialog of the switch the timer runs, not of the number the card is set to: it is
+    // named for the device, and has the device's switch. The card's own pop-up stays shut.
+    const dialog = page.locator("ha-more-info-dialog");
+    await expect(dialog.getByText(STRICT_NAME, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("switch")).toBeVisible();
+    await expect(round.locator("dialog")).toBeHidden();
+    expect((await ws.state(state.timers.strict.run_for))?.state).toBe("0");
   });
 });

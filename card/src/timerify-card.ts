@@ -2,15 +2,15 @@
 // Everything it shows is read from the states of the timer's entities; everything it does
 // goes through Timerify's own services.
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
-import { addMinutes, runWithoutDuration, setMinutes } from "./actions";
-import { parseConfig, type CardConfig } from "./config";
+import { addMinutes, runWithoutDuration, setMinutes, stop } from "./actions";
+import { ACTION_KEYS, parseConfig, type CardConfig, type Press } from "./config";
 import { CountdownController } from "./countdown";
 import { getConfigForm, getStubConfig } from "./editor";
 import type { HomeAssistant } from "./hass";
 import { commonStyles } from "./layout";
 import { pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
-import { PressController } from "./press";
+import { PressController, type PressActions } from "./press";
 import { renderRound, roundStyles } from "./round";
 import { lastLoaded, loadStrings, onStringsLoaded, t } from "./strings";
 import {
@@ -71,13 +71,8 @@ export class TimerifyCard extends LitElement {
   readonly #pending = new Set<Promise<unknown>>();
   #lookingUp = false;
   #askAgain = false;
-  /** The pill is pressed with a tap alone: a long press on it is a tap with a mouse, or nothing. */
-  readonly #pillBinding = new PressController(this, { tap: () => this.#popup?.open() }).binding();
-  /** The round card also acts on a long press. */
-  readonly #roundBinding = new PressController(this, {
-    tap: () => this.#popup?.open(),
-    hold: () => this.#holdOnTimer(),
-  }).binding();
+  /** How both layouts are pressed: what a press does is what the config says at that moment. */
+  readonly #binding = new PressController(this, () => this.#pressActions()).binding();
   /** The pill's chip: adds its minutes to the timer, whatever the card's clock says. */
   readonly #addChipMinutes = (): void => {
     const { _config: config, hass } = this;
@@ -212,21 +207,84 @@ export class TimerifyCard extends LitElement {
   }
 
   /**
-   * What a long press on the round card does: stops the timer when it runs, with a countdown
-   * or without; starts it, with no duration, when it is idle. A timer that is unavailable has
-   * nothing to act on.
+   * What the card can do for each press. A tap is always there. A double tap and a long press
+   * exist only when they are set to something, because a card that has a double tap makes a
+   * tap wait for it, and one that has a long press takes the click of a long press away.
    */
-  #holdOnTimer(): void {
+  #pressActions(): PressActions {
+    const config = this._config;
+    const actions: PressActions = { tap: () => this.#perform("tap") };
+    if (config !== undefined && config.double_tap !== "none") {
+      actions.doubleTap = () => this.#perform("double_tap");
+    }
+    if (config !== undefined && config.hold !== "none") {
+      actions.hold = () => this.#perform("hold");
+    }
+    return actions;
+  }
+
+  /** Does what the config sets a press to. */
+  #perform(press: Press): void {
     const { _config: config, hass } = this;
-    const state = this.#view?.state;
     if (config === undefined || hass === undefined) {
       return;
     }
+    switch (config[press]) {
+      case "popup":
+        this.#popup?.open();
+        break;
+      case "run":
+        void runWithoutDuration(hass, config.entity);
+        break;
+      case "stop":
+        void stop(hass, config.entity);
+        break;
+      case "run_or_stop":
+        this.#runOrStop(hass, config);
+        break;
+      case "action":
+        this.#fireAction(press, config);
+        break;
+      case "none":
+        break;
+    }
+  }
+
+  /**
+   * What "Start or stop" does: stops the timer when it runs, with a countdown or without;
+   * starts it, with no duration, when it is idle. A timer that is unavailable has nothing to
+   * act on.
+   */
+  #runOrStop(hass: HomeAssistant, config: CardConfig): void {
+    const state = this.#view?.state;
     if (state === "counting" || state === "open") {
       void setMinutes(hass, config.entity, 0);
     } else if (state === "idle") {
       void runWithoutDuration(hass, config.entity);
     }
+  }
+
+  /**
+   * Hands a press to Home Assistant's own handler of actions, which does what the user chose
+   * in the editor: "more-info" and "toggle" act on the entity the timer runs, not on the
+   * card's own number. An action the user did not set is left out: Home Assistant then opens
+   * the more-info dialog. Until the card has found its timer it does not know that entity, and
+   * does nothing.
+   */
+  #fireAction(press: Press, config: CardConfig): void {
+    if (this._lookup.status !== "found") {
+      return;
+    }
+    const actions = Object.fromEntries(
+      ACTION_KEYS.filter((key) => config[key] !== undefined).map((key) => [key, config[key]]),
+    );
+    this.dispatchEvent(
+      new CustomEvent("hass-action", {
+        detail: { config: { entity: this._lookup.info.target, ...actions }, action: press },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   /**
@@ -286,8 +344,8 @@ export class TimerifyCard extends LitElement {
     this.#view = view;
     return html`
       ${config.layout === "round"
-        ? renderRound(view, config, hass, this.#roundBinding, now)
-        : renderPill(view, config, hass, this.#pillBinding, this.#addChipMinutes, now)}
+        ? renderRound(view, config, hass, this.#binding, now)
+        : renderPill(view, config, hass, this.#binding, this.#addChipMinutes, now)}
       ${this._lookup.status === "found"
         ? html`
             <timerify-card-popup

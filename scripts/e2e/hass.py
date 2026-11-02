@@ -149,6 +149,22 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 ],
             },
             {
+                # What is pressed besides a tap: the round tile of the strict timer
+                # whose long press is a Home Assistant action, and a pill of the same
+                # timer whose double tap runs it.
+                "title": "Presses",
+                "path": "presses",
+                "cards": [
+                    timerify_card(
+                        strict,
+                        layout="round",
+                        hold="action",
+                        hold_action={"action": "more-info"},
+                    ),
+                    timerify_card(strict, layout="pill", double_tap="run"),
+                ],
+            },
+            {
                 # Empty: the editor tests add a card to it from the card picker, and the
                 # reset that every test starts with saves the dashboard as it was.
                 "title": "Editor",

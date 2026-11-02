@@ -5,6 +5,7 @@ import {
   runWithoutDuration,
   setIntervalEnabled,
   setMinutes,
+  stop,
 } from "../src/actions";
 import { NUMBER, fakeHass } from "./fake-hass";
 
@@ -45,6 +46,14 @@ describe("what the card asks Timerify to do", () => {
     expect(Object.keys(hass.calls[0]?.data ?? { none: true })).toEqual([]);
   });
 
+  it("stops the timer with Timerify's own action", async () => {
+    const hass = fakeHass();
+
+    await stop(hass, NUMBER);
+
+    expect(hass.calls).toEqual([{ domain: "timerify", service: "stop", data: {}, target }]);
+  });
+
   it("switches an interval of the schedule on and off through its own switch", async () => {
     const hass = fakeHass();
     const interval = "switch.boiler_schedule_06_30_07_15_mon_sun";
@@ -79,11 +88,13 @@ describe("what the card asks Timerify to do", () => {
     await expect(addMinutes(hass, NUMBER, 5)).resolves.toBeUndefined();
     hass.rejectNext(new Error("The timer refused"));
     await expect(runWithoutDuration(hass, NUMBER)).resolves.toBeUndefined();
+    hass.rejectNext(new Error("The timer refused"));
+    await expect(stop(hass, NUMBER)).resolves.toBeUndefined();
     hass.rejectNext(new Error("The switch refused"));
     await expect(setIntervalEnabled(hass, "switch.interval", true)).resolves.toBeUndefined();
     hass.rejectNext(new Error("The timer refused"));
     await expect(cancelCommand(hass, NUMBER, "c1")).resolves.toBeUndefined();
-    expect(hass.calls).toHaveLength(5);
+    expect(hass.calls).toHaveLength(6);
   });
 
   it("lets the service notify on error, as it does by default", async () => {

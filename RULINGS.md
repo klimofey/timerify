@@ -3333,3 +3333,61 @@ in `docs/followups.md`.
   above the maximum` (no row; plus, minus and Stop work), `the presets follow a maximum that
   changes` (a lower and a higher maximum, each in a new `hass`), `shows every preset while the
   number states no maximum` and `shows every preset when the maximum is not a number`.
+
+- **A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
+  choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
+  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the
+  card hands to Home Assistant's own handler as a `hass-action` event (#36).** The defaults keep
+  the card of 1.0.0: `tap: popup`, `double_tap: none`, and `hold: run_or_stop` on the round layout
+  and `none` on the pill. An unknown choice is `card_error_press`, and an action that is not a set
+  of settings is `card_error_action`; the visual editor is thrown out of the form only for a
+  value of the wrong kind, as for the other options. `run` is a bare `timerify.run` on the
+  number, the call the 1.0.0 long press made on an idle timer. `stop` is `timerify.stop`.
+  `run_or_stop` is the 1.0.0 long press as it was: `number.set_value` 0 when the timer counts or
+  is open, a bare run when it is idle, nothing when it is unavailable. The event is
+  `{ config: { entity: <the timer's target>, tap_action, double_tap_action, hold_action },
+  action: "tap" | "double_tap" | "hold" }`, with only the actions the user set, fired by the card
+  with `bubbles` and `composed`; until the lookup has found the timer, the card does not know the
+  target and fires nothing. A double tap exists only when `double_tap` is not `none`: a click then
+  waits `DOUBLE_TAP_MS` (250, Home Assistant's own wait) for a second one, a second click inside
+  the window is the double tap alone, and Enter and Space tap at once. A long press exists only
+  when `hold` is not `none`, on either layout, and the pill's icon pulses while letting go would
+  act, as the round tile's ring does. The body of the card announces `aria-haspopup="dialog"`
+  only when `tap` is `popup`.
+  Why: the `ui_action` selector writes only the standard actions (its list is typed
+  `UiAction[]` and its labels are Home Assistant's own words for them), so "open the pop-up",
+  "run" and "stop" cannot be offered by it; and a custom value in it would be shown with no
+  label and written by no handler. A first level the card owns, beside the selector Home
+  Assistant owns, gives the user both without a custom editor (which would give up the form
+  and its translated labels). The action acts on the target and not on the card's entity
+  because the card's entity is the "Run for" number, which cannot be toggled and whose
+  more-info dialog is not the one the user means. A missing key makes Home Assistant open the
+  more-info dialog, so a press set to `action` with no action does that; the selector's own
+  "Default" choice writes no key. The `visible` condition of a form field, which would hide an
+  action while its press is not `action`, is not in the developer documentation, so the six
+  fields are always shown and the helper under each action says when it is used. The wait for a
+  double tap is the price of having one: a card without it taps at once, as before. The
+  keyboard has neither gesture, and the docs say to keep the pop-up on the tap for it. The
+  `PressController` asks the card what to do at every press, instead of being given it once, so
+  that a card whose layout or config changes is pressed as its new config says; one controller
+  serves both layouts.
+  Cost if wrong: the `action` choice with no action opens a dialog the user may not expect, and
+  a form field is empty until the user sets it, because the form does not apply the default
+  (the same as the layout); the default of `hold` depends on the layout, so the stub config of
+  the picker does not write it. If Home Assistant documents `visible`, the actions can be hidden
+  with their presses. A user who sets a double tap on a card with a tap that opens the
+  pop-up waits a quarter of a second for it. `run_or_stop` stops with `number.set_value` 0 and
+  `stop` with `timerify.stop`: the same effect (`async_stop` is `async_set_minutes(0)`), two
+  calls in the card; unifying them is a change to the 1.0.0 tests of the round tile.
+  Tests: `card/test/press.test.ts` (a tap opens the pop-up by default on both layouts; a single
+  tap still opens it when a double tap is set; a double tap does the double tap action alone;
+  two taps further apart than the window are two taps; Enter and Space act at once; the wait is
+  dropped when the card leaves the page or is set again; a long press acts on the pill when set,
+  and a round tile set to nothing leaves it alone; each choice; `hass-action` with the target
+  and only the actions set, for each press, and nothing before the lookup has found the timer),
+  `card/test/config.test.ts` (the defaults, the six choices, the refusals), `card/test/editor.test.ts`
+  (the Interactions group, its labels and helper in both languages, the shape check),
+  `card/test/round.test.ts` unchanged (the long press of 1.0.0 under its default); end to end
+  `opens the more-info dialog of the device, and starts nothing` (`round.spec.ts`), `runs the
+  timer on a double tap` and `opens the pop-up on a single tap` (`pill.spec.ts`), and `sets what a
+  tap does in the Interactions group` (`editor.spec.ts`, which also reads the group in Russian).

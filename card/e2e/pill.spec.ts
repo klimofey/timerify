@@ -1,16 +1,19 @@
 // The pill in a real Home Assistant: it counts down a timer that was started somewhere else,
 // opens its pop-up from a tap anywhere on it (its border too) but the chip, adds the chip's
 // minutes without opening the pop-up, and carries on to the same end when Home Assistant
-// restarts, and counts by Home Assistant's clock on a browser whose own is wrong.
-// View "pill": one pill card on the strict timer, with a chip of 15.
-import type { Locator } from "@playwright/test";
+// restarts, and counts by Home Assistant's clock on a browser whose own is wrong. View "pill":
+// one pill card on the strict timer, with a chip of 15. A pill whose double tap runs the timer
+// is in the view "presses".
+import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
-import { tapBorder } from "./press";
+import { doubleTap, tap, tapBorder } from "./press";
 import { hassWs } from "./ws";
 
 const CHIP_MINUTES = 15;
+/** The strict timer's default duration, which a run with no duration takes. */
+const DEFAULT_MINUTES = "30";
 const MINUTE = 60_000;
 /** The browser's time zone, which the user's profile follows by default (the config's). */
 const ZONE = "America/New_York";
@@ -197,5 +200,35 @@ test.describe("the pill on a browser whose clock is wrong", () => {
     const ends = (await ws.state(strict.ends_at))?.state ?? "";
     expect(Date.parse(ends), "Ends at should hold the end of the countdown").not.toBeNaN();
     await expectUntil(card, Date.parse(ends));
+  });
+});
+
+test.describe("the pill with a double tap", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "presses");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  const pillOf = (page: Page) =>
+    page.locator("timerify-card").filter({ has: page.locator("ha-card.pill") });
+
+  test("runs the timer on a double tap, and opens nothing", async ({ page, state, ws }) => {
+    const { strict } = state.timers;
+    const pill = pillOf(page);
+
+    await doubleTap(page, pill);
+
+    await expect.poll(async () => (await ws.state(strict.run_for))?.state).toBe(DEFAULT_MINUTES);
+    await expect(pill.locator("dialog")).toBeHidden();
+  });
+
+  test("opens the pop-up on a single tap, and starts nothing", async ({ page, state, ws }) => {
+    const { strict } = state.timers;
+    const pill = pillOf(page);
+
+    await tap(page, pill);
+
+    await expect(pill.locator("dialog")).toBeVisible();
+    expect((await ws.state(strict.run_for))?.state).toBe("0");
   });
 });

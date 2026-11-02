@@ -3254,15 +3254,17 @@ in `docs/followups.md`.
   needs it.
   A second registration, from a timer's set-up, would not fail: `HomeAssistantView.register`
   adds its routes with lower-case method names, which aiohttp does not find among the upper-case
-  ones it stored, so the later view silently replaces the earlier and with it the bytes. The
-  view is therefore registered from `async_setup`, which runs once per start, and a test
-  guards that.
+  ones it stored. If no other resource was registered since the card's, aiohttp reuses the
+  card's resource and the later view silently replaces the earlier and with it the bytes; if
+  another was, aiohttp adds a second resource at the same address, which the first one
+  shadows, so the old bytes keep being served while the frontend is told the key of the new
+  ones. Either way the key and the body disagree again. The view is therefore registered
+  from `async_setup`, which runs once per start, and a test guards that.
   Tests (`tests/test_card_registration.py`): `test_the_card_served_is_the_one_registered_until_a_restart`
   (the file is written over after the set-up, as HACS does: the address the frontend was told
   serves the first bytes, and its key is their hash),
   `test_a_timer_set_up_or_reloaded_after_the_update_keeps_the_registered_card` (a second timer and
-  a reload after the update do not swap the bytes) and
-  `test_the_card_is_served_with_a_month_of_cache_to_anyone` (no login, JavaScript, a month);
-  `test_card_is_served_to_anyone`, `test_dashboards_load_the_card_once` and
+  a reload after the update do not swap the bytes); `test_card_is_served_to_anyone` also checks
+  that the answer is JavaScript with a month of cache; `test_dashboards_load_the_card_once` and
   `test_reloading_a_timer_keeps_the_card` hold as before. The end-to-end tests of the card load the
   bundle through this address in a real Home Assistant.

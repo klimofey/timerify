@@ -9,6 +9,7 @@ Assistant by the smoke test and the end-to-end tests of the card.
 
 import hashlib
 import logging
+from collections.abc import Mapping
 from http import HTTPStatus
 from pathlib import Path
 from unittest.mock import patch
@@ -30,16 +31,12 @@ JAVASCRIPT = "text/javascript; charset=utf-8"
 
 async def served(
     client_of: ClientSessionGenerator,
-) -> tuple[HTTPStatus, bytes, str | None]:
+) -> tuple[HTTPStatus, bytes, Mapping[str, str]]:
     """What a browser that has not logged in gets for the card's address: the status,
-    the body and the cache header."""
+    the body and the headers."""
     client = await client_of()
     response = await client.get(CARD_URL)
-    return (
-        HTTPStatus(response.status),
-        await response.read(),
-        response.headers.get("Cache-Control"),
-    )
+    return HTTPStatus(response.status), await response.read(), response.headers
 
 
 async def test_card_is_served_to_anyone(
@@ -49,33 +46,17 @@ async def test_card_is_served_to_anyone(
     hass_client_no_auth: ClientSessionGenerator,
 ) -> None:
     """The browser loads the module before anyone has logged in, so the file is open to
-    everyone, and the browser may keep it for a month: its address changes with it."""
+    everyone, as JavaScript, and the browser may keep it for a month: its address
+    changes with it."""
     await setup_target()
     bundle = await hass.async_add_executor_job(CARD_FILE.read_bytes)
 
-    status, body, cache = await served(hass_client_no_auth)
+    status, body, headers = await served(hass_client_no_auth)
 
     assert status is HTTPStatus.OK
     assert body == bundle
-    assert cache == CACHE_FOR_31_DAYS
-
-
-async def test_the_card_is_served_with_a_month_of_cache_to_anyone(
-    fake_target: FakeTarget,
-    setup_target: SetupTarget,
-    hass_client_no_auth: ClientSessionGenerator,
-) -> None:
-    """A browser that has not logged in gets the module as JavaScript, which it may
-    keep for a month; the address without the version key answers as well."""
-    await setup_target()
-    client = await hass_client_no_auth()
-
-    response = await client.get(CARD_URL)
-
-    assert response.status == HTTPStatus.OK
-    assert response.headers["Content-Type"] == JAVASCRIPT
-    assert response.headers["Cache-Control"] == CACHE_FOR_31_DAYS
-    assert "WWW-Authenticate" not in response.headers
+    assert headers["Content-Type"] == JAVASCRIPT
+    assert headers["Cache-Control"] == CACHE_FOR_31_DAYS
 
 
 @pytest.fixture

@@ -63,9 +63,11 @@ async def async_register_card(hass: HomeAssistant) -> None:
     """Serve the card, and tell the frontend to load it on every dashboard.
 
     This belongs to the integration, not to a timer, and is done once, from
-    `async_setup`: a second registration does not fail, it silently replaces the bytes
-    with the file as it is by then. Timerify does not need the frontend, so a Home
-    Assistant without one (no dashboards) serves the bundle and loads it nowhere.
+    `async_setup`: a second registration does not fail. Depending on what was
+    registered in between, it either replaces the bytes with the file as it is by then,
+    or is shadowed by the first view while the frontend is told the key of the new
+    bytes. Timerify does not need the frontend, so a Home Assistant without one (no
+    dashboards) serves the bundle and loads it nowhere.
     """
     bundle = await hass.async_add_executor_job(CARD_FILE.read_bytes)
     hass.http.register_view(CardView(bundle))

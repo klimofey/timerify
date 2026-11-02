@@ -34,10 +34,10 @@ class Command:
     """When the command is due (timezone-aware UTC)."""
     action: Literal["on", "off"]
     minutes: int | None = None
-    """How long an "on" runs, counted from `at`; None ends the run to the end of the
-    window that is open then, if one is; otherwise it runs the default duration in
-    strict mode and without a countdown in loose mode (`TimerCore._open_run_end`).
-    Never set for "off"."""
+    """How long an "on" runs, counted from `at`. None runs it to the end of the window
+    that is open then, if one is; otherwise for the default duration in strict mode
+    and without a countdown in loose mode (`TimerCore._open_run_end`). Never set for
+    "off"."""
     settings: Settings = NO_SETTINGS
     """What an "on" turns the target on with. Never set for "off"."""
 

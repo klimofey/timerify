@@ -51,7 +51,7 @@ Each timer has a mode. You choose it when you add the timer, and you can change 
 - **Strict** (the default): the device runs only while a countdown does. You also set a default duration. It is 30 minutes to begin with. If **Maximum of Run for** is smaller, it is that instead.
 - **Loose**: the device may also run without a countdown. A countdown then only means "turn off when it reaches zero".
 
-The default duration is how long a Strict device runs when it is turned on without a length of time. While a schedule window is open, the run lasts to the end of the window instead, or to the end of the default duration if that is later.
+The default duration is how long a Strict device runs when it is turned on without a length of time. While a schedule window is open, the run lasts to the end of the window instead. If the default duration ends later, the run lasts to its end.
 
 ## What a timer adds to the device page
 

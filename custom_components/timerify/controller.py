@@ -405,9 +405,10 @@ class TargetController:
         there are any.
 
         Without a duration, a target that is off runs to the end of the schedule window
-        that is open, if one is (#58); otherwise it runs for the default duration in
-        strict mode and without a countdown in loose mode (R9). One that is wanted
-        running keeps its countdown (`TimerCore.run_open`).
+        that is open, if one is, and in strict mode the default duration is kept when it
+        ends later (#58); otherwise it runs for the default duration in strict mode and
+        without a countdown in loose mode (R9). One that is wanted running keeps its
+        countdown (`TimerCore.run_open`).
 
         Raises ServiceValidationError, before anything runs, for `minutes` outside 1 to
         a day (`duration_out_of_range`) and for settings that the target cannot take.

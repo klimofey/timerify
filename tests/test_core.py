@@ -523,7 +523,8 @@ def test_manual_on_in_strict_starts_default_duration() -> None:
 
 def test_manual_on_in_loose_leaves_timer_idle() -> None:
     """In loose mode a target switched on by hand just runs, with no countdown (R5),
-    unless a window is open (`test_manual_on_in_loose_during_a_window_...`)."""
+    unless a window is open
+    (`test_manual_on_in_loose_during_a_window_gets_a_countdown_to_its_end`)."""
     c = core("loose", "off")
 
     fx = c.observe(NOW, "on", by_us=False)

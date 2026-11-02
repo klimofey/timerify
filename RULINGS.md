@@ -394,9 +394,10 @@ only the final behaviour is written.
   window stays off), a stop from the card, Run for 0, the end of a manual run, an off
   command, a realignment that stops. The timer is never handed to a suppressed window. A
   turn-on that names no duration, after the zeroing, is the user's own run: it ends at the
-  window's end and leaves the mark where it is (#58). Why: R8 "manual wins", and a restart must behave like no restart. A window that starts
-  after the zeroing is not suppressed. Cost if wrong: a user who stops the boiler from the
-  card and expects a restart to bring the window back.
+  window's end and leaves the mark where it is (#58). Why: R8 "manual wins", and a
+  restart must behave like no restart. A window that starts after the zeroing is not
+  suppressed. Cost if wrong: a user who stops the boiler from the card and expects a
+  restart to bring the window back.
 - **S1 judges "the target already runs" by the desired state, not by delivery.** At a
   window start the interval's settings are owed (turn-on only) only if the target is not
   wanted running as of that item: the fold's wish so far is "off", or, before any wish,
@@ -3771,8 +3772,9 @@ in `docs/followups.md`.
   `at` plus the default duration and `latest`, so the window never shortens a run. Loose
   mode: `latest`, and with no window open none, a run without a countdown as before. With
   overlapping windows the end is the latest of them. A duration that is named is kept.
-  After the window the turn-on is what it always was. This replaced the first reading,
-  "S5": the window does not stretch a run that someone started by hand. Tests:
+  After the window the turn-on is what it always was. This replaced the spec's S5 (the
+  original design, "Assistant's call"): the window does not stretch a run that someone
+  started by hand. Tests:
   `test_a_turn_on_by_hand_inside_a_window_runs_to_its_end`,
   `test_a_default_duration_that_ends_later_than_the_window_is_kept`,
   `test_a_loose_turn_on_inside_a_window_gets_a_countdown_to_its_end`,
@@ -3812,7 +3814,8 @@ in `docs/followups.md`.
   carries the run (a third writer passing `by`, so that S2 follows edits), needed the
   suppressed marks of the carrying windows cleared or another filter in `_realign`, and
   made a turn-on no longer a change of the user's. Tests:
-  `test_editing_the_interval_leaves_a_turn_on_inside_its_window_alone` and
+  `test_editing_the_interval_leaves_a_turn_on_inside_its_window_alone`,
+  `test_deleting_or_switching_off_the_interval_leaves_a_turn_on_alone` and
   `test_a_turn_on_inside_a_window_keeps_its_end_across_a_restart`. Cost if wrong: a user
   who edits the interval after turning the boiler on, and expects the run to follow it,
   turns the boiler on again.

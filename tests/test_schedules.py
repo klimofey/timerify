@@ -59,6 +59,7 @@ from .helpers import (
     restart_after,
     saved,
     set_number,
+    set_switch,
     state_of,
     timerify_info,
     timerify_warnings,
@@ -905,6 +906,39 @@ async def test_editing_the_interval_leaves_a_turn_on_inside_its_window_alone(
     await edit_interval(hass, entry, interval, end="07:30")
 
     assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "07:15"))
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+@pytest.mark.parametrize("how", ["delete", "switch_off"])
+async def test_deleting_or_switching_off_the_interval_leaves_a_turn_on_alone(
+    how: str,
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The run that a turn-on by hand got is yours (rule 3) whatever becomes of the
+    interval: deleting it, or switching it off, leaves the end as it was and the
+    boiler running until then."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target(default_duration=20)
+    interval = await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    await fake_target.set_state("off")
+    await advance_to(hass, freezer, local(SUNDAY, "06:50"))
+    await fake_target.set_state("on")
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+
+    if how == "delete":
+        hass.config_entries.async_remove_subentry(entry, interval)
+        await hass.async_block_till_done()
+    else:
+        await set_switch(hass, "switch.boiler_schedule_06_30_07_15_mon_sun", False)
+
+    assert state_of(hass, SENSOR) == iso(SUNDAY, "07:15")
+    assert state_of(hass, TARGET_ID) == "on"
     await advance_to(hass, freezer, local(SUNDAY, "07:15"))
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 

@@ -107,6 +107,14 @@ const behaviour = (page: Page, label: string, words: Record<string, string> = en
 const menuChoice = (page: Page, key: string, words: Record<string, string> = english) =>
   page.getByRole("menuitem", { name: words[key], exact: true });
 
+/**
+ * A yes-or-no field of the form, found by the words beside it: the switch has no name of its
+ * own, its label is the text of the field it sits in. (Playwright's click on the switch is
+ * refused: the switch's own thumb is in the way.)
+ */
+const yesNoField = (page: Page, label: string) =>
+  page.locator("ha-formfield").filter({ hasText: label });
+
 /** The button that takes the chip of a preset away. */
 const removeChip = (page: Page, label: string) =>
   page.getByRole("button", { name: `Remove ${label}` });
@@ -217,6 +225,30 @@ test.describe("the card in Home Assistant's editor", () => {
           layout: "pill",
           presets: DEFAULT_PRESETS,
           tap: "run",
+        },
+      ]);
+  });
+
+  test("turns the Turn off button on in the form", async ({ page, state, ws }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+
+    // A press on the words beside the switch turns it, as a press on the switch does.
+    await yesNoField(page, english["card_editor_show_turn_off"]).getByRole("paragraph").click();
+    await saveCard(page);
+
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          show_turn_off: true,
         },
       ]);
   });
@@ -336,7 +368,9 @@ test.describe("the card in Home Assistant's editor", () => {
       await pickCard(page, ru);
 
       await expect(page.locator("html")).toHaveAttribute("lang", "ru");
-      for (const field of ["entity", "layout", "name", "icon", "presets", "chip", "interactions"]) {
+      await expect(yesNoField(page, ru["card_editor_show_turn_off"])).toBeVisible();
+      const fields = ["entity", "layout", "name", "icon", "presets", "chip", "interactions"];
+      for (const field of fields) {
         await expect(
           page.getByText(ru[`card_editor_${field}`], { exact: true }),
           field,

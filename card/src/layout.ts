@@ -1,12 +1,12 @@
 // What the two layouts of the card have in common: the icon, what the card says of the timer's
 // state, and the styles of the layer that is pressed and of the text above it. Each layout
 // (pill.ts, round.ts) draws only its own shape.
-import { css, html, type TemplateResult } from "lit";
+import { css, html, nothing, type TemplateResult } from "lit";
 import type { CardConfig } from "./config";
 import { formatClock, formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
 import { t } from "./strings";
-import { hasValue, type TimerView } from "./timer";
+import { hasValue, isRunning, type TimerView } from "./timer";
 
 /** The icon of the timer's target, or the one the config chooses. */
 export function renderIcon(view: TimerView): TemplateResult {
@@ -29,6 +29,25 @@ export const popupAnnounced = (config: CardConfig): "dialog" | undefined =>
  */
 export const isPressable = (config: CardConfig): boolean =>
   config.tap !== "none" || config.double_tap !== "none" || config.hold !== "none";
+
+/**
+ * The Turn off button, when the config asks for it and the target runs, with a countdown or
+ * without one: a button of its own beside the body, whose press `turnOff` answers and the
+ * body never hears of. A timer that is unavailable, or not found yet, is not running.
+ */
+export function renderTurnOff(
+  view: TimerView,
+  config: CardConfig,
+  hass: HomeAssistant,
+  turnOff: () => void,
+) {
+  if (!config.show_turn_off || !isRunning(view)) {
+    return nothing;
+  }
+  return html`
+    <button class="turn-off" type="button" @click=${turnOff}>${t(hass, "card_turn_off")}</button>
+  `;
+}
 
 /**
  * What the card says under the name while nothing counts: the state of the target in the
@@ -107,6 +126,26 @@ export const commonStyles = css`
     height: 100%;
     /* A press anywhere on the card reaches the body underneath, except on a control. */
     pointer-events: none;
+  }
+  /* The small buttons that sit on the card beside its body: the pill's chip, and Turn off. */
+  .chip,
+  .turn-off {
+    flex: none;
+    height: 32px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 16px;
+    background: var(--secondary-background-color);
+    color: var(--primary-text-color);
+    font: inherit;
+    font-size: var(--ha-font-size-m, 14px);
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .chip:focus-visible,
+  .turn-off:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
   }
   .icon {
     color: var(--state-icon-color, var(--secondary-text-color));

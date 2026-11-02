@@ -2,7 +2,7 @@
 
 Timerify brings a dashboard card for one timer. It shows the countdown at a glance.
 
-A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor. You can set what a tap, a double tap and a long press do.
+A tap opens a pop-up. There you run the timer for a set time, add or take off minutes, and stop it. You also switch the intervals of its schedule and cancel pending commands. The card has two layouts and a visual editor. You can set what a tap, a double tap and a long press do. You can also add a **Turn off** button to the card.
 
 ## Loading the card
 
@@ -24,19 +24,19 @@ The dashboard then shows "Configuration error" and "Custom element doesn't exist
 
 The **pill** is a card one row high. Its fill grows from the left. It shows the share of the countdown that is left: full when the countdown starts, empty when it ends.
 
-On the pill are the icon of the device, its name, and the time left with the moment the countdown ends. When nothing counts, the state of the device stands in their place. An optional chip, "+15 min" in the picture, adds time without opening the pop-up.
+On the pill are the icon of the device, its name, and the time left with the moment the countdown ends. When nothing counts, the state of the device stands in their place. An optional chip, "+15 min" in the picture, adds time without opening the pop-up. An optional **Turn off** button stands before the chip. See [The Turn off button](#the-turn-off-button).
 
 ![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](../screenshots/card-pill.png)
 
 The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. The name is below.
 
-The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses).
+The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses). Its optional **Turn off** button is below the name.
 
 ![The round layout: a ring two thirds full around 30:00, beside a timer that is off](../screenshots/card-round.png)
 
 - The name and the icon are the device's. The icon follows the device's state, as it does on any card. You can set both in the card's configuration.
 - A device that is on with no countdown shows a full fill and a full ring. **Loose** mode allows this. The [Modes](timers.md#modes) section explains it. The pill says the state of the device in words. The round tile has the words for screen readers only. An idle timer shows an empty fill and an empty ring.
-- A timer whose number is unavailable shows that. Its chip, presets, plus, minus, Stop and cancel buttons are off. See [The pop-up](#the-pop-up).
+- A timer whose number is unavailable shows that. Its chip, presets, plus, minus, Stop and cancel buttons are off, and the **Turn off** button is not shown. See [The pop-up](#the-pop-up).
 - Suppose the entity of the card does not exist, or is not the **Run for** number of a Timerify timer. The card says so and names it. It finds its timer again by itself when the entity is back. After you rename the number, point the card at its new entity id.
 - Sometimes the number is a timer's, but the timer cannot be shown. That happens when the device or one of the two sensors is missing from the registry. The card says that and sends you to the timer's page to see why. It does so whatever the state of the number. Right after you add a timer, the line can show for a moment. It goes away by itself.
 - The card never goes quiet when it cannot work. A user who may not see the timer is told so. See [Permissions](#permissions).
@@ -45,7 +45,7 @@ The round tile has no chip. A long press on it starts or stops the timer. See [P
   - With **Next command** disabled, the card works. The pop-up says, in the place of the pending commands, that they are hidden. It names the sensor.
   - Enable the sensor in its entity settings. Home Assistant reloads the timer about half a minute later, and the card returns by itself.
 - A countdown carries on across a restart of Home Assistant or a lost connection, to the same end. The card asks for its timer again when the connection returns.
-- In a dashboard with sections, the pill starts 6 columns wide and one row high. It can be made as narrow as 3 columns. The round tile starts 3 columns wide and 2 rows high. It can be made 2 columns wide or 3 rows high.
+- In a dashboard with sections, the pill starts 6 columns wide and one row high. It can be made as narrow as 3 columns. The round tile starts 3 columns wide and 2 rows high. It can be made 2 columns wide or 3 rows high. With the **Turn off** button it is 3 rows high.
 
 ## Add the card
 
@@ -61,6 +61,7 @@ name: Boiler                              # default: the name of the device
 icon: mdi:water-boiler                    # default: the icon of the device, which follows its state
 presets: ["15", "30", "45", "60", "120"]  # the default: the minutes the pop-up offers
 chip: 15                                  # no chip by default: the pill's "+15 min" chip
+show_turn_off: false                      # true shows a Turn off button while the device is on
 tap: popup                                # popup (the default), run, stop, run_or_stop, action or none
 double_tap: none                          # the same choices, none by default
 hold: none                                # the same choices, run_or_stop on the round tile by default
@@ -76,6 +77,7 @@ tap_action:                               # a Home Assistant action, used when t
 | `icon` | the device's icon | An icon such as `mdi:water-boiler`. It does not follow the state. |
 | `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. The pop-up does not show a preset that is longer than the timer's **Maximum of Run for**. Home Assistant would refuse it. |
 | `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
+| `show_turn_off` | `false` | `true` shows a **Turn off** button on the card while the device is on. See [The Turn off button](#the-turn-off-button). |
 | `tap` | `popup` | What a tap does. One of `popup`, `run`, `stop`, `run_or_stop`, `action` and `none`. See [Presses](#presses). |
 | `double_tap` | `none` | What a double tap does. The same choices. |
 | `hold` | `run_or_stop` on the round tile, `none` on the pill | What a long press does. The same choices. |
@@ -96,7 +98,7 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 
 ## The pop-up
 
-By default a tap anywhere on the card opens it, the border included. The chip is the exception, because it has its own job. The card is a button for the keyboard and assistive technology too. Focus it with Tab and press Enter or Space.
+By default a tap anywhere on the card opens it, the border included. The chip and the **Turn off** button are the exceptions, because each has its own job. The card is a button for the keyboard and assistive technology too. Focus it with Tab and press Enter or Space.
 
 The pop-up is a modal dialog. Escape, the **Close** button and a click on the dimmed page behind it close it. From top to bottom it holds:
 
@@ -107,9 +109,21 @@ The pop-up is a modal dialog. Escape, the **Close** button and a click on the di
 - **Pending commands**, when there are some. Each shows like "On at 7:30 AM for 1 hr" or "Off at Tue 7:00 AM". It also shows its settings ("Cool, 24 °C") and a × button that cancels it. If the **Next command** sensor is disabled, one line stands here instead. It says that the commands are hidden because of it.
 - **Settings**, a link to the timer's page in the settings of the integration. Only administrators see it. It opens in the same tab and closes the pop-up. Ctrl, Cmd or Shift with the click open it in a new tab or window, and the pop-up stays.
 
-A timer that is unavailable has nothing to act on. Its presets, plus, minus, Stop and cancel buttons are off, and so is the pill's chip. When Home Assistant refuses an action, it shows its own error message, and the pop-up stays open.
+A timer that is unavailable has nothing to act on. Its presets, plus, minus, Stop and cancel buttons are off, and so is the pill's chip. The **Turn off** button is not shown. When Home Assistant refuses an action, it shows its own error message, and the pop-up stays open.
 
 Times follow your profile: its language, its 12 or 24 hour clock and its time zone, the server's or the browser's. A time on the same day is shown as a time. Within the next six days it is shown with the short weekday. Further ahead it is shown with the date. Durations such as "1 hr 30 min" are written for your language.
+
+## The Turn off button
+
+The pop-up has a **Stop** button. You can also show a **Turn off** button on the card itself. Then you stop the timer without opening the pop-up. The button is off by default. Turn it on with **Show a Turn off button** in the visual editor. In YAML, write `show_turn_off: true`.
+
+- The button shows while the device is on, with a countdown or without one.
+- It is not shown while the device is off. It is not shown while the timer is unavailable, or before the card has found its timer.
+- On the pill it stands beside the name, before the chip. On the round tile it is below the name.
+- Pressing it does what **Stop** does in the pop-up. It ends the countdown and turns the device off. That is the [**Stop** action](services.md#stop). It also turns off a device that runs without a countdown in **Loose** mode.
+- A press on it is not a tap, a double tap or a long press of the card. The pop-up does not open.
+- It is the card's own button, and it needs no other. The timer can also have a **Turn off** button on its device page. The section [What a timer adds to the device page](timers.md#what-a-timer-adds-to-the-device-page) describes it.
+- A round tile with the button is taller: 3 rows in a dashboard with sections, not 2. Its place stays free while the device is off. So the ring does not move when the button comes.
 
 ## Presses
 
@@ -176,11 +190,10 @@ The card keeps no timer of its own. Everything it shows is read from the states 
 
 | The card does | By |
 | --- | --- |
-| Runs for a preset, stops | Setting **Run for**, where 0 stops |
+| Runs for a preset | Setting **Run for** |
 | Adds or takes off time, and the chip | The [**Add time** action](services.md#add-time) |
 | A press set to **Run for the default duration**, or to **Start or stop** while the timer is idle | The [**Run** action](services.md#run) with no duration |
-| A press set to **Stop** | The [**Stop** action](services.md#stop) |
-| A press set to **Start or stop** while the timer runs | Setting **Run for** to 0 |
+| Stops: the pop-up's **Stop** button, the **Turn off** button, a press set to **Stop**, and a press set to **Start or stop** while the timer runs | The [**Stop** action](services.md#stop) |
 | A press set to **Home Assistant action** | Home Assistant's own handler of actions, on the device the timer runs |
 | Cancels a command | The [**Cancel command** action](services.md#cancel-command) |
 | Switches an interval | Turning its switch on or off |

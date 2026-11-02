@@ -96,7 +96,7 @@ function pageWithTimers(...numbers: string[]): FakeHass {
 }
 
 describe("the form of the visual editor", () => {
-  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets, a chip and the presses", async () => {
+  it("offers Timerify's Run for numbers, a layout, a name, an icon, presets, a chip, the Turn off button and the presses", async () => {
     const { getConfigForm } = await freshEditor();
 
     const { schema } = await getConfigForm();
@@ -141,6 +141,7 @@ describe("the form of the visual editor", () => {
       },
       // No unit of its own: its label says minutes.
       { name: "chip", selector: { number: { min: 1, max: 1440, mode: "box" } } },
+      { name: "show_turn_off", selector: { boolean: {} } },
       interactions(english),
     ]);
     expect(lengths("en").presets).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
@@ -154,7 +155,7 @@ describe("the form of the visual editor", () => {
 
     const localize = localizeFor("ru");
     const labelled = [
-      ...["entity", "layout", "name", "icon", "presets", "chip"],
+      ...["entity", "layout", "name", "icon", "presets", "chip", "show_turn_off"],
       ...["interactions", "tap", "double_tap", "hold"],
       ...["tap_action", "double_tap_action", "hold_action"],
     ] as const;
@@ -164,7 +165,7 @@ describe("the form of the visual editor", () => {
       );
     }
     const russianLengths = lengths("ru");
-    const [, layout, , presets, , group] = form.schema;
+    const [, layout, , presets, , , group] = form.schema;
     expect(group).toStrictEqual(interactions(russian));
     expect(layout).toMatchObject({
       selector: {
@@ -249,7 +250,10 @@ describe("the form of the visual editor", () => {
     for (const field of ["tap_action", "double_tap_action", "hold_action"]) {
       expect(form.computeHelper({ name: field }), field).toBe(english.card_editor_action_helper);
     }
-    for (const field of ["entity", "layout", "name", "icon", "chip", "interactions", "tap", ""]) {
+    for (const field of [
+      ...["entity", "layout", "name", "icon", "chip", "show_turn_off"],
+      ...["interactions", "tap", ""],
+    ]) {
       expect(form.computeHelper({ name: field }), field).toBeUndefined();
     }
   });
@@ -273,6 +277,8 @@ describe("the form of the visual editor", () => {
       [{ entity: NUMBER, presets: [{}] }, english.card_error_presets],
       [{ entity: NUMBER, presets: [15, null] }, english.card_error_presets],
       [{ entity: NUMBER, chip: true }, english.card_error_chip],
+      [{ entity: NUMBER, show_turn_off: "yes" }, english.card_error_show_turn_off],
+      [{ entity: NUMBER, show_turn_off: 1 }, english.card_error_show_turn_off],
       [{ entity: NUMBER, tap: 5 }, english.card_error_press],
       [{ entity: NUMBER, hold: ["run"] }, english.card_error_press],
       [{ entity: NUMBER, hold_action: "more-info" }, english.card_error_action],
@@ -290,6 +296,7 @@ describe("the form of the visual editor", () => {
         layout: "round",
         presets: ["15", "30", 20],
         chip: 10,
+        show_turn_off: true,
         tap: "action",
         tap_action: { action: "more-info" },
         double_tap: "run",

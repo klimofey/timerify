@@ -8,6 +8,7 @@ import {
   AC_ENDS_AT,
   AC_NEXT_COMMAND,
   AC_NUMBER,
+  BOILER,
   ENDS_AT,
   NEXT_COMMAND,
   NUMBER,
@@ -135,9 +136,9 @@ const addTime = (minutes: number, entity = NUMBER) => ({
   target: { entity_id: entity },
 });
 const stopped = (entity = NUMBER) => ({
-  domain: "number",
-  service: "set_value",
-  data: { value: 0 },
+  domain: "timerify",
+  service: "stop",
+  data: {},
   target: { entity_id: entity },
 });
 
@@ -384,6 +385,33 @@ describe("stopping", () => {
     control(second.root, "Stop").click();
     await settle(second.card);
     expect(runs.calls).toEqual([stopped(AC_NUMBER)]);
+  });
+
+  it("offers Stop while the boiler runs without a countdown", async () => {
+    const hass = boilerHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const { card, root } = await opened(hass);
+
+    // Nothing counts: no minus, and no time left. The target runs, and Stop turns it off.
+    expect(isDisabled(control(root, "Take off 5 min"))).toBe(true);
+    expect(root.querySelector(".countdown")).toBeNull();
+    expect(isDisabled(control(root, "Stop"))).toBe(false);
+
+    control(root, "Stop").click();
+    await settle(card);
+
+    expect(hass.calls).toEqual([stopped()]);
+  });
+
+  it("stops with Timerify's own action, as a Turn off button on the card does", async () => {
+    const hass = boilerHass({ counting: 45 });
+    const { card, root } = await opened(hass);
+
+    control(root, "Stop").click();
+    await settle(card);
+
+    expect(hass.calls.map(({ domain, service }) => `${domain}.${service}`)).toEqual([
+      "timerify.stop",
+    ]);
   });
 
   it("stops being offered when the timer has stopped", async () => {

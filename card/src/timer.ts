@@ -154,6 +154,10 @@ export function timerView(
   };
 }
 
+/** Whether the target runs, with a countdown or without one: there is something to stop. */
+export const isRunning = ({ state }: Pick<TimerView, "state">): boolean =>
+  state === "counting" || state === "open";
+
 /** The entities whose states the card reads: its number, and what Timerify names as its own. */
 export function watchedEntities(entityId: string, info: TimerInfo | undefined): string[] {
   return info

@@ -25,7 +25,7 @@ async function callOnEntity(
   }
 }
 
-/** Runs the timer for `minutes` from now; 0 stops it. */
+/** Runs the timer for `minutes` from now. The card stops it with `stop`, never with 0. */
 export function setMinutes(hass: HomeAssistant, runFor: string, minutes: number): Promise<void> {
   return callOnEntity(hass, "number", "set_value", { value: minutes }, runFor);
 }

@@ -37,6 +37,7 @@ describe("the config of the card", () => {
       tap: "popup",
       double_tap: "none",
       hold: "none",
+      show_turn_off: false,
     });
     expect([...DEFAULT_PRESETS]).toEqual([15, 30, 45, 60, 120]);
   });
@@ -108,7 +109,29 @@ describe("the config of the card", () => {
       tap: "popup",
       double_tap: "none",
       hold: "none",
+      show_turn_off: false,
     });
+  });
+});
+
+describe("the Turn off button of the card", () => {
+  it("is not shown unless the config asks for it", () => {
+    expect(parseConfig({ entity: NUMBER }).show_turn_off).toBe(false);
+    expect(parseConfig({ entity: NUMBER, show_turn_off: undefined }).show_turn_off).toBe(false);
+  });
+
+  it("takes true and false, as the visual editor writes them", () => {
+    expect(parseConfig({ entity: NUMBER, show_turn_off: true }).show_turn_off).toBe(true);
+    expect(parseConfig({ entity: NUMBER, show_turn_off: false }).show_turn_off).toBe(false);
+  });
+
+  it("refuses anything else, which would be taken for a yes or a no without a word", () => {
+    for (const given of ["true", "yes", 1, 0, null, [true], {}]) {
+      expect(
+        refusal({ entity: NUMBER, show_turn_off: given }).key,
+        JSON.stringify(given),
+      ).toBe("card_error_show_turn_off");
+    }
   });
 });
 
@@ -207,6 +230,14 @@ describe("the errors of a card on a page that is not in English", () => {
     expect(refusal({ entity: NUMBER, hold: "toggle" }).message).toBe(russian.card_error_press);
     expect(refusal({ entity: NUMBER, hold_action: "toggle" }).message).toBe(
       russian.card_error_action,
+    );
+  });
+
+  it("words the error of the Turn off button in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, show_turn_off: "yes" }).message).toBe(
+      russian.card_error_show_turn_off,
     );
   });
 });

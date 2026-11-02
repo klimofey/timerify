@@ -31,6 +31,8 @@ export interface CardConfig {
   presets: number[];
   /** The minutes the pill's chip adds; the round layout has no chip. */
   chip?: number;
+  /** Whether the card shows a Turn off button while the device is on; the pop-up has its Stop. */
+  show_turn_off: boolean;
   /** What a tap does: it opens the pop-up unless the config says otherwise. */
   tap: PressChoice;
   double_tap: PressChoice;
@@ -113,6 +115,17 @@ function parsePress(raw: unknown, fallback: PressChoice): PressChoice {
   return raw;
 }
 
+/** Whether the Turn off button is shown: not unless the config says `true`. */
+function parseShowTurnOff(raw: unknown): boolean {
+  if (raw === undefined) {
+    return false;
+  }
+  if (typeof raw !== "boolean") {
+    throw new ConfigError("card_error_show_turn_off");
+  }
+  return raw;
+}
+
 /** A Home Assistant action is a set of settings; anything else is not one. */
 const isAction = (given: unknown): given is ActionConfig =>
   typeof given === "object" && given !== null && !Array.isArray(given);
@@ -159,6 +172,9 @@ export function assertShape(raw: unknown): void {
   if (chip !== undefined && !isMinutesText(chip)) {
     throw new ConfigError("card_error_chip");
   }
+  if (given.show_turn_off !== undefined && typeof given.show_turn_off !== "boolean") {
+    throw new ConfigError("card_error_show_turn_off");
+  }
   for (const press of PRESSES) {
     if (given[press] !== undefined && typeof given[press] !== "string") {
       throw new ConfigError("card_error_press");
@@ -185,6 +201,7 @@ export function parseConfig(raw: unknown): CardConfig {
     ...(typeof icon === "string" && icon !== "" && { icon }),
     presets: parsePresets(given.presets),
     ...(chip !== undefined && { chip }),
+    show_turn_off: parseShowTurnOff(given.show_turn_off),
     tap: parsePress(given.tap, "popup"),
     double_tap: parsePress(given.double_tap, "none"),
     // Only the round tile has had a long press, and it keeps it unless the user turns it off.

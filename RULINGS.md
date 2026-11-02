@@ -3343,8 +3343,9 @@ in `docs/followups.md`.
   of settings is `card_error_action`; the visual editor is thrown out of the form only for a
   value of the wrong kind, as for the other options. `run` is a bare `timerify.run` on the
   number, the call the 1.0.0 long press made on an idle timer. `stop` is `timerify.stop`.
-  `run_or_stop` is the 1.0.0 long press as it was: `number.set_value` 0 when the timer counts or
-  is open, a bare run when it is idle, nothing when it is unavailable. The event is
+  `run_or_stop` is the 1.0.0 long press: it stops when the timer counts or is open (with
+  `timerify.stop`, since the Turn off entry below; 1.0.0 set the number to 0), runs bare when it is
+  idle, and does nothing when it is unavailable. The event is
   `{ config: { entity: <the timer's target>, tap_action, double_tap_action, hold_action },
   action: "tap" | "double_tap" | "hold" }`, with only the actions the user set, fired by the card
   with `bubbles` and `composed`; until the lookup has found the timer, the card does not know the
@@ -3385,9 +3386,7 @@ in `docs/followups.md`.
   (the same as the layout); the default of `hold` depends on the layout, so the stub config of
   the picker does not write it. If Home Assistant documents `visible`, the actions can be hidden
   with their presses. A user who sets a double tap on a card with a tap that opens the
-  pop-up waits a quarter of a second for it. `run_or_stop` stops with `number.set_value` 0 and
-  `stop` with `timerify.stop`: the same effect (`async_stop` is `async_set_minutes(0)`), two
-  calls in the card; unifying them is a change to the 1.0.0 tests of the round tile.
+  pop-up waits a quarter of a second for it.
   Tests: `card/test/press.test.ts` (a tap opens the pop-up by default on both layouts; a single
   tap still opens it when a double tap is set; a double tap does the double tap action alone;
   two taps further apart than the window are two taps; Enter and Space act at once; the wait is
@@ -3401,7 +3400,63 @@ in `docs/followups.md`.
   press, another finger's does not, and no listener is left when the card leaves the page),
   `card/test/config.test.ts` (the defaults, the six choices, the refusals), `card/test/editor.test.ts`
   (the Interactions group, its labels and helper in both languages, the shape check),
-  `card/test/round.test.ts` unchanged (the long press of 1.0.0 under its default); end to end
+  `card/test/round.test.ts` (the long press of 1.0.0 under its default, which stops with
+  `timerify.stop` since the Turn off entry below); end to end
   `opens the more-info dialog of the device, and starts nothing` (`round.spec.ts`), `runs the
   timer on a double tap` and `opens the pop-up on a single tap` (`pill.spec.ts`), and `sets what a
   tap does in the Interactions group` (`editor.spec.ts`, which also reads the group in Russian).
+
+- **The card has an optional Turn off button, `show_turn_off` (default `false`): while the target
+  runs, with a countdown or without one, the pill shows it beside its name, before the chip, and the
+  round tile below its name; pressing it calls `timerify.stop` and nothing else (#37).** It is shown
+  when the option is on and the view is `counting` or `open` (`isRunning`, which the pop-up's Stop
+  and Start or stop use too). It is not shown while the timer is unavailable (the lookup has not
+  found it, or its number or "Ends at" is unavailable) and not while it is idle, which includes a
+  target that is unavailable with nothing counting. It is a `<button>` of its own in the content
+  layer, beside the body as the chip is, so a press on it never reaches the body's handlers: it is
+  no tap, no double tap and no long press of the card, and it does not open the pop-up. It does
+  not cancel pending commands or do anything else beyond the stop command: what a stop does to
+  them is the server's rule ("the user's last word", above). `parseConfig` takes `true` and
+  `false` and refuses anything else with `card_error_show_turn_off` (a string such as `"yes"`
+  would otherwise be a silent no); `assertShape` sends the editor to YAML for a value of another
+  kind; the editor shows a boolean selector after the chip, labelled "Show a Turn off button".
+  The words are `card_turn_off` ("Turn off"; its Russian is the word of the timer's own
+  `button.turn_off` entity in `ru.json`, so the device page and the card agree) and
+  `card_editor_show_turn_off` ("Show a Turn off button", with that same word in Russian).
+  The card has one command for stopping: the Turn off button, the pop-up's Stop, a press set to
+  Stop and a press set to Start or stop while the timer runs all call `timerify.stop`. Before,
+  the pop-up's Stop and the round tile's default long press set the number to 0. The two ended in
+  the same code (`async_set_native_value` and `async_stop` both call `async_set_minutes`, in
+  `number.py`), so the user saw the same thing; only the logbook context differed. The pop-up's
+  Stop was already enabled while the target runs with no countdown, so the option adds the button
+  to the card and the pop-up needed nothing but the new call. `setMinutes` is left to the presets. The round tile that has the button is
+  184 px high, three rows of the sections grid (3 x 56 px and two gaps of 8 px), against 120 px
+  without it: `getGridOptions` answers 3 rows (minimum and maximum too) and `getCardSize` 4. The
+  button's place, a slot of 32 px under the name, is kept while the target is off, so the dial and
+  the name do not move when the button comes and goes. The pill is as high as before.
+  Why: the spec asks that the option make the card and its pop-up show a Turn off button while the
+  target is on; the pop-up has its Stop, so the option puts the same command on the card, for a
+  user who wants to switch a device off from the dashboard without opening a dialog. One command
+  for one meaning keeps the logbook the same whichever way the user stops the device, and keeps
+  the button, the pop-up and the presses from drifting apart. The slot keeps a dashboard still:
+  a tile whose dial jumped when the target went on would be hard to hit.
+  Cost if wrong: a round tile is a row taller with the option than without it, so switching it on
+  moves the cards below it on a sections dashboard. A target that is unavailable while a countdown
+  still counts is `counting`, so the button shows and ends the countdown, as the pop-up's Stop does;
+  if that should hide it, `isRunning` is the one rule to change, for the button, the pop-up and
+  Start or stop together. The logbook now credits a stop by the long press of the round tile to
+  `timerify.stop` and no longer to `number.set_value`.
+  Tests: `card/test/pill.test.ts` and `card/test/round.test.ts` (shown while the boiler runs with
+  and without a countdown; hidden while it is off, without the option, while the timer or the
+  boiler is unavailable and before the timer is found; comes and goes with the boiler; a press
+  stops with one `timerify.stop` and opens nothing, also on a loose timer; a long press on the
+  button is no hold, and presses at once are no double tap; the keys of the card do not reach it;
+  it is a control of its own, outside the body and before the chip; Russian wording; a refusal
+  leaves the card as it was; the slot is there while the boiler is off), `card/test/popup.test.ts`
+  (`offers Stop while the boiler runs without a countdown`, and a stop is `timerify.stop`),
+  `card/test/press.test.ts` (Start or stop stops with `timerify.stop`), `card/test/config.test.ts`,
+  `card/test/editor.test.ts` and `card/test/card.test.ts` (the option, its refusals, the field, the
+  size); end to end `turns off a boiler that runs with no countdown` (`pill.spec.ts`),
+  `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
+  and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
+  Russian).

@@ -2,7 +2,7 @@
 // Everything it shows is read from the states of the timer's entities; everything it does
 // goes through Timerify's own services.
 import { LitElement, css, html, nothing, type PropertyValues } from "lit";
-import { addMinutes, runWithoutDuration, setMinutes, stop } from "./actions";
+import { addMinutes, runWithoutDuration, stop } from "./actions";
 import { ACTION_KEYS, parseConfig, type CardConfig, type Press } from "./config";
 import { CountdownController } from "./countdown";
 import { getConfigForm, getStubConfig } from "./editor";
@@ -16,6 +16,7 @@ import { lastLoaded, loadStrings, onStringsLoaded, t } from "./strings";
 import {
   hasValue,
   isDisabled,
+  isRunning,
   lookupTimer,
   mattersToRender,
   serverNow,
@@ -30,6 +31,8 @@ const TAG = "timerify-card";
 const GRID_OPTIONS = {
   pill: { columns: 6, rows: 1, min_columns: 3, min_rows: 1, max_rows: 1 },
   round: { columns: 3, rows: 2, min_columns: 2, min_rows: 2, max_rows: 3 },
+  // The round tile with its Turn off button is a row taller.
+  roundWithTurnOff: { columns: 3, rows: 3, min_columns: 2, min_rows: 3, max_rows: 3 },
 } as const;
 
 export class TimerifyCard extends LitElement {
@@ -81,6 +84,13 @@ export class TimerifyCard extends LitElement {
       void addMinutes(hass, config.entity, config.chip);
     }
   };
+  /** The Turn off button: stops the timer, as the pop-up's Stop does. */
+  readonly #turnOff = (): void => {
+    const { _config: config, hass } = this;
+    if (config !== undefined && hass !== undefined) {
+      void stop(hass, config.entity);
+    }
+  };
   /** What the last render showed of the timer: the countdown ticks while it has an end ahead. */
   #view: TimerView | undefined;
 
@@ -118,12 +128,19 @@ export class TimerifyCard extends LitElement {
 
   /** The height in units of 50 pixels, for dashboards in masonry layout. */
   getCardSize(): number {
-    return this._config?.layout === "round" ? 3 : 1;
+    if (this._config?.layout !== "round") {
+      return 1;
+    }
+    return this._config.show_turn_off ? 4 : 3;
   }
 
   /** The size in cells, for dashboards in sections layout. */
   getGridOptions() {
-    return GRID_OPTIONS[this._config?.layout ?? "pill"];
+    const config = this._config;
+    if (config?.layout !== "round") {
+      return GRID_OPTIONS.pill;
+    }
+    return config.show_turn_off ? GRID_OPTIONS.roundWithTurnOff : GRID_OPTIONS.round;
   }
 
   /**
@@ -259,10 +276,13 @@ export class TimerifyCard extends LitElement {
    * act on.
    */
   #runOrStop(hass: HomeAssistant, config: CardConfig): void {
-    const state = this.#view?.state;
-    if (state === "counting" || state === "open") {
-      void setMinutes(hass, config.entity, 0);
-    } else if (state === "idle") {
+    const view = this.#view;
+    if (view === undefined) {
+      return;
+    }
+    if (isRunning(view)) {
+      void stop(hass, config.entity);
+    } else if (view.state === "idle") {
       void runWithoutDuration(hass, config.entity);
     }
   }
@@ -347,8 +367,8 @@ export class TimerifyCard extends LitElement {
     this.#view = view;
     return html`
       ${config.layout === "round"
-        ? renderRound(view, config, hass, this.#binding, now)
-        : renderPill(view, config, hass, this.#binding, this.#addChipMinutes, now)}
+        ? renderRound(view, config, hass, this.#binding, this.#turnOff, now)
+        : renderPill(view, config, hass, this.#binding, this.#addChipMinutes, this.#turnOff, now)}
       ${this._lookup.status === "found"
         ? html`
             <timerify-card-popup

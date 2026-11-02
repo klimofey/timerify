@@ -3,7 +3,7 @@
 // minutes without opening the pop-up, and carries on to the same end when Home Assistant
 // restarts, and counts by Home Assistant's clock on a browser whose own is wrong. View "pill":
 // one pill card on the strict timer, with a chip of 15. A pill whose double tap runs the timer
-// is in the view "presses".
+// is in the view "presses", and one with a Turn off button, on the loose timer, in "turn-off".
 import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
@@ -49,6 +49,10 @@ async function expectUntil(card: Locator, end: number, timeout = 10_000): Promis
     await expect(card.getByText(untilText(end), { exact: true })).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout });
 }
+
+/** The pill among the cards of a view that has another layout too. */
+const pillOf = (page: Page) =>
+  page.locator("timerify-card").filter({ has: page.locator("ha-card.pill") });
 
 test.describe("the pill in Home Assistant", () => {
   test.beforeEach(async ({ page, openDashboard }) => {
@@ -209,9 +213,6 @@ test.describe("the pill with a double tap", () => {
     await expect(page.locator("timerify-card")).toHaveCount(2);
   });
 
-  const pillOf = (page: Page) =>
-    page.locator("timerify-card").filter({ has: page.locator("ha-card.pill") });
-
   test("runs the timer on a double tap, and opens nothing", async ({ page, state, ws }) => {
     const { strict } = state.timers;
     const pill = pillOf(page);
@@ -230,5 +231,35 @@ test.describe("the pill with a double tap", () => {
 
     await expect(pill.locator("dialog")).toBeVisible();
     expect((await ws.state(strict.run_for))?.state).toBe("0");
+  });
+});
+
+test.describe("the pill with a Turn off button", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "turn-off");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("turns off a boiler that runs with no countdown", async ({ page, state, ws }) => {
+    const { loose } = state.timers;
+    const pill = pillOf(page);
+    const turnOff = pill.getByRole("button", { name: "Turn off", exact: true });
+    // The card has found its timer once it has its pop-up; nothing runs, so nothing to turn off.
+    await expect(pill.locator("timerify-card-popup")).toBeAttached();
+    await expect(turnOff).toHaveCount(0);
+
+    // Somewhere else the boiler is run with no duration: a loose timer turns its target on,
+    // and nothing counts.
+    await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("on");
+    expect((await ws.state(loose.ends_at))?.state).toBe("unknown");
+    await expect(turnOff).toBeVisible();
+
+    await turnOff.click();
+
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    // A press on the button is not a tap of the card.
+    await expect(pill.locator("dialog")).toBeHidden();
   });
 });

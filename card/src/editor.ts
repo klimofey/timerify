@@ -24,6 +24,7 @@ const LABELS = {
   icon: "card_editor_icon",
   presets: "card_editor_presets",
   chip: "card_editor_chip",
+  show_turn_off: "card_editor_show_turn_off",
   interactions: "card_editor_interactions",
   tap: "card_editor_tap",
   double_tap: "card_editor_double_tap",
@@ -58,6 +59,7 @@ interface SelectorField {
     | { text: Record<string, never> }
     | { icon: Record<string, never> }
     | { number: { min: number; max: number; mode: "box" } }
+    | { boolean: Record<string, never> }
     | { ui_action: { default_action: "more-info" } };
 }
 
@@ -168,6 +170,7 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       },
       // The label says that these are minutes, so the field has no unit of its own.
       { name: "chip", selector: { number: { min: 1, max: MAX_MINUTES, mode: "box" } } },
+      { name: "show_turn_off", selector: { boolean: {} } },
       {
         name: "interactions",
         type: "expandable",

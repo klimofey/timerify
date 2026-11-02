@@ -7,7 +7,7 @@ import { styleMap } from "lit/directives/style-map.js";
 import type { CardConfig } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant } from "./hass";
-import { isPressable, popupAnnounced, renderIcon, renderStatus } from "./layout";
+import { isPressable, popupAnnounced, renderIcon, renderStatus, renderTurnOff } from "./layout";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
 import type { TimerView } from "./timer";
@@ -16,9 +16,10 @@ import type { TimerView } from "./timer";
  * The card as a pill, drawn at the instant `now` that `view` was made for. Its body is an
  * empty layer under the content, as in Home Assistant's tile card: a button, pressed through
  * `binding`, that opens the pop-up, named by the name and the state it covers. The content
- * above lets presses through to it, except the chip, a button of its own beside the body:
- * `chip` is called when it is pressed, and the body never hears of it. A timer that is
- * unavailable has nothing to add time to, and the chip is off.
+ * above lets presses through to it, except the chip and the Turn off button, each a button
+ * of its own beside the body: `chip` and `turnOff` are called when they are pressed, and the
+ * body never hears of them. A timer that is unavailable has nothing to add time to, and the
+ * chip is off.
  */
 export function renderPill(
   view: TimerView,
@@ -26,6 +27,7 @@ export function renderPill(
   hass: HomeAssistant,
   binding: PressBinding,
   chip: () => void,
+  turnOff: () => void,
   now: number,
 ): TemplateResult {
   const filled = Math.round(view.progress * 1000) / 10;
@@ -57,6 +59,7 @@ export function renderPill(
           <span class="name">${view.name}</span>
           <span class="status">${renderStatus(view, config, hass, now)}</span>
         </span>
+        ${renderTurnOff(view, config, hass, turnOff)}
         ${config.chip === undefined
           ? nothing
           : html`
@@ -123,26 +126,9 @@ export const pillStyles = css`
     font-size: var(--ha-font-size-s, 12px);
     white-space: nowrap;
   }
-  .chip {
-    flex: none;
-    height: 32px;
-    padding: 0 12px;
-    border: none;
-    border-radius: 16px;
-    background: var(--secondary-background-color);
-    color: var(--primary-text-color);
-    font: inherit;
-    font-size: var(--ha-font-size-m, 14px);
-    cursor: pointer;
-    pointer-events: auto;
-  }
   .chip:disabled {
     color: var(--disabled-text-color);
     cursor: default;
-  }
-  .chip:focus-visible {
-    outline: 2px solid var(--primary-color);
-    outline-offset: 2px;
   }
   /*
    * The pill has a long press only when the config gives it one. While letting go would act,

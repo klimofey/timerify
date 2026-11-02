@@ -20,7 +20,6 @@ afterEach(() => {
 const target = (entity = NUMBER) => ({ entity_id: entity });
 const ran = { domain: "timerify", service: "run", data: {}, target: target() };
 const stopped = { domain: "timerify", service: "stop", data: {}, target: target() };
-const setToZero = { domain: "number", service: "set_value", data: { value: 0 }, target: target() };
 
 const isOpen = (card: TimerifyCard) => popupOf(card).shadowRoot?.querySelector("dialog")?.open;
 
@@ -315,7 +314,8 @@ describe("what a press can be set to", () => {
     await click(runningCard);
 
     expect(idle.calls).toEqual([ran]);
-    expect(running.calls).toEqual([setToZero]);
+    // The one command for stopping, the same as a press set to Stop makes.
+    expect(running.calls).toEqual([stopped]);
   });
 
   it("start or stop does nothing to a timer that is unavailable", async () => {

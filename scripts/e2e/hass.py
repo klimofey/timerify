@@ -165,6 +165,16 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 ],
             },
             {
+                # The Turn off button: a pill of the loose timer, which can run with no
+                # countdown, and a round tile of the strict one, which counts.
+                "title": "Turn off",
+                "path": "turn-off",
+                "cards": [
+                    timerify_card(loose, layout="pill", show_turn_off=True),
+                    timerify_card(strict, layout="round", show_turn_off=True),
+                ],
+            },
+            {
                 # Empty: the editor tests add a card to it from the card picker, and the
                 # reset that every test starts with saves the dashboard as it was.
                 "title": "Editor",

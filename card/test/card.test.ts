@@ -759,6 +759,28 @@ describe("its size", () => {
       max_rows: 3,
     });
   });
+
+  it("makes room for the Turn off button of the round tile, and for it alone", async () => {
+    const hass = fakeHass();
+
+    const pill = await mountCard(hass, { entity: NUMBER, layout: "pill", show_turn_off: true });
+    expect(pill.getCardSize()).toBe(1);
+    expect(pill.getGridOptions()).toMatchObject({ rows: 1, max_rows: 1 });
+
+    const round = await mountCard(hass, { entity: NUMBER, layout: "round", show_turn_off: true });
+    expect(round.getCardSize()).toBe(4);
+    expect(round.getGridOptions()).toEqual({
+      columns: 3,
+      rows: 3,
+      min_columns: 2,
+      min_rows: 3,
+      max_rows: 3,
+    });
+
+    round.setConfig({ entity: NUMBER, layout: "round" });
+    expect(round.getCardSize()).toBe(3);
+    expect(round.getGridOptions()).toMatchObject({ rows: 2, min_rows: 2 });
+  });
 });
 
 describe("the card picker", () => {

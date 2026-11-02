@@ -12,15 +12,15 @@ import { NUMBER, fakeHass } from "./fake-hass";
 const target = { entity_id: NUMBER };
 
 describe("what the card asks Timerify to do", () => {
-  it("runs the timer for a number of minutes, and stops it with none", async () => {
+  it("runs the timer for a number of minutes", async () => {
     const hass = fakeHass();
 
     await setMinutes(hass, NUMBER, 45);
-    await setMinutes(hass, NUMBER, 0);
+    await setMinutes(hass, NUMBER, 120);
 
     expect(hass.calls).toEqual([
       { domain: "number", service: "set_value", data: { value: 45 }, target },
-      { domain: "number", service: "set_value", data: { value: 0 }, target },
+      { domain: "number", service: "set_value", data: { value: 120 }, target },
     ]);
   });
 

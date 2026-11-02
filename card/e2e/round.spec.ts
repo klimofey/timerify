@@ -1,7 +1,8 @@
 // The round card in a real Home Assistant: a tap opens its pop-up, and a long press starts the
 // timer with no duration, or stops it when it runs, without opening the pop-up. View "round":
 // the strict timer's round card, then the loose timer's. A long press that is set to a Home
-// Assistant action does that action: the view "presses" has such a card.
+// Assistant action does that action: the view "presses" has such a card. The view "turn-off"
+// has a round card with a Turn off button.
 import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
@@ -136,5 +137,51 @@ test.describe("a round card whose long press is a Home Assistant action", () => 
     await expect(dialog.getByRole("switch")).toBeVisible();
     await expect(round.locator("dialog")).toBeHidden();
     expect((await ws.state(state.timers.strict.run_for))?.state).toBe("0");
+  });
+});
+
+test.describe("a round card with a Turn off button", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "turn-off");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("turns off a countdown from under the name, and the dial stays where it was", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const { strict: entities } = state.timers;
+    const round = page.locator("timerify-card").filter({ has: page.locator("ha-card.round") });
+    await isReady(round);
+    const turnOff = round.getByRole("button", { name: "Turn off", exact: true });
+    await expect(turnOff).toHaveCount(0);
+    const dial = round.locator(".dial");
+    const before = await dial.boundingBox();
+
+    await ws.callService("number", "set_value", { value: 30 }, { entity_id: entities.run_for });
+    await expect(round.locator(".time")).toBeVisible();
+    await expect(turnOff).toBeVisible();
+
+    // The button is under the name, and inside the card; the dial did not move to make room.
+    const [card, name, button] = await Promise.all([
+      round.locator("ha-card").boundingBox(),
+      round.locator(".name").boundingBox(),
+      turnOff.boundingBox(),
+    ]);
+    if (card === null || name === null || button === null) {
+      throw new Error("The card, its name and its button should be on the page");
+    }
+    expect(button.y).toBeGreaterThanOrEqual(name.y + name.height);
+    expect(button.y + button.height).toBeLessThanOrEqual(card.y + card.height);
+    expect(await dial.boundingBox()).toEqual(before);
+
+    await turnOff.click();
+
+    await expect.poll(async () => (await ws.state(entities.run_for))?.state).toBe("0");
+    await expect.poll(async () => (await ws.state(entities.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    await expect(round.locator("dialog")).toBeHidden();
+    expect(await dial.boundingBox()).toEqual(before);
   });
 });

@@ -11,6 +11,7 @@ import {
   cancelCommand,
   setIntervalEnabled,
   setMinutes,
+  stop,
 } from "./actions";
 import type { CardConfig } from "./config";
 import { formatClock, formatMinutes, formatRemaining, settingText } from "./format";
@@ -18,6 +19,7 @@ import type { HassEntity, HomeAssistant, IntervalInfo } from "./hass";
 import { t } from "./strings";
 import {
   isDisabled,
+  isRunning,
   mattersToRender,
   serverNow,
   watchedEntities,
@@ -444,7 +446,7 @@ export class TimerifyCardPopup extends LitElement {
     const { hass, config, view } = this;
     const step = formatMinutes(hass, STEP_MINUTES);
     const counting = view.state === "counting";
-    const running = counting || view.state === "open";
+    const running = isRunning(view);
     // A timer that is unavailable has nothing to act on: Home Assistant would leave it out of
     // the call without a word, and a press would seem to do nothing.
     const unavailable = view.state === "unavailable";
@@ -489,7 +491,7 @@ export class TimerifyCardPopup extends LitElement {
         <button
           class="action stop"
           ?disabled=${!running}
-          @click=${() => void setMinutes(hass, config.entity, 0)}
+          @click=${() => void stop(hass, config.entity)}
         >
           ${t(hass, "card_stop")}
         </button>

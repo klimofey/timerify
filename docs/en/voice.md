@@ -165,7 +165,7 @@ Timerify then writes the file `custom_sentences/<language>/timerify.yaml` in you
 
 A name is listed the way Home Assistant lists every entity: with its aliases. The file also holds the words for the HVAC modes that the devices have. It holds the modes of fans, humidifiers and the like too. Each of them is listed in two ways. One is the mode as the device names it, with a space for an underscore. The other is the word Home Assistant shows for it in the language of the file. The Russian file has the Russian words, whatever language your house is set to.
 
-Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one.
+Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one. A word that two modes of different devices share is listed for one of them only. The other mode is then said by its own name.
 
 A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
 

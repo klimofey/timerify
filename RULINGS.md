@@ -2935,7 +2935,10 @@ in `docs/followups.md`.
   compares texts without a difference of case and takes the first value that has the
   text, so a text that is listed already is left out, whatever mode has it: the English
   "Auto" of `auto` is the name again, and every mode is listed by its name before any
-  word is, so a word that is said like another mode cannot mean the wrong one.
+  word is, so a word that is said like another mode cannot mean the wrong one. A word
+  that two modes of different devices share goes to the one that sorts first, and the
+  other is said by its name, since the values of the list are not scoped to a device (as
+  those of the HVAC words are not, #25).
   `SentenceFiles.async_sync` asks for the words of each language it writes, in the event
   loop, before the executor job that builds the file; `VoiceSettingValues.mode_sources`
   replaces the set of modes, which stays as the property `modes`. Why: a person who reads
@@ -2952,6 +2955,7 @@ in `docs/followups.md`.
   `test_a_water_heater_mode_uses_the_words_of_the_water_heater_domain`,
   `test_a_device_class_without_words_of_its_own_has_the_words_of_the_domain`,
   `test_every_language_gets_the_same_modes`,
+  `test_auto_in_russian_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode`,
   `test_the_words_of_a_mode_are_listed_after_its_name_in_the_order_of_the_words`,
   `test_a_word_with_a_yo_is_listed_under_both_spellings_like_a_name`,
   `test_a_word_that_is_the_name_of_its_own_mode_is_listed_once`,

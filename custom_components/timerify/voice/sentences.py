@@ -287,7 +287,11 @@ async def async_mode_words(
     entities. Without a translation in `language`, Home Assistant has its English one
     in its place, which is what its interface shows in that language.
     """
-    platforms = {source.platform for source in sources if source.platform is not None}
+    platforms = {
+        source.platform
+        for source in sources
+        if source.platform is not None and source.translation_key is not None
+    }
     domains = {source.domain for source in sources}
     entity = await async_get_translations(hass, language, "entity", platforms)
     component = await async_get_translations(

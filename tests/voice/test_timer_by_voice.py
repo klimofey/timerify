@@ -56,6 +56,7 @@ from ..helpers import (
     state_of,
 )
 from .helpers import (
+    CLIMATE_FAN_MODE,
     HOUR_CLASSES,
     MINUTE_CLASSES,
     SETTING_LISTS,
@@ -77,6 +78,7 @@ from .helpers import (
     talk,
     translated,
     with_voice_settings,
+    word_of,
 )
 
 RUN = "TimerifyRun"
@@ -505,6 +507,59 @@ async def test_auto_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode(
     assert ac.call_data == [
         ("set_hvac_mode", {"hvac_mode": "auto"}),
         ("set_fan_mode", {"fan_mode": "auto"}),
+        ("set_fan_mode", {"fan_mode": "auto"}),
+    ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_auto_in_russian_is_the_hvac_mode_unless_it_is_asked_for_as_a_fan_mode(
+    hass: HomeAssistant, provide_target: ProvideTarget, setup_target: SetupTarget
+) -> None:
+    """The word Home Assistant shows in Russian for the automatic fan of a thermostat
+    is also a word for its automatic HVAC mode. Bare, with "in mode" or with "mode", it
+    is the mode of the thermostat; with "fan" it is the fan."""
+    ac = provide_target(
+        AC_ID,
+        CLIMATE_SERVICES,
+        name="AC",
+        capability_attributes={**AC_ATTRS, "hvac_modes": ["off", "heat", "auto"]},
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+    await with_voice_settings(hass, setup_target, ac)
+    word = await word_of(hass, "ru", "entity_component", f"{CLIMATE_FAN_MODE}.auto")
+    hvac_words = {w.casefold() for w in spoken_values("ru", LIST_HVAC_MODE)["auto"]}
+    assert word.casefold() in hvac_words, "the fan word is no longer an HVAC word"
+    hvac_forms = spoken_rule(
+        "ru", "timerify_hvac_part", {}, texts={"timerify_hvac_mode": word}
+    )
+    fan_forms = [
+        form
+        for form in spoken_rule(
+            "ru", "timerify_mode_part", {}, texts={"timerify_mode": word}
+        )
+        if form not in hvac_forms
+    ]
+    assert len(fan_forms) == 1
+    turn_on = min(
+        samples(
+            "ru",
+            RUN,
+            names=("AC",),
+            numbers={"timerify_hours": 1},
+            absent=SETTING_LISTS,
+            admitting="climate",
+        ),
+        key=len,
+    )
+
+    for form in [*hvac_forms, *fan_forms]:
+        response = await converse(hass, f"{turn_on} {form}", "ru")
+        assert reached(response) == RUN, (form, speech(response))
+
+    assert ac.call_data == [
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
+        ("set_hvac_mode", {"hvac_mode": "auto"}),
         ("set_fan_mode", {"fan_mode": "auto"}),
     ]
 

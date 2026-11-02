@@ -41,6 +41,7 @@ from homeassistant.core import Context, Event, HomeAssistant, ServiceCall, callb
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import intent, llm
 from homeassistant.helpers.template import Template
+from homeassistant.helpers.translation import async_get_translations
 from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import (
@@ -488,6 +489,24 @@ def listed(
     written = yaml.safe_load(managed_file(hass, language).read_text("utf-8"))
     values: list[dict[str, Any]] = written["lists"][list_name]["values"]
     return values
+
+
+def outs(values: list[dict[str, Any]]) -> list[Any]:
+    """What the values of a list mean, in the order they are listed."""
+    return [value["out"] for value in values]
+
+
+CLIMATE_FAN_MODE: Final = (
+    "component.climate.entity_component._.state_attributes.fan_mode.state"
+)
+"""Where Home Assistant keeps the words for the fan modes of all thermostats."""
+
+
+async def word_of(hass: HomeAssistant, language: str, category: str, key: str) -> str:
+    """The word Home Assistant has at `key` in `language`: the integration or domain
+    that the key names is the one that is loaded."""
+    component = key.split(".")[1]
+    return (await async_get_translations(hass, language, category, [component]))[key]
 
 
 def conversation_reloads(hass: HomeAssistant) -> list[ServiceCall]:

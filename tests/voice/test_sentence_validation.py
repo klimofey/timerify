@@ -32,14 +32,11 @@ from custom_components.timerify.voice.sentences import (
     load_sources,
     read_back,
     render,
-    spoken_form,
     spoken_variants,
     validate,
 )
 
-NAMES = tuple(
-    VoiceName(spoken_form(name), name, "switch") for name in ("Boiler", "Boiler (main)")
-)
+NAMES = tuple(VoiceName(name, "switch") for name in ("Boiler", "Boiler (main)"))
 """A target known by a plain name and by one with characters in it that a sentence
 template would read as its own."""
 
@@ -348,9 +345,9 @@ def test_every_value_is_listed_under_both_spellings() -> None:
     listed with it and with a ye, both meaning the same thing, and said as each."""
     built = build(
         load_sources("en"),
-        [VoiceName(spoken_form(YO_NAME), YO_NAME, "switch")],
+        [VoiceName(YO_NAME, "switch")],
         VoiceSettingValues(modes=frozenset({YO_MODE})),
-        [VoiceTitle(spoken_form(YO_TITLE), YO_TITLE)],
+        [VoiceTitle(YO_TITLE)],
     )
 
     lists = built.data["lists"]
@@ -397,9 +394,36 @@ def test_a_value_not_read_as_the_text_it_was_built_from_is_refused() -> None:
         validate("en", built.data, said)
 
 
-def test_a_list_with_more_values_than_texts_said_is_refused() -> None:
+def test_a_list_with_another_number_of_texts_said_is_refused() -> None:
     built = built_sentences()
     said = {**built.said, LIST_TARGET: ("Boiler",)}
 
-    with pytest.raises(InvalidSentences, match="ValueError"):
+    with pytest.raises(
+        InvalidSentences,
+        match=f"{LIST_TARGET} lists 2 values, and 1 texts are said",
+    ):
         validate("en", built.data, said)
+
+
+@pytest.mark.parametrize("list_name", [LIST_TARGET, LIST_INTERVAL, LIST_MODE])
+def test_a_list_that_nothing_is_said_of_is_refused(list_name: str) -> None:
+    """A list left out of `said` would be left unchecked, however wrong its values."""
+    built = built_sentences()
+    said = {name: texts for name, texts in built.said.items() if name != list_name}
+
+    with pytest.raises(InvalidSentences, match=f"No text is said for .*{list_name}"):
+        validate("en", built.data, said)
+
+
+def test_a_name_and_a_title_of_nothing_but_punctuation_are_left_out() -> None:
+    """They would match anywhere, as a mode of the kind would."""
+    built = build(
+        load_sources("en"),
+        [VoiceName("?!", "switch"), VoiceName("Boiler!", "switch")],
+        intervals=[VoiceTitle("..."), VoiceTitle("Morning")],
+    )
+
+    assert [v["out"] for v in built.data["lists"][LIST_TARGET]["values"]] == ["Boiler!"]
+    assert [v["in"] for v in built.data["lists"][LIST_TARGET]["values"]] == ["Boiler"]
+    assert built.said[LIST_TARGET] == ("Boiler",)
+    assert built.said[LIST_INTERVAL] == ("Morning",)

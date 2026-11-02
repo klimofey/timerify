@@ -50,6 +50,10 @@ from .base import loaded_timers
 RULE_PREFIX: Final = "timerify_"
 """What the names of the lists and expansion rules the sentences define start with."""
 
+NAME_LISTS: Final = (LIST_TARGET, LIST_INTERVAL, LIST_MODE)
+"""The lists of the sentences that hold names as people say them, which `validate`
+proves are matched as said and `BuiltSentences.said` has the texts of."""
+
 _TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
 
 _LOADER: Final = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
@@ -93,27 +97,25 @@ class BuiltSentences:
 
 @dataclass(frozen=True)
 class VoiceName:
-    """One way a target is called: what is said, and what is meant by it."""
+    """One way a target is called."""
 
-    spoken: str
-    """The name as the built-in agent compares it with what it hears: punctuation
-    removed."""
     name: str
-    """The name as Home Assistant shows it, which the intent receives."""
+    """The name as Home Assistant shows it, which the intent receives. It is also what
+    is said, once `spoken_variants` has made of it what the built-in agent compares
+    with what it hears."""
     domain: str
     """The domain of the target."""
 
 
 @dataclass(frozen=True)
 class VoiceTitle:
-    """One way a schedule interval is called: what is said, and what is meant by it.
-    A title belongs to no domain: timers of any domain may have an interval of it."""
+    """One way a schedule interval is called. A title belongs to no domain: timers of
+    any domain may have an interval of it."""
 
-    spoken: str
-    """The title as the built-in agent compares it with what it hears: punctuation
-    removed."""
     title: str
-    """The title as the interval has it, which the intent receives."""
+    """The title as the interval has it, which the intent receives. It is also what is
+    said, once `spoken_variants` has made of it what the built-in agent compares with
+    what it hears."""
 
 
 @dataclass(frozen=True)
@@ -138,26 +140,18 @@ def spoken_form(name: str) -> str:
     return remove_punctuation(name).strip()
 
 
-def spoken_mode(mode: str) -> str:
-    """The mode of a device as a person says it: as the device names it, with the
-    underscores of a name such as `eco_plus` for spaces."""
-    return spoken_form(mode.replace("_", " "))
-
-
 def spoken_variants(text: str) -> tuple[str, ...]:
     """The ways `text` is listed so that the built-in agent matches it as said: as
     `spoken_form` has it and, when that has a Russian "yo", with "ye" for it too, since
     a speech recogniser writes the one for the other and the agent compares letter by
-    letter. Nothing for a text of nothing but punctuation, which would match
-    anywhere."""
+    letter. Nothing for a text of nothing but punctuation, which would match anywhere.
+
+    The text is the one as it is written, never what `spoken_form` made of it:
+    removing punctuation twice does not always leave what removing it once did.
+    """
     spoken = spoken_form(text)
-    return _both_spellings(spoken) if spoken else ()
-
-
-def _both_spellings(spoken: str) -> tuple[str, ...]:
-    """`spoken` and, when it has a "yo", the same with "ye" for it. Not `spoken_form`
-    again: removing punctuation twice does not always leave what removing it once
-    did."""
+    if not spoken:
+        return ()
     folded = fold_yo(spoken)
     return (spoken, folded) if folded != spoken else (spoken,)
 
@@ -181,8 +175,7 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
 
     The names of an entity are its aliases, the computed name among them, as the
     built-in agent lists them, so that a name is matched as it is for any other
-    entity. A target that has no state yet is listed by its registry entry. A name that
-    is nothing but punctuation is left out: it would match anywhere.
+    entity. A target that has no state yet is listed by its registry entry.
     """
     registry = er.async_get(hass)
     names: list[VoiceName] = []
@@ -196,11 +189,7 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
         else:
             aliases = []
         domain = split_entity_id(entity_id)[0]
-        names.extend(
-            VoiceName(spoken, alias, domain)
-            for alias in aliases
-            if (spoken := spoken_form(alias))
-        )
+        names.extend(VoiceName(alias, domain) for alias in aliases)
     return names
 
 
@@ -209,18 +198,13 @@ def interval_names(hass: HomeAssistant) -> list[VoiceTitle]:
     """Every title the built-in agent would know the schedule intervals of the timers
     by, each once however many timers have an interval of that title.
 
-    A title is cleaned as a name is: what is said is the title without punctuation, and
-    what is meant is the title as it is, which names the interval to the timer. A title
-    that is nothing but punctuation is left out: it would match anywhere.
+    A title is said as a name is, and meant as it is, which names the interval to the
+    timer.
     """
-    titles: dict[tuple[str, str], VoiceTitle] = {}
+    titles: dict[str, VoiceTitle] = {}
     for entry in loaded_timers(hass):
         for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
-            spoken = spoken_form(subentry.title)
-            if spoken:
-                titles.setdefault(
-                    (spoken, subentry.title), VoiceTitle(spoken, subentry.title)
-                )
+            titles.setdefault(subentry.title, VoiceTitle(subentry.title))
     return list(titles.values())
 
 
@@ -260,11 +244,12 @@ def build(
 
     A name is listed under what is said (`in`, escaped so that it is read as text) and
     what it means (`out`), with the domain of its target as context; an interval, which
-    is told apart by its title alone, without a context. A name, a title or a mode with
-    a Russian "yo" is listed twice, with "yo" and with "ye", both meaning the same. The
-    words for an HVAC mode are those of the sources that mean a mode some target
-    supports; the modes are listed as the devices name them, said with spaces for
-    underscores.
+    is told apart by its title alone, without a context. What is said is made of the
+    name, the title or the mode as it is written by `spoken_variants`: a Russian "yo" in
+    it makes two values, with "yo" and with "ye", both meaning the same, and one that is
+    nothing but punctuation is left out, since it would match anywhere. The words for an
+    HVAC mode are those of the sources that mean a mode some target supports; the modes
+    are listed as the devices name them, said with spaces for underscores.
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
@@ -272,12 +257,12 @@ def build(
     lists[LIST_TARGET], said[LIST_TARGET] = _name_list(
         (spoken, {"out": name.name, "context": {"domain": name.domain}})
         for name in names
-        for spoken in _both_spellings(name.spoken)
+        for spoken in spoken_variants(name.name)
     )
     lists[LIST_INTERVAL], said[LIST_INTERVAL] = _name_list(
         (spoken, {"out": interval.title})
         for interval in intervals
-        for spoken in _both_spellings(interval.spoken)
+        for spoken in spoken_variants(interval.title)
     )
     lists[LIST_HVAC_MODE] = {
         "values": [
@@ -307,15 +292,15 @@ def _name_list(
 
 
 def _mode_entries(modes: Iterable[str]) -> list[tuple[str, dict[str, str]]]:
-    """The entries of the list of modes: each said as `spoken_mode` says it, in each of
-    its spellings, and meaning the mode as the device names it. A mode that is nothing
-    but punctuation is left out: it would match anywhere."""
+    """The entries of the list of modes: each said as a person says it, which is as the
+    device names it with a space for each underscore of a name such as `eco_plus`, in
+    each of its spellings, and meaning the mode as the device names it."""
     entries: list[tuple[str, dict[str, str]]] = []
     for mode in sorted(modes):
-        if spoken := spoken_mode(mode):
-            entries.extend(
-                (variant, {"out": mode}) for variant in _both_spellings(spoken)
-            )
+        entries.extend(
+            (spoken, {"out": mode})
+            for spoken in spoken_variants(mode.replace("_", " "))
+        )
     return entries
 
 
@@ -329,9 +314,10 @@ def validate(
     use, and a sentence that is not a template does not fail until it is matched. So
     this also parses every sentence of every intent `built` defines, checks that every
     list and expansion rule they and Timerify's own rules use is there, and that each
-    value of the lists of `said` is read as exactly the text that `build` meant to say
+    value of the lists of names is read as exactly the text that `build` meant to say
     with it (`BuiltSentences.said`), which is the text itself, in the order of the
-    values.
+    values. A list that `said` has no texts for is refused, as is one whose number of
+    texts is not its number of values.
 
     Raises `InvalidSentences` for the first thing that is wrong.
     """
@@ -344,8 +330,8 @@ def validate(
         intents = Intents.from_dict(merged)
         own_intents = [intents.intents[name] for name in built.get("intents", {})]
         _check_references(intents, own_intents)
-        for list_name, texts in said.items():
-            _check_names(intents, built, list_name, texts)
+        for list_name in NAME_LISTS:
+            _check_names(intents, built, list_name, said)
     except InvalidSentences:
         raise
     except Exception as err:
@@ -435,16 +421,23 @@ def _check_names(
     intents: Intents,
     built: Mapping[str, Any],
     list_name: str,
-    said: Sequence[str],
+    said: Mapping[str, Sequence[str]],
 ) -> None:
     """Every name listed in `list_name` is read as the text that it is said as, the
-    texts of `said` being those of the values, in order."""
+    texts `said` has for the list being those of its values, in order."""
     slot_list = intents.slot_lists[list_name]
     if not isinstance(slot_list, TextSlotList):
         raise InvalidSentences(f"{list_name} is not a list of names")
-    for value, parsed, text in zip(
-        built["lists"][list_name]["values"], slot_list.values, said, strict=True
-    ):
+    values = built["lists"][list_name]["values"]
+    if list_name not in said:
+        raise InvalidSentences(f"No text is said for the values of {list_name}")
+    texts = said[list_name]
+    if len(texts) != len(values):
+        raise InvalidSentences(
+            f"{list_name} lists {len(values)} values, and {len(texts)} texts are said"
+            " for them"
+        )
+    for value, parsed, text in zip(values, slot_list.values, texts, strict=True):
         if _text_of(parsed.text_in) != normalize_text(text):
             raise InvalidSentences(
                 f"{value['out']!r} would not be matched as said: it is listed as"

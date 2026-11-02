@@ -930,10 +930,10 @@ those of the spec.
   fold of the repository), runs of space one space.** So "morning" means `Morning!` and
   `06:30-07:15, Mon-Sun` means the generated title with en dashes. The sentence files list a
   title with a yo under both spellings, since the built-in agent cannot be told to fold
-  (Decision 6 of the voice part, below). A title of nothing but punctuation has the key `""`, which matches
-  nothing: the built-in agent does not know such a title either, so an LLM cannot ask for it
-  and it is reached by the whole schedule or its own switch. Cost if wrong: such an
-  interval is not named by an agent.
+  (Decision 6 of the voice part, below). A title of nothing but punctuation has the key
+  `""`, which matches nothing: the built-in agent does not know such a title either, so an
+  LLM cannot ask for it and it is reached by the whole schedule or its own switch. Cost if
+  wrong: such an interval is not named by an agent.
 - **A refusal for an unknown title lists the titles that can be asked for, bare, each
   once, joined by semicolons, at most five; the translation chooses the quotes around the
   asked title.** A placeholder can be put in quotes as a whole but not each element of a
@@ -2875,25 +2875,35 @@ in `docs/followups.md`.
 - **A name, a title and a mode with a Russian yo are listed under both spellings, and
   `fold_yo` is the one fold (Decision 6, #23).** A speech recogniser writes "ye" where
   Russian prints "yo", and the built-in agent compares what it hears with the file letter
-  by letter and cannot be told to fold. So `build` lists each name, interval title and mode
-  once per spelling (`spoken_variants`: as `spoken_form` has it, and with `fold_yo` of it
-  when that differs), both with the same `out` and context, and the answer gives the name
+  by letter and cannot be told to fold. So `build` takes a name, an interval title and a
+  mode as they are written and lists each as `spoken_variants` makes of it: `spoken_form` of
+  the text, and `fold_yo` of that when it differs, both with the same `out` and context. A
+  text of nothing but punctuation has no variant and is left out. The answer gives the name
   as the device has it. `spelling.fold_yo` makes each yo, small and capital, a ye; it is
   also what `schedule.title_key` folds with, which the controller and the tools of an LLM
   agent compare titles by, so the repository folds the letter in one place. `build` returns
   `BuiltSentences`, the sentences and `said`, the text each value of the three lists is
   meant to be said as (unescaped, in order), and `validate` holds every value of the file to
-  its text: the text of `in` is no longer a function of `out`, so the check that derived it
-  from `out` could not stay. `spoken_form` is applied once: removing punctuation twice does
-  not always leave what removing it once did, and the built-in agent applies it once to
-  every entity it lists. Why: a name such as the Russian "boiler" is printed with a yo and
-  spoken, and recognised, with a ye. Cost if wrong: the file has one more value per such
+  its text, refusing a list that `said` has no texts for and one whose count of texts is not
+  its count of values: the text of `in` is no longer a function of `out`, so the check that
+  derived it from `out` could not stay. `VoiceName` and `VoiceTitle` hold the text as it is
+  written and nothing derived from it. `spoken_form` is applied once to each value, by
+  `spoken_variants`: removing punctuation twice does not always leave what removing it once
+  did, and the built-in agent applies it once to every entity it lists. So a caller (the
+  words of a mode, the aliases of a title) passes `spoken_variants` the text as it is
+  written, never what `spoken_form` made of it; a mode is `spoken_variants` of the mode with
+  a space for each underscore. Why: a name such as the Russian "boiler" is printed with a yo
+  and spoken, and recognised, with a ye. Cost if wrong: the file has one more value per such
   name, title and mode.
   Tests: `test_a_russian_name_with_yo_is_matched_said_with_ye`,
   `test_a_russian_name_with_yo_is_still_matched_as_written`,
   `test_an_interval_title_with_yo_is_switched_said_with_ye`,
   `test_every_value_is_listed_under_both_spellings`,
+  `test_a_value_without_a_yo_is_listed_once`,
+  `test_a_text_is_listed_as_it_is_said_and_with_ye_for_each_yo`,
+  `test_a_name_and_a_title_of_nothing_but_punctuation_are_left_out`,
   `test_a_value_not_read_as_the_text_it_was_built_from_is_refused`,
-  `test_a_list_with_more_values_than_texts_said_is_refused`,
+  `test_a_list_with_another_number_of_texts_said_is_refused`,
+  `test_a_list_that_nothing_is_said_of_is_refused`,
   `test_each_yo_is_a_ye_and_nothing_else_changes` and
   `test_a_letter_with_and_without_the_diaeresis_is_one_in_a_title`.

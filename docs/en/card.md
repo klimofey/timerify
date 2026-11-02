@@ -45,7 +45,7 @@ The round tile has no chip. A long press on it starts or stops the timer. See [P
   - With **Next command** disabled, the card works. The pop-up says, in the place of the pending commands, that they are hidden. It names the sensor.
   - Enable the sensor in its entity settings. Home Assistant reloads the timer about half a minute later, and the card returns by itself.
 - A countdown carries on across a restart of Home Assistant or a lost connection, to the same end. The card asks for its timer again when the connection returns.
-- In a dashboard with sections, the pill starts 6 columns wide and one row high. It can be made as narrow as 3 columns. The round tile starts 3 columns wide and 2 rows high. It can be made 2 columns wide or 3 rows high. With the **Turn off** button it is 3 rows high.
+- In a dashboard with sections, the pill starts 6 columns wide and one row high. It can be made as narrow as 3 columns. The round tile starts 3 columns wide and 2 rows high. It can be made 2 columns wide or 3 rows high. The **Turn off** button needs more room. See [The Turn off button](#the-turn-off-button).
 
 ## Add the card
 
@@ -117,13 +117,14 @@ Times follow your profile: its language, its 12 or 24 hour clock and its time zo
 
 The pop-up has a **Stop** button. You can also show a **Turn off** button on the card itself. Then you stop the timer without opening the pop-up. The button is off by default. Turn it on with **Show a Turn off button** in the visual editor. In YAML, write `show_turn_off: true`.
 
-- The button shows while the device is on, with a countdown or without one.
+- The button shows while the device is on, with a countdown or without one. While a countdown runs, it shows even if the device is unavailable.
 - It is not shown while the device is off. It is not shown while the timer is unavailable, or before the card has found its timer.
 - On the pill it stands beside the name, before the chip. On the round tile it is below the name.
 - Pressing it does what **Stop** does in the pop-up. It ends the countdown and turns the device off. That is the [**Stop** action](services.md#stop). It also turns off a device that runs without a countdown in **Loose** mode.
 - A press on it is not a tap, a double tap or a long press of the card. The pop-up does not open.
-- It is the card's own button, and it needs no other. The timer can also have a **Turn off** button on its device page. The section [What a timer adds to the device page](timers.md#what-a-timer-adds-to-the-device-page) describes it.
-- A round tile with the button is taller: 3 rows in a dashboard with sections, not 2. Its place stays free while the device is off. So the ring does not move when the button comes.
+- It works with or without the timer's own **Turn off button** setting. That setting adds a button to the device page. See [What a timer adds to the device page](timers.md#what-a-timer-adds-to-the-device-page).
+- In a dashboard with sections, a pill with the button starts 8 columns wide and cannot be made narrower. With a chip as well, it starts 11 columns wide. On a phone as narrow as 320 pixels, the name then has no room. The icon, the button and the chip still fit.
+- A round tile with the button is bigger: 5 columns wide and 3 rows high in a dashboard with sections, not 3 by 2. It cannot be made narrower. Its place stays free while the device is off. So the ring does not move when the button comes.
 
 ## Presses
 

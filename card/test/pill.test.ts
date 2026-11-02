@@ -13,7 +13,7 @@ import {
   counting,
   fakeHass,
 } from "./fake-hass";
-import { bodyOf, mountCard, popupOf, textOf } from "./mount";
+import { bodyOf, mountCard, popupOf, textOf, turnOffOf } from "./mount";
 
 const MINUTE = 60_000;
 const SECOND = 1000;
@@ -47,12 +47,6 @@ const dialogOf = (card: TimerifyCard) => popupOf(card).shadowRoot?.querySelector
 
 /** The boiler runs with no countdown: a target that is on, and nothing counting. */
 const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
-
-/** The Turn off button, found as a person finds it: by the words on it. */
-function turnOffOf(card: TimerifyCard, name = english.card_turn_off): HTMLButtonElement | null {
-  const buttons = [...(card.shadowRoot?.querySelectorAll("button") ?? [])];
-  return buttons.find((button) => button.textContent?.trim() === name) ?? null;
-}
 
 function chipOf(card: TimerifyCard): HTMLButtonElement {
   const chip = card.shadowRoot?.querySelector<HTMLButtonElement>("button.chip");
@@ -545,7 +539,7 @@ describe("the Turn off button of the pill", () => {
     ]);
   });
 
-  it("is no tap, double tap or long press of the card", async () => {
+  it.each(["mouse", "touch"] as const)("is no tap, double tap or long press of the card, by a %s", async (pointerType) => {
     const hass = counting(45);
     const card = await mountCard(hass, {
       ...WITH_BUTTON,
@@ -561,7 +555,7 @@ describe("the Turn off button of the pill", () => {
         cancelable: true,
         isPrimary: true,
         pointerId: 1,
-        pointerType: "mouse",
+        pointerType,
       });
 
     // A long press on the button is no long press of the card: nothing is held, and letting
@@ -579,6 +573,61 @@ describe("the Turn off button of the pill", () => {
 
     expect(hass.calls).toEqual([stopped, stopped, stopped]);
     expect(dialogOf(card)?.open).toBe(false);
+  });
+
+  it("is shown for a countdown that goes on while the boiler is unavailable, and ends it", async () => {
+    const hass = counting(45).state(BOILER, "unavailable", { friendly_name: "Boiler" });
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    expect(textOf(card)).toContain("45:00");
+    turnOffOf(card)?.click();
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped]);
+  });
+
+  it("gives the focus to the body of the card when a keyboard press takes the button away", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, WITH_BUTTON);
+    const button = turnOffOf(card);
+    button?.focus();
+    expect(card.shadowRoot?.activeElement).toBe(button);
+
+    // The keyboard presses a button with Enter, which the browser makes a click.
+    button?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }),
+    );
+    button?.click();
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(bodyOf(card));
+  });
+
+  it("leaves the focus alone when it was not on the button", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, { ...WITH_BUTTON, chip: 15 });
+    chipOf(card).focus();
+
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(chipOf(card));
+  });
+
+  it("gives the focus to no one when the body of the card is no button", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, { ...WITH_BUTTON, tap: "none" });
+    // Nothing is set to act on a press, so the body is no button and has no tab stop.
+    expect(card.shadowRoot?.querySelector('[role="button"]')).toBeNull();
+    turnOffOf(card)?.focus();
+
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(card.shadowRoot?.activeElement ?? null).toBeNull();
   });
 
   it("does not hear the keys that press the card", async () => {

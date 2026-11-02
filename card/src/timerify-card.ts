@@ -7,7 +7,7 @@ import { ACTION_KEYS, parseConfig, type CardConfig, type Press } from "./config"
 import { CountdownController } from "./countdown";
 import { getConfigForm, getStubConfig } from "./editor";
 import type { HomeAssistant } from "./hass";
-import { commonStyles } from "./layout";
+import { commonStyles, isPressable } from "./layout";
 import { pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
 import { PressController, type PressActions } from "./press";
@@ -31,8 +31,14 @@ const TAG = "timerify-card";
 const GRID_OPTIONS = {
   pill: { columns: 6, rows: 1, min_columns: 3, min_rows: 1, max_rows: 1 },
   round: { columns: 3, rows: 2, min_columns: 2, min_rows: 2, max_rows: 3 },
-  // The round tile with its Turn off button is a row taller.
-  roundWithTurnOff: { columns: 3, rows: 3, min_columns: 2, min_rows: 3, max_rows: 3 },
+  // The Turn off button needs room: a row taller on the round tile, and columns enough for
+  // the icon, the button (in Russian, the longer word) and the chip, if there is one, on the
+  // narrowest sections Home Assistant makes (a phone 320 px wide). The columns are the
+  // fewest that fit there, measured in a real Home Assistant (see RULINGS), and are also
+  // where the card starts, so that it does not start narrower than it can be.
+  pillWithTurnOff: { columns: 8, rows: 1, min_columns: 8, min_rows: 1, max_rows: 1 },
+  pillWithTurnOffAndChip: { columns: 11, rows: 1, min_columns: 11, min_rows: 1, max_rows: 1 },
+  roundWithTurnOff: { columns: 5, rows: 3, min_columns: 5, min_rows: 3, max_rows: 3 },
 } as const;
 
 export class TimerifyCard extends LitElement {
@@ -93,6 +99,8 @@ export class TimerifyCard extends LitElement {
   };
   /** What the last render showed of the timer: the countdown ticks while it has an end ahead. */
   #view: TimerView | undefined;
+  /** The Turn off button had the focus when the card began to draw what it shows now. */
+  #turnOffHadFocus = false;
 
   constructor() {
     super();
@@ -137,10 +145,15 @@ export class TimerifyCard extends LitElement {
   /** The size in cells, for dashboards in sections layout. */
   getGridOptions() {
     const config = this._config;
-    if (config?.layout !== "round") {
+    if (config?.layout === "round") {
+      return config.show_turn_off ? GRID_OPTIONS.roundWithTurnOff : GRID_OPTIONS.round;
+    }
+    if (!config?.show_turn_off) {
       return GRID_OPTIONS.pill;
     }
-    return config.show_turn_off ? GRID_OPTIONS.roundWithTurnOff : GRID_OPTIONS.round;
+    return config.chip === undefined
+      ? GRID_OPTIONS.pillWithTurnOff
+      : GRID_OPTIONS.pillWithTurnOffAndChip;
   }
 
   /**
@@ -211,6 +224,29 @@ export class TimerifyCard extends LitElement {
       } while (this.#askAgain);
     } finally {
       this.#lookingUp = false;
+    }
+  }
+
+  protected override willUpdate(): void {
+    this.#turnOffHadFocus = this.shadowRoot?.activeElement?.classList.contains("turn-off") === true;
+  }
+
+  /**
+   * The Turn off button goes when the device goes off, and the focus goes with it: to the page,
+   * so that the next Tab would start from the top of the dashboard. Whoever pressed it by
+   * keyboard is left on the body of the card, as the pop-up does when it closes.
+   */
+  protected override updated(): void {
+    if (this.#turnOffHadFocus && this.shadowRoot?.querySelector(".turn-off") === null) {
+      this.#focusBody();
+    }
+  }
+
+  /** Puts the focus on the body of the card, when it is a button: see `isPressable`. */
+  #focusBody(): void {
+    const config = this._config;
+    if (config !== undefined && isPressable(config)) {
+      this.renderRoot.querySelector<HTMLElement>(".body")?.focus();
     }
   }
 
@@ -376,7 +412,7 @@ export class TimerifyCard extends LitElement {
               .config=${config}
               .lookup=${this._lookup}
               .view=${view}
-              @closed=${() => this.renderRoot.querySelector<HTMLElement>(".body")?.focus()}
+              @closed=${() => this.#focusBody()}
             ></timerify-card-popup>
           `
         : nothing}

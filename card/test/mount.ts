@@ -1,5 +1,6 @@
 // The one way the scenarios put a card on a page, and the few things they look at in it.
 import type { LitElement } from "lit";
+import { common as english } from "../../custom_components/timerify/translations/en.json";
 import type { TimerifyCardPopup } from "../src/popup";
 import "../src/timerify-card";
 import type { TimerifyCard } from "../src/timerify-card";
@@ -39,6 +40,18 @@ export function bodyOf(card: TimerifyCard): HTMLElement {
     throw new Error("The card has no body to press");
   }
   return body;
+}
+
+/**
+ * The Turn off button, found as a person finds it: by the words on it, which are English
+ * unless the scenario says the words it is looking for.
+ */
+export function turnOffOf(
+  card: TimerifyCard,
+  name = english.card_turn_off,
+): HTMLButtonElement | null {
+  const buttons = [...(card.shadowRoot?.querySelectorAll("button") ?? [])];
+  return buttons.find((button) => button.textContent?.trim() === name) ?? null;
 }
 
 /** The name the card shows, apart from whatever else it says. */

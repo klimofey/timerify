@@ -11,7 +11,7 @@ import {
   counting,
   fakeHass,
 } from "./fake-hass";
-import { bodyOf, mountCard, nameOf, popupOf, textOf } from "./mount";
+import { bodyOf, mountCard, nameOf, popupOf, textOf, turnOffOf } from "./mount";
 
 const MINUTE = 60_000;
 const SECOND = 1000;
@@ -530,12 +530,6 @@ describe("the Turn off button of the round tile", () => {
   const WITH_BUTTON = { ...ROUND, show_turn_off: true } as const;
   const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
 
-  /** The Turn off button, found as a person finds it: by the words on it. */
-  function turnOffOf(card: TimerifyCard): HTMLButtonElement | null {
-    const buttons = [...(card.shadowRoot?.querySelectorAll("button") ?? [])];
-    return buttons.find((button) => button.textContent?.trim() === english.card_turn_off) ?? null;
-  }
-
   it("shows Turn off below the dial and the name while the boiler runs, with or without a countdown", async () => {
     for (const hass of [counting(45), running()]) {
       const card = await mountCard(hass, WITH_BUTTON);
@@ -630,22 +624,51 @@ describe("the Turn off button of the round tile", () => {
     }
   });
 
-  it("is no tap or long press of the card", async () => {
+  it.each(["mouse", "touch"] as const)("is no tap or long press of the card, by a %s", async (pointerType) => {
     const hass = counting(45);
     const card = await mountCard(hass, { ...WITH_BUTTON, double_tap: "run" });
     const button = turnOffOf(card);
 
     // The round tile has a long press by default: on the button it is the button's press.
-    button?.dispatchEvent(pointer("pointerdown"));
+    button?.dispatchEvent(pointer("pointerdown", { pointerType }));
     await vi.advanceTimersByTimeAsync(600);
     expect(card.hasAttribute("data-held")).toBe(false);
-    button?.dispatchEvent(pointer("pointerup"));
+    button?.dispatchEvent(pointer("pointerup", { pointerType }));
     button?.click();
     await vi.advanceTimersByTimeAsync(1000);
     await popupOf(card).updateComplete;
 
     expect(hass.calls).toEqual([stopped()]);
     expect(isOpen(card)).toBe(false);
+  });
+
+  it("is shown for a countdown that goes on while the boiler is unavailable, and ends it", async () => {
+    const hass = counting(45).state(BOILER, "unavailable", { friendly_name: "Boiler" });
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    expect(centreOf(card)).toBe("45:00");
+    turnOffOf(card)?.click();
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped()]);
+  });
+
+  it("gives the focus to the body of the card when a keyboard press takes the button away", async () => {
+    const hass = running();
+    const card = await mountCard(hass, WITH_BUTTON);
+    const button = turnOffOf(card);
+    button?.focus();
+    expect(card.shadowRoot?.activeElement).toBe(button);
+
+    button?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }),
+    );
+    button?.click();
+    card.hass = hass.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(bodyOf(card));
   });
 
   it("leaves a tap on the rest of the tile to open the pop-up", async () => {

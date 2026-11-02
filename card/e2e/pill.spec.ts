@@ -9,6 +9,7 @@ import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
 import { doubleTap, tap, tapBorder } from "./press";
+import { isReady } from "./ready";
 import { hassWs } from "./ws";
 
 const CHIP_MINUTES = 15;
@@ -244,8 +245,8 @@ test.describe("the pill with a Turn off button", () => {
     const { loose } = state.timers;
     const pill = pillOf(page);
     const turnOff = pill.getByRole("button", { name: "Turn off", exact: true });
-    // The card has found its timer once it has its pop-up; nothing runs, so nothing to turn off.
-    await expect(pill.locator("timerify-card-popup")).toBeAttached();
+    // Nothing runs, so there is nothing to turn off, once the card has found its timer.
+    await isReady(pill);
     await expect(turnOff).toHaveCount(0);
 
     // Somewhere else the boiler is run with no duration: a loose timer turns its target on,
@@ -261,5 +262,22 @@ test.describe("the pill with a Turn off button", () => {
     await expect(turnOff).toHaveCount(0);
     // A press on the button is not a tap of the card.
     await expect(pill.locator("dialog")).toBeHidden();
+  });
+
+  test("leaves the keyboard on the card when the button goes", async ({ page, state, ws }) => {
+    const { loose } = state.timers;
+    const pill = pillOf(page);
+    const turnOff = pill.getByRole("button", { name: "Turn off", exact: true });
+    await isReady(pill);
+    await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
+    await expect(turnOff).toBeVisible();
+
+    await turnOff.focus();
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    // The next Tab goes on from the card, not from the top of the dashboard.
+    await expect(pill.locator(".body")).toBeFocused();
   });
 });

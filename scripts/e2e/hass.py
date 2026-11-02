@@ -175,6 +175,42 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 ],
             },
             {
+                # The fewest columns a card with a Turn off button may have, in a
+                # sections view: each card asks for one column, which is less than it
+                # declares, so that Home Assistant gives it the fewest it declares. A
+                # pill of the loose timer with the chip and without it, and a round
+                # tile of the strict one.
+                "title": "Sizes",
+                "path": "sizes",
+                "type": "sections",
+                "sections": [
+                    {
+                        "type": "grid",
+                        "cards": [
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                chip=QUICK_CHIP_MINUTES,
+                                show_turn_off=True,
+                                grid_options={"columns": 1},
+                            ),
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                show_turn_off=True,
+                                grid_options={"columns": 1},
+                            ),
+                            timerify_card(
+                                strict,
+                                layout="round",
+                                show_turn_off=True,
+                                grid_options={"columns": 1},
+                            ),
+                        ],
+                    }
+                ],
+            },
+            {
                 # Empty: the editor tests add a card to it from the card picker, and the
                 # reset that every test starts with saves the dashboard as it was.
                 "title": "Editor",

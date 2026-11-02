@@ -7,6 +7,7 @@ import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { hold, tap, tapBorder } from "./press";
+import { isReady } from "./ready";
 
 /** The strict timer's default duration, which a bare run takes (Task 4's fixture). */
 const DEFAULT_MINUTES = "30";
@@ -15,14 +16,6 @@ const DEFAULT_MINUTES = "30";
 function cardsOf(page: Page): { strict: Locator; loose: Locator } {
   const cards = page.locator("timerify-card");
   return { strict: cards.nth(0), loose: cards.nth(1) };
-}
-
-/**
- * Returns when the card has found its timer: until then it is a card of a timer that is not
- * there, and a long press on it does nothing.
- */
-async function isReady(card: Locator): Promise<void> {
-  await expect(card.locator("timerify-card-popup")).toBeAttached();
 }
 
 test.describe("the round card in Home Assistant", () => {

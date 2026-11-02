@@ -3429,34 +3429,73 @@ in `docs/followups.md`.
   the same code (`async_set_native_value` and `async_stop` both call `async_set_minutes`, in
   `number.py`), so the user saw the same thing; only the logbook context differed. The pop-up's
   Stop was already enabled while the target runs with no countdown, so the option adds the button
-  to the card and the pop-up needed nothing but the new call. `setMinutes` is left to the presets. The round tile that has the button is
-  184 px high, three rows of the sections grid (3 x 56 px and two gaps of 8 px), against 120 px
-  without it: `getGridOptions` answers 3 rows (minimum and maximum too) and `getCardSize` 4. The
-  button's place, a slot of 32 px under the name, is kept while the target is off, so the dial and
-  the name do not move when the button comes and goes. The pill is as high as before.
+  to the card and the pop-up needed nothing but the new call. `setMinutes` is left to the
+  presets. The round tile that has the button is 184 px high, three rows of the sections grid
+  (3 x 56 px and two gaps of 8 px), against 120 px without it: `getGridOptions` answers 3 rows
+  (minimum and maximum too) and `getCardSize` 4. The button's place, a slot of 32 px under the
+  name, is kept while the target is off, so the dial and the name do not move when the button
+  comes and goes. The pill is as high as before.
+  The card is wider with the option, and the numbers are measured, not guessed. A sections view
+  is 12 columns with gaps of 8 px, and a section is at most 500 px wide and narrower on a small
+  screen, so a column count is a different width on each device. In the Home Assistant of the
+  end-to-end tests, in Russian (its word for the button is the longer one: 101 px, and the chip
+  is 78 px), the fewest columns at which nothing of the card overflows were:
+  - a pill with the button and a chip: 7 on a 1280 px screen, 9 on one 390 px wide, 10 with two
+    sections on 768 px, and 11 on a 320 px phone;
+  - a pill with the button and no chip: 5, 6, 7 and 8 on the same screens;
+  - a round tile with the button: 3, 4, 5 and 5.
+  The option answers the numbers of the narrowest screen, so that the card fits on every one:
+  `getGridOptions` gives a pill with the button `columns` and `min_columns` of 8, with a chip 11,
+  and a round tile with it 5 (`min_rows` and `max_rows` 3). `columns` is the minimum, so a card
+  starts as narrow as it may be, and Home Assistant never gives it fewer, whatever a dashboard's
+  `grid_options` ask for. With the option off, the sizes are what they were (pill 6 and at least
+  3 columns, round tile 3 and at least 2). The end-to-end test `sizes.spec.ts` asks for one
+  column on a 320 px phone in Russian, and checks that the icon, the button, the chip and the
+  tile's button are inside the card, in order, and that nothing is cut off.
+  When a keyboard press takes the button away (the user tabs to it, presses Enter, the target
+  goes off and the button leaves), the focus goes to the body of the card, as it does when the
+  pop-up closes, if the body is a button (`isPressable`): the next Tab goes on from the card, not
+  from the top of the dashboard. A card whose three presses are `none` has no focusable body, and
+  then no focus is moved: there is nowhere better to put it. A focus that was not on the button
+  (on the chip, say) stays where it was.
   Why: the spec asks that the option make the card and its pop-up show a Turn off button while the
   target is on; the pop-up has its Stop, so the option puts the same command on the card, for a
   user who wants to switch a device off from the dashboard without opening a dialog. One command
   for one meaning keeps the logbook the same whichever way the user stops the device, and keeps
   the button, the pop-up and the presses from drifting apart. The slot keeps a dashboard still:
-  a tile whose dial jumped when the target went on would be hard to hit.
+  a tile whose dial jumped when the target went on would be hard to hit. The minimum widths are
+  what the controls need, found by measuring the card: a narrower pill cuts its buttons off, and
+  a note in the documentation would leave them cut off. The focus rule keeps a keyboard user's
+  place, where a stop would otherwise drop it.
   Cost if wrong: a round tile is a row taller with the option than without it, so switching it on
-  moves the cards below it on a sections dashboard. A target that is unavailable while a countdown
-  still counts is `counting`, so the button shows and ends the countdown, as the pop-up's Stop does;
-  if that should hide it, `isRunning` is the one rule to change, for the button, the pop-up and
-  Start or stop together. The logbook now credits a stop by the long press of the round tile to
-  `timerify.stop` and no longer to `number.set_value`.
+  moves the cards below it on a sections dashboard. A pill with the button is also wider, and at
+  its narrowest, on a phone 320 px wide, the name and the state have no room left (the icon, the
+  button and the chip are all that fits: that is what the minimum measures); the documentation
+  says so, and a wider card shows the name. The `grid_options` of a dashboard can make no card
+  narrower than the minimum: the end-to-end test asks for one column and gets the minimum. A
+  target that is unavailable while a countdown still counts is `counting`, so the button shows and
+  ends the countdown, as the pop-up's Stop does; if that should hide it, `isRunning` is the one
+  rule to change, for the button, the pop-up and Start or stop together. The logbook now credits
+  a stop by the long press of the round tile to `timerify.stop` and no longer to
+  `number.set_value`.
   Tests: `card/test/pill.test.ts` and `card/test/round.test.ts` (shown while the boiler runs with
   and without a countdown; hidden while it is off, without the option, while the timer or the
   boiler is unavailable and before the timer is found; comes and goes with the boiler; a press
   stops with one `timerify.stop` and opens nothing, also on a loose timer; a long press on the
   button is no hold, and presses at once are no double tap; the keys of the card do not reach it;
   it is a control of its own, outside the body and before the chip; Russian wording; a refusal
-  leaves the card as it was; the slot is there while the boiler is off), `card/test/popup.test.ts`
+  leaves the card as it was; the slot is there while the boiler is off; shown for a countdown
+  that goes on while the boiler is unavailable, and a press ends it; a press by a finger is no
+  tap, hold or double tap either; the focus goes to the body when a keyboard press takes the
+  button away, stays on the chip when it was there, and goes nowhere when the body is not a
+  button), `card/test/popup.test.ts`
   (`offers Stop while the boiler runs without a countdown`, and a stop is `timerify.stop`),
   `card/test/press.test.ts` (Start or stop stops with `timerify.stop`), `card/test/config.test.ts`,
   `card/test/editor.test.ts` and `card/test/card.test.ts` (the option, its refusals, the field, the
-  size); end to end `turns off a boiler that runs with no countdown` (`pill.spec.ts`),
+  sizes with the option on and off); end to end `turns off a boiler that runs with no countdown`
+  and `leaves the keyboard on the card when the button goes` (`pill.spec.ts`), the two tests of
+  `sizes.spec.ts` (a pill and a round tile with the button at their narrowest, in Russian, on a
+  320 px phone),
   `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
   and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
   Russian).

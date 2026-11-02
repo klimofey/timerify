@@ -770,16 +770,43 @@ describe("its size", () => {
     const round = await mountCard(hass, { entity: NUMBER, layout: "round", show_turn_off: true });
     expect(round.getCardSize()).toBe(4);
     expect(round.getGridOptions()).toEqual({
-      columns: 3,
+      columns: 5,
       rows: 3,
-      min_columns: 2,
+      min_columns: 5,
       min_rows: 3,
       max_rows: 3,
     });
 
     round.setConfig({ entity: NUMBER, layout: "round" });
     expect(round.getCardSize()).toBe(3);
-    expect(round.getGridOptions()).toMatchObject({ rows: 2, min_rows: 2 });
+    expect(round.getGridOptions()).toEqual({
+      columns: 3,
+      rows: 2,
+      min_columns: 2,
+      min_rows: 2,
+      max_rows: 3,
+    });
+  });
+
+  it("starts the pill with its Turn off button at the fewest columns that hold what it shows", async () => {
+    const hass = fakeHass();
+    const sizes = async (config: Record<string, unknown>) =>
+      (await mountCard(hass, { entity: NUMBER, layout: "pill", ...config })).getGridOptions();
+    const columns = ({ columns, min_columns }: { columns: number; min_columns: number }) => ({
+      columns,
+      min_columns,
+    });
+
+    // The icon, the button, and the chip if there is one, in the longer Russian word, fit in
+    // these on the narrowest sections: the measurement is in RULINGS, and in the E2E.
+    expect(columns(await sizes({ show_turn_off: true }))).toEqual({ columns: 8, min_columns: 8 });
+    expect(columns(await sizes({ show_turn_off: true, chip: 15 }))).toEqual({
+      columns: 11,
+      min_columns: 11,
+    });
+    // Without the button the pill is as it was, with the chip or without it.
+    expect(columns(await sizes({ chip: 15 }))).toEqual({ columns: 6, min_columns: 3 });
+    expect(columns(await sizes({ show_turn_off: false }))).toEqual({ columns: 6, min_columns: 3 });
   });
 });
 

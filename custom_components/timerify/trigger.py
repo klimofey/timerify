@@ -65,7 +65,9 @@ class TimerEventTrigger(Trigger):
 
         @callback
         def handle(event: Event[Mapping[str, Any]]) -> None:
-            entity_id: str = event.data["entity_id"]
+            entity_id = event.data.get("entity_id")
+            if not isinstance(entity_id, str):
+                return  # Fired by hand, not by a timer: it names none.
             selected = async_extract_referenced_entity_ids(
                 self._hass, self._selection, expand_group=False
             )

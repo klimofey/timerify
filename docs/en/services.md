@@ -173,12 +173,13 @@ A countdown ends for one of three reasons. The event names it in `reason`.
 - `expired`: the countdown ran out.
 - `stopped`: Timerify stopped it. The cause is one of these:
   - **Run for** set to 0, **Stop**, or the **Turn off** button.
-  - A voice request.
+  - A voice request, or the tools of an LLM agent.
   - A pending "off".
   - **Add time** down to zero.
-  - A schedule interval that you switched off while its window ran.
+  - A schedule interval that you switched off or deleted while its window ran.
   - A schedule interval that you edited, so that its window no longer runs.
-- `turned_off`: the device was switched off outside Timerify, for example by hand or in its own app.
+  - The Workday sensor changed its answer, so that the window of a working day or day off interval no longer runs.
+- `turned_off`: the device was switched off outside Timerify, for example by hand or in its own app. Another automation, or the device itself, counts too.
 
 An automation about the end of a countdown should check `reason`. Say it starts something when the boiler runs out of time. Without the check, it would also start after **Stop**.
 

@@ -11,6 +11,8 @@ You can use Timerify in an automation without typing YAML. You pick the device, 
 
 A device that Timerify made for an entity that is on no device works the same.
 
+If you hide the **Run for** entity, Home Assistant leaves it out when you aim at a device or an area. The device then does not offer Timerify's actions and triggers. An automation aimed at it does not reach that timer. Aim at the **Run for** entity itself to include it.
+
 The **Device** group on the **By type** tab does not list Timerify's actions and triggers. It lists what the device's own integration offers. It also lists actions and triggers of the device's kinds of entities. One example is setting the value of **Run for**. Home Assistant builds that list itself, so Timerify's actions and triggers are under **By target** instead.
 
 ## Actions
@@ -50,8 +52,8 @@ Every trigger gives the automation some variables. You can use them in condition
 The reason is one of three words:
 
 - `expired`: the countdown ran out.
-- `stopped`: Timerify stopped it. You set **Run for** to 0, used **Stop**, or pressed **Turn off**. A voice request or a pending command to turn off can stop it too.
-- `turned_off`: someone switched the device off outside Timerify, by hand or in its own app.
+- `stopped`: Timerify stopped it. For example, you set **Run for** to 0, used **Stop**, or pressed **Turn off**. A voice request, a pending command to turn off, or a schedule interval that stops running can stop it too.
+- `turned_off`: the device was switched off outside Timerify. That is you by hand or in its own app, another automation, or the device itself.
 
 The [Events](services.md#events) section lists every cause of `stopped`.
 

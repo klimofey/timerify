@@ -4493,6 +4493,82 @@ def test_a_bare_on_that_comes_due_as_the_countdown_ends_announces_the_end() -> N
     assert c.take_announcements() == [CommandCameDue(on), CountdownEnded("expired")]
 
 
+def test_two_windows_that_open_together_announce_the_end_they_leave() -> None:
+    """The first window starts the countdown and the second, which ends later, moves
+    its end within the same fold: the start is told with the end that is left, which the
+    Ends at sensor shows."""
+    c = core("strict", "off")
+    c.set_windows(
+        NOW, [window("a", 10, 40), window("b", 10, 70)], configured={"a", "b"}
+    )
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.end == NOW + minutes(70)
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(70))]
+
+
+def test_a_window_and_a_command_due_together_announce_the_end_they_leave() -> None:
+    """The window starts the countdown to its end, and the command, due at the same
+    instant, sets the timer for an hour: one countdown, told with its last end."""
+    run = cmd(10, "on", minutes=60)
+    c = core("strict", "off")
+    c.set_windows(NOW, [window("x", 10, 55)], configured={"x"})
+    c.add_command(NOW, run)
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.end == NOW + minutes(70)
+    assert c.take_announcements() == [
+        CountdownStarted(NOW + minutes(70)),
+        CommandCameDue(run),
+    ]
+
+
+def test_a_catch_up_with_a_command_and_a_window_announces_the_end_they_leave() -> None:
+    """Home Assistant was down while a command and then a window began the countdown:
+    what start-up tells is the end it leaves."""
+    run = cmd(-10, "on", minutes=30)
+    stored = Snapshot(
+        commands=(run,), windows=(window("x", -5, 60),), last_actual="off"
+    )
+    c = TimerCore("strict", minutes(45), stored)
+
+    c.tick(NOW)
+
+    assert c.snapshot.end == NOW + minutes(60)
+    assert c.take_announcements() == [
+        CommandCameDue(run),
+        CountdownStarted(NOW + minutes(60)),
+    ]
+
+
+def test_a_start_that_was_told_is_not_changed_by_a_later_move() -> None:
+    """Announcements already taken are told as they were: the caller has them."""
+    c = core("strict", "on")
+    c.set_duration(NOW, minutes(30))
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]
+
+    c.add(NOW + minutes(5), minutes(10))
+
+    assert c.take_announcements() == []
+
+
+def test_a_start_after_an_end_in_the_same_fold_carries_the_end_it_leaves() -> None:
+    """A countdown that ran out and the one a window begins are two: the end is told,
+    then the start, with the end that the second window leaves."""
+    c = TimerCore("strict", minutes(45), Snapshot(end=NOW - minutes(5)))
+    c.set_windows(NOW, [window("a", 0, 50), window("b", 0, 70)], configured={"a", "b"})
+
+    c.tick(NOW)
+
+    assert c.snapshot.end == NOW + minutes(70)
+    assert c.take_announcements() == [
+        CountdownEnded("expired"),
+        CountdownStarted(NOW + minutes(70)),
+    ]
+
+
 def test_a_pending_off_due_as_the_countdown_ends_announces_it_expired() -> None:
     """The countdown ran out at the command's time, so there is nothing left for the
     command to stop: the same reason as for a bare "on" or a zero at that instant."""

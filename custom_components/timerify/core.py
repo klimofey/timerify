@@ -935,13 +935,16 @@ class TimerCore:
 
         Going from no end to an end announces a start; going from an end to none
         announces an end, for `ended_by`. Moving the end announces nothing: it is the
-        same countdown.
+        same countdown, but a start that has not been taken yet goes on with the new end
+        (`_move_untold_start`).
         """
         before = self._snapshot.end
         if before is None and end is not None:
             self._announce(CountdownStarted(end))
         elif before is not None and end is None:
             self._announce(CountdownEnded(ended_by))
+        elif end is not None:
+            self._move_untold_start(end)
         self._snapshot = replace(
             self._snapshot,
             end=end,
@@ -972,6 +975,16 @@ class TimerCore:
 
     def _announce(self, announcement: Announcement) -> None:
         self._announcements.append(announcement)
+
+    def _move_untold_start(self, end: datetime) -> None:
+        """The countdown goes on to `end`: if it began in this fold, its start has not
+        been taken yet and tells the end it has, which the Ends at sensor shows once the
+        fold is done. A move happens while a countdown runs, so the last start there is
+        is its own."""
+        for index in reversed(range(len(self._announcements))):
+            if isinstance(self._announcements[index], CountdownStarted):
+                self._announcements[index] = CountdownStarted(end)
+                return
 
     def _want(
         self,

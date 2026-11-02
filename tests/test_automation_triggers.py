@@ -22,7 +22,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
-from custom_components.timerify.const import DOMAIN
+from custom_components.timerify.const import DOMAIN, EVENT_COUNTDOWN_ENDED
 
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
@@ -316,6 +316,35 @@ async def test_a_trigger_of_a_deleted_timer_never_fires(
     await set_number(hass, run_for_of(hass, kettle), 10)
 
     await advance(hass, freezer, minutes=10)
+
+    assert records == []
+    [automation] = hass.states.async_entity_ids("automation")
+    assert state_of(hass, automation) == "on"
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.parametrize(
+    "data",
+    [None, {"reason": "expired"}, {"entity_id": None}, {"entity_id": [NUMBER]}],
+    ids=["no_data", "no_timer", "no_entity_id", "entity_id_is_a_list"],
+)
+async def test_an_event_fired_by_hand_without_a_timer_is_ignored(
+    data: dict[str, Any] | None,
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A user who tries the event from Developer tools fires it with no timer named, or
+    a malformed one. The automation does not run, stays on, and Home Assistant logs no
+    error."""
+    await setup_target()
+    records = await watch(
+        hass, "countdown_ended", {"device_id": fake_target.device_id}, ["entity_id"]
+    )
+
+    hass.bus.async_fire(EVENT_COUNTDOWN_ENDED, data)
+    await hass.async_block_till_done()
 
     assert records == []
     [automation] = hass.states.async_entity_ids("automation")

@@ -42,6 +42,7 @@ from .helpers import (
     restart_after,
     run_for_of,
     set_number,
+    set_switch,
     start_set_number,
     state_of,
     timerify_warnings,
@@ -460,6 +461,52 @@ async def test_a_holiday_that_takes_the_window_away_fires_ended_stopped(
 
     fake_workday.holidays = {SUNDAY}
     await fake_workday.report()
+
+    assert fired == [
+        (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "stopped"})
+    ]
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_two_intervals_that_open_together_fire_the_end_the_boiler_shows(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A weekday interval and a Workday interval both open at half past six. The
+    countdown is one, and it runs to the later end: the event says the end the Ends at
+    sensor shows, not the end of the window that happened to be folded first."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await add_interval(hass, entry, start="06:30", end="07:45")
+    started = async_capture_events(hass, EVENT_COUNTDOWN_STARTED)
+
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+
+    assert [e.data for e in started] == [
+        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:45")}
+    ]
+    assert started[0].data["ends_at"] == state_of(hass, SENSOR)
+
+
+async def test_switching_the_running_interval_off_fires_ended_stopped(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user flips the interval's switch while its window carries the boiler: it is
+    Timerify that takes the boiler off, and the event says so at once."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    await advance_to(hass, freezer, local(SUNDAY, "06:40"))
+    fired = record_events(hass)
+
+    await set_switch(hass, "switch.boiler_schedule_06_30_07_15_mon_sun", False)
 
     assert fired == [
         (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "stopped"})

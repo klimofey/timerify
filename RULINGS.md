@@ -2390,14 +2390,18 @@ in `docs/followups.md`.
     run without a countdown starts none. A move of a running end, however it is made (Run
     for, Add time, Run with minutes, a pending "on", a window that ends later), announces
     neither a start nor an end. The pending command that came due in the middle of it is
-    still announced.
+    still announced. A start that the same step moves, because more than one write of the
+    end falls in one fold (two intervals that open together, a window and a command due at
+    one instant, a start-up catch-up), is announced with the end it leaves, which the Ends
+    at sensor shows: `_set_end` carries a start that has not been taken yet to each new end.
   - **An end** has a reason. `expired`: the end was reached, by the alarm, a fold after a
     restart or a report of the target; a window whose end is the timer's end counts too.
     `stopped`: Timerify ended it: Run for 0, Stop, the Turn off button, voice and the LLM
-    tools, Add time down to zero, a pending "off", a window taken away by switching or
-    editing its interval or by a change of the Workday sensor. `turned_off`: the target was switched off outside Timerify
-    (`observe` with `by_us=False`). The core already takes a different path for each, so
-    the reason costs nothing to tell.
+    tools, Add time down to zero, a pending "off", a window taken away by switching off,
+    editing or deleting its interval or by a change of the Workday sensor. `turned_off`:
+    the target was switched off outside Timerify, by hand, by its app, by another
+    automation or by the device itself (`observe` with `by_us=False`). The core already
+    takes a different path for each, so the reason costs nothing to tell.
   - **A countdown whose end is not ahead of now is no countdown** (#42), whether or not a
     tick folded it. Run for, Run and Add time (up) on such a timer announce its end as
     `expired` first and then the start of the new countdown. Run for 0 announces only the
@@ -2452,7 +2456,10 @@ in `docs/followups.md`.
   `test_stop_after_the_end_passed_announces_that_it_expired`,
   `test_editing_the_running_interval_to_other_days_fires_ended_stopped`,
   `test_a_holiday_that_takes_the_window_away_fires_ended_stopped`,
-  `test_the_end_of_a_schedule_window_fires_start_and_expired`, and
+  `test_the_end_of_a_schedule_window_fires_start_and_expired`,
+  `test_two_intervals_that_open_together_fire_the_end_the_boiler_shows`,
+  `test_two_windows_that_open_together_announce_the_end_they_leave`,
+  `test_switching_the_running_interval_off_fires_ended_stopped`, and
   `test_running_and_stopping_the_boiler_by_voice_fires_start_and_stop` with its LLM twin
   in `tests/voice/test_events_by_voice.py`.
 - **The triggers are integration triggers on the Run for entities, matched against their
@@ -2478,6 +2485,11 @@ in `docs/followups.md`.
   - **No options**: no "for", and no "first" or "last" of several timers. An event has no
     duration, and each timer's event stands alone, so a device with two timers fires the
     trigger twice and `trigger.entity_id` tells which.
+  - **An event that names no timer is ignored**, without an error: the events are
+    documented for YAML, so a user may fire one by hand from Developer tools.
+  - **A hidden Run for drops out of a device or area target**, as every hidden entity does
+    in Home Assistant (`helpers/target.py`, `_include_entry`); the docs say to aim at the
+    Run for itself to include it.
   Why: #39 and Decision 1 of the plan: pick the boiler and choose a trigger.
   Cost if wrong: an automation aimed at a Run for whose entity id the user renames never
   fires again, as with any entity id in Home Assistant; a device target avoids it, and the
@@ -2489,5 +2501,6 @@ in `docs/followups.md`.
   `test_a_trigger_aimed_at_one_run_for_ignores_the_other_channel`,
   `test_a_trigger_of_a_deleted_timer_never_fires`,
   `test_a_timer_added_later_is_covered_by_the_device_trigger`,
+  `test_an_event_fired_by_hand_without_a_timer_is_ignored`,
   `test_a_countdown_that_ended_while_down_triggers_once_at_start_up` and
   `test_a_command_that_came_due_while_down_triggers_at_start_up`.

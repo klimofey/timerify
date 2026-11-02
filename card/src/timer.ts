@@ -6,7 +6,12 @@ import type { HassEntity, HomeAssistant, TimerInfo } from "./hass";
 
 export type TimerLookup =
   | { status: "pending" }
-  | { status: "found"; info: TimerInfo }
+  | {
+      status: "found";
+      info: TimerInfo;
+      /** Milliseconds to add to the browser's clock to get the server's, measured at the lookup. */
+      clockOffset: number;
+    }
   | { status: "not_found" }
   | { status: "incomplete" }
   | { status: "unauthorized" }
@@ -22,11 +27,22 @@ const INCOMPLETE = "timer_incomplete";
 /** The one it answers when the user may not read what the answer would tell. */
 const UNAUTHORIZED = "unauthorized";
 
-/** Asks Timerify which timer the "Run for" number `entityId` belongs to. */
+/** A lookup that found its timer. */
+export type FoundLookup = Extract<TimerLookup, { status: "found" }>;
+
+/**
+ * Asks Timerify which timer the "Run for" number `entityId` belongs to, and how far the
+ * browser's clock is from the server's. The server stamped its answer somewhere between the
+ * request leaving and the answer arriving; the middle of the wait is the best guess.
+ */
 export async function lookupTimer(hass: HomeAssistant, entityId: string): Promise<TimerLookup> {
+  const sent = Date.now();
   try {
     const info = await hass.callWS<TimerInfo>({ type: "timerify/timer", entity_id: entityId });
-    return { status: "found", info };
+    const stamped = momentOf(info.server_time);
+    // An answer with no time to read is counted by the browser's clock, as before.
+    const clockOffset = stamped === undefined ? 0 : stamped - (sent + Date.now()) / 2;
+    return { status: "found", info, clockOffset };
   } catch (error) {
     const code = typeof error === "object" && error !== null && "code" in error ? error.code : "";
     if (code === NOT_FOUND) {
@@ -38,6 +54,16 @@ export async function lookupTimer(hass: HomeAssistant, entityId: string): Promis
     return { status: code === UNAUTHORIZED ? "unauthorized" : "failed" };
   }
 }
+
+/**
+ * The time now, in milliseconds since the epoch, by Home Assistant's clock, which the countdown
+ * is counted by: the browser's clock moved by what the lookup measured. A countdown is the
+ * difference between a moment the server wrote and a clock, and a device whose clock is wrong
+ * would count it wrong. Without a lookup that found the timer there is nothing to show, and
+ * the browser's clock is all there is.
+ */
+export const serverNow = (lookup: TimerLookup): number =>
+  Date.now() + (lookup.status === "found" ? lookup.clockOffset : 0);
 
 /** Whether a sensor of the timer is disabled in the registry, so that it has no state. */
 export const isDisabled = (info: TimerInfo, sensor: string): boolean =>

@@ -666,6 +666,26 @@ describe("the pending commands", () => {
   });
 });
 
+describe("the clock the pop-up follows", () => {
+  it("tells the day of a time by the server's date, not the browser's", async () => {
+    // Monday 23:58 on the server (UTC+2), and Tuesday 00:03 by the browser's clock.
+    const monday = Date.UTC(2026, 0, 5, 21, 58);
+    vi.setSystemTime(monday + 5 * MINUTE);
+    const turnOn: Command = { ...TURN_ON, at: isoAt(monday + 32 * MINUTE) };
+    const hass = fakeHass({ timeFormat: "24", serverClockAhead: -5 * MINUTE })
+      .state(ENDS_AT, isoAt(monday + 32 * MINUTE), { started_at: isoAt(monday) })
+      .state(NEXT_COMMAND, turnOn.at, { commands: [turnOn] });
+
+    const { root } = await opened(hass);
+
+    expect(textIn(root.querySelector(".remaining"))).toBe("32:00");
+    expect(textIn(root.querySelector(".until"))).toBe(
+      english.card_until.replace("{time}", "Tue 00:30"),
+    );
+    expect(textIn(root.querySelector(".commands .command"))).toBe("On at Tue 00:30 for 1 hr");
+  });
+});
+
 describe("the settings link", () => {
   const URL_OF_BOILER = "/config/integrations/integration/timerify#config_entry=boiler_entry";
 

@@ -14,9 +14,16 @@ import {
 } from "./actions";
 import type { CardConfig } from "./config";
 import { formatClock, formatMinutes, formatRemaining, settingText } from "./format";
-import type { HassEntity, HomeAssistant, IntervalInfo, TimerInfo } from "./hass";
+import type { HassEntity, HomeAssistant, IntervalInfo } from "./hass";
 import { t } from "./strings";
-import { isDisabled, mattersToRender, watchedEntities, type TimerView } from "./timer";
+import {
+  isDisabled,
+  mattersToRender,
+  serverNow,
+  watchedEntities,
+  type FoundLookup,
+  type TimerView,
+} from "./timer";
 
 /** A command that waits for its time, as the "Next command" sensor lists it. */
 interface PendingCommand {
@@ -71,7 +78,7 @@ export class TimerifyCardPopup extends LitElement {
   static override properties = {
     hass: { attribute: false },
     config: { attribute: false },
-    info: { attribute: false },
+    lookup: { attribute: false },
     view: { attribute: false },
     opened: { state: true },
   };
@@ -279,8 +286,8 @@ export class TimerifyCardPopup extends LitElement {
 
   declare hass: HomeAssistant;
   declare config: CardConfig;
-  /** What Timerify told of the timer. */
-  declare info: TimerInfo;
+  /** What Timerify told of the timer, and how far the browser's clock is from the server's. */
+  declare lookup: FoundLookup;
   /** What the card shows of the timer; the card makes a new one at every render, so it ticks. */
   declare view: TimerView;
   /** Whether the dialog is open; only then does the pop-up have anything to render. */
@@ -363,7 +370,7 @@ export class TimerifyCardPopup extends LitElement {
     if (!this.hasUpdated || changed.has("opened")) {
       return true;
     }
-    const watched = watchedEntities(this.config.entity, this.info);
+    const watched = watchedEntities(this.config.entity, this.lookup.info);
     return this.opened && mattersToRender(changed, this.hass, watched);
   }
 
@@ -392,7 +399,7 @@ export class TimerifyCardPopup extends LitElement {
 
   #content(): TemplateResult {
     const { hass, view } = this;
-    const now = Date.now();
+    const now = serverNow(this.lookup);
     return html`
       <div class="wrapper">
         <header>
@@ -473,7 +480,7 @@ export class TimerifyCardPopup extends LitElement {
 
   /** The intervals of the schedule, each with the switch that enables it. */
   #schedule() {
-    const { intervals } = this.info;
+    const { intervals } = this.lookup.info;
     if (intervals.length === 0) {
       return nothing;
     }
@@ -518,7 +525,8 @@ export class TimerifyCardPopup extends LitElement {
 
   /** The commands that wait for their time, each with a button that cancels it. */
   #commands(now: number) {
-    const { hass, config, info, view } = this;
+    const { hass, config, view } = this;
+    const { info } = this.lookup;
     // Without its sensor the card cannot list the commands, and says so: a list that is
     // missing would look like a timer with nothing pending.
     if (isDisabled(info, info.next_command)) {
@@ -585,7 +593,7 @@ export class TimerifyCardPopup extends LitElement {
     }
     return html`
       <footer>
-        <a href=${settingsPath(this.info.entry_id)} @click=${this.#onSettingsClick}>
+        <a href=${settingsPath(this.lookup.info.entry_id)} @click=${this.#onSettingsClick}>
           ${t(this.hass, "card_settings")}
         </a>
       </footer>

@@ -18,6 +18,7 @@ import {
   isDisabled,
   lookupTimer,
   mattersToRender,
+  serverNow,
   timerView,
   watchedEntities,
   type TimerLookup,
@@ -90,7 +91,11 @@ export class TimerifyCard extends LitElement {
   constructor() {
     super();
     this._lookup = { status: "pending" };
-    new CountdownController(this, () => this.#view?.endsAt);
+    new CountdownController(
+      this,
+      () => this.#view?.endsAt,
+      () => serverNow(this._lookup),
+    );
   }
 
   get hass(): HomeAssistant | undefined {
@@ -276,7 +281,7 @@ export class TimerifyCard extends LitElement {
         </ha-card>
       `;
     }
-    const now = Date.now();
+    const now = serverNow(this._lookup);
     const view = timerView(hass, config, this._lookup, now);
     this.#view = view;
     return html`
@@ -288,7 +293,7 @@ export class TimerifyCard extends LitElement {
             <timerify-card-popup
               .hass=${hass}
               .config=${config}
-              .info=${this._lookup.info}
+              .lookup=${this._lookup}
               .view=${view}
               @closed=${() => this.renderRoot.querySelector<HTMLElement>(".body")?.focus()}
             ></timerify-card-popup>

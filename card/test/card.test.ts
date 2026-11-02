@@ -29,6 +29,9 @@ const earlierCards = vi.hoisted(() => {
   return cards;
 });
 
+const MINUTE = 60_000;
+const SECOND = 1000;
+
 const EVENING = "switch.boiler_schedule_18_00_19_00_mon_sun";
 const EVENING_INTERVAL = { entity_id: EVENING, title: "18:00–19:00" };
 
@@ -544,6 +547,92 @@ describe("redrawing when the frontend brings new words", () => {
     await popupOf(card).updateComplete;
     expect(textOfPopup(card)).toContain(russian.card_close);
     expect(textOfPopup(card)).toContain("ru Boiler");
+  });
+});
+
+describe("the clock the countdown follows", () => {
+  const until = (time: string) => english.card_until.replace("{time}", time);
+
+  /** Lets the card draw what some seconds of its countdown changed. */
+  async function passSeconds(card: TimerifyCard, seconds: number): Promise<void> {
+    await vi.advanceTimersByTimeAsync(seconds * SECOND);
+    await card.updateComplete;
+  }
+
+  // In these scenarios the server's clock stands at `START`, as Ends at is written by it,
+  // and the browser's is the fake clock that a scenario sets.
+
+  it("the countdown follows the server when the browser is 5 minutes fast", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: -5 * MINUTE });
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 9:59 ${until("09:10")}`);
+  });
+
+  it("the countdown follows the server when the browser is 5 minutes slow", async () => {
+    vi.setSystemTime(START - 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: 5 * MINUTE });
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 9:59 ${until("09:10")}`);
+  });
+
+  it("counts on to the end when the browser's clock says it is over", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const card = await mountCard(counting(3, { serverClockAhead: -5 * MINUTE }));
+    expect(textOf(card)).toBe(`Boiler 3:00 ${until("09:03")}`);
+
+    await passSeconds(card, 179);
+    expect(textOf(card)).toBe(`Boiler 0:01 ${until("09:03")}`);
+    expect(vi.getTimerCount()).toBe(1);
+
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 0:00 ${until("09:03")}`);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops at the end when the browser's clock says it goes on", async () => {
+    vi.setSystemTime(START - 5 * MINUTE);
+    const card = await mountCard(counting(1, { serverClockAhead: 5 * MINUTE }));
+
+    await passSeconds(card, 60);
+
+    expect(textOf(card)).toBe(`Boiler 0:00 ${until("09:01")}`);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("says on which day it ends by the server's date", async () => {
+    // Monday 23:58 on the server (UTC+2), and Tuesday 00:03 by the browser's clock.
+    const monday = Date.UTC(2026, 0, 5, 21, 58);
+    vi.setSystemTime(monday + 5 * MINUTE);
+
+    const card = await mountCard(counting(32, { serverClockAhead: -5 * MINUTE }, monday));
+
+    expect(textOf(card)).toBe(`Boiler 32:00 ${until("Tue 00:30")}`);
+  });
+
+  it("takes the clock from the newest answer", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: -5 * MINUTE });
+    const card = await mountCard(hass);
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+
+    // The browser's clock is set right, and the connection comes back.
+    vi.setSystemTime(START);
+    hass.setServerClockAhead(0);
+    card.hass = hass.with({ connected: false });
+    await card.updateComplete;
+    card.hass = hass.with({ connected: true });
+    await card.updateComplete;
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
   });
 });
 

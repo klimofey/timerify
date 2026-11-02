@@ -11,6 +11,10 @@ The answer is configuration, read from the entity registry and the entry, never 
 the running timer. The card asks again whenever the number comes back, which is while
 its entry is still starting after a restart or a reload, so the answer is the same
 whatever state the entry is in; the card shows a timer that did not start by its states.
+The one thing in it that is not configuration is the server's time, stamped on every
+answer: a countdown is the difference between a moment the server wrote and the clock of
+the device that shows it, and the card measures how far that clock is from the server's
+by this time instead of trusting it.
 The command only reads and is open to every user, not only to admins, but it tells a
 user only what the user may read, as the commands of Home Assistant that are about
 entities do: it refuses a user who may not read the number it is asked about, the target
@@ -48,6 +52,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_MODE,
@@ -110,6 +115,10 @@ class TimerInfo(TypedDict):
     """The entity ids of the two sensors that are disabled in the registry; none when
     both are enabled. A disabled sensor has no state, so the card cannot tell it from
     one that has not started yet without this."""
+    server_time: str
+    """Home Assistant's clock when it gave this answer, in UTC as ISO 8601. The card
+    sets its own clock against it, so that the countdown of a device whose clock is
+    wrong is still right."""
 
 
 @callback
@@ -174,7 +183,8 @@ class _TimerIncomplete(Exception):
 
 def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
     """What the card needs about the timer whose "Run for" number is `entity_id`, from
-    the registry and the entry alone, whatever state the entry is in.
+    the registry and the entry alone, whatever state the entry is in, with the time on
+    the server's clock.
 
     Raises `_TimerNotFound` when `entity_id` is not such a number (the voice settings
     have none). Raises `_TimerIncomplete` when it is one but the timer cannot be told
@@ -212,6 +222,7 @@ def _timer_of_number(hass: HomeAssistant, entity_id: str) -> TimerInfo:
         disabled_sensors=[
             sensor.entity_id for sensor in (ends_at, next_command) if sensor.disabled
         ],
+        server_time=dt_util.utcnow().isoformat(),
     )
 
 

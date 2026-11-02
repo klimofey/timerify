@@ -132,7 +132,11 @@ The card keeps no timer of its own. Everything it shows is read from the states 
 
 To tell which entities belong to its timer, the card asks Timerify through [a command of its own](services.md#the-command-of-the-dashboard-card). The answer comes from the timer's entry and Home Assistant's registry alone. So the card gets an answer even while the timer is starting. The answer also names the settings of the device that are percentages. So the card writes a brightness or a fan speed of 40 as a percentage, and not as a bare number.
 
-Nothing counts down on the server for the card. The card counts once a second. It does so only while a countdown runs and the card is on the page. It uses the browser's clock against the end time that the server reports. A clock that is wrong therefore changes the time left, but never below 0:00. The fill stays between empty and full. The end time shown, such as "until 4:42 PM", is the server's. What you press always goes to the server.
+Nothing counts down on the server for the card. The card counts once a second. It does so only while a countdown runs and the card is on the page.
+
+The card counts by Home Assistant's clock, not by the browser's. Timerify's answer says what time it is on the server. The card keeps the difference from the browser's clock. So a browser clock that is off by minutes does not change the time left. A wall tablet whose clock drifts shows the right countdown. The end time shown, such as "until 4:42 PM", follows the server's clock too. So does the day shown beside a time that is not today.
+
+The card measures the difference again whenever it asks again, for example when the connection returns. If the browser's clock jumps in between, the countdown is off until then. The time left never goes below 0:00. The fill stays between empty and full. What you press always goes to the server.
 
 ## Permissions
 

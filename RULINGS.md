@@ -3268,3 +3268,40 @@ in `docs/followups.md`.
   that the answer is JavaScript with a month of cache; `test_dashboards_load_the_card_once` and
   `test_reloading_a_timer_keeps_the_card` hold as before. The end-to-end tests of the card load the
   bundle through this address in a real Home Assistant.
+
+- **The card counts by the server's clock: `timerify/timer` stamps every answer with
+  `server_time` (`dt_util.utcnow().isoformat()`), `lookupTimer` measures the offset as
+  `Date.parse(server_time) - (sent + received) / 2` and keeps it in the found lookup as
+  `clockOffset`, and every "now" of the card reads `serverNow(lookup)`, which is `Date.now()` plus
+  that offset (#8).** The readers are `timerView` (the time left and the share), the day words of
+  `formatClock` on the card and in the pop-up (so "until Tue 00:30", and the day of a pending
+  command, follow the server's date), and the `CountdownController`, whose check that the end is
+  still ahead decides whether it ticks. The pop-up takes the whole lookup (`lookup`) in place of
+  `info`, so that it reads the same offset. A lookup that found no timer counts by the browser's
+  clock, as does one whose answer has no `server_time` that `Date.parse` can read (an older
+  Timerify answering a card that was cached or added by hand): there is nothing to correct then,
+  and a `NaN` must never reach the countdown. A new lookup replaces the offset.
+  Why: Ends at is a moment the server wrote, and a time left is its distance from a clock; a wall
+  tablet whose clock has drifted by minutes showed a time left that was wrong by as many. The
+  offset costs no request of its own, since the answer to the question the card asks anyway
+  carries the time. The middle of the wait is the best guess for the moment of the stamp when the
+  two halves of the trip take as long; the error is at most half the round trip (tens of
+  milliseconds on a home network), against minutes of a wrong clock. The times of the pending
+  commands are moments the server wrote and are shown as they are, in the zone of the user's
+  profile: only the `now` they are compared with, to tell the day, is the server's.
+  Cost if wrong: the offset is measured at a lookup, not kept up. The card looks up when it loads,
+  when the connection returns, when the entity registry changes and when its number gets a value,
+  so a browser clock that is stepped in between (a tablet that syncs its clock after it wakes) is
+  off by the step until the next lookup, and drift of seconds a day is invisible. If that ever
+  matters, the lookup is the one place to measure again, on `visibilitychange` or on a timer.
+  Tests: `test_the_answer_says_the_server_time` (`tests/test_websocket.py`: the time of the
+  answer, not of the first one); `card/test/timer.test.ts` (`measures how far the browser's clock
+  is from the server's`, `takes the server to have stamped its answer half way through the wait`,
+  `goes by the browser's clock when the answer has no time to read`, `a lookup that failed counts
+  by the browser's clock`); `card/test/card.test.ts` (`the countdown follows the server when the
+  browser is 5 minutes fast`, and slow, `counts on to the end when the browser's clock says it is
+  over`, `stops at the end when the browser's clock says it goes on`, `says on which day it ends by
+  the server's date`, `takes the clock from the newest answer`); `round.test.ts` and
+  `popup.test.ts` for the round tile and the pop-up; end to end, `Timerify's answer says the time on
+  the server's clock` (`ws.spec.ts`) and `counts by Home Assistant's clock when the browser's is 5
+  minutes fast` (`pill.spec.ts`, a real card on a browser whose clock Playwright moved).

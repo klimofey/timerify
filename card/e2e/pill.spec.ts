@@ -1,7 +1,7 @@
 // The pill in a real Home Assistant: it counts down a timer that was started somewhere else,
 // opens its pop-up from a tap anywhere on it (its border too) but the chip, adds the chip's
 // minutes without opening the pop-up, and carries on to the same end when Home Assistant
-// restarts.
+// restarts, and counts by Home Assistant's clock on a browser whose own is wrong.
 // View "pill": one pill card on the strict timer, with a chip of 15.
 import type { Locator } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
@@ -169,5 +169,33 @@ test.describe("the pill in Home Assistant", () => {
     // Neither the card's own warning nor the dashboard's error card was left behind.
     await expect(card.locator('[role="alert"]')).toHaveCount(0);
     await expect(page.locator("hui-error-card")).toHaveCount(0);
+  });
+});
+
+test.describe("the pill on a browser whose clock is wrong", () => {
+  test("counts by Home Assistant's clock when the browser's is 5 minutes fast", async ({
+    page,
+    openDashboard,
+    state,
+    ws,
+  }) => {
+    await openDashboard(page, "pill");
+    // Playwright's clock stays on for the pages that load next, and replaces what the frontend
+    // asks of `performance` while it starts: so the page is opened first, as everywhere, and
+    // loaded again on the wrong clock, where the card asks its first question.
+    await page.clock.setSystemTime(Date.now() + 5 * MINUTE);
+    await page.reload({ waitUntil: "load" });
+    const card = page.locator("timerify-card");
+    await expect(card.locator("ha-card")).toBeVisible();
+    expect(await page.evaluate(() => Date.now())).toBeGreaterThan(Date.now() + 4 * MINUTE);
+
+    const { strict } = state.timers;
+    await ws.callService("number", "set_value", { value: 10 }, { entity_id: strict.run_for });
+
+    // Ten minutes by Home Assistant's clock; the browser's would say five.
+    await expect(card.getByText(/^(9:5\d|10:00)$/)).toBeVisible();
+    const ends = (await ws.state(strict.ends_at))?.state ?? "";
+    expect(Date.parse(ends), "Ends at should hold the end of the countdown").not.toBeNaN();
+    await expectUntil(card, Date.parse(ends));
   });
 });

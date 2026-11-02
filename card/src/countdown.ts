@@ -7,13 +7,18 @@ const TICK_MS = 1000;
 export class CountdownController implements ReactiveController {
   readonly #host: ReactiveControllerHost;
   readonly #endsAt: () => Date | undefined;
+  readonly #now: () => number;
   #connected = false;
   #timer: ReturnType<typeof setInterval> | undefined;
 
-  /** `endsAt` says when the countdown the host shows ends, if it shows one. */
-  constructor(host: ReactiveControllerHost, endsAt: () => Date | undefined) {
+  /**
+   * `endsAt` says when the countdown the host shows ends, if it shows one, and `now` what time
+   * it is by the clock the host counts by, in milliseconds since the epoch.
+   */
+  constructor(host: ReactiveControllerHost, endsAt: () => Date | undefined, now: () => number) {
     this.#host = host;
     this.#endsAt = endsAt;
+    this.#now = now;
     host.addController(this);
   }
 
@@ -35,7 +40,7 @@ export class CountdownController implements ReactiveController {
   /** Ticks while the host is on the page and its countdown has an end that is still ahead. */
   #follow(): void {
     const end = this.#endsAt();
-    const counting = this.#connected && end !== undefined && end.getTime() > Date.now();
+    const counting = this.#connected && end !== undefined && end.getTime() > this.#now();
     if (counting && this.#timer === undefined) {
       this.#timer = setInterval(() => this.#host.requestUpdate(), TICK_MS);
     } else if (!counting && this.#timer !== undefined) {

@@ -8,7 +8,6 @@ One line per issue: its number and its title, under the area it belongs to.
 ## Card
 
 - [#7](https://github.com/klimofey/timerify/issues/7) Raise the minimum Home Assistant to 2026.11 to drop the first-load "Custom element doesn't exist" error
-- [#8](https://github.com/klimofey/timerify/issues/8) Card countdown is off by the browser's clock error
 - [#9](https://github.com/klimofey/timerify/issues/9) Card editor option labels can be in the wrong language before any card has loaded
 
 ## Engine

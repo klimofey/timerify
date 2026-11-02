@@ -92,4 +92,9 @@ export interface TimerInfo {
    * state, which looks like one that has not started yet, so only this tells them apart.
    */
   disabled_sensors: string[];
+  /**
+   * Home Assistant's clock when it gave this answer, in UTC as ISO 8601. The card sets its
+   * own clock against it, so that a device whose clock is wrong still counts down right.
+   */
+  server_time: string;
 }

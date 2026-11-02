@@ -124,6 +124,18 @@ describe("the ring and its centre", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("counts by the server's clock when the browser's is off", async () => {
+    vi.setSystemTime(START + 15 * MINUTE);
+
+    const card = await mountCard(counting(60, { serverClockAhead: -15 * MINUTE }), ROUND);
+
+    expect(centreOf(card)).toBe("1:00:00");
+    expect(undrawnShare(card)).toBeCloseTo(0, 6);
+    await passSeconds(card, 30 * 60);
+    expect(centreOf(card)).toBe("30:00");
+    expect(undrawnShare(card)).toBeCloseTo(0.5, 6);
+  });
+
   it("is not fooled by a clock that runs ahead", async () => {
     vi.setSystemTime(START + 50 * MINUTE);
 

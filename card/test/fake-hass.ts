@@ -66,6 +66,12 @@ const defaultFormatters: Formatters = {
   },
 };
 
+/**
+ * What `timerify/timer` answers of a timer, but for the time on the server's clock: the
+ * fake adds that when it answers, as the server does, so a timer does not have one.
+ */
+export type FakeTimerInfo = Omit<TimerInfo, "server_time">;
+
 export interface FakeState {
   state: string;
   attributes?: Record<string, unknown>;
@@ -76,11 +82,11 @@ export interface FakeTimer {
   /** The "Run for" number, the entity the card is configured with. */
   number: string;
   /** What `timerify/timer` answers for that number. */
-  info: TimerInfo;
+  info: FakeTimerInfo;
   states: Record<string, FakeState>;
 }
 
-function timerOf(number: string, name: string, info: TimerInfo, target: FakeState): FakeTimer {
+function timerOf(number: string, name: string, info: FakeTimerInfo, target: FakeState): FakeTimer {
   const states: Record<string, FakeState> = {
     [number]: {
       state: "0",
@@ -113,8 +119,8 @@ function timerOf(number: string, name: string, info: TimerInfo, target: FakeStat
  * A strict timer on `switch.boiler` ("Boiler", off), 45 minutes by default, no intervals,
  * both sensors enabled.
  */
-export function boilerTimer(overrides: Partial<TimerInfo> = {}): FakeTimer {
-  const info: TimerInfo = {
+export function boilerTimer(overrides: Partial<FakeTimerInfo> = {}): FakeTimer {
+  const info: FakeTimerInfo = {
     entry_id: "boiler_entry",
     target: BOILER,
     mode: "strict",
@@ -135,7 +141,7 @@ export function boilerTimer(overrides: Partial<TimerInfo> = {}): FakeTimer {
 
 /** A loose timer on `climate.ac` ("AC", off), where anything but off counts as on. */
 export function acTimer(): FakeTimer {
-  const info: TimerInfo = {
+  const info: FakeTimerInfo = {
     entry_id: "ac_entry",
     target: AC,
     mode: "loose",
@@ -195,6 +201,11 @@ export interface FakeHass extends HomeAssistant {
   holdAnswers(): void;
   /** Lets the answer to the oldest request that waits through. */
   answerNext(): void;
+  /**
+   * From now on the server's clock is `milliseconds` ahead of the browser's (behind, when
+   * negative), as a `timerify/timer` answer says; it changes with the browser's.
+   */
+  setServerClockAhead(milliseconds: number): void;
   /** A new `hass` object with the changes, as Home Assistant makes one for every change. */
   with(changes: Changes): FakeHass;
   /** A new `hass` object in which the entity has this state. */
@@ -209,6 +220,8 @@ export interface FakeHassOptions {
   /** The user's choice of `hass.locale.time_zone`. */
   localeTimeZone?: "server" | "local";
   timeFormat?: "language" | "system" | "12" | "24";
+  /** How far the server's clock is ahead of the browser's, in milliseconds; none by default. */
+  serverClockAhead?: number;
   /** The timers Timerify has; a boiler timer if none are given. */
   timers?: FakeTimer[];
   /** States on top of the timers' own; `null` removes one. */
@@ -224,6 +237,8 @@ interface World {
   requests: WsRequest[];
   translationLoads: [string, string][];
   failingCode?: string;
+  /** How far the server's clock is ahead of the browser's, in milliseconds. */
+  serverClockAhead: number;
   /** The requests that wait for their answer to be let through, oldest first; set while held. */
   held?: (() => void)[];
   callRejection?: { error: unknown };
@@ -342,7 +357,9 @@ function build(world: World, parts: Parts): FakeHass {
       if (timer === undefined) {
         throw lookupError("not_found");
       }
-      return structuredClone(timer.info) as T;
+      // The server stamps the answer when it gives it, by its own clock.
+      const server_time = new Date(Date.now() + world.serverClockAhead).toISOString();
+      return { ...structuredClone(timer.info), server_time } as T;
     },
 
     ...parts.formatters,
@@ -364,6 +381,9 @@ function build(world: World, parts: Parts): FakeHass {
     },
     answerNext() {
       world.held?.shift()?.();
+    },
+    setServerClockAhead(milliseconds) {
+      world.serverClockAhead = milliseconds;
     },
     with(changes) {
       const { states, formatters, ...rest } = changes;
@@ -387,7 +407,13 @@ function build(world: World, parts: Parts): FakeHass {
 export function fakeHass(options: FakeHassOptions = {}): FakeHass {
   const language = options.language ?? "en";
   const timers = options.timers ?? [boilerTimer()];
-  const world: World = { timers, calls: [], requests: [], translationLoads: [] };
+  const world: World = {
+    timers,
+    calls: [],
+    requests: [],
+    translationLoads: [],
+    serverClockAhead: options.serverClockAhead ?? 0,
+  };
   const timerStates = Object.assign({}, ...timers.map(({ states }) => states)) as Record<
     string,
     FakeState

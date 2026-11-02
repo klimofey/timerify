@@ -73,6 +73,7 @@ def test_cyrillic_is_allowed_in_the_russian_files_of_the_repository(
         f"{FIXTURES}/en/answers.yaml",
         f"{FIXTURES}/answers.yaml",
         f"{FIXTURES}/ru.yaml",
+        f"{FIXTURES}/rux/answers.yaml",
         "tests/voice/fixtures/ru/answers.yaml",
     ],
 )

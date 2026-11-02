@@ -26,20 +26,35 @@ FIXTURE: Final = Path(__file__).parents[1] / "fixtures" / "ru" / "answers.yaml"
 COUNTED: Final[Mapping[tuple[str, str], frozenset[str]]] = {
     ("TimerifyTimeLeft", "default"): frozenset({"minutes", "hours"}),
     ("TimerifyRun", "default"): frozenset({"minutes", "hours"}),
-    ("TimerifyListCommands", "default"): frozenset({"commands", "minutes"}),
+    ("TimerifyListCommands", "default"): frozenset({"commands", "minutes", "days"}),
     ("TimerifyCancelCommands", "default"): frozenset({"commands"}),
 }
 """For each answer that says a count, by intent and response key, the units it counts.
 The answer of `TimerifyRun` is the one that Add time and Stop give too, and the
-minutes of `TimerifyListCommands` are the run of a planned command."""
+minutes and the days of `TimerifyListCommands` are the run of a planned command and the
+days ahead it is due."""
 CLASS_COUNTS: Final[Mapping[str, frozenset[int]]] = {
     "minutes": frozenset({1, 2, 5, 11, 21, 22}),
     "hours": frozenset({1, 2, 5, 11, 21}),
     "commands": frozenset({1, 2, 5, 11, 21}),
+    "days": frozenset({3, 5}),
 }
 """For each unit, the counts the fixture must hold a case of: one that is a "one" in
 Russian (1 and 21), a "few" (2 and, for minutes, 22), and a "many" (5, and 11, which is
-not a "one" though it ends in 1)."""
+not a "one" though it ends in 1). The days start at 3, since 1 and 2 are said "tomorrow"
+and "the day after tomorrow", and stop at the "few" and "many" a pending command can
+reach: it is kept at most 7 days ahead."""
+COUNT_SLOT: Final[Mapping[tuple[str, str], tuple[str | int, ...]]] = {
+    ("TimerifyTimeLeft", "minutes"): ("left_minutes",),
+    ("TimerifyTimeLeft", "hours"): ("left_hours",),
+    ("TimerifyRun", "minutes"): ("left_minutes",),
+    ("TimerifyRun", "hours"): ("left_hours",),
+    ("TimerifyListCommands", "commands"): ("count",),
+    ("TimerifyListCommands", "minutes"): ("commands", 0, "minutes"),
+    ("TimerifyListCommands", "days"): ("commands", 0, "in_days"),
+    ("TimerifyCancelCommands", "commands"): ("cancelled",),
+}
+"""For each unit of an answer, where in the slots of a handler its count is."""
 
 
 def load_cases() -> list[Mapping[str, Any]]:
@@ -49,8 +64,18 @@ def load_cases() -> list[Mapping[str, Any]]:
 
 
 def case_id(case: Mapping[str, Any]) -> str:
-    """The name of a case in a test report."""
-    return f"{case['intent']}-{case['unit']}-{case['count']}"
+    """The name of a case in a test report: the answer, the unit and its count, and for
+    hours with minutes after them, the minutes."""
+    minutes = f"-and-{case['and_minutes']}" if "and_minutes" in case else ""
+    return f"{case['intent']}-{case['unit']}-{case['count']}{minutes}"
+
+
+def count_in_slots(case: Mapping[str, Any]) -> int:
+    """The count of the unit of a case as its slots hold it."""
+    found: Any = case["slots"]
+    for step in COUNT_SLOT[(case["intent"], case["unit"])]:
+        found = found[step]
+    return int(found)
 
 
 def shipped_answers(language: str) -> dict[str, dict[str, str]]:
@@ -83,3 +108,22 @@ def test_the_fixture_has_every_count_class_of_every_counted_answer() -> None:
                 == (intent, response, unit)
             }
             assert counts == CLASS_COUNTS[unit], (intent, response, unit)
+
+
+def test_every_case_has_a_name_of_its_own() -> None:
+    names = [case_id(case) for case in load_cases()]
+
+    assert len(set(names)) == len(names)
+
+
+@pytest.mark.parametrize("case", load_cases(), ids=case_id)
+def test_each_case_counts_what_it_is_labelled_with(case: Mapping[str, Any]) -> None:
+    """A case that says it counts 22 minutes has 22 minutes in its slots: a mistyped
+    label would else leave a class of counts without the case the class test thinks it
+    has."""
+    answer = (case["intent"], case["response"])
+    assert case["unit"] in COUNTED.get(answer, frozenset()), answer
+    assert count_in_slots(case) == case["count"]
+    if "and_minutes" in case:
+        assert case["unit"] == "hours"
+        assert case["slots"]["left_minutes"] == case["and_minutes"]

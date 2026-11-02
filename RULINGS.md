@@ -2515,16 +2515,23 @@ in `docs/followups.md`.
   Russian text a speaker expects. The text is written from the rules of Russian plurals,
   never rendered from the templates, so a fixture does not repeat what it checks.
   `tests/voice/test_russian_answers.py` renders each shipped answer with the slots of a
-  case and compares, and fails if a class of counts (1, 2, 5, 11, 21, and 22 for minutes)
-  has no case. The pre-commit hook allows Cyrillic under `tests/fixtures/ru/`, at any depth,
-  and refuses it everywhere else in `tests/`, a `fixtures/ru/` of another folder included.
-  The owner decided it on 2026-11-01 (#27).
+  case and compares. It fails if a class of counts has no case (1, 2, 5, 11, 21 and, for
+  minutes, 22; for the days ahead a command is due, 3 and 5), or if the slots of a case do
+  not hold the count it is labelled with. The time left and the answer of Run for also have
+  a case of hours with minutes after them, which pins the verb that goes with the hours and
+  the word "and" that joins the two. The pre-commit hook allows Cyrillic under
+  `tests/fixtures/ru/`, at any depth, and refuses it everywhere else in `tests/`, a
+  `fixtures/ru/` of another folder included. The owner decided it on 2026-11-01 (#27).
   Why: the plural classes test (`assert_one_form_per_class`) proves the forms differ, not
   which goes with which count; a swapped "few" and "many" passed it. The folder is under
   `tests/`, not `custom_components/`, so HACS does not ship it.
   Cost if wrong: a Russian answer changed on purpose needs its fixture line changed too.
-  The count of days ("in N days") is not in the fixture; the classes test covers it.
+  Not in the fixture: 1 and 2 days, which are said "tomorrow" and "the day after
+  tomorrow", and the "one" form of the days (21), since a command is due at most 7 days
+  ahead.
   Tests: `test_each_russian_answer_reads_as_the_fixture_says`,
   `test_the_fixture_has_every_count_class_of_every_counted_answer`,
+  `test_each_case_counts_what_it_is_labelled_with`,
+  `test_every_case_has_a_name_of_its_own`,
   `test_cyrillic_is_allowed_in_the_russian_files_of_the_repository` and
   `test_cyrillic_is_refused_everywhere_else`.

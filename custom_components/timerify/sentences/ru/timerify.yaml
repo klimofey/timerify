@@ -26,14 +26,14 @@ intents:
       requires_context:
         domain: climate
       expansion_rules:
-        timerify_duration: <timerify_spelled_duration>
+        timerify_duration: <timerify_duration_with_and>
         timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
     - sentences:
       - <timerify_turn_on> {timerify_target:name} на <timerify_duration> [<timerify_settings>]
       requires_context:
         domain: water_heater
       expansion_rules:
-        timerify_duration: <timerify_spelled_duration>
+        timerify_duration: <timerify_duration_with_and>
         timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
   TimerifyAddTime:
     data:
@@ -79,6 +79,7 @@ intents:
 expansion_rules:
   timerify_turn_on: (включи|запусти)[ть]
   timerify_spelled_duration: (<timerify_hours_part> [[и] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
+  timerify_duration_with_and: (<timerify_spelled_duration>|<timerify_hours_part> и {timerify_minutes_of_hour:minutes})
   timerify_duration: (<timerify_spelled_duration>|<timerify_hours_part> [и] {timerify_minutes_of_hour:minutes})
   timerify_hours_part: '{timerify_hours:hours} час[а|ов]'
   timerify_minutes_part: <timerify_minutes_count> минут[у|ы]

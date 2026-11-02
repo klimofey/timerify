@@ -67,9 +67,11 @@ from .helpers import (
     expose,
     listed,
     reached,
+    readings,
     refusal_of,
     samples,
     speech,
+    spoken_rule,
     spoken_values,
     talk,
     translated,
@@ -571,15 +573,53 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
     ]
 
 
+AND_WORDS = {"en": "and", "ru": "\N{CYRILLIC SMALL LETTER I}"}
+"""The word that joins the hours to the minutes, in each language."""
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize(
+    ("name", "domain"), [("AC", "climate"), ("Tank", "water_heater")]
+)
+def test_hours_and_a_number_are_read_one_way_where_a_temperature_is_said(
+    language: str, name: str, domain: str
+) -> None:
+    """A thermostat or a water heater has one reading of each phrase, not a tie that
+    the order of the alternatives breaks: the number right after the hours is the
+    temperature, and the number after the word for "and" is the minutes."""
+    hours = samples(
+        language,
+        RUN,
+        names=(name,),
+        requiring=domain,
+        numbers={"timerify_hours": 1},
+        absent=SETTING_LISTS,
+    )
+    assert hours
+
+    for text in hours:
+        bare = readings(language, f"{text} 30", name=name, domain=domain)
+        joined = readings(
+            language, f"{text} {AND_WORDS[language]} 30", name=name, domain=domain
+        )
+
+        assert bare == [{"name": name, "hours": 1, "temperature": 30}], text
+        assert joined == [{"name": name, "hours": 1, "minutes": 30}], text
+
+
 @pytest.mark.usefixtures("assist")
 async def test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature(
     hass: HomeAssistant, fake_full_ac: FakeTarget, setup_target: SetupTarget
 ) -> None:
-    """A thermostat reads the bare number after the hours as its temperature, so the
-    air conditioner runs for the hour and is set at 30 degrees."""
+    """A thermostat reads the bare number after the hours as its temperature, and as
+    nothing else, so the air conditioner runs for the hour and is set at 30 degrees."""
     await with_voice_settings(hass, setup_target, fake_full_ac)
+    text = "turn on the AC for 1 hour 30"
+    assert readings("en", text, name="AC", domain="climate") == [
+        {"name": "AC", "hours": 1, "temperature": 30}
+    ]
 
-    response = await converse(hass, "turn on the AC for 1 hour 30")
+    response = await converse(hass, text)
 
     assert reached(response) == RUN, speech(response)
     assert state_of(hass, AC_NUMBER) == "60"
@@ -590,18 +630,32 @@ async def test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature(
 
 
 @pytest.mark.usefixtures("assist")
-async def test_for_an_hour_and_a_bare_number_is_not_minutes_to_a_thermostat(
-    hass: HomeAssistant, fake_full_ac: FakeTarget, setup_target: SetupTarget
+@pytest.mark.parametrize(
+    ("text", "calls"),
+    [
+        ("turn on the AC for 1 hour and 30", [("turn_on", {})]),
+        (
+            "turn on the AC for 1 hour and 30 at 24",
+            [("turn_on", {}), ("set_temperature", {"temperature": 24.0})],
+        ),
+    ],
+)
+async def test_for_an_hour_and_30_is_90_minutes_to_a_thermostat(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    text: str,
+    calls: list[tuple[str, dict[str, object]]],
 ) -> None:
-    """A thermostat keeps the spelled-out form of how long: with "and" before the bare
-    number, which cannot be a temperature, the sentence is not understood, and nothing
-    is switched. A person says "minutes" there."""
+    """With "and" before it the number is minutes, also for a thermostat: a person who
+    wants an hour at 30 degrees leaves "and" out."""
     await with_voice_settings(hass, setup_target, fake_full_ac)
 
-    response = await converse(hass, "turn on the AC for 1 hour and 30")
+    response = await converse(hass, text)
 
-    assert reached(response) != RUN, speech(response)
-    assert fake_full_ac.call_data == []
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, AC_NUMBER) == "90"
+    assert fake_full_ac.call_data == calls
 
 
 @pytest.mark.usefixtures("assist")
@@ -609,10 +663,14 @@ async def test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature(
     hass: HomeAssistant, fake_tank: FakeTarget, setup_target: SetupTarget
 ) -> None:
     """A water heater reads the bare number after the hours as its temperature, as a
-    thermostat does."""
+    thermostat does, and "and" before the number makes it minutes."""
     await with_voice_settings(hass, setup_target, fake_tank)
+    text = "turn on the tank for 1 hour 30"
+    assert readings("en", text, name="Tank", domain="water_heater") == [
+        {"name": "Tank", "hours": 1, "temperature": 30}
+    ]
 
-    response = await converse(hass, "turn on the tank for 1 hour 30")
+    response = await converse(hass, text)
 
     assert reached(response) == RUN, speech(response)
     assert state_of(hass, TANK_NUMBER) == "60"
@@ -621,25 +679,45 @@ async def test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature(
         ("set_temperature", {"temperature": 30.0}),
     ]
 
+    await set_number(hass, TANK_NUMBER, 0)
+    fake_tank.call_data.clear()
+    response = await converse(hass, "turn on the tank for 1 hour and 30")
 
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, TANK_NUMBER) == "90"
+    assert fake_tank.call_data == [("turn_on", {})]
+
+
+@pytest.mark.parametrize("hours", [1, 2, 5])
 async def test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes(
-    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry, hours: int
 ) -> None:
-    """Every Russian way to ask for an hour, followed by 30 with no word for the
-    minutes, with or without the word for "and", runs the boiler for 90 minutes.
+    """Every form of the word for hours that the Russian sentences take after 1, 2 or 5,
+    followed by 30 with no word for the minutes, with or without the word for "and",
+    runs the boiler for that many hours and half an hour, in each sampled way to ask.
 
     The sampler takes the first alternative of a rule, which is the hours alone, so the
-    minutes are added to what it samples."""
-    hours = samples("ru", RUN, numbers={"timerify_hours": 1}, absent=SETTING_LISTS)
-    and_word = "\N{CYRILLIC SMALL LETTER I}"
-    texts = [f"{text} {more}" for text in hours for more in ("30", f"{and_word} 30")]
+    minutes, and the other forms of the hours, are put in the sampled texts."""
+    forms = spoken_rule("ru", "timerify_hours_part", {"timerify_hours": hours})
+    texts: list[str] = []
+    for sampled in samples(
+        "ru", RUN, numbers={"timerify_hours": hours}, absent=SETTING_LISTS
+    ):
+        (ending,) = [form for form in forms if sampled.endswith(form)]
+        asked = sampled.removesuffix(ending)
+        texts += [
+            f"{asked}{form} {more}"
+            for form in forms
+            for more in ("30", f"{AND_WORDS['ru']} 30")
+        ]
+    assert len(forms) == 3
     assert texts
 
-    for text in texts:
+    for text in dict.fromkeys(texts):
         response = await converse(hass, text, language="ru")
 
         assert reached(response) == RUN, text
-        assert state_of(hass, NUMBER) == "90", text
+        assert state_of(hass, NUMBER) == str(hours * 60 + 30), text
         await set_number(hass, NUMBER, 0)
 
 

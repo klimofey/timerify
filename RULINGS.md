@@ -876,10 +876,12 @@ those of the spec.
   settings carries every rule of its block" in the voice section of release 1.1.0).
   Cost if wrong: a number that was meant as something else after a duration ("for 1 hour
   30" said to a thermostat, "for 2 hours 120") is a temperature, which a thermostat or a
-  water heater then checks and refuses when it is out of its range. The temperature is
-  understood up to 250, so "turn on the AC for 2 hours 120" is answered "120 is not a
-  valid Temperature: it must be between 16 and 30." and nothing is switched, while a water
-  heater that counts in Fahrenheit takes the same 120 as its temperature (probed on both).
+  water heater then checks and refuses when it is out of its range, while a device
+  without one does not understand "for 2 hours 120", since the bare minutes stop at 59.
+  The temperature is understood up to 250, so "turn on the AC for 2 hours 120" is answered
+  "120 is not a valid Temperature: it must be between 16 and 30." and nothing is switched,
+  while a water heater that counts in Fahrenheit takes the same 120 as its temperature
+  (probed on both).
 - **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
   on the domain of the name), in blocks of their own.** Before that, any thermostat with an
   "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which
@@ -2545,34 +2547,41 @@ in `docs/followups.md`.
   rule that uses it is `timerify_duration` (#26). Everywhere it is
   `timerify_spelled_duration`, which is what it was (hours and minutes, each alone or both,
   or a phrase such as "half an hour"), or hours followed by a bare number of minutes from 1
-  to 59, with "and" between them or not, in English and in Russian: "for 1 hour 30" is 90
-  minutes. The `climate` and `water_heater` blocks of `TimerifyRun` set `timerify_duration`
-  to `timerify_spelled_duration`, so for them "for 1 hour 30" stays one hour at 30 degrees,
-  and "for 1 hour and 30" is not understood. The rule is shared by every sentence that says
-  a duration: "set the boiler timer to 1 hour 30", "add 1 hour 30 to the boiler" (a
-  thermostat takes that one too, since adding time has no settings) and the delayed command
-  "turn on the boiler in 15 minutes for 1 hour 30", whose block copies the override for a
-  thermostat and a water heater.
+  to 59, with "and" between them or not, in English and in Russian: "for 1 hour 30" and
+  "for 1 hour and 30" are 90 minutes. The `climate` and `water_heater` blocks of
+  `TimerifyRun` set `timerify_duration` to `timerify_duration_with_and`: the spelled-out
+  form, or hours, "and" and the minutes, with "and" required (Russian: its word for "and").
+  So for them "for 1 hour 30" stays one hour at 30 degrees, and "for 1 hour and 30" is 90
+  minutes. The rule is shared by every sentence that says a duration: "set the boiler timer
+  to 1 hour 30", "add 1 hour 30 to the boiler" (a thermostat takes that one too, since
+  adding time has no settings) and the delayed command "turn on the boiler in 15 minutes for
+  1 hour 30", whose block copies the override for a thermostat and a water heater.
   Why: hours followed by a bare number is a temperature only where there is a temperature;
   for the devices without one the issue's fix adds no new ambiguity, and the devices with
-  one keep the old reading. A block's rule replaces a global one inside the global rules
-  that its sentences use (`timerify_for_part` is global and says `timerify_duration`), so
-  the override reaches the delayed command without a copy of the sentences. The override is
-  not only a label: probed with hassil 3.12.1, without it "turn on the AC for 1 hour 30"
-  has two parses of the same score (`text_chunks_matched` 16), the temperature and the 90
-  minutes, and `recognize_best` (`hassil/recognize.py:814`, `_get_result_score` at :819)
-  keeps the first of them, which is the temperature only because the rule lists the
-  spelled-out form first; and "for 1 hour and 30" would be 90 minutes. The override leaves
-  one parse, not the winner of a tie.
-  Cost if wrong: "for 1 hour 30" said to a thermostat sets 30 degrees, as before. A
-  thermostat or water heater listed by hand with no domain gets the sentences that fit
-  every device, so it takes "for 1 hour 30" as 90 minutes. A person who says "for 1 hour
-  and 30" to a thermostat is not understood and must say "minutes".
+  one keep the old reading. "And" cannot start a setting, so for them the two phrases
+  cannot be read each as the other's: the number right after the hours is the temperature,
+  and the number after "and" is the minutes (the controller's ruling after the review of
+  the first version, which left "for 1 hour and 30" not understood on a thermostat). A
+  block's rule replaces a global one inside the global rules that its sentences use
+  (`timerify_for_part` is global and says `timerify_duration`), so the override reaches the
+  delayed command without a copy of the sentences. The override is not only a label: probed
+  with hassil 3.12.1, without it "turn on the AC for 1 hour 30" has two parses of the same
+  score (`text_chunks_matched` 16), the temperature and the 90 minutes, and `recognize_best`
+  (`hassil/recognize.py:814`, `_get_result_score` at :819) keeps the first of them, which
+  is the temperature only because the rule lists the spelled-out form first. With the
+  override each phrase has one reading, in both languages, for both kinds of device, alone
+  and after a delay.
+  Cost if wrong: "for 1 hour 30" said to a thermostat sets 30 degrees, as before. A user
+  who means "an hour, and 30 degrees" and says "and" gets 90 minutes, and must say
+  "degrees". A thermostat or water heater listed by hand with no domain gets the sentences
+  that fit every device, so it takes "for 1 hour 30" as 90 minutes.
   Tests: `test_for_an_hour_and_bare_minutes_runs_a_switch_for_90_minutes`,
   `test_add_an_hour_and_bare_minutes_adds_90_minutes`,
   `test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes`,
   `test_a_delayed_turn_on_runs_a_switch_for_hours_and_bare_minutes`,
+  `test_hours_and_a_number_are_read_one_way_where_a_temperature_is_said`,
   `test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature`,
   `test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature`,
-  `test_for_an_hour_and_a_bare_number_is_not_minutes_to_a_thermostat` and
+  `test_for_an_hour_and_30_is_90_minutes_to_a_thermostat`,
+  `test_a_delayed_turn_on_of_a_thermostat_reads_hours_and_a_number` and
   `test_a_scope_carries_every_rule_of_its_block`.

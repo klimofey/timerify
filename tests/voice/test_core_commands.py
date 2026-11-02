@@ -73,6 +73,7 @@ from .helpers import (
     converse,
     copy_sentences,
     reached,
+    readings,
     refusal_of,
     speech,
     talk,
@@ -88,6 +89,8 @@ TEMPERATURE_24 = ("set_temperature", {"temperature": 24.0})
 COOL_24 = [COOL, TEMPERATURE_24]
 """The calls that turn the air conditioner on cooling, at 24 degrees."""
 TANK_NUMBER = "number.tank_run_for"
+WITH_AND = "<timerify_duration_with_and>"
+"""What a thermostat and a water heater make of how long a command runs."""
 DELAY_VALUES = {"hours": 2, "minutes": 15, "seconds": 30}
 """What the samples say for each unit of a delay."""
 
@@ -351,6 +354,37 @@ async def test_a_delayed_turn_on_runs_a_switch_for_hours_and_bare_minutes(
 
     assert reached(response) == DELAYED_COMMAND, speech(response)
     assert [command["minutes"] for command in pending(hass, NEXT)] == [90]
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    ("text", "minutes", "settings"),
+    [
+        ("turn on the AC in 15 minutes for 1 hour 30", 60, {"temperature": 30.0}),
+        ("turn on the AC in 15 minutes for 1 hour and 30", 90, {}),
+        ("turn on the AC for 1 hour 30 in 15 minutes", 60, {"temperature": 30.0}),
+        ("turn on the AC for 1 hour and 30 in 15 minutes", 90, {}),
+    ],
+)
+async def test_a_delayed_turn_on_of_a_thermostat_reads_hours_and_a_number(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    text: str,
+    minutes: int,
+    settings: dict[str, float],
+) -> None:
+    """After the delay, as alone, a thermostat reads the number right after the hours as
+    its temperature, and the number after "and" as the minutes."""
+    await with_voice_settings(hass, setup_target, fake_climate)
+    assert len(readings("en", text, name="AC", domain="climate", takeover=True)) == 1
+
+    response = await converse(hass, text)
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert [(c["minutes"], c["settings"]) for c in pending(hass, AC_NEXT)] == [
+        (minutes, settings)
+    ]
 
 
 @pytest.mark.usefixtures("assist")
@@ -978,8 +1012,8 @@ def test_a_file_that_leaves_something_out_or_adds_something_is_caught(
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
 def test_a_scope_carries_every_rule_of_its_block(language: str) -> None:
-    """The thermostat and the water heater say how long with the old words alone, since
-    a bare number after the hours is their temperature, and the delayed commands of
+    """The thermostat and the water heater need "and" before the minutes that follow the
+    hours, since a bare number there is their temperature, and the delayed commands of
     those two kinds of device say it the same way; the other kinds do not."""
     sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
     thermostats = {"climate", "water_heater"}
@@ -987,7 +1021,7 @@ def test_a_scope_carries_every_rule_of_its_block(language: str) -> None:
     overriding = {
         domain
         for scope in run_scopes(sources)
-        if scope.rules.get("timerify_duration") == "<timerify_spelled_duration>"
+        if scope.rules.get("timerify_duration") == WITH_AND
         for domain in scope.requires
     }
     delayed = [
@@ -1007,9 +1041,7 @@ def test_a_scope_carries_every_rule_of_its_block(language: str) -> None:
     for block in delayed:
         domains = set(block.get("requires_context", {}).get("domain", []))
         if domains and domains <= thermostats:
-            assert block["expansion_rules"]["timerify_duration"] == (
-                "<timerify_spelled_duration>"
-            )
+            assert block["expansion_rules"]["timerify_duration"] == WITH_AND
         else:
             assert "timerify_duration" not in block["expansion_rules"]
 

@@ -19,7 +19,14 @@ from typing import Any, Final
 import yaml
 from freezegun.api import FrozenDateTimeFactory
 from hassil.expression import RuleReference, Sentence
-from hassil.intents import Intents, RangeSlotList, SlotList, TextSlotList
+from hassil.intents import (
+    IntentData,
+    Intents,
+    RangeSlotList,
+    SlotList,
+    TextSlotList,
+)
+from hassil.recognize import recognize_all
 from hassil.sample import sample_expression, sample_sentence
 from hassil.util import merge_dict
 from home_assistant_intents import get_intents
@@ -577,6 +584,12 @@ def _intents_of(language: str, takeover: bool = False) -> Intents:
     return Intents.from_dict(merged)
 
 
+def _required_domains(data: IntentData) -> list[str]:
+    """The domains a block of sentences is for (its `requires_context`), if any."""
+    required = data.requires_context.get("domain")
+    return [required] if isinstance(required, str) else list(required or [])
+
+
 def _one_value(
     slot_lists: Mapping[str, SlotList],
     names: Sequence[str],
@@ -621,9 +634,11 @@ def samples(
     absent: Collection[str] = (),
     takeover: bool = False,
     optionals: bool = True,
+    requiring: str | None = None,
 ) -> list[str]:
     """Sentences of the intent as a user would say them, a bounded number: those of
-    `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`.
+    `OWN_SENTENCES`, or of `CORE_COMMANDS` for `takeover`; with `requiring`, only the
+    blocks that are for a target of that domain alone (`requires_context`).
 
     Every list is cut down to one value (see `_one_value`) and every sentence
     template is sampled twice: once as its first expansion with the optional parts
@@ -639,6 +654,8 @@ def samples(
         return []
     found: list[str] = []
     for data in intents.intents[intent_type].data:
+        if requiring is not None and requiring not in _required_domains(data):
+            continue
         slot_lists = _one_value(
             {**intents.slot_lists, **data.slot_lists},
             names,
@@ -660,6 +677,52 @@ def samples(
             for text in (said, minimal):
                 if text is not None and text not in found:
                     found.append(text)
+    return found
+
+
+@cache
+def _own_intents(language: str, takeover: bool = False) -> Intents:
+    """The shipped sentences of Timerify alone, or, for `takeover`, those of
+    `CORE_COMMANDS` in their place, with the rules and lists of the core that they use
+    (`<turn>`, `<the>`, the delays): the core's own sentences need lists that a test of
+    one reading has no use for."""
+    core = get_intents(language)
+    assert core is not None, f"home-assistant-intents has no {language}"
+    shipped = SENTENCES_DIR / language
+    own = read_back((shipped / OWN_SENTENCES).read_text("utf-8"))
+    if takeover:
+        taken = read_back((shipped / CORE_COMMANDS).read_text("utf-8"))
+        own["intents"] = taken["intents"]
+        own["expansion_rules"] = {
+            **own.get("expansion_rules", {}),
+            **taken.get("expansion_rules", {}),
+        }
+    own["expansion_rules"] = {
+        **core.get("expansion_rules", {}),
+        **own.get("expansion_rules", {}),
+    }
+    own["lists"] = {**core.get("lists", {}), **own.get("lists", {})}
+    return Intents.from_dict(own)
+
+
+def readings(
+    language: str, text: str, *, name: str, domain: str, takeover: bool = False
+) -> list[dict[str, Any]]:
+    """Every different way the shipped sentences of Timerify (`takeover`: those that
+    take over Home Assistant's commands) read `text`, said of the target `name`, a
+    device of `domain`: the slots each reading fills in. Results that differ only in how
+    the sentence was worded (an article, a verb) are one reading."""
+    targets = TextSlotList.from_tuples([(name, name, {"domain": domain})])
+    found: list[dict[str, Any]] = []
+    for result in recognize_all(
+        text,
+        _own_intents(language, takeover),
+        slot_lists={LIST_TARGET: targets},
+        language=language,
+    ):
+        slots = {slot: entity.value for slot, entity in result.entities.items()}
+        if slots not in found:
+            found.append(slots)
     return found
 
 
@@ -769,6 +832,24 @@ def _first_sample(
         None,
     )
     return None if first is None else first.strip()
+
+
+def spoken_rule(language: str, rule_name: str, numbers: Mapping[str, int]) -> list[str]:
+    """Every text the shipped expansion rule `rule_name` of `language` can be said as,
+    with the lists of numbers it says a value of cut down to the one `numbers` gives:
+    the forms of a part of a sentence (the word for hours after a count), read from the
+    sentence files so that a test can use them without writing them."""
+    intents = _intents_of(language)
+    slot_lists = _one_value(dict(intents.slot_lists), (), numbers, {}, ())
+    return [
+        text.strip()
+        for text in sample_sentence(
+            intents.expansion_rules[rule_name],
+            slot_lists,
+            dict(intents.expansion_rules),
+            language=language,
+        )
+    ]
 
 
 def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:

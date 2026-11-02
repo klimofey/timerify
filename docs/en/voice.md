@@ -50,7 +50,8 @@ The Russian column is transliterated because this page is in English. The real s
 
 - It does the same as setting **Run for**. The countdown is that long, from one minute to 24 hours. It replaces a countdown that runs.
 - You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count beyond a week is not understood at all.
-- Hours followed by a bare number of minutes, such as "for 1 hour 30", mean 90 minutes. A thermostat or a water heater reads that number as its temperature instead. For them, say "minutes".
+- If a number of minutes follows the hours, with or without "and", it adds to them. "For 1 hour 30" and "for 1 hour and 30" are both 90 minutes. You can leave out the word "minutes".
+- The exception is turning on a thermostat or a water heater for a time. There "for 1 hour 30" means one hour at 30 degrees. Say "and" or "minutes" for the minutes: "for 1 hour and 30" is 90 minutes.
 - A thermostat, a water heater, a light, a fan or a humidifier takes its settings in the same sentence, in any order:
   - the HVAC mode ("cooling", "heating", "auto");
   - a temperature ("24 degrees", "at 22.5", or "120 degrees" for a water heater in Fahrenheit). Any number up to 250 works, in digits or words. The device then accepts or refuses it by its own range;

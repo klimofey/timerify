@@ -36,6 +36,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from importlib.metadata import version
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final, Literal
 
 from home_assistant_intents import get_intents
@@ -334,7 +335,7 @@ def run_scopes(sources: Mapping[str, Any]) -> list[Scope]:
         Scope(
             _domains_of(block.get("requires_context", {}).get("domain")),
             _domains_of(block.get("excludes_context", {}).get("domain")),
-            dict(block["expansion_rules"]),
+            MappingProxyType(dict(block["expansion_rules"])),
         )
         for block in sources["intents"][TIMERIFY_COMMANDS["on"]]["data"]
         if "timerify_settings" in block.get("expansion_rules", {})

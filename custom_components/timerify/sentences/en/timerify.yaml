@@ -29,7 +29,7 @@ intents:
       requires_context:
         domain: climate
       expansion_rules:
-        timerify_duration: <timerify_spelled_duration>
+        timerify_duration: <timerify_duration_with_and>
         timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
     - sentences:
       - <turn> on [<the>] {timerify_target:name} for <timerify_duration> [<timerify_settings>]
@@ -38,7 +38,7 @@ intents:
       requires_context:
         domain: water_heater
       expansion_rules:
-        timerify_duration: <timerify_spelled_duration>
+        timerify_duration: <timerify_duration_with_and>
         timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
   TimerifyAddTime:
     data:
@@ -94,6 +94,7 @@ intents:
         enabled: false
 expansion_rules:
   timerify_spelled_duration: (<timerify_hours_part> [[and] <timerify_minutes_part>]|<timerify_minutes_part>|{timerify_duration_words:minutes})
+  timerify_duration_with_and: (<timerify_spelled_duration>|<timerify_hours_part> and {timerify_minutes_of_hour:minutes})
   timerify_duration: (<timerify_spelled_duration>|<timerify_hours_part> [and] {timerify_minutes_of_hour:minutes})
   timerify_more_duration: ({timerify_hours:hours} more hour[s]|<timerify_minutes_count> more minute[s])
   timerify_hours_part: '{timerify_hours:hours} hour[s]'

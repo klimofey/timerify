@@ -3226,3 +3226,43 @@ in `docs/followups.md`.
   `en.json` copy outside the repository): `does not change when a text outside common is
   reworded`, `does not change when a section outside common is added`, `does not change when
   every section outside common is removed` and `changes when a text of common changes`.
+
+- **The server answers the card's address with the bytes it read at start-up, from memory, not
+  with the file on disk: `card.CardView`, a `HomeAssistantView` registered once by
+  `async_register_card`, replaces the static path (#30).** The view has the address of the
+  static path (`/timerify_frontend/timerify-card.js`), `requires_auth = False`, the cache
+  header the static path sent (`CACHE_HEADERS` of Home Assistant's http component: public, a
+  month) and `Content-Type: text/javascript; charset=utf-8`. The file is read once, in the
+  executor, and the address the frontend is told (`card_module_url`) is made of the same
+  bytes, so the key on the address is always the key of what the address serves. Until the
+  restart, a browser gets the card that goes with the Python that answers `timerify/timer`,
+  whatever HACS has written to the disk since.
+  Why: Home Assistant keeps the Python of an integration it has imported until the restart, so
+  after an update the server answers as the old version while a file served from disk is the
+  new card, which may rely on a key of the answer that the old Python does not send. One
+  policy for the whole answer replaces a guard for each key. The view sends less than the static
+  path did, on purpose. It sends no `ETag` and no `Last-Modified`: the static path made them
+  from the file on disk (its inode, size and time), which after an update describe other
+  bytes than the ones served; and because the address carries the key of the bytes, a
+  browser asks again only when a month has passed, once, for a file of 49 KB, which a
+  `304` would save. It does not answer a `Range` request (a module load sends none) and,
+  like the static path, not a `HEAD` request. It does not compress, as the static path did
+  not: one fetch per browser and version does not pay for a compressor on the event loop.
+  Cost if wrong: a HACS update shows its card only after the restart, which HACS asks for
+  anyway; the restart changes the key, and every browser fetches the new bundle at once. If
+  the bytes ever had to be answered with a validator, `CardView.get` is the one place that
+  needs it.
+  A second registration, from a timer's set-up, would not fail: `HomeAssistantView.register`
+  adds its routes with lower-case method names, which aiohttp does not find among the upper-case
+  ones it stored, so the later view silently replaces the earlier and with it the bytes. The
+  view is therefore registered from `async_setup`, which runs once per start, and a test
+  guards that.
+  Tests (`tests/test_card_registration.py`): `test_the_card_served_is_the_one_registered_until_a_restart`
+  (the file is written over after the set-up, as HACS does: the address the frontend was told
+  serves the first bytes, and its key is their hash),
+  `test_a_timer_set_up_or_reloaded_after_the_update_keeps_the_registered_card` (a second timer and
+  a reload after the update do not swap the bytes) and
+  `test_the_card_is_served_with_a_month_of_cache_to_anyone` (no login, JavaScript, a month);
+  `test_card_is_served_to_anyone`, `test_dashboards_load_the_card_once` and
+  `test_reloading_a_timer_keeps_the_card` hold as before. The end-to-end tests of the card load the
+  bundle through this address in a real Home Assistant.

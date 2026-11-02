@@ -10,18 +10,22 @@ Assistant by the smoke test and the end-to-end tests of the card.
 import hashlib
 import logging
 from http import HTTPStatus
+from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.timerify import card
 from custom_components.timerify.card import CARD_FILE, CARD_URL, card_module_url
 
 from .conftest import FakeTarget, SetupTarget
 from .helpers import AC_ID, restart
 
 CACHE_FOR_31_DAYS = "public, max-age=2678400"
+JAVASCRIPT = "text/javascript; charset=utf-8"
 
 
 async def served(
@@ -54,6 +58,85 @@ async def test_card_is_served_to_anyone(
     assert status is HTTPStatus.OK
     assert body == bundle
     assert cache == CACHE_FOR_31_DAYS
+
+
+async def test_the_card_is_served_with_a_month_of_cache_to_anyone(
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_client_no_auth: ClientSessionGenerator,
+) -> None:
+    """A browser that has not logged in gets the module as JavaScript, which it may
+    keep for a month; the address without the version key answers as well."""
+    await setup_target()
+    client = await hass_client_no_auth()
+
+    response = await client.get(CARD_URL)
+
+    assert response.status == HTTPStatus.OK
+    assert response.headers["Content-Type"] == JAVASCRIPT
+    assert response.headers["Cache-Control"] == CACHE_FOR_31_DAYS
+    assert "WWW-Authenticate" not in response.headers
+
+
+@pytest.fixture
+def card_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A copy of the bundle that the integration reads as its card file, so that a
+    test can write over it the way HACS writes an update."""
+    copy = tmp_path / "timerify-card.js"
+    copy.write_bytes(CARD_FILE.read_bytes())
+    monkeypatch.setattr(card, "CARD_FILE", copy)
+    return copy
+
+
+async def test_the_card_served_is_the_one_registered_until_a_restart(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_client_no_auth: ClientSessionGenerator,
+    card_on_disk: Path,
+) -> None:
+    """HACS writes a new bundle while Home Assistant still runs the Python of the old
+    one, which answers the card with what the old card knows. The browser must not get
+    the new bundle before the restart: the address the dashboards were told, with its
+    version key, serves the bytes that key was made of."""
+    hass.config.components.add("frontend")
+    with patch("custom_components.timerify.card.add_extra_js_url") as add:
+        await setup_target()
+    module_url = add.call_args.args[1]
+    registered = await hass.async_add_executor_job(card_on_disk.read_bytes)
+    updated = b"export const card = 'a bundle that needs a newer server';"
+    await hass.async_add_executor_job(card_on_disk.write_bytes, updated)
+
+    client = await hass_client_no_auth()
+    response = await client.get(module_url)
+
+    body = await response.read()
+    assert response.status == HTTPStatus.OK
+    assert body == registered
+    assert module_url == card_module_url(body)
+
+
+async def test_a_timer_set_up_or_reloaded_after_the_update_keeps_the_registered_card(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_client_no_auth: ClientSessionGenerator,
+    card_on_disk: Path,
+) -> None:
+    """Registering the card again, as a second timer or a reload could, would not fail:
+    it would swap the bytes for the file as it is by then, and the browser would get
+    the new bundle before the restart after all."""
+    first = await setup_target()
+    registered = await hass.async_add_executor_job(card_on_disk.read_bytes)
+    await hass.async_add_executor_job(card_on_disk.write_bytes, b"export {};")
+
+    await setup_target(target=AC_ID)
+    await restart(hass, first)
+
+    status, body, _ = await served(hass_client_no_auth)
+    assert status is HTTPStatus.OK
+    assert body == registered
 
 
 def test_module_url_follows_the_bundle() -> None:

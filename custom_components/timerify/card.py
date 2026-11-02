@@ -6,17 +6,23 @@ it. It is served to everyone, because the browser loads it before a user has log
 in, at an address that does not change, with a cache of a month. What changes is the
 address the dashboards are told to load it from: it carries a key made of the file's
 contents, so that a new bundle is fetched at once.
+
+The bytes served are the ones read when Timerify started, not the file on disk. HACS
+writes an update while Home Assistant still runs the Python of the old version, and a
+card that came from the new file would ask that Python for answers it does not give
+yet. Until the restart that HACS asks for, the browser gets the card that goes with the
+server, and the key on its address is the key of those bytes.
 """
 
 import hashlib
 from pathlib import Path
 from typing import Final
 
+from aiohttp import web
 from homeassistant.components.frontend import add_extra_js_url
-
-# The module that defines it: the package only re-exports the name.
-from homeassistant.components.http.server import StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.components.http.static import CACHE_HEADERS
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.http import HomeAssistantView
 
 CARD_URL: Final = "/timerify_frontend/timerify-card.js"
 """Where the bundle is served, the same for every version of it."""
@@ -32,20 +38,36 @@ def card_module_url(bundle: bytes) -> str:
     return f"{CARD_URL}?v={version}"
 
 
-def _module_url() -> str:
-    return card_module_url(CARD_FILE.read_bytes())
+class CardView(HomeAssistantView):
+    """Answers the card's address with the bundle it was made with."""
+
+    url = CARD_URL
+    name = "timerify:card"
+    requires_auth = False
+
+    def __init__(self, bundle: bytes) -> None:
+        self._bundle = bundle
+
+    @callback
+    def get(self, request: web.Request) -> web.Response:
+        """The bundle, for a month, to anyone."""
+        return web.Response(
+            body=self._bundle,
+            content_type="text/javascript",
+            charset="utf-8",
+            headers=CACHE_HEADERS,
+        )
 
 
 async def async_register_card(hass: HomeAssistant) -> None:
     """Serve the card, and tell the frontend to load it on every dashboard.
 
-    This belongs to the integration, not to a timer, and is done once: a static path
-    cannot be registered twice. Timerify does not need the frontend, so a Home Assistant
-    without one (no dashboards) serves the file and loads it nowhere.
+    This belongs to the integration, not to a timer, and is done once, from
+    `async_setup`: a second registration does not fail, it silently replaces the bytes
+    with the file as it is by then. Timerify does not need the frontend, so a Home
+    Assistant without one (no dashboards) serves the bundle and loads it nowhere.
     """
-    module_url = await hass.async_add_executor_job(_module_url)
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARD_URL, str(CARD_FILE), cache_headers=True)]
-    )
+    bundle = await hass.async_add_executor_job(CARD_FILE.read_bytes)
+    hass.http.register_view(CardView(bundle))
     if "frontend" in hass.config.components:
-        add_extra_js_url(hass, module_url)
+        add_extra_js_url(hass, card_module_url(bundle))

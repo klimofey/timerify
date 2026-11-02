@@ -101,6 +101,7 @@ from .issues import (
 )
 from .schedule import (
     Interval,
+    async_title_labels,
     spoken_aliases,
     title_key,
     weekday_window,
@@ -217,10 +218,13 @@ def _unloaded_error() -> HomeAssistantError:
     )
 
 
-def _name_keys(subentry: ConfigSubentry) -> set[str]:
+def _name_keys(subentry: ConfigSubentry, labels: Mapping[str, str]) -> set[str]:
     """What an interval is meant by, as `title_key` compares: its title and, while it
-    has the title Timerify gave it, the times it can be said by (`spoken_aliases`)."""
-    return {title_key(name) for name in (subentry.title, *spoken_aliases(subentry))}
+    has the title Timerify gave it, the times it can be said by (`spoken_aliases`).
+    `labels` are the words of a title in the language of the house."""
+    return {
+        title_key(name) for name in (subentry.title, *spoken_aliases(subentry, labels))
+    }
 
 
 class _WorkdayUnknown(Exception):
@@ -609,10 +613,13 @@ class TargetController:
             chosen = every_interval
             if interval is not None:
                 wanted = title_key(interval)
+                labels = await async_title_labels(
+                    self._hass, self._hass.config.language
+                )
                 chosen = {
                     interval_id: subentry
                     for interval_id, subentry in every_interval.items()
-                    if wanted and wanted in _name_keys(subentry)
+                    if wanted and wanted in _name_keys(subentry, labels)
                 }
                 if not chosen:
                     raise self._unknown_interval(

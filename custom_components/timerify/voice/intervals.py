@@ -58,8 +58,10 @@ class SetScheduleHandler(TimerifyIntentHandler):
             {
                 "target": target_name(intent_obj.hass, controller.target_entity_id),
                 "enabled": enabled,
-                # The title as the interval has it, not as it was said.
-                "interval": None if asked is None else titles[0],
+                # The titles as the intervals have them, not as they were said, each
+                # once, in the order of the schedule: intervals that share a title are
+                # one title. Empty when the whole schedule was asked for.
+                "intervals": [] if asked is None else list(dict.fromkeys(titles)),
                 "count": len(titles),
             }
         )

@@ -259,11 +259,12 @@ def _hvac_modes(
 
 
 @callback
-def interval_names(hass: HomeAssistant) -> list[VoiceTitle]:
+def interval_names(hass: HomeAssistant, labels: Mapping[str, str]) -> list[VoiceTitle]:
     """Every title the built-in agent would know the schedule intervals of the timers
     by, each once however many timers have an interval of that title, and with the
     title of an interval that Timerify titled, the times it can be said by instead
-    (`spoken_aliases`).
+    (`spoken_aliases`). `labels` are the words of a title in the language of the house
+    (`async_title_labels`), which tell whether a title is Timerify's.
 
     A title is said as a name is, and meant as it is, which names the interval to the
     timer. A time is meant as it is said too, not as a title: the list is the house's,
@@ -273,7 +274,7 @@ def interval_names(hass: HomeAssistant) -> list[VoiceTitle]:
     titles: dict[str, VoiceTitle] = {}
     for entry in loaded_timers(hass):
         for subentry in entry.get_subentries_of_type(SUBENTRY_INTERVAL):
-            for name in (subentry.title, *spoken_aliases(subentry)):
+            for name in (subentry.title, *spoken_aliases(subentry, labels)):
                 titles.setdefault(name, VoiceTitle(name))
     return list(titles.values())
 

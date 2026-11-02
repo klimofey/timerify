@@ -516,8 +516,15 @@ responses:
         {%- endif -%}
     TimerifySetSchedule:
       default: |-
-        {%- if slots.interval -%}
-          {{ slots.target }}: расписание «{{ slots.interval }}» {{ "включено" if slots.enabled else "выключено" }}.
+        {%- macro quoted_titles(titles) -%}
+          {%- for title in titles -%}
+            «{{ title }}»{{ " и " if loop.revindex == 2 else (", " if not loop.last else "") }}
+          {%- endfor -%}
+        {%- endmacro -%}
+        {%- if slots.intervals | length == 1 -%}
+          {{ slots.target }}: расписание «{{ slots.intervals[0] }}» {{ "включено" if slots.enabled else "выключено" }}.
+        {%- elif slots.intervals -%}
+          {{ slots.target }}: расписания {{ quoted_titles(slots.intervals) }} {{ "включены" if slots.enabled else "выключены" }}.
         {%- else -%}
           {{ slots.target }}: расписание {{ "включено" if slots.enabled else "выключено" }}.
         {%- endif -%}

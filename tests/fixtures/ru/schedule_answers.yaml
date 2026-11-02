@@ -1,0 +1,46 @@
+# The Russian answers about switching a schedule, written by hand.
+#
+# They are not produced by the templates: a fixture rendered from the templates would only
+# repeat them. A change to a Russian answer changes this file in the same commit.
+#
+# A case is the answer a speaker expects (`answer`) for the slots a handler gives it
+# (`slots`). `intervals` holds the titles of the intervals that were asked for, each once,
+# in the order of the schedule, and is empty when the whole schedule was asked for. The
+# answer names every title in guillemets, since a title may have a comma: «Утро» for one,
+# «Утро» и «День» for two, «Утро», «День» и «Вечер» for more. The noun and the verb that
+# goes with it agree with the number of titles named, not with the number of intervals
+# switched: two intervals that share one title are one title. For one it is "расписание ...
+# включено" (the schedule is on), and from two on "расписания ... включены" (the schedules
+# are on).
+
+- name: the whole schedule off
+  slots: {target: Boiler, enabled: false, intervals: [], count: 2}
+  answer: "Boiler: расписание выключено."
+
+- name: the whole schedule on
+  slots: {target: Boiler, enabled: true, intervals: [], count: 2}
+  answer: "Boiler: расписание включено."
+
+- name: one interval off
+  slots: {target: Boiler, enabled: false, intervals: ["Утро"], count: 1}
+  answer: "Boiler: расписание «Утро» выключено."
+
+- name: one interval on
+  slots: {target: Boiler, enabled: true, intervals: ["Утро"], count: 1}
+  answer: "Boiler: расписание «Утро» включено."
+
+- name: two intervals that share a title
+  slots: {target: Boiler, enabled: false, intervals: ["Утро"], count: 2}
+  answer: "Boiler: расписание «Утро» выключено."
+
+- name: two intervals with titles of their own, off
+  slots: {target: Boiler, enabled: false, intervals: ["06:30–07:15, Пн–Ср", "06:30–08:00, Сб, Вс"], count: 2}
+  answer: "Boiler: расписания «06:30–07:15, Пн–Ср» и «06:30–08:00, Сб, Вс» выключены."
+
+- name: two intervals with titles of their own, on
+  slots: {target: Boiler, enabled: true, intervals: ["Утро", "День"], count: 2}
+  answer: "Boiler: расписания «Утро» и «День» включены."
+
+- name: three intervals
+  slots: {target: Boiler, enabled: true, intervals: ["Утро", "День", "Вечер"], count: 3}
+  answer: "Boiler: расписания «Утро», «День» и «Вечер» включены."

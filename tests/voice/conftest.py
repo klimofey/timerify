@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.fan.const import FanEntityFeature
 from homeassistant.components.humidifier.const import HumidifierEntityFeature
 from homeassistant.components.light.const import ColorMode
@@ -21,8 +22,16 @@ from ..conftest import (
     sets_attribute,
     switches_to,
 )
-from ..helpers import AC_ATTRS, AC_ID, JERUSALEM, SMALL_AC_ID
-from .helpers import copy_sentences
+from ..helpers import (
+    AC_ATTRS,
+    AC_ID,
+    JERUSALEM,
+    SMALL_AC_ID,
+    add_interval,
+    open_sunday,
+    retitle_interval,
+)
+from .helpers import add_voice_entry, copy_sentences
 
 
 @pytest.fixture
@@ -250,3 +259,62 @@ def fake_fahrenheit_tank(provide_target: ProvideTarget) -> FakeTarget:
         },
         state_attributes={"temperature": 120, "operation_mode": "eco"},
     )
+
+
+@pytest.fixture
+async def boiler_schedule(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> MockConfigEntry:
+    """A timer on the Boiler with a schedule of two intervals, Morning from 06:30 to
+    07:15 and Evening from 18:00 to 19:00, on every day of the week, the way its owner
+    titled them. It is Sunday, six in the morning. Assist is not told about them yet."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    morning = await add_interval(hass, entry, start="06:30", end="07:15")
+    evening = await add_interval(hass, entry, start="18:00", end="19:00")
+    await retitle_interval(hass, entry, morning, "Morning")
+    await retitle_interval(hass, entry, evening, "Evening")
+    return entry
+
+
+@pytest.fixture
+async def scheduled(
+    hass: HomeAssistant, boiler_schedule: MockConfigEntry
+) -> MockConfigEntry:
+    """The boiler and its two intervals, which Assist knows by the Voice settings in
+    English. A test of another language asks for `boiler_schedule` and adds the Voice
+    settings of its own."""
+    await add_voice_entry(hass, languages=("en",))
+    return boiler_schedule
+
+
+@pytest.fixture
+async def generated_schedule(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> MockConfigEntry:
+    """The same two intervals of the Boiler, but their owner never titled them: they
+    keep the titles Timerify gave them, `MORNING_TITLE` and `EVENING_TITLE`. It is
+    Sunday, six in the morning. Assist is not told about them yet."""
+    await open_sunday(hass, freezer)
+    entry = await setup_target()
+    await add_interval(hass, entry, start="06:30", end="07:15")
+    await add_interval(hass, entry, start="18:00", end="19:00")
+    return entry
+
+
+@pytest.fixture
+async def generated(
+    hass: HomeAssistant, generated_schedule: MockConfigEntry
+) -> MockConfigEntry:
+    """The boiler and its two intervals with the titles Timerify gave them, which Assist
+    knows by the Voice settings in English."""
+    await add_voice_entry(hass, languages=("en",))
+    return generated_schedule

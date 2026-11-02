@@ -10,15 +10,8 @@ reloads the timer. Every scenario talks to the real built-in agent, or calls the
 the real Assist API, on a clock that is moved with `advance_to`.
 """
 
-import copy
-
 import pytest
-import yaml
 from freezegun.api import FrozenDateTimeFactory
-from hassil.intents import Intents, TextSlotList
-from hassil.recognize import recognize_all
-from hassil.util import merge_dict
-from home_assistant_intents import get_intents
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -26,20 +19,10 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import LIST_INTERVAL, VOICE_SYNC_COOLDOWN
-from custom_components.timerify.schedule import start_aliases
 from custom_components.timerify.spelling import fold_yo
-from custom_components.timerify.voice.sentences import (
-    VoiceName,
-    VoiceTitle,
-    build,
-    load_sources,
-    render,
-    validate,
-)
 
 from ..conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from ..helpers import (
-    NEXT,
     NUMBER,
     SENSOR,
     SUNDAY,
@@ -49,17 +32,19 @@ from ..helpers import (
     add_interval,
     advance,
     advance_to,
-    edit_interval,
     iso,
     local,
     open_sunday,
     reload_held_back,
     retitle_interval,
-    set_number,
     set_switch,
     state_of,
 )
 from .helpers import (
+    BOILER_INTERVALS,
+    EVENING,
+    MORNING,
+    SET_SCHEDULE,
     add_voice_entry,
     assist_api,
     call_tool,
@@ -69,93 +54,18 @@ from .helpers import (
     every_text,
     expose,
     listed,
-    pending,
     reached,
     refusal_of,
     speech,
+    switches,
     translated,
 )
 
-SET_SCHEDULE = "TimerifySetSchedule"
-CLOCK_COMMAND = "TimerifyCommandAt"
-MORNING = "switch.boiler_schedule_06_30_07_15_mon_sun"
-EVENING = "switch.boiler_schedule_18_00_19_00_mon_sun"
-"""The switches of the intervals from 06:30 to 07:15 and from 18:00 to 19:00."""
 OFF = "The schedule of Boiler is off."
 ON = "The schedule of Boiler is on."
-BOILER_INTERVALS = "Morning; Evening"
-"""How a refusal lists the titles of the intervals the boiler has."""
 YO_TITLE = "Day\N{CYRILLIC CAPITAL LETTER IO}"
 """A title with the Russian letter yo, built from the code point so that this file stays
 free of Cyrillic."""
-MORNING_TITLE = "06:30–07:15, Mon–Sun"
-EVENING_TITLE = "18:00–19:00, Mon–Sun"
-"""The titles Timerify gives the morning and the evening interval when nobody titles
-them."""
-
-
-@pytest.fixture
-async def boiler_schedule(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    assist: None,
-    setup_target: SetupTarget,
-) -> MockConfigEntry:
-    """A timer on the Boiler with a schedule of two intervals, Morning from 06:30 to
-    07:15 and Evening from 18:00 to 19:00, on every day of the week, the way its owner
-    titled them. It is Sunday, six in the morning. Assist is not told about them yet."""
-    await open_sunday(hass, freezer)
-    entry = await setup_target()
-    morning = await add_interval(hass, entry, start="06:30", end="07:15")
-    evening = await add_interval(hass, entry, start="18:00", end="19:00")
-    await retitle_interval(hass, entry, morning, "Morning")
-    await retitle_interval(hass, entry, evening, "Evening")
-    return entry
-
-
-@pytest.fixture
-async def scheduled(
-    hass: HomeAssistant, boiler_schedule: MockConfigEntry
-) -> MockConfigEntry:
-    """The boiler and its two intervals, which Assist knows by the Voice settings in
-    English. A test of another language asks for `boiler_schedule` and adds the Voice
-    settings of its own."""
-    await add_voice_entry(hass, languages=("en",))
-    return boiler_schedule
-
-
-@pytest.fixture
-async def generated_schedule(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    assist: None,
-    setup_target: SetupTarget,
-) -> MockConfigEntry:
-    """The same two intervals of the Boiler, but their owner never titled them: they
-    keep the titles Timerify gave them, `MORNING_TITLE` and `EVENING_TITLE`. It is
-    Sunday, six in the morning. Assist is not told about them yet."""
-    await open_sunday(hass, freezer)
-    entry = await setup_target()
-    await add_interval(hass, entry, start="06:30", end="07:15")
-    await add_interval(hass, entry, start="18:00", end="19:00")
-    return entry
-
-
-@pytest.fixture
-async def generated(
-    hass: HomeAssistant, generated_schedule: MockConfigEntry
-) -> MockConfigEntry:
-    """The boiler and its two intervals with the titles Timerify gave them, which Assist
-    knows by the Voice settings in English."""
-    await add_voice_entry(hass, languages=("en",))
-    return generated_schedule
-
-
-def switches(hass: HomeAssistant) -> tuple[str, str]:
-    """What the switches of the Morning and the Evening interval show."""
-    return state_of(hass, MORNING), state_of(hass, EVENING)
 
 
 # --- The whole schedule ------------------------------------------------------------
@@ -852,409 +762,6 @@ async def test_two_intervals_with_one_title_are_switched_together(
     ] == ["off", "off", "on"]
 
 
-# --- A generated title, said by its start time ----------------------------------------
-
-
-def test_start_aliases_are_the_ways_a_recogniser_writes_the_time() -> None:
-    assert start_aliases("06:30") == ("6:30", "06:30", "6.30", "06.30")
-    assert start_aliases("18:00") == ("18:00", "18.00")
-    assert start_aliases("00:05") == ("0:05", "00:05", "0.05", "00.05")
-
-
-async def test_a_generated_title_is_said_by_its_start_time(
-    hass: HomeAssistant, fake_target: FakeTarget, generated: MockConfigEntry
-) -> None:
-    """The title Timerify gave the morning interval is a mouthful, so its start time
-    names it: only the morning goes off, and the answer gives the title as the interval
-    has it. The boiler itself is not touched."""
-    response = await converse(hass, "turn off the 6:30 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert response.response_type is intent.IntentResponseType.ACTION_DONE
-    assert speech(response) == f"The {MORNING_TITLE} schedule of Boiler is off."
-    assert switches(hass) == ("off", "on")
-    assert fake_target.calls == []
-
-
-@pytest.mark.parametrize(
-    ("said", "title", "interval"),
-    [
-        ("6:30", MORNING_TITLE, MORNING),
-        ("06:30", MORNING_TITLE, MORNING),
-        ("6.30", MORNING_TITLE, MORNING),
-        ("06.30", MORNING_TITLE, MORNING),
-        ("18:00", EVENING_TITLE, EVENING),
-        ("18.00", EVENING_TITLE, EVENING),
-    ],
-)
-async def test_every_way_a_recogniser_writes_the_start_time_names_the_interval(
-    hass: HomeAssistant,
-    fake_target: FakeTarget,
-    generated: MockConfigEntry,
-    said: str,
-    title: str,
-    interval: str,
-) -> None:
-    """A speech recogniser writes half past six with or without the zero, after a colon
-    or a dot; any of them reaches the interval, off and on again."""
-    off = await converse(hass, f"turn off the {said} schedule of the boiler")
-    assert reached(off) == SET_SCHEDULE, said
-    assert speech(off) == f"The {title} schedule of Boiler is off."
-    assert state_of(hass, interval) == "off"
-
-    on = await converse(hass, f"resume the {said} schedule of the boiler")
-    assert reached(on) == SET_SCHEDULE, said
-    assert speech(on) == f"The {title} schedule of Boiler is on."
-    assert switches(hass) == ("on", "on")
-    assert fake_target.calls == []
-
-
-async def test_the_file_lists_each_start_time_with_itself_as_the_value(
-    hass: HomeAssistant, generated: MockConfigEntry
-) -> None:
-    """The title keeps meaning itself, and each start time follows the title it belongs
-    to, meaning the text that was said: the controller, not the file, tells which
-    intervals that is. A value that reads as a number in YAML is quoted by the writer,
-    so that Home Assistant reads it back as the text it is."""
-    assert listed(hass, "en", LIST_INTERVAL) == [
-        {"in": "06:30–07:15 Mon–Sun", "out": MORNING_TITLE},
-        *({"in": said, "out": said} for said in ("6:30", "06:30", "6.30", "06.30")),
-        {"in": "18:00–19:00 Mon–Sun", "out": EVENING_TITLE},
-        *({"in": said, "out": said} for said in ("18:00", "18.00")),
-    ]
-
-
-def test_the_start_times_are_listed_as_the_built_in_agent_reads_them() -> None:
-    """The proof that gates every write holds the start times to what is said: a colon
-    or a dot between digits is not punctuation to the agent, so "6:30" and "6.30" are
-    read back as they were written, and the file reads back as text, not as the number
-    that YAML makes of `6:30` or `6.30` unquoted."""
-    aliases = (*start_aliases("06:30"), *start_aliases("18:00"))
-    built = build(
-        load_sources("en"),
-        [VoiceName("Boiler", "switch")],
-        intervals=[VoiceTitle(alias) for alias in aliases],
-    )
-
-    validate("en", built.data, built.said)
-
-    assert built.said[LIST_INTERVAL] == aliases
-    values = yaml.safe_load(render(built.data))["lists"][LIST_INTERVAL]["values"]
-    assert values == [{"in": alias, "out": alias} for alias in aliases]
-
-
-async def test_the_start_time_switches_every_interval_that_starts_then(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    assist: None,
-    setup_target: SetupTarget,
-) -> None:
-    """The weekday and the weekend morning both start at half past six, with titles
-    that differ in their end and days: the 6:30 schedule is both, as two intervals with
-    one title are switched together, and the evening is not touched."""
-    await open_sunday(hass, freezer)
-    entry = await setup_target()
-    await add_interval(
-        hass, entry, start="06:30", end="07:15", weekdays=["mon", "tue", "wed"]
-    )
-    await add_interval(hass, entry, start="06:30", end="08:00", weekdays=["sat", "sun"])
-    await add_interval(hass, entry, start="18:00", end="19:00")
-    await add_voice_entry(hass, languages=("en",))
-    both = (
-        "switch.boiler_schedule_06_30_07_15_mon_wed",
-        "switch.boiler_schedule_06_30_08_00_sat_sun",
-    )
-
-    response = await converse(hass, "turn off the 06:30 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert [state_of(hass, entity_id) for entity_id in (*both, EVENING)] == [
-        "off",
-        "off",
-        "on",
-    ]
-    assert fake_target.calls == []
-
-
-async def test_a_start_time_is_listed_once_and_each_timer_switches_its_own(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    fake_fan: FakeTarget,
-    generated: MockConfigEntry,
-    setup_target: SetupTarget,
-) -> None:
-    """The fan has an interval from half past six too. The file has "6:30" once for
-    the house, and the timer in the words is the one whose interval is switched."""
-    fan = await setup_target(target=fake_fan.entity_id)
-    await add_interval(hass, fan, start="06:30", end="07:00")
-    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
-
-    said = [value["out"] for value in listed(hass, "en", LIST_INTERVAL)]
-    assert said.count("6:30") == 1
-    response = await converse(hass, "turn off the 6:30 schedule of the fan")
-
-    assert reached(response) == SET_SCHEDULE
-    assert state_of(hass, "switch.fan_schedule_06_30_07_00_mon_sun") == "off"
-    assert switches(hass) == ("on", "on")
-    response = await converse(hass, "turn off the 6:30 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert switches(hass) == ("off", "on")
-    assert fake_target.calls == []
-    assert fake_fan.calls == []
-
-
-async def test_a_start_time_only_another_timer_has_is_refused(
-    hass: HomeAssistant,
-    fake_target: FakeTarget,
-    fake_fan: FakeTarget,
-    generated_schedule: MockConfigEntry,
-    setup_target: SetupTarget,
-) -> None:
-    """The start times are the house's, as the titles are: the fan has an interval from
-    ten at night and the boiler has none, so the words are understood, the boiler says
-    which intervals it has, and nothing is switched or turned off."""
-    fan = await setup_target(target=fake_fan.entity_id)
-    await add_interval(hass, fan, start="22:00", end="23:00")
-    await add_voice_entry(hass, languages=("en",))
-    await set_number(hass, NUMBER, 60)
-
-    response = await converse(hass, "turn off the 22:00 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert refusal_of(response) == translated(
-        "en", "exceptions", "unknown_interval", "message"
-    ).format(
-        target="Boiler",
-        interval="22:00",
-        intervals=f"{MORNING_TITLE}; {EVENING_TITLE}",
-    )
-    assert switches(hass) == ("on", "on")
-    assert state_of(hass, "switch.fan_schedule_22_00_23_00_mon_sun") == "on"
-    assert fake_target.calls == [TURN_ON]
-    assert fake_fan.calls == []
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "turn off the 6:30 schedule of the boiler",
-        "turn on the 6:30 schedule of the boiler",
-        "turn the 6:30 schedule of the boiler off",
-        "turn off the 6:30 schedule for the boiler",
-        "disable the 6:30 schedule for the boiler",
-        "pause the 6:30 schedule of the boiler",
-        "switch off the 6.30 schedule of the boiler",
-        "turn off 6:30 schedule for the boiler",
-        "turn off the boiler 6:30 schedule",
-    ],
-)
-async def test_a_title_the_user_gave_is_not_said_by_its_start_time(
-    hass: HomeAssistant, fake_target: FakeTarget, scheduled: MockConfigEntry, text: str
-) -> None:
-    """The owner called the morning interval Morning, so half past six is not its name:
-    no title in the house is generated for that time and the words are not Timerify's.
-    The boiler is running, and neither it nor the schedule is touched by words that
-    the built-in agent falls back on its names for."""
-    await set_number(hass, NUMBER, 60)
-    assert fake_target.calls == [TURN_ON]
-
-    response = await converse(hass, text)
-
-    assert reached(response) != SET_SCHEDULE
-    assert response.response_type is intent.IntentResponseType.ERROR
-    assert switches(hass) == ("on", "on")
-    assert fake_target.calls == [TURN_ON]
-    assert state_of(hass, TARGET_ID) == "on"
-
-
-async def test_a_renamed_interval_is_refused_when_its_start_time_is_another_timer_s(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    fake_fan: FakeTarget,
-    scheduled: MockConfigEntry,
-    setup_target: SetupTarget,
-) -> None:
-    """The fan has an interval that starts at half past six, still titled by Timerify,
-    so the house can say 6:30. The boiler's interval at that time was renamed, so it is
-    not the one meant: the boiler says which titles it has, and nothing is switched."""
-    fan = await setup_target(target=fake_fan.entity_id)
-    await add_interval(hass, fan, start="06:30", end="07:00")
-    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
-
-    response = await converse(hass, "turn off the 6:30 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert refusal_of(response) == translated(
-        "en", "exceptions", "unknown_interval", "message"
-    ).format(target="Boiler", interval="6:30", intervals=BOILER_INTERVALS)
-    assert switches(hass) == ("on", "on")
-    assert state_of(hass, "switch.fan_schedule_06_30_07_00_mon_sun") == "on"
-    assert fake_target.calls == []
-    assert fake_fan.calls == []
-
-
-async def test_an_interval_edited_to_start_later_is_said_by_the_new_time(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    generated: MockConfigEntry,
-) -> None:
-    """Moving the morning interval to seven makes Timerify title it again, since the
-    title is still its own, and the half past six goes with the old time: it is not
-    understood any more, and the new time is."""
-    (morning,) = (
-        subentry_id
-        for subentry_id, subentry in generated.subentries.items()
-        if subentry.title == MORNING_TITLE
-    )
-
-    await edit_interval(hass, generated, morning, start="07:00", end="07:45")
-    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
-
-    said = [value["out"] for value in listed(hass, "en", LIST_INTERVAL)]
-    assert "6:30" not in said
-    assert {"7:00", "07:00", "7.00", "07.00"} <= set(said)
-    old = await converse(hass, "turn off the 6:30 schedule of the boiler")
-    assert reached(old) != SET_SCHEDULE
-    assert switches(hass) == ("on", "on")
-    new = await converse(hass, "turn off the 7:00 schedule of the boiler")
-    assert reached(new) == SET_SCHEDULE
-    assert speech(new) == "The 07:00–07:45, Mon–Sun schedule of Boiler is off."
-    assert fake_target.calls == []
-
-
-async def test_a_title_that_reads_as_a_time_is_its_own_name_and_the_time_s_too(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_target: FakeTarget,
-    generated: MockConfigEntry,
-) -> None:
-    """The owner titles a weekday interval 6:30, which is also what the morning
-    interval is said by. The text is listed once and means one thing: the 6:30
-    schedule is both, as every interval that is called by a name is."""
-    week = await add_interval(
-        hass, generated, start="08:00", end="09:00", weekdays=["mon", "tue"]
-    )
-    await retitle_interval(hass, generated, week, "6:30")
-    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
-
-    said = [value["out"] for value in listed(hass, "en", LIST_INTERVAL)]
-    assert said.count("6:30") == 1
-    response = await converse(hass, "turn off the 6:30 schedule of the boiler")
-
-    assert reached(response) == SET_SCHEDULE
-    assert [
-        state_of(hass, entity_id)
-        for entity_id in (
-            MORNING,
-            "switch.boiler_schedule_08_00_09_00_mon_tue",
-            EVENING,
-        )
-    ] == ["off", "off", "on"]
-
-
-async def test_russian_start_time_switches_the_interval(
-    hass: HomeAssistant, fake_target: FakeTarget, generated_schedule: MockConfigEntry
-) -> None:
-    """The start time is the same in every language: each way the shipped Russian
-    sentences have to switch an interval, said with 6:30 in the place of its title,
-    reaches the morning interval, off and on, and the answer names it by its title."""
-    await add_voice_entry(hass, languages=("ru",))
-    for enabled in (False, True):
-        texts = [
-            text
-            for text, fixed in every_text("ru", SET_SCHEDULE, interval="6:30")
-            if fixed["enabled"] is enabled and "6:30" in text
-        ]
-        assert texts
-
-        for text in texts:
-            response = await converse(hass, text, "ru")
-
-            assert reached(response) == SET_SCHEDULE, text
-            assert response.response_type is intent.IntentResponseType.ACTION_DONE
-            assert response.intent is not None
-            assert response.intent.slots["interval"]["value"] == "6:30", text
-            assert MORNING_TITLE in speech(response), text
-
-        assert switches(hass) == (("on" if enabled else "off"), "on")
-    assert fake_target.calls == []
-
-
-def intent_types_reading(text: str) -> set[str]:
-    """Every intent that Home Assistant's own sentences and Timerify's, built for the
-    Boiler with an interval from 06:30, read `text` as: the whole of what the built-in
-    agent chooses from. The lists it adds for the names of the house have the Boiler
-    and no area or floor."""
-    core = get_intents("en")
-    assert core is not None
-    merged = copy.deepcopy(core)
-    built = build(
-        load_sources("en"),
-        [VoiceName("Boiler", "switch")],
-        intervals=[VoiceTitle(alias) for alias in start_aliases("06:30")],
-    )
-    merge_dict(merged, built.data)
-    house = {
-        "name": TextSlotList.from_strings(["Boiler"], name="name"),
-        "area": TextSlotList(name="area", values=[]),
-        "floor": TextSlotList(name="floor", values=[]),
-    }
-    return {
-        result.intent.name
-        for result in recognize_all(
-            text, Intents.from_dict(merged), slot_lists=house, language="en"
-        )
-    }
-
-
-def test_the_time_in_each_phrase_is_read_by_one_intent_only() -> None:
-    """The only intent that reads either phrase is the one it is meant for, so there is
-    no tie between intents for the order of the sentences to settle."""
-    assert intent_types_reading("turn off the 6:30 schedule of the boiler") == {
-        SET_SCHEDULE
-    }
-    assert intent_types_reading("turn off the boiler at 6:30") == {CLOCK_COMMAND}
-
-
-async def test_a_start_time_is_not_a_clock_time_and_the_other_way_round(
-    hass: HomeAssistant, fake_target: FakeTarget, generated: MockConfigEntry
-) -> None:
-    """Half past six is the interval in one phrase and the time of day in another: the
-    command at 6:30 keeps a command and switches no schedule, the schedule of 6:30
-    switches the interval and keeps no command, and neither turns the boiler on or off
-    now."""
-    clock = await converse(hass, "turn on the boiler at 6:30")
-
-    assert reached(clock) == CLOCK_COMMAND, speech(clock)
-    assert state_of(hass, NEXT) == iso(SUNDAY, "06:30")
-    assert switches(hass) == ("on", "on")
-
-    schedule = await converse(hass, "turn off the 6:30 schedule of the boiler")
-
-    assert reached(schedule) == SET_SCHEDULE
-    assert switches(hass) == ("off", "on")
-    assert state_of(hass, NEXT) == iso(SUNDAY, "06:30")
-    assert len(pending(hass, NEXT)) == 1
-    assert fake_target.calls == []
-
-
-async def test_turning_off_at_a_time_does_not_switch_the_schedule(
-    hass: HomeAssistant, fake_target: FakeTarget, generated: MockConfigEntry
-) -> None:
-    """The boiler is off, so "turn off the boiler at 6:30" has nothing to do: it is
-    answered as a command at a time, and the interval that starts then is left on."""
-    response = await converse(hass, "turn off the boiler at 6:30")
-
-    assert reached(response) == CLOCK_COMMAND, speech(response)
-    assert switches(hass) == ("on", "on")
-    assert fake_target.calls == []
-
-
 # --- Where the words do not belong to the schedule ------------------------------------
 
 
@@ -1517,7 +1024,7 @@ async def test_llm_set_schedule(
     assert whole["speech_slots"] == {
         "target": "Boiler",
         "enabled": False,
-        "interval": None,
+        "intervals": [],
         "count": 2,
     }
     assert switches(hass) == ("off", "off")
@@ -1531,7 +1038,7 @@ async def test_llm_set_schedule(
     assert one["speech_slots"] == {
         "target": "Boiler",
         "enabled": True,
-        "interval": "Morning",
+        "intervals": ["Morning"],
         "count": 1,
     }
     assert switches(hass) == ("on", "off")
@@ -1549,53 +1056,6 @@ async def test_llm_set_schedule(
     assert switches(hass) == ("on", "off")
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
     assert fake_target.calls == [TURN_ON]
-
-
-async def test_llm_names_an_interval_by_its_start_time(
-    hass: HomeAssistant, fake_target: FakeTarget, generated: MockConfigEntry
-) -> None:
-    """An agent that is told the interval can be named by its start time writes it with
-    a dot, as a recogniser may: the morning interval goes off, it is answered with the
-    title the interval has, and the tool's description tells it that it may."""
-    api = await assist_api(hass)
-    (tool,) = (tool for tool in api.tools if tool.name == "timerify__set_schedule")
-    assert tool.description is not None
-    assert "named by its start time, such as '6:30'" in tool.description
-
-    result = await call_tool(
-        api,
-        "timerify__set_schedule",
-        {"name": "Boiler", "enabled": False, "interval": "6.30"},
-    )
-
-    assert result["response_type"] == "action_done"
-    assert result["speech_slots"] == {
-        "target": "Boiler",
-        "enabled": False,
-        "interval": MORNING_TITLE,
-        "count": 1,
-    }
-    assert switches(hass) == ("off", "on")
-    assert fake_target.calls == []
-
-
-async def test_llm_naming_a_renamed_interval_by_its_start_time_is_told_the_titles(
-    hass: HomeAssistant, fake_target: FakeTarget, scheduled: MockConfigEntry
-) -> None:
-    """The morning interval has a title of the owner's: the time is not a name for it,
-    and the agent is told which titles the boiler has instead."""
-    refused = await call_tool(
-        await assist_api(hass),
-        "timerify__set_schedule",
-        {"name": "Boiler", "enabled": False, "interval": "6:30"},
-    )
-
-    assert refused["response_type"] == "error"
-    assert refused["speech"]["plain"]["speech"] == translated(
-        "en", "exceptions", "unknown_interval", "message"
-    ).format(target="Boiler", interval="6:30", intervals=BOILER_INTERVALS)
-    assert switches(hass) == ("on", "on")
-    assert fake_target.calls == []
 
 
 async def test_llm_asking_for_an_interval_just_deleted_is_told_which_are_left(
@@ -1681,7 +1141,7 @@ async def test_llm_finds_the_interval_it_titled_by_its_times_whatever_the_dash(
     )
 
     assert result["response_type"] == "action_done"
-    assert result["speech_slots"]["interval"] == "06:30–07:15, Mon–Sun"
+    assert result["speech_slots"]["intervals"] == ["06:30–07:15, Mon–Sun"]
     assert state_of(hass, MORNING) == "off"
 
 
@@ -1820,6 +1280,6 @@ async def test_llm_leaving_the_interval_blank_means_the_whole_schedule(
         {"name": "Boiler", "enabled": False, "interval": "  "},
     )
 
-    assert result["speech_slots"]["interval"] is None
+    assert result["speech_slots"]["intervals"] == []
     assert result["speech_slots"]["count"] == 2
     assert switches(hass) == ("off", "off")

@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 from custom_components.timerify.const import SENTENCES_DIR
 from custom_components.timerify.voice.sentences import read_back
 
-from .helpers import render_response
+from .helpers import render_response, russian_schedule_answers
 
 FIXTURE: Final = Path(__file__).parents[1] / "fixtures" / "ru" / "answers.yaml"
 """The one file of the tests that holds the Russian answers."""
@@ -92,6 +92,21 @@ async def test_each_russian_answer_reads_as_the_fixture_says(
 ) -> None:
     answers = await hass.async_add_executor_job(shipped_answers, "ru")
     template = answers[case["intent"]][case["response"]]
+
+    assert render_response(hass, template, case["slots"]) == case["answer"]
+
+
+@pytest.mark.parametrize("name", russian_schedule_answers())
+async def test_each_russian_schedule_answer_reads_as_the_fixture_says(
+    hass: HomeAssistant, name: str
+) -> None:
+    """The answer about switching a schedule names the titles asked for, in guillemets,
+    and agrees with how many titles that is: one, or several, each once however many
+    intervals share it. It has its own fixture, `schedule_answers.yaml`, since it
+    counts titles, not a unit that has a plural form per count."""
+    case = russian_schedule_answers()[name]
+    answers = await hass.async_add_executor_job(shipped_answers, "ru")
+    template = answers["TimerifySetSchedule"]["default"]
 
     assert render_response(hass, template, case["slots"]) == case["answer"]
 

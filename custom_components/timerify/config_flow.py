@@ -99,8 +99,8 @@ from .schedule import (
     DAYS_SELECTOR,
     WEEKDAY_SELECTOR,
     async_title_labels,
+    has_generated_title,
     interval_title,
-    stored_interval_title,
 )
 from .services import SETTINGS_SCHEMA
 from .target import target_name
@@ -614,13 +614,7 @@ class IntervalSubentryFlow(ConfigSubentryFlow):
                     return self.async_create_entry(
                         title=title, data={**data, CONF_GENERATED_TITLE: title}
                     )
-                # An interval without the mark was made or last edited by release 1.0.0,
-                # which keeps none; its rule applies: the title is generated while it
-                # equals the title the interval's data makes now.
-                generated = subentry.data.get(CONF_GENERATED_TITLE)
-                if generated is None:
-                    generated = stored_interval_title(subentry.data, labels)
-                if subentry.title == generated:
+                if has_generated_title(subentry, labels):
                     data[CONF_GENERATED_TITLE] = title
                 else:
                     title = subentry.title

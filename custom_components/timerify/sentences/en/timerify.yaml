@@ -516,8 +516,15 @@ responses:
         {%- endif -%}
     TimerifySetSchedule:
       default: |-
-        {%- if slots.interval -%}
-          The {{ slots.interval }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- macro titles_list(titles) -%}
+          {%- for title in titles -%}
+            {{ title }}{{ " and " if loop.revindex == 2 else ("; " if not loop.last else "") }}
+          {%- endfor -%}
+        {%- endmacro -%}
+        {%- if slots.intervals | length == 1 -%}
+          The {{ slots.intervals[0] }} schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
+        {%- elif slots.intervals -%}
+          The {{ titles_list(slots.intervals) }} schedules of {{ slots.target }} are {{ "on" if slots.enabled else "off" }}.
         {%- else -%}
           The schedule of {{ slots.target }} is {{ "on" if slots.enabled else "off" }}.
         {%- endif -%}

@@ -243,11 +243,22 @@ def title_key(title: str) -> str:
     return " ".join(fold_yo(unpunctuated.casefold()).split())
 
 
-def has_generated_title(subentry: ConfigSubentry) -> bool:
+def has_generated_title(subentry: ConfigSubentry, labels: Mapping[str, str]) -> bool:
     """Whether the interval still has the title Timerify gave it, not one its owner
     wrote: an edit that changes the times and days gives it the new title, a rename
-    ends it."""
-    return subentry.data.get(CONF_GENERATED_TITLE) == subentry.title
+    ends it. `labels` are the words of the title in the language of the house now
+    (`async_title_labels`).
+
+    The title is Timerify's while it equals the mark `CONF_GENERATED_TITLE`. An interval
+    with no mark was made or last edited by release 1.0.0, which keeps none: its title
+    is Timerify's while it equals the one its data makes in the language of the house
+    now. This is the one rule of the interval form and of the times an interval can be
+    said by.
+    """
+    generated = subentry.data.get(CONF_GENERATED_TITLE)
+    if generated is None:
+        generated = stored_interval_title(subentry.data, labels)
+    return subentry.title == generated
 
 
 def start_aliases(start: str) -> tuple[str, ...]:
@@ -264,11 +275,13 @@ def start_aliases(start: str) -> tuple[str, ...]:
     )
 
 
-def spoken_aliases(subentry: ConfigSubentry) -> tuple[str, ...]:
+def spoken_aliases(
+    subentry: ConfigSubentry, labels: Mapping[str, str]
+) -> tuple[str, ...]:
     """The times an interval can be said by instead of its title: `start_aliases` of
-    its start while it has the title Timerify gave it, none once it has been renamed,
-    since its owner's title is the name to say."""
-    if not has_generated_title(subentry):
+    its start while it has the title Timerify gave it (`has_generated_title`), none once
+    it has been renamed, since its owner's title is the name to say."""
+    if not has_generated_title(subentry, labels):
         return ()
     return start_aliases(subentry.data[CONF_START])
 

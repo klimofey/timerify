@@ -42,6 +42,7 @@ from ..const import (
     is_voice_options,
 )
 from ..controller import TimerifyConfigEntry
+from ..schedule import async_title_labels
 from .base import loaded_timers
 from .sentences import (
     InvalidSentences,
@@ -270,6 +271,9 @@ class SentenceFiles:
         in the log: a file the built-in agent cannot load breaks it for the language.
         """
         hass = self._hass
+        # The words of a title come first: nothing may change between what is read of
+        # Home Assistant below and the count of the changes seen.
+        labels = await async_title_labels(hass, hass.config.language)
         changes_seen = self._changes
         chosen = [
             language
@@ -278,7 +282,7 @@ class SentenceFiles:
         ]
         names = voice_names(hass)
         settings = voice_setting_values(hass)
-        intervals = interval_names(hass)
+        intervals = interval_names(hass, labels)
         await self._async_warn_about_manual_installs(chosen)
         changed = False
         try:

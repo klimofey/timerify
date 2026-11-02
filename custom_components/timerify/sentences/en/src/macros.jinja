@@ -74,6 +74,15 @@
   {%- endif -%}
 {%- endmacro -%}
 
+{#- The titles of schedule intervals, in the order they are given, set apart by semicolons
+    and the last after "and": "A", "A and B", "A; B and C". A title may have a comma, as the
+    one Timerify makes does, so a comma does not set them apart. -#}
+{%- macro titles_list(titles) -%}
+  {%- for title in titles -%}
+    {{ title }}{{ " and " if loop.revindex == 2 else ("; " if not loop.last else "") }}
+  {%- endfor -%}
+{%- endmacro -%}
+
 {#- The planned commands, in the order they are given, set apart by semicolons. -#}
 {%- macro planned_commands(commands) -%}
   {%- for command in commands -%}

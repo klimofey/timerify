@@ -60,7 +60,7 @@ from custom_components.timerify.voice.sentences import read_back, references
 from scripts.generate_core_commands import FILE_NAME as CORE_COMMANDS
 
 from ..conftest import FakeTarget, SetupTarget
-from ..helpers import advance_to, local
+from ..helpers import advance_to, local, state_of
 
 ASSISTANT: Final = "conversation"
 """The assistant the built-in agent asks Home Assistant about exposure as."""
@@ -77,6 +77,16 @@ LATE_EVENING: Final = local(date(2026, 1, 5), "23:00")
 """From this time every count of hours up to 24 ends the next day, and every count of
 minutes below 60 ends the same day, so that answers to different counts differ in
 nothing but the count."""
+SET_SCHEDULE: Final = "TimerifySetSchedule"
+MORNING: Final = "switch.boiler_schedule_06_30_07_15_mon_sun"
+EVENING: Final = "switch.boiler_schedule_18_00_19_00_mon_sun"
+"""The switches of the intervals from 06:30 to 07:15 and from 18:00 to 19:00."""
+MORNING_TITLE: Final = "06:30\u201307:15, Mon\u2013Sun"
+EVENING_TITLE: Final = "18:00\u201319:00, Mon\u2013Sun"
+"""The titles Timerify gives the morning and the evening interval when nobody titles
+them."""
+BOILER_INTERVALS: Final = "Morning; Evening"
+"""How a refusal lists the titles of the intervals the boiler has."""
 SETTING_LISTS: Final = ("timerify_hvac_mode", "timerify_mode")
 """The lists of the words for a setting: a sample that leaves them out is a sentence for
 a target that is turned on without any setting."""
@@ -318,16 +328,14 @@ tells apart: none, the next one (each of the ways a command is said), every one,
 the counts of each plural form, and one by its id."""
 
 
-def scheduling(
-    enabled: bool, interval: str | None = None, count: int = 2
-) -> dict[str, Any]:
+def scheduling(enabled: bool, *intervals: str, count: int = 2) -> dict[str, Any]:
     """The slots a handler gives to the answer about switching a schedule: the
-    schedule of the target, or the one `interval` of it, `enabled` or not, with the
-    `count` of intervals switched."""
+    schedule of the target, or the `intervals` of it that were asked for by their titles
+    (each title once), `enabled` or not, with the `count` of intervals switched."""
     return {
         "target": "Boiler",
         "enabled": enabled,
-        "interval": interval,
+        "intervals": list(intervals),
         "count": count,
     }
 
@@ -339,9 +347,12 @@ SCHEDULE_CASES: Final[Sequence[Mapping[str, Any]]] = (
     scheduling(True, "Morning", count=1),
     scheduling(False, "Morning", count=1),
     scheduling(False, "Morning", count=3),
+    scheduling(False, "Morning", "Evening"),
+    scheduling(True, "Morning", "Noon", "Evening", count=3),
 )
 """The slots a handler gives to the answer about switching a schedule, in the cases it
-tells apart: the whole schedule, or an interval by its title, on and off."""
+tells apart: the whole schedule, or the intervals asked for by their titles (one title,
+two, or three), on and off."""
 
 RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
     ("TimerifyTimeLeft", "default"): TIMER_CASES,
@@ -357,6 +368,19 @@ RESPONSE_SLOTS: Final[Mapping[tuple[str, str], Sequence[Mapping[str, Any]]]] = {
 """For each answer of the sentence files, by intent and response key, the slots a
 handler gives it in the cases it tells apart. A task that adds an answer adds its slots
 here."""
+
+
+SCHEDULE_ANSWERS: Final = (
+    Path(__file__).parents[1] / "fixtures" / "ru" / "schedule_answers.yaml"
+)
+"""The file of the tests that holds the Russian answers about switching a schedule."""
+
+
+def russian_schedule_answers() -> dict[str, dict[str, Any]]:
+    """The cases of the hand-written Russian answers about switching a schedule, by
+    name: the slots a handler gives and the answer a speaker expects."""
+    cases: list[dict[str, Any]] = yaml.safe_load(SCHEDULE_ANSWERS.read_text("utf-8"))
+    return {case["name"]: case for case in cases}
 
 
 def translated(language: str, *path: str) -> str:
@@ -960,3 +984,8 @@ def spoken_values(language: str, list_name: str) -> dict[str, list[str]]:
         str(value.value_out): list(sample_expression(value.text_in, language=language))
         for value in slot_list.values
     }
+
+
+def switches(hass: HomeAssistant) -> tuple[str, str]:
+    """What the switches of the Morning and the Evening interval show."""
+    return state_of(hass, MORNING), state_of(hass, EVENING)

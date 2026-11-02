@@ -10,6 +10,7 @@ import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { REPO_ROOT, type TimerEntities } from "./constants";
 import { expect, test } from "./fixtures";
+import { installMushroom, mushroomBundle } from "./mushroom";
 import type { HassWs } from "./ws";
 
 const MINUTE = 60_000;
@@ -46,6 +47,37 @@ async function takePicture(page: Page, cards: Locator, name: string): Promise<vo
   });
 }
 
+/**
+ * Waits until the pill picture is complete: what each card says (the countdown on the one, the
+ * state of its target on the other) and, for each, the icon, which the frontend draws a moment
+ * after the card.
+ */
+async function pillsAreDrawn(cards: Locator): Promise<void> {
+  await expect(cards).toHaveCount(2);
+  const [counting, idle] = [cards.nth(0), cards.nth(1)];
+  await expect(counting.getByText("30:00", { exact: true })).toBeVisible();
+  await expect(idle.getByText("Off", { exact: true })).toBeVisible();
+  for (const card of [counting, idle]) {
+    await expect(card.locator(".icon svg path[d]").first()).toBeAttached();
+  }
+}
+
+/**
+ * The same for the round tiles: the countdown is the centre of the one; the other has no time
+ * to show, so its centre is its target's icon. Both have found their timer when their pop-up is
+ * there, and the picture shows what they say then.
+ */
+async function roundsAreDrawn(cards: Locator): Promise<void> {
+  await expect(cards).toHaveCount(2);
+  const [counting, idle] = [cards.nth(0), cards.nth(1)];
+  await expect(counting.locator(".time")).toHaveText("30:00");
+  await expect(idle.getByText("Off", { exact: true })).toBeAttached();
+  await expect(idle.locator(".centre .icon svg path[d]").first()).toBeAttached();
+  for (const card of [counting, idle]) {
+    await expect(card.locator("timerify-card-popup")).toBeAttached();
+  }
+}
+
 test("pill", async ({ page, openDashboard, state, ws }) => {
   const began = await startCountdown(ws, state.timers.strict);
   await openDashboard(page, "screenshots");
@@ -53,16 +85,7 @@ test("pill", async ({ page, openDashboard, state, ws }) => {
   await page.clock.setFixedTime(began + 15 * MINUTE);
 
   const cards = page.locator("timerify-card");
-  await expect(cards).toHaveCount(2);
-  const [counting, idle] = [cards.nth(0), cards.nth(1)];
-  // Take the picture when it is complete: what each card says (the countdown on the one,
-  // the state of its target on the other) and, for each, the icon, which the frontend
-  // draws a moment after the card.
-  await expect(counting.getByText("30:00", { exact: true })).toBeVisible();
-  await expect(idle.getByText("Off", { exact: true })).toBeVisible();
-  for (const card of [counting, idle]) {
-    await expect(card.locator(".icon svg path[d]").first()).toBeAttached();
-  }
+  await pillsAreDrawn(cards);
   await takePicture(page, cards, "card-pill.png");
 });
 
@@ -73,16 +96,71 @@ test("round", async ({ page, openDashboard, state, ws }) => {
   await page.clock.setFixedTime(began + 15 * MINUTE);
 
   const cards = page.locator("timerify-card");
-  await expect(cards).toHaveCount(2);
-  const [counting, idle] = [cards.nth(0), cards.nth(1)];
-  // The countdown is the centre of the one; the other has no time to show, so its centre is
-  // its target's icon, which the frontend draws a moment after the card. Both have found
-  // their timer when their pop-up is there, and the picture shows what they say then.
-  await expect(counting.locator(".time")).toHaveText("30:00");
-  await expect(idle.getByText("Off", { exact: true })).toBeAttached();
-  await expect(idle.locator(".centre .icon svg path[d]").first()).toBeAttached();
-  for (const card of [counting, idle]) {
-    await expect(card.locator("timerify-card-popup")).toBeAttached();
-  }
+  await roundsAreDrawn(cards);
   await takePicture(page, cards, "card-round.png");
+});
+
+/**
+ * Mushroom, the real release, as a user who installs it by hand has it: its file in the `www`
+ * folder of Home Assistant, which serves it at `/local`, and a resource of the dashboard that
+ * points there. The resource and the file are taken away again when the test is over, whatever
+ * came of it, so that the other pictures, and the end-to-end tests, are taken without it.
+ */
+const withMushroom = test.extend<{ mushroomResource: void }>({
+  mushroomResource: [
+    async ({ ws }, use) => {
+      const installed = await installMushroom(await mushroomBundle());
+      try {
+        const created = await ws.command<{ id: string }>("lovelace/resources/create", {
+          res_type: "module",
+          url: installed.url,
+        });
+        try {
+          await use();
+        } finally {
+          await ws.command("lovelace/resources/delete", { resource_id: created.id });
+        }
+      } finally {
+        await installed.remove();
+      }
+    },
+    // Every test of this one is a test with Mushroom on the dashboard.
+    { auto: true },
+  ],
+});
+
+/** Waits until Mushroom is on the page, and the cards have taken its style. */
+async function mushroomIsOn(page: Page, cards: Locator): Promise<void> {
+  await expect
+    .poll(() => page.evaluate(() => customElements.get("mushroom-entity-card") !== undefined), {
+      message: "Mushroom should define its cards on the page",
+    })
+    .toBe(true);
+  for (const card of await cards.all()) {
+    await expect(card).toHaveAttribute("data-mushroom", "");
+  }
+}
+
+withMushroom("pill in the Mushroom style", async ({ page, openDashboard, state, ws }) => {
+  const began = await startCountdown(ws, state.timers.strict);
+  await openDashboard(page, "mushroom-pill");
+
+  await page.clock.setFixedTime(began + 15 * MINUTE);
+
+  const cards = page.locator("timerify-card");
+  await pillsAreDrawn(cards);
+  await mushroomIsOn(page, cards);
+  await takePicture(page, cards, "card-pill-mushroom.png");
+});
+
+withMushroom("round in the Mushroom style", async ({ page, openDashboard, state, ws }) => {
+  const began = await startCountdown(ws, state.timers.strict);
+  await openDashboard(page, "mushroom-round");
+
+  await page.clock.setFixedTime(began + 15 * MINUTE);
+
+  const cards = page.locator("timerify-card");
+  await roundsAreDrawn(cards);
+  await mushroomIsOn(page, cards);
+  await takePicture(page, cards, "card-round-mushroom.png");
 });

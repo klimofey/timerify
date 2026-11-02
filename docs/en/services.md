@@ -215,6 +215,7 @@ The dashboard card asks Timerify which entities belong to its timer. It does so 
 
 - The answer comes from the timer's entry and Home Assistant's registry alone. So the card gets an answer even while the timer is starting.
 - The answer also names the settings of the device that are written as percentages.
+- The answer says what time it is on the server. The card counts by that clock, not by the browser's.
 - The command is open to every user. It tells a user only what the user may read.
 
 See [What the card does](card.md#what-the-card-does).

@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config";
 import type { HassEntity, TimerInfo } from "../src/hass";
-import { lookupTimer, targetRunning, timerView, type TimerLookup } from "../src/timer";
+import {
+  lookupTimer,
+  serverNow,
+  targetRunning,
+  timerView,
+  type TimerLookup,
+} from "../src/timer";
 import {
   BOILER,
   ENDS_AT,
@@ -15,7 +21,24 @@ import {
 
 const MINUTE = 60_000;
 const config = parseConfig({ entity: NUMBER });
-const found = (info: TimerInfo = boilerTimer().info): TimerLookup => ({ status: "found", info });
+const SECOND = 1000;
+
+// The browser's clock is the fake one, and stands at `START` until a scenario moves it.
+beforeEach(() => {
+  vi.useFakeTimers({ now: START });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+const serverTime = (moment: number): string => new Date(moment).toISOString();
+/** A lookup that found the boiler's timer, with the server's clock `clockOffset` ahead. */
+const found = (clockOffset = 0): TimerLookup => ({
+  status: "found",
+  info: { ...boilerTimer().info, server_time: serverTime(START + clockOffset) },
+  clockOffset,
+});
 
 /** A boiler timer whose countdown started `startedAt` and ends `endsAt` (both in ms). */
 function counting(endsAt: number, startedAt: number | null = START): FakeHass {
@@ -166,15 +189,78 @@ describe("what counts as the target running", () => {
   });
 });
 
+describe("the time by the server's clock", () => {
+  it("is the browser's clock moved by what the lookup measured", () => {
+    expect(serverNow(found(5 * MINUTE))).toBe(START + 5 * MINUTE);
+    expect(serverNow(found(-5 * MINUTE))).toBe(START - 5 * MINUTE);
+  });
+
+  it("moves as the browser's clock does", () => {
+    const lookup = found(-5 * MINUTE);
+
+    vi.setSystemTime(START + 90 * SECOND);
+
+    expect(serverNow(lookup)).toBe(START + 90 * SECOND - 5 * MINUTE);
+  });
+
+  it("a lookup that failed counts by the browser's clock", () => {
+    // Every lookup that found no timer: there is no server time to measure the browser's by.
+    const failed = [
+      { status: "pending" },
+      { status: "not_found" },
+      { status: "incomplete" },
+      { status: "unauthorized" },
+      { status: "failed" },
+    ] as const;
+
+    for (const lookup of failed) {
+      expect(serverNow(lookup), lookup.status).toBe(START);
+    }
+  });
+});
+
 describe("asking Timerify for a timer", () => {
   it("is told which timer a number belongs to", async () => {
     const hass = fakeHass();
 
-    await expect(lookupTimer(hass, NUMBER)).resolves.toEqual({
-      status: "found",
-      info: boilerTimer().info,
-    });
+    await expect(lookupTimer(hass, NUMBER)).resolves.toEqual(found());
     expect(hass.requests).toEqual([{ type: "timerify/timer", entity_id: NUMBER }]);
+  });
+
+  it("measures how far the browser's clock is from the server's", async () => {
+    const browserBehind = fakeHass({ serverClockAhead: 5 * MINUTE });
+    const browserFast = fakeHass({ serverClockAhead: -5 * MINUTE });
+
+    await expect(lookupTimer(browserBehind, NUMBER)).resolves.toEqual(found(5 * MINUTE));
+    await expect(lookupTimer(browserFast, NUMBER)).resolves.toEqual(found(-5 * MINUTE));
+  });
+
+  it("takes the server to have stamped its answer half way through the wait", async () => {
+    const hass = fakeHass();
+    // The answer takes 4 seconds. The server's clock is 7 seconds ahead of the browser's, and
+    // the server stamped the answer 2 seconds after the request left.
+    hass.callWS = async () => {
+      vi.advanceTimersByTime(4 * SECOND);
+      const info = { ...boilerTimer().info, server_time: serverTime(START + 9 * SECOND) };
+      return info as never;
+    };
+
+    await expect(lookupTimer(hass, NUMBER)).resolves.toMatchObject({
+      status: "found",
+      clockOffset: 7 * SECOND,
+    });
+  });
+
+  it("goes by the browser's clock when the answer has no time to read", async () => {
+    const hass = fakeHass();
+    for (const server_time of [undefined, "", "yesterday"]) {
+      hass.callWS = async () => ({ ...boilerTimer().info, server_time }) as never;
+
+      await expect(lookupTimer(hass, NUMBER)).resolves.toMatchObject({
+        status: "found",
+        clockOffset: 0,
+      });
+    }
   });
 
   it("tells a number that is no timer's from a command that fails", async () => {

@@ -6,6 +6,7 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    "allowJs": true,
     "useDefineForClassFields": true,
     "isolatedModules": true,
     "noEmit": true,

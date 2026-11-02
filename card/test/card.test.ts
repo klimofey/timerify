@@ -29,6 +29,9 @@ const earlierCards = vi.hoisted(() => {
   return cards;
 });
 
+const MINUTE = 60_000;
+const SECOND = 1000;
+
 const EVENING = "switch.boiler_schedule_18_00_19_00_mon_sun";
 const EVENING_INTERVAL = { entity_id: EVENING, title: "18:00–19:00" };
 
@@ -547,6 +550,92 @@ describe("redrawing when the frontend brings new words", () => {
   });
 });
 
+describe("the clock the countdown follows", () => {
+  const until = (time: string) => english.card_until.replace("{time}", time);
+
+  /** Lets the card draw what some seconds of its countdown changed. */
+  async function passSeconds(card: TimerifyCard, seconds: number): Promise<void> {
+    await vi.advanceTimersByTimeAsync(seconds * SECOND);
+    await card.updateComplete;
+  }
+
+  // In these scenarios the server's clock stands at `START`, as Ends at is written by it,
+  // and the browser's is the fake clock that a scenario sets.
+
+  it("the countdown follows the server when the browser is 5 minutes fast", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: -5 * MINUTE });
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 9:59 ${until("09:10")}`);
+  });
+
+  it("the countdown follows the server when the browser is 5 minutes slow", async () => {
+    vi.setSystemTime(START - 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: 5 * MINUTE });
+
+    const card = await mountCard(hass);
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 9:59 ${until("09:10")}`);
+  });
+
+  it("counts on to the end when the browser's clock says it is over", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const card = await mountCard(counting(3, { serverClockAhead: -5 * MINUTE }));
+    expect(textOf(card)).toBe(`Boiler 3:00 ${until("09:03")}`);
+
+    await passSeconds(card, 179);
+    expect(textOf(card)).toBe(`Boiler 0:01 ${until("09:03")}`);
+    expect(vi.getTimerCount()).toBe(1);
+
+    await passSeconds(card, 1);
+    expect(textOf(card)).toBe(`Boiler 0:00 ${until("09:03")}`);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("stops at the end when the browser's clock says it goes on", async () => {
+    vi.setSystemTime(START - 5 * MINUTE);
+    const card = await mountCard(counting(1, { serverClockAhead: 5 * MINUTE }));
+
+    await passSeconds(card, 60);
+
+    expect(textOf(card)).toBe(`Boiler 0:00 ${until("09:01")}`);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("says on which day it ends by the server's date", async () => {
+    // Monday 23:58 on the server (UTC+2), and Tuesday 00:03 by the browser's clock.
+    const monday = Date.UTC(2026, 0, 5, 21, 58);
+    vi.setSystemTime(monday + 5 * MINUTE);
+
+    const card = await mountCard(counting(32, { serverClockAhead: -5 * MINUTE }, monday));
+
+    expect(textOf(card)).toBe(`Boiler 32:00 ${until("Tue 00:30")}`);
+  });
+
+  it("takes the clock from the newest answer", async () => {
+    vi.setSystemTime(START + 5 * MINUTE);
+    const hass = counting(10, { serverClockAhead: -5 * MINUTE });
+    const card = await mountCard(hass);
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+
+    // The browser's clock is set right, and the connection comes back.
+    vi.setSystemTime(START);
+    hass.setServerClockAhead(0);
+    card.hass = hass.with({ connected: false });
+    await card.updateComplete;
+    card.hass = hass.with({ connected: true });
+    await card.updateComplete;
+
+    expect(textOf(card)).toBe(`Boiler 10:00 ${until("09:10")}`);
+  });
+});
+
 describe("its body", () => {
   async function opening() {
     const card = await mountCard(fakeHass());
@@ -644,6 +733,29 @@ describe("its body", () => {
       card.remove();
     }
   });
+
+  it("is not zoomed by a double tap where the card can be pressed, and is left alone where not", async () => {
+    // Safari zooms the page on a double tap unless the element says `touch-action:
+    // manipulation`, which leaves panning and pinch-zoom to the user. The card offers a double
+    // tap, so its body says it whenever a press can reach it; a body that nothing can press
+    // is left to the browser.
+    const touchActionOf = (card: TimerifyCard) => {
+      const body = card.shadowRoot?.querySelector(".body");
+      return body ? getComputedStyle(body).touchAction : undefined;
+    };
+    const nothing = { tap: "none", double_tap: "none", hold: "none" };
+    for (const layout of ["pill", "round"]) {
+      const pressable = await mountCard(fakeHass(), { entity: NUMBER, layout });
+      expect(touchActionOf(pressable), layout).toBe("manipulation");
+      pressable.remove();
+
+      const idle = await mountCard(fakeHass(), { entity: NUMBER, layout, ...nothing });
+      expect(touchActionOf(idle), `${layout} with every press set to nothing`).not.toBe(
+        "manipulation",
+      );
+      idle.remove();
+    }
+  });
 });
 
 describe("its size", () => {
@@ -669,6 +781,57 @@ describe("its size", () => {
       min_rows: 2,
       max_rows: 3,
     });
+  });
+
+  it("makes room for the Turn off button of the round tile, and for it alone", async () => {
+    const hass = fakeHass();
+
+    const pill = await mountCard(hass, { entity: NUMBER, layout: "pill", show_turn_off: true });
+    expect(pill.getCardSize()).toBe(1);
+    expect(pill.getGridOptions()).toMatchObject({ rows: 1, max_rows: 1 });
+
+    const round = await mountCard(hass, { entity: NUMBER, layout: "round", show_turn_off: true });
+    expect(round.getCardSize()).toBe(4);
+    expect(round.getGridOptions()).toEqual({
+      columns: 3,
+      rows: 3,
+      min_columns: 3,
+      min_rows: 3,
+      max_rows: 3,
+    });
+
+    round.setConfig({ entity: NUMBER, layout: "round" });
+    expect(round.getCardSize()).toBe(3);
+    expect(round.getGridOptions()).toEqual({
+      columns: 3,
+      rows: 2,
+      min_columns: 2,
+      min_rows: 2,
+      max_rows: 3,
+    });
+  });
+
+  it("holds the pill with its Turn off button to the columns its icon form needs", async () => {
+    const hass = fakeHass();
+    const sizes = async (config: Record<string, unknown>) =>
+      (await mountCard(hass, { entity: NUMBER, layout: "pill", ...config })).getGridOptions();
+    const columns = ({ columns, min_columns }: { columns: number; min_columns: number }) => ({
+      columns,
+      min_columns,
+    });
+
+    // The icon, the button as its icon alone, and the chip if there is one, fit in the minimum
+    // on the narrowest sections (a phone 320 px wide), and a card starts at the old size where
+    // that fits on a phone 390 px wide, or else at the minimum: measured, see RULINGS and the
+    // end-to-end test of the sizes. A wide card shows the words, which its styles decide.
+    expect(columns(await sizes({ show_turn_off: true }))).toEqual({ columns: 6, min_columns: 6 });
+    expect(columns(await sizes({ show_turn_off: true, chip: 15 }))).toEqual({
+      columns: 9,
+      min_columns: 9,
+    });
+    // Without the button the pill is as it was, with the chip or without it.
+    expect(columns(await sizes({ chip: 15 }))).toEqual({ columns: 6, min_columns: 3 });
+    expect(columns(await sizes({ show_turn_off: false }))).toEqual({ columns: 6, min_columns: 3 });
   });
 });
 

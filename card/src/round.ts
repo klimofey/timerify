@@ -1,11 +1,23 @@
 // The round layout: a ring that shows the share of the countdown that is left, the time left
 // in its centre while it counts (the icon of the timer's target otherwise), and the name below.
-// A press anywhere on the card reaches its body; a long press acts, see `press.ts`.
-import { css, html, type TemplateResult } from "lit";
+// A press anywhere on the card reaches its body; what a press does is set in the config, and a
+// long press starts or stops the timer unless it is set to something else, see `press.ts`. The
+// one control beside the body is the optional Turn off button, under the name.
+import { css, html, nothing, type TemplateResult } from "lit";
+import { ifDefined } from "lit/directives/if-defined.js";
 import type { CardConfig } from "./config";
 import { formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
-import { renderIcon, renderStatus } from "./layout";
+import {
+  WORDS_FROM,
+  isPressable,
+  popupAnnounced,
+  renderIcon,
+  renderStatus,
+  renderTurnOff,
+  turnOffAsIcon,
+} from "./layout";
+import { mush } from "./mushroom";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 
@@ -30,24 +42,28 @@ function renderCentre(view: TimerView): TemplateResult {
  * an empty layer under the content, as the pill's, pressed through `binding`; the ring and
  * the time are for the eye alone. The state that the ring and the icon show is also said in
  * words that only assistive technology reads, so that the button is named by the name and
- * the state, as the pill's is.
+ * the state, as the pill's is. The Turn off button is a button of its own below the name,
+ * which `turnOff` answers and the body never hears of. Where it goes is kept free whenever
+ * the config asks for it, so that the dial does not move when the target goes on or off.
  */
 export function renderRound(
   view: TimerView,
   config: CardConfig,
   hass: HomeAssistant,
   binding: PressBinding,
+  turnOff: () => void,
   now: number,
 ): TemplateResult {
   const middle = SIZE / 2;
+  const pressable = isPressable(config);
   return html`
-    <ha-card class="round ${view.state}">
+    <ha-card class="round ${view.state} ${config.show_turn_off ? "with-turn-off" : ""}">
       <div
         class="body"
-        role="button"
-        tabindex="0"
-        aria-haspopup="dialog"
-        aria-labelledby="label"
+        role=${ifDefined(pressable ? "button" : undefined)}
+        tabindex=${ifDefined(pressable ? "0" : undefined)}
+        aria-haspopup=${ifDefined(popupAnnounced(config))}
+        aria-labelledby=${ifDefined(pressable ? "label" : undefined)}
         @click=${binding.click}
         @keydown=${binding.keydown}
         @keyup=${binding.keyup}
@@ -79,6 +95,9 @@ export function renderRound(
           <span class="name">${view.name}</span>
           <span class="status">${renderStatus(view, config, hass, now)}</span>
         </span>
+        ${config.show_turn_off
+          ? html`<div class="turn-off-slot">${renderTurnOff(view, config, hass, turnOff)}</div>`
+          : nothing}
       </div>
     </ha-card>
   `;
@@ -88,6 +107,10 @@ export const roundStyles = css`
   ha-card.round {
     --timerify-radius: var(--ha-card-border-radius, var(--ha-border-radius-lg, 12px));
     height: 120px;
+  }
+  /* A row taller than the tile, for the Turn off button: three rows of the sections grid. */
+  ha-card.round.with-turn-off {
+    height: 184px;
   }
   .round .content {
     display: flex;
@@ -148,6 +171,17 @@ export const roundStyles = css`
   .round .name {
     max-width: 100%;
   }
+  .turn-off-slot {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    margin-top: 4px;
+  }
+  @container (width < ${WORDS_FROM.round}px) {
+    ${turnOffAsIcon(css`.round`)}
+  }
   /* For assistive technology only: what the ring and the icon say. */
   .round .status {
     position: absolute;
@@ -161,16 +195,6 @@ export const roundStyles = css`
    * While letting go would act, the ring pulses. A timer that is unavailable has nothing to
    * act on, so its ring stays still.
    */
-  @keyframes pulse {
-    from {
-      opacity: 1;
-      transform: scale(1);
-    }
-    to {
-      opacity: 0.6;
-      transform: scale(1.08);
-    }
-  }
   :host([data-held]) .round:not(.unavailable) .ring {
     animation: pulse 0.8s ease-in-out infinite alternate;
   }
@@ -179,5 +203,37 @@ export const roundStyles = css`
       animation: none;
       transform: scale(1.08);
     }
+  }
+  /*
+   * The Mushroom style (see mushroomStyles in layout.ts): the dial, the name and the button
+   * with the spacing of Mushroom around them. The tile is as high as they make it, and never
+   * lower than the rows of the grid it sits in.
+   */
+  :host([data-mushroom]) ha-card.round {
+    height: max(120px, calc(2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight}));
+  }
+  :host([data-mushroom]) ha-card.round.with-turn-off {
+    height: max(
+      184px,
+      calc(
+        2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight} + 4px + ${mush.controlHeight}
+      )
+    );
+  }
+  :host([data-mushroom]) .round .content {
+    gap: 0;
+    padding: ${mush.spacing};
+  }
+  :host([data-mushroom]) .progress {
+    stroke: rgb(${mush.activeRgb});
+  }
+  :host([data-mushroom]) .time {
+    color: ${mush.primaryColor};
+    font-size: ${mush.primaryFontSize};
+    font-weight: ${mush.primaryFontWeight};
+    letter-spacing: ${mush.primaryLetterSpacing};
+  }
+  :host([data-mushroom]) .turn-off-slot {
+    height: ${mush.controlHeight};
   }
 `;

@@ -11,7 +11,7 @@ import {
   counting,
   fakeHass,
 } from "./fake-hass";
-import { bodyOf, mountCard, nameOf, popupOf } from "./mount";
+import { bodyOf, mountCard, nameOf, popupOf, textOf, turnOffOf } from "./mount";
 
 const MINUTE = 60_000;
 const SECOND = 1000;
@@ -28,9 +28,9 @@ afterEach(() => {
 
 const until = (time: string) => english.card_until.replace("{time}", time);
 const stopped = (entity = NUMBER) => ({
-  domain: "number",
-  service: "set_value",
-  data: { value: 0 },
+  domain: "timerify",
+  service: "stop",
+  data: {},
   target: { entity_id: entity },
 });
 const startedWithoutDuration = (entity = NUMBER) => ({
@@ -122,6 +122,18 @@ describe("the ring and its centre", () => {
 
     card.remove();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("counts by the server's clock when the browser's is off", async () => {
+    vi.setSystemTime(START + 15 * MINUTE);
+
+    const card = await mountCard(counting(60, { serverClockAhead: -15 * MINUTE }), ROUND);
+
+    expect(centreOf(card)).toBe("1:00:00");
+    expect(undrawnShare(card)).toBeCloseTo(0, 6);
+    await passSeconds(card, 30 * 60);
+    expect(centreOf(card)).toBe("30:00");
+    expect(undrawnShare(card)).toBeCloseTo(0.5, 6);
   });
 
   it("is not fooled by a clock that runs ahead", async () => {
@@ -511,5 +523,184 @@ describe("changing the layout", () => {
 
     expect(hass.calls).toEqual([startedWithoutDuration()]);
     expect(isOpen(card)).toBe(true);
+  });
+});
+
+describe("the Turn off button of the round tile", () => {
+  const WITH_BUTTON = { ...ROUND, show_turn_off: true } as const;
+  const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+
+  it("marks its card as one with the button, and only then", async () => {
+    const with_ = await mountCard(counting(45), WITH_BUTTON);
+    const without = await mountCard(counting(45), ROUND);
+
+    expect(with_.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off")).toBe(
+      true,
+    );
+    expect(
+      without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off"),
+    ).toBe(false);
+  });
+
+  it("is a button named Turn off, whether the tile shows its words or only its icon", async () => {
+    const card = await mountCard(counting(45), WITH_BUTTON);
+    const button = turnOffOf(card);
+
+    // A wide tile shows the words and a narrow one the power icon: the styles choose, from the
+    // width of the tile, and both are in the button. The name and the tip hold in both.
+    expect(button?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:power");
+    expect(button?.getAttribute("aria-label")).toBe(english.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(english.card_turn_off);
+  });
+
+  it("shows Turn off below the dial and the name while the boiler runs, with or without a countdown", async () => {
+    for (const hass of [counting(45), running()]) {
+      const card = await mountCard(hass, WITH_BUTTON);
+      const button = turnOffOf(card);
+
+      expect(button).not.toBeNull();
+      // Below the name in the card's order, and no part of the button that opens the pop-up.
+      const name = part(card, ".name");
+      expect(name?.compareDocumentPosition(button as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(bodyOf(card).contains(button)).toBe(false);
+      expect(button?.closest('[role="button"]')).toBeNull();
+      expect(card.shadowRoot?.querySelectorAll("button, [role='button']")).toHaveLength(2);
+      card.remove();
+    }
+  });
+
+  it("is hidden while the boiler is off, and without the option", async () => {
+    const idle = await mountCard(fakeHass(), WITH_BUTTON);
+    const counts = await mountCard(counting(45), ROUND);
+    const runs = await mountCard(running(), { ...ROUND, show_turn_off: false });
+
+    expect(turnOffOf(idle)).toBeNull();
+    expect(turnOffOf(counts)).toBeNull();
+    expect(turnOffOf(runs)).toBeNull();
+    expect(textOf(runs)).toBe("Boiler on");
+  });
+
+  it("is hidden while the timer or the boiler is unavailable, and until the timer is found", async () => {
+    const timerGone = await mountCard(running().state(NUMBER, "unavailable"), WITH_BUTTON);
+    const boilerGone = await mountCard(
+      fakeHass().state(BOILER, "unavailable", { friendly_name: "Boiler" }),
+      WITH_BUTTON,
+    );
+    const hass = running();
+    hass.holdAnswers();
+    const asking = document.createElement("timerify-card") as TimerifyCard;
+    asking.setConfig(WITH_BUTTON);
+    asking.hass = hass;
+    document.body.append(asking);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(turnOffOf(timerGone)).toBeNull();
+    expect(turnOffOf(boilerGone)).toBeNull();
+    expect(turnOffOf(asking)).toBeNull();
+
+    hass.answerNext();
+    await asking.updateComplete;
+    expect(turnOffOf(asking)).not.toBeNull();
+  });
+
+  it("comes with the boiler's running and goes with it", async () => {
+    const off = fakeHass();
+    const card = await mountCard(off, WITH_BUTTON);
+    expect(turnOffOf(card)).toBeNull();
+
+    card.hass = off.state(BOILER, "on", { friendly_name: "Boiler" });
+    await card.updateComplete;
+    expect(turnOffOf(card)).not.toBeNull();
+
+    card.hass = off;
+    await card.updateComplete;
+    expect(turnOffOf(card)).toBeNull();
+  });
+
+  it("keeps its place while the boiler is off, so that the dial does not move when it comes", async () => {
+    const off = fakeHass();
+    const card = await mountCard(off, WITH_BUTTON);
+    const slot = () => part(card, ".turn-off-slot");
+
+    expect(slot()).not.toBeNull();
+    card.hass = off.state(BOILER, "on", { friendly_name: "Boiler" });
+    await card.updateComplete;
+    expect(slot()?.contains(turnOffOf(card))).toBe(true);
+
+    const without = await mountCard(fakeHass(), ROUND);
+    expect(part(without, ".turn-off-slot")).toBeNull();
+  });
+
+  it("stops the timer, and does not open the pop-up", async () => {
+    for (const [hass, number] of [
+      [counting(45), NUMBER],
+      [fakeHass({ timers: [acTimer()] }).state(AC, "cool", { friendly_name: "AC" }), AC_NUMBER],
+    ] as const) {
+      const card = await mountCard(hass, { ...WITH_BUTTON, entity: number });
+
+      turnOffOf(card)?.click();
+      await popupOf(card).updateComplete;
+
+      expect(hass.calls).toEqual([stopped(number)]);
+      expect(isOpen(card)).toBe(false);
+      card.remove();
+    }
+  });
+
+  it.each(["mouse", "touch"] as const)("is no tap or long press of the card, by a %s", async (pointerType) => {
+    const hass = counting(45);
+    const card = await mountCard(hass, { ...WITH_BUTTON, double_tap: "run" });
+    const button = turnOffOf(card);
+
+    // The round tile has a long press by default: on the button it is the button's press.
+    button?.dispatchEvent(pointer("pointerdown", { pointerType }));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(card.hasAttribute("data-held")).toBe(false);
+    button?.dispatchEvent(pointer("pointerup", { pointerType }));
+    button?.click();
+    await vi.advanceTimersByTimeAsync(1000);
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped()]);
+    expect(isOpen(card)).toBe(false);
+  });
+
+  it("is shown for a countdown that goes on while the boiler is unavailable, and ends it", async () => {
+    const hass = counting(45).state(BOILER, "unavailable", { friendly_name: "Boiler" });
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    expect(centreOf(card)).toBe("45:00");
+    turnOffOf(card)?.click();
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped()]);
+  });
+
+  it("gives the focus to the body of the card when a keyboard press takes the button away", async () => {
+    const hass = running();
+    const card = await mountCard(hass, WITH_BUTTON);
+    const button = turnOffOf(card);
+    button?.focus();
+    expect(card.shadowRoot?.activeElement).toBe(button);
+
+    button?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }),
+    );
+    button?.click();
+    card.hass = hass.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(bodyOf(card));
+  });
+
+  it("leaves a tap on the rest of the tile to open the pop-up", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    await press(card, 0);
+
+    expect(isOpen(card)).toBe(true);
+    expect(hass.calls).toEqual([]);
   });
 });

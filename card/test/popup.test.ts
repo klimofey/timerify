@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
 import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import type { HassEntity } from "../src/hass";
 import type { TimerifyCard } from "../src/timerify-card";
 import {
   AC,
   AC_ENDS_AT,
   AC_NEXT_COMMAND,
   AC_NUMBER,
+  BOILER,
   ENDS_AT,
   NEXT_COMMAND,
   NUMBER,
@@ -134,9 +136,9 @@ const addTime = (minutes: number, entity = NUMBER) => ({
   target: { entity_id: entity },
 });
 const stopped = (entity = NUMBER) => ({
-  domain: "number",
-  service: "set_value",
-  data: { value: 0 },
+  domain: "timerify",
+  service: "stop",
+  data: {},
   target: { entity_id: entity },
 });
 
@@ -146,6 +148,15 @@ async function settle(card: TimerifyCard): Promise<void> {
   await card.updateComplete;
   await popupOf(card).updateComplete;
 }
+
+/** The home, with the "Run for" number ending at `max` minutes, as its `max` attribute says. */
+function endingAt(hass: FakeHass, max: unknown): FakeHass {
+  const number = hass.states[NUMBER] as HassEntity;
+  return hass.state(NUMBER, number.state, { ...number.attributes, max });
+}
+
+/** The presets on offer, as a person reads them. */
+const presetsOf = (root: ShadowRoot) => [...root.querySelectorAll(".preset")].map(textIn);
 
 describe("the presets", () => {
   it("runs a preset and stays open", async () => {
@@ -168,6 +179,68 @@ describe("the presets", () => {
 
     expect(presets).toEqual(["1 hr 30 min", "15 min", "1 hr"]);
   });
+
+  it("the pop-up hides a preset longer than the timer's maximum", async () => {
+    const hass = endingAt(boilerHass(), 60);
+    const { card, root } = await opened(hass, {
+      entity: NUMBER,
+      presets: [15, 30, 45, 60, 120],
+    });
+
+    // 60 minutes is the maximum itself, so it stays; 120 is longer than the timer can run.
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr"]);
+
+    control(root, "1 hr").click();
+    await settle(card);
+    expect(hass.calls).toEqual([
+      { domain: "number", service: "set_value", data: { value: 60 }, target: { entity_id: NUMBER } },
+    ]);
+  });
+
+  it("the pop-up shows no presets when each is above the maximum", async () => {
+    const hass = endingAt(boilerHass({ counting: 8 }), 10);
+    const { card, root } = await opened(hass);
+
+    expect(presetsOf(root)).toEqual([]);
+    // An empty row of presets would still take its share of the gap between the rows.
+    expect(root.querySelector(".presets")).toBeNull();
+
+    control(root, "Add 5 min").click();
+    control(root, "Take off 5 min").click();
+    control(root, "Stop").click();
+    await settle(card);
+    expect(hass.calls).toEqual([addTime(5), addTime(-5), stopped()]);
+  });
+
+  it("the presets follow a maximum that changes", async () => {
+    const hass = endingAt(boilerHass(), 60);
+    const { card, root } = await opened(hass);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr"]);
+
+    card.hass = endingAt(hass, 30);
+    await settle(card);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min"]);
+
+    card.hass = endingAt(hass, 1440);
+    await settle(card);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+  });
+
+  it("shows every preset while the number states no maximum", async () => {
+    // The fake's number has no `max` attribute.
+    const { root } = await opened(boilerHass());
+
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+  });
+
+  it.each([null, "unknown", Number.NaN])(
+    "shows every preset when the maximum is not a number (%s)",
+    async (max) => {
+      const { root } = await opened(endingAt(boilerHass(), max));
+
+      expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+    },
+  );
 
   it("labels presets in the user's language", async () => {
     const { root } = await opened(boilerHass(), { entity: NUMBER, presets: [15, 60, 90] });
@@ -312,6 +385,33 @@ describe("stopping", () => {
     control(second.root, "Stop").click();
     await settle(second.card);
     expect(runs.calls).toEqual([stopped(AC_NUMBER)]);
+  });
+
+  it("offers Stop while the boiler runs without a countdown", async () => {
+    const hass = boilerHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const { card, root } = await opened(hass);
+
+    // Nothing counts: no minus, and no time left. The target runs, and Stop turns it off.
+    expect(isDisabled(control(root, "Take off 5 min"))).toBe(true);
+    expect(root.querySelector(".countdown")).toBeNull();
+    expect(isDisabled(control(root, "Stop"))).toBe(false);
+
+    control(root, "Stop").click();
+    await settle(card);
+
+    expect(hass.calls).toEqual([stopped()]);
+  });
+
+  it("stops with Timerify's own action, as a Turn off button on the card does", async () => {
+    const hass = boilerHass({ counting: 45 });
+    const { card, root } = await opened(hass);
+
+    control(root, "Stop").click();
+    await settle(card);
+
+    expect(hass.calls.map(({ domain, service }) => `${domain}.${service}`)).toEqual([
+      "timerify.stop",
+    ]);
   });
 
   it("stops being offered when the timer has stopped", async () => {
@@ -663,6 +763,26 @@ describe("the pending commands", () => {
     const { root } = await opened(hass);
 
     expect(root.querySelector(".commands")).toBeNull();
+  });
+});
+
+describe("the clock the pop-up follows", () => {
+  it("tells the day of a time by the server's date, not the browser's", async () => {
+    // Monday 23:58 on the server (UTC+2), and Tuesday 00:03 by the browser's clock.
+    const monday = Date.UTC(2026, 0, 5, 21, 58);
+    vi.setSystemTime(monday + 5 * MINUTE);
+    const turnOn: Command = { ...TURN_ON, at: isoAt(monday + 32 * MINUTE) };
+    const hass = fakeHass({ timeFormat: "24", serverClockAhead: -5 * MINUTE })
+      .state(ENDS_AT, isoAt(monday + 32 * MINUTE), { started_at: isoAt(monday) })
+      .state(NEXT_COMMAND, turnOn.at, { commands: [turnOn] });
+
+    const { root } = await opened(hass);
+
+    expect(textIn(root.querySelector(".remaining"))).toBe("32:00");
+    expect(textIn(root.querySelector(".until"))).toBe(
+      english.card_until.replace("{time}", "Tue 00:30"),
+    );
+    expect(textIn(root.querySelector(".commands .command"))).toBe("On at Tue 00:30 for 1 hr");
   });
 });
 

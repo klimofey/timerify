@@ -1247,7 +1247,10 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   licence notice has to travel with it; `/timerify` is kept free for a later sidebar page;
   converting line endings would break the byte check, and a one-line file would flood every
   diff. Cost if wrong: an error in the browser points into the minified file, and a reader
-  reads the TypeScript.
+  reads the TypeScript. Changed in 1.1.0: see "The server answers the card's address with the
+  bytes it read at start-up, from memory, not with the file on disk: `card.CardView`, a
+  `HomeAssistantView` registered once by `async_register_card`, replaces the static path (#30)."
+  under Release 1.1.0.
 - **The module defines `timerify-card` and adds itself to `window.customCards` inside one "not
   defined yet" guard, and the entry is added to the array, which is never replaced.** The
   frontend reuses the array, and a second copy of the module (a resource a user added by hand
@@ -1335,7 +1338,12 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   server's clock. The time left never goes below 0:00 and the fill stays between empty and full
   when the browser's clock runs ahead or behind; the end time shown is the server's; every
   action goes to the server. Cost if wrong: a device with a wrong clock shows a time left that
-  is wrong by as much; a server offset is issue #8.
+  is wrong by as much; a server offset is issue #8. Changed in 1.1.0: see "The card counts by the
+  server's clock: `timerify/timer` stamps every answer with `server_time`
+  (`dt_util.utcnow().isoformat()`), `lookupTimer` measures the offset as
+  `Date.parse(server_time) - (sent + received) / 2` and keeps it in the found lookup as
+  `clockOffset`, and every "now" of the card reads `serverNow(lookup)`, which is `Date.now()` plus
+  that offset (#8)." under Release 1.1.0.
 - **Clock times: the same local day shows the time, the next six days the short weekday and the
   time, later ones the date and the time.** They honour `locale.time_zone` (`server` is
   `hass.config.time_zone`) and `time_format` (`12`, `24`, `system`, which is the browser's
@@ -1402,12 +1410,24 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   (the intervals), each with `target: {entity_id}` and with `notifyOnError` left on.** It reads
   only the states of the entities that `timerify/timer` names and the target's, and
   `hass.entities` for the picker's stub. It adds no state writes and nothing counts down on the
-  server (§2). Cost if wrong: none; whatever the card does can be done by an automation.
+  server (§2). Cost if wrong: none; whatever the card does can be done by an automation. Changed
+  in 1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take
+  one of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the
+  choice `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or
+  `hold_action`, which the card hands to Home Assistant's own handler as a `hass-action` event
+  (#36)." and "The card has an optional Turn off button, `show_turn_off` (default `false`): while
+  the target runs, with a countdown or without one, the pill shows it beside its name, before the
+  chip, and the round tile below its name; pressing it calls `timerify.stop` and nothing else
+  (#37)." under Release 1.1.0.
 - **A tap opens the pop-up in both layouts, and a hold on the round layout runs the timer with
   no duration through `timerify.run`, or stops it while it runs; the pill has no hold.**
   `timerify.run` with no duration is R9: in strict mode the default duration, in loose mode an
   open run, and a target that already runs keeps its countdown. A running timer, with or without
-  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none.
+  a countdown, is stopped by `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
+  press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
+  choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
+  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
+  hands to Home Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **A tap is the `click` event of the card's body (a mouse, a finger, the keyboard and assistive
   technology all produce it); a hold is added on top of it.** The hold fires on release after
   at least 500 ms, as Home Assistant's own handler does, and swallows the click that follows
@@ -1418,7 +1438,12 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   says that letting go will act. A visible focus ring (`:focus-visible`) shows keyboard users
   where they are on the card. The pill has no hold: with a mouse a long press there is a tap,
   and on touch it does nothing. Cost if wrong: a user may expect a long press on the pill to
-  act; there is none for keyboard users either, who start and stop through the pop-up.
+  act; there is none for keyboard users either, who start and stop through the pop-up. Changed in
+  1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one
+  of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice
+  `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which
+  the card hands to Home Assistant's own handler as a `hass-action` event (#36)." under
+  Release 1.1.0.
 - **The body is an empty layer that covers the whole card, border included, under the content,
   as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
   `aria-labelledby` the name and the status text, and, on the pill, the fill; the round tile's
@@ -1494,6 +1519,11 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   fails `tsc`, a stale bundle fails `build:check`, and a page whose first card is invalid shows
   that error in English. Cost if wrong: the editor's option labels and helper come from the last
   strings a card loaded, and are English when none has (issue #9).
+  Changed in 1.1.0: the text under the fields no longer comes from `lastLoaded()`: see "The
+  editor's helper texts are made with the `localize` that the frontend hands to
+  `computeHelper`, and the language of that `localize` is read from the card's own
+  `card_language` string; only the names of a select's options still come from `lastLoaded()`
+  (#9)." under Release 1.1.0.
 
 ### The editor and the picker
 
@@ -1735,7 +1765,9 @@ the form they have now. What is still open is a GitHub issue of klimofey/timerif
   with a second one could not give it `voice == "percent"` (a row has at most one setting for
   each meaning), and it would need a field of its own. Cost if wrong: that field. A bundle that
   is newer than the server's answer, between a HACS update and the restart, has no key to read
-  (#30).
+  (#30). Changed in 1.1.0: see "The server answers the card's address with the bytes it read at
+  start-up, from memory, not with the file on disk: `card.CardView`, a `HomeAssistantView`
+  registered once by `async_register_card`, replaces the static path (#30)." under Release 1.1.0.
 - **`card/src/popup.ts` stays one element while it does not grow.** It is about 600 lines,
   about 200 of them the styles, and it has one job; splitting it now adds files that must
   agree on one state, and removes nothing. If it grows, the order is: move the styles out
@@ -3192,3 +3224,490 @@ in `docs/followups.md`.
   `test_a_device_that_lists_its_modes_in_another_order_rewrites_nothing`,
   `test_a_state_change_after_the_entry_is_unloaded_writes_nothing` and
   `test_a_thermostat_that_no_listed_name_belongs_to_brings_no_sentences`.
+
+### Card
+
+- **The card's bundle is built from `common` of `translations/en.json` alone: an esbuild plugin
+  in `card/build.mjs` loads that one file as the module `export const common = {...}`.**
+  `strings.ts` keeps its typed `import { common }` of the JSON file, so a key that does not
+  exist still fails `tsc`. `build.mjs` exports `buildBundle(entryPoint, extraPlugins)`, which
+  builds with the options of the script and returns the bytes of the one output, and runs the
+  build only when node started it (`import.meta.main`), so that a test can build the same way
+  and the committed file is neither written nor checked by it. `build.mjs` stays plain
+  JavaScript, run by `node` as before, and is type-checked by `tsc` through `// @ts-check`
+  and `allowJs` in `card/tsconfig.json`, which also gives the test the types of its export.
+  After this, the bytes of the bundle are a function of `card/src`, the pinned packages and
+  `common`: a text of an exception, an issue, a service or a config flow changes nothing in
+  it (#43).
+  Why: esbuild names the identifiers of a minified bundle after the letters its sources use
+  most, and it counts the letters of every file it reads, the whole JSON file included, before
+  it drops the sections the card does not import. Measured with esbuild 0.28.2 on the sources
+  of this commit: reversing every text outside `common` (the same letters) gave the same
+  bundle byte for byte; adding " reworded" to each of them, or removing every section outside
+  `common`, gave a bundle of the same size in which identifiers had traded names (a class and
+  a helper of Lit's `css-tag` and `reactive-element` among them); and with the minifying of
+  identifiers off, the bundle was the same whatever the other sections held. A generated
+  `common` module in the repository would do the same, but it is a second file to keep in step
+  with `en.json`; the plugin reads the file the translators already edit.
+  Cost if wrong: the committed bundle changes once, in this commit, with the same size and
+  behaviour. The plugin and the test find the file by its name, `translations/en.json`; if the
+  file is renamed, the plugin no longer runs and the whole JSON is bundled again, and the last
+  test below fails, since its reworded copy is no longer the file that is read. A text of
+  `common` still changes the bundle, as it should.
+  Tests (`card/test/bundle.test.ts`, which builds the card with `buildBundle` and an
+  `en.json` copy outside the repository): `does not change when a text outside common is
+  reworded`, `does not change when a section outside common is added`, `does not change when
+  every section outside common is removed` and `changes when a text of common changes`.
+
+- **The server answers the card's address with the bytes it read at start-up, from memory, not
+  with the file on disk: `card.CardView`, a `HomeAssistantView` registered once by
+  `async_register_card`, replaces the static path (#30).** The view has the address of the
+  static path (`/timerify_frontend/timerify-card.js`), `requires_auth = False`, the cache
+  header the static path sent (`CACHE_HEADERS` of Home Assistant's http component: public, a
+  month) and `Content-Type: text/javascript; charset=utf-8`. The file is read once, in the
+  executor, and the address the frontend is told (`card_module_url`) is made of the same
+  bytes, so the key on the address is always the key of what the address serves. Until the
+  restart, a browser gets the card that goes with the Python that answers `timerify/timer`,
+  whatever HACS has written to the disk since.
+  Why: Home Assistant keeps the Python of an integration it has imported until the restart, so
+  after an update the server answers as the old version while a file served from disk is the
+  new card, which may rely on a key of the answer that the old Python does not send. One
+  policy for the whole answer replaces a guard for each key. The view sends less than the static
+  path did, on purpose. It sends no `ETag` and no `Last-Modified`: the static path made them
+  from the file on disk (its inode, size and time), which after an update describe other
+  bytes than the ones served; and because the address carries the key of the bytes, a
+  browser asks again only when a month has passed, once, for a file of about 65 KB, which a
+  `304` would save. It does not answer a `Range` request (a module load sends none) and,
+  like the static path, not a `HEAD` request. It does not compress, as the static path did
+  not: one fetch per browser and version does not pay for a compressor on the event loop.
+  Cost if wrong: a HACS update shows its card only after the restart, which HACS asks for
+  anyway; the restart changes the key, and every browser fetches the new bundle at once. If
+  the bytes ever had to be answered with a validator, `CardView.get` is the one place that
+  needs it.
+  A second registration, from a timer's set-up, would not fail: `HomeAssistantView.register`
+  adds its routes with lower-case method names, which aiohttp does not find among the upper-case
+  ones it stored. If no other resource was registered since the card's, aiohttp reuses the
+  card's resource and the later view silently replaces the earlier and with it the bytes; if
+  another was, aiohttp adds a second resource at the same address, which the first one
+  shadows, so the old bytes keep being served while the frontend is told the key of the new
+  ones. Either way the key and the body disagree again. The view is therefore registered
+  from `async_setup`, which runs once per start, and a test guards that.
+  Tests (`tests/test_card_registration.py`): `test_the_card_served_is_the_one_registered_until_a_restart`
+  (the file is written over after the set-up, as HACS does: the address the frontend was told
+  serves the first bytes, and its key is their hash),
+  `test_a_timer_set_up_or_reloaded_after_the_update_keeps_the_registered_card` (a second timer and
+  a reload after the update do not swap the bytes); `test_card_is_served_to_anyone` also checks
+  that the answer is JavaScript with a month of cache; `test_dashboards_load_the_card_once` and
+  `test_reloading_a_timer_keeps_the_card` hold as before. The end-to-end tests of the card load the
+  bundle through this address in a real Home Assistant.
+
+- **The card counts by the server's clock: `timerify/timer` stamps every answer with
+  `server_time` (`dt_util.utcnow().isoformat()`), `lookupTimer` measures the offset as
+  `Date.parse(server_time) - (sent + received) / 2` and keeps it in the found lookup as
+  `clockOffset`, and every "now" of the card reads `serverNow(lookup)`, which is `Date.now()` plus
+  that offset (#8).** The readers are `timerView` (the time left and the share), the day words of
+  `formatClock` on the card and in the pop-up (so "until Tue 00:30", and the day of a pending
+  command, follow the server's date), and the `CountdownController`, whose check that the end is
+  still ahead decides whether it ticks. The pop-up takes the whole lookup (`lookup`) in place of
+  `info`, so that it reads the same offset. A lookup that found no timer counts by the browser's
+  clock, as does one whose answer has a `server_time` that `momentOf` cannot read. `momentOf` is
+  the one rule for reading every moment the server writes (Ends at, `started_at` and this one),
+  and a time it cannot read must never put a `NaN` into the countdown: a `NaN` offset would draw
+  "NaN" and stop the ticking, since no end is ever after it. The answer is typed and the server
+  always sends the key, so this is a guard of that one rule, not one for a version that lacks the
+  key. A new lookup replaces the offset.
+  Why: Ends at is a moment the server wrote, and a time left is its distance from a clock; a wall
+  tablet whose clock has drifted by minutes showed a time left that was wrong by as many. The
+  offset costs no request of its own, since the answer to the question the card asks anyway
+  carries the time. The middle of the wait is the best guess for the moment of the stamp when the
+  two halves of the trip take as long; the error is at most half the round trip (tens of
+  milliseconds on a home network), against minutes of a wrong clock. The times of the pending
+  commands are moments the server wrote and are shown as they are, in the zone of the user's
+  profile: only the `now` they are compared with, to tell the day, is the server's.
+  Cost if wrong: the offset is measured at a lookup, not kept up. The card looks up when it loads,
+  when the connection returns, when the entity registry changes and when its number gets a value,
+  so a browser clock that is stepped in between (a tablet that syncs its clock after it wakes) is
+  off by the step until the next lookup, and drift of seconds a day is invisible. If that ever
+  matters, the lookup is the one place to measure again, on `visibilitychange` or on a timer.
+  Tests: `test_the_answer_says_the_server_time` (`tests/test_websocket.py`: the time of the
+  answer, not of the first one); `card/test/timer.test.ts` (`measures how far the browser's clock
+  is from the server's`, `takes the server to have stamped its answer half way through the wait`,
+  `goes by the browser's clock when the answer has no time to read`, `a lookup that failed counts
+  by the browser's clock`); `card/test/card.test.ts` (`the countdown follows the server when the
+  browser is 5 minutes fast`, and slow, `counts on to the end when the browser's clock says it is
+  over`, `stops at the end when the browser's clock says it goes on`, `says on which day it ends by
+  the server's date`, `takes the clock from the newest answer`); `round.test.ts` and
+  `popup.test.ts` for the round tile and the pop-up; end to end, `Timerify's answer says the time on
+  the server's clock` (`ws.spec.ts`) and `counts by Home Assistant's clock when the browser's is 5
+  minutes fast` (`pill.spec.ts`, a real card on a browser whose clock Playwright moved).
+
+- **The pop-up offers only the presets that are not longer than the maximum of the timer's "Run
+  for" number, which it reads from the `max` attribute of that number's state at every render
+  (#35).** `presetsWithinMaximum` keeps `minutes <= max` in the order of the card, so a preset equal
+  to the maximum is shown. A number that has no `max`, or whose `max` is not a finite number
+  (missing, `null`, text, `NaN`), sets no limit, and every preset is shown. The list is filtered
+  from the live state each time the pop-up renders and is never kept: the number is one of the
+  entities the pop-up watches, so a new maximum reaches an open pop-up with the next `hass`. When
+  no preset is left, the row is not rendered, and the plus, minus and Stop buttons remain.
+  Why: `number.set_value` raises `out_of_range` for a value above the number's maximum, so the
+  button of a longer preset would answer every press with an error. The card's `presets` cannot
+  be checked once, when the config is read: the maximum belongs to the timer, not to the card
+  (two cards of one timer share it), and the timer's settings change it, which reloads the
+  entry, while the dashboard stays open. Clamping a preset to the maximum would give a button
+  that says "2 hr" and runs for 1 hr, and a preset left out of the config would not come back
+  when the maximum is raised. The row is left out, rather than left empty, because an empty row
+  would still take its 16 px gap in the column of the pop-up.
+  Cost if wrong: a card whose presets are all above the maximum shows no preset and does not say
+  why; the docs name the maximum as the cause. If a future Home Assistant wrote `max` as text,
+  every preset would show again and a press of a long one would be refused as before.
+  Tests (`card/test/popup.test.ts`): `the pop-up hides a preset longer than the timer's maximum`
+  (the preset equal to the maximum stays and runs), `the pop-up shows no presets when each is
+  above the maximum` (no row; plus, minus and Stop work), `the presets follow a maximum that
+  changes` (a lower and a higher maximum, each in a new `hass`), `shows every preset while the
+  number states no maximum` and `shows every preset when the maximum is not a number`.
+
+- **A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
+  choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
+  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the
+  card hands to Home Assistant's own handler as a `hass-action` event (#36).** The defaults keep
+  the card of 1.0.0: `tap: popup`, `double_tap: none`, and `hold: run_or_stop` on the round layout
+  and `none` on the pill. An unknown choice is `card_error_press`, and an action that is not a set
+  of settings is `card_error_action`; the visual editor is thrown out of the form only for a
+  value of the wrong kind, as for the other options. `run` is a bare `timerify.run` on the
+  number, the call the 1.0.0 long press made on an idle timer. `stop` is `timerify.stop`.
+  `run_or_stop` is the 1.0.0 long press: it stops when the timer counts or is open (with
+  `timerify.stop`, since the Turn off entry below; 1.0.0 set the number to 0), runs bare when it is
+  idle, and does nothing when it is unavailable. The event is
+  `{ config: { entity: <the timer's target>, tap_action, double_tap_action, hold_action },
+  action: "tap" | "double_tap" | "hold" }`, with only the actions the user set, fired by the card
+  with `bubbles` and `composed`; until the lookup has found the timer, the card does not know the
+  target and fires nothing. A double tap exists only when `double_tap` is not `none`: a click then
+  waits `DOUBLE_TAP_MS` (250, Home Assistant's own wait) for a second one, a second click inside
+  the window is the double tap alone, and Enter and Space tap at once. A long press exists only
+  when `hold` is not `none`, on either layout, and the pill's icon pulses while letting go would
+  act, as the round tile's ring does. The body of the card announces `aria-haspopup="dialog"`
+  only when `tap` is `popup`. It is a button with a tab stop only while at least one of the
+  three presses is not `none`, as the tile card of Home Assistant is only while it has an
+  action; with all three `none` it is neither, and a tap that is `none` beside a press that
+  acts keeps it a button. A press ends wherever its pointer comes up or is taken away, even off
+  the card, and a tap that opens the pop-up ends the press at once: a long press that starts
+  while a tap waits for a second one may find the pop-up open under the pointer when the wait
+  ends, the release then lands on the dialog, and the card must not go on pulsing. When the tap
+  opens nothing, the tap and a long press that starts during its wait both act as set. A tap set
+  to a Home Assistant action that opens a dialog of its own (more info) does not end the press,
+  as Home Assistant's own cards do not: the release still ends it wherever it lands.
+  Why: the `ui_action` selector writes only the standard actions (its list is typed
+  `UiAction[]` and its labels are Home Assistant's own words for them), so "open the pop-up",
+  "run" and "stop" cannot be offered by it; and a custom value in it would be shown with no
+  label and written by no handler. A first level the card owns, beside the selector Home
+  Assistant owns, gives the user both without a custom editor (which would give up the form
+  and its translated labels). The action acts on the target and not on the card's entity
+  because the card's entity is the "Run for" number, which cannot be toggled and whose
+  more-info dialog is not the one the user means. A missing key makes Home Assistant open the
+  more-info dialog, so a press set to `action` with no action does that; the selector's own
+  "Default" choice writes no key. The `visible` condition of a form field, which would hide an
+  action while its press is not `action`, is not in the developer documentation, so the six
+  fields are always shown and the helper under each action says when it is used. The six fields
+  sit in an `expandable` group with `flatten: true`, which keeps them at the top level of the
+  config (without it they would be written under an `interactions` key). That key belongs to
+  the frontend and is not in the form schema the developer documentation describes, so the card
+  relies on a key that Home Assistant could change. The end-to-end test `sets what a tap does in
+  the Interactions group` (`editor.spec.ts`) guards it: it reads the saved config for a
+  top-level `tap`. If a release drops the key, the fallback is `name: ""` with a `title`, which
+  keeps the fields at the top level and loses the translated title of the group. The wait for a
+  double tap is the price of having one: a card without it taps at once, as before. The
+  keyboard has neither gesture, and the docs say to keep the pop-up on the tap for it. The
+  `PressController` asks the card what to do at every press, instead of being given it once, so
+  that a card whose layout or config changes is pressed as its new config says; one controller
+  serves both layouts.
+  Clearing a press in the visual editor, with the cross of its drop-down, was tried in the Home
+  Assistant of the end-to-end tests (2026.10.4): it drops the key, both from the config that the
+  preview's `setConfig` gets and from the saved dashboard. Home Assistant does not write an
+  empty string, so the card has no empty choice to read as unset, and a `tap: ""` written by
+  hand stays `card_error_press`. The action selector has no cross: its own Default, which is how
+  a user takes an action back, writes no key either, so neither kind of field needs a rule in
+  `parseConfig`.
+  The body of a card that can be pressed (the one that has `role="button"`) says `touch-action:
+  manipulation`, because Safari zooms the page on a double tap unless the element says that it
+  does not, and the card now offers a double tap. The value leaves panning and pinch-zoom to the
+  user. WebKit's zoom is the reason for the rule, and no test drives WebKit: the end-to-end
+  tests run only in Chromium, with a mouse, which does not zoom on a double tap, so they and
+  the vitest scenario read the computed style, not the zoom.
+  Cost if wrong: the `action` choice with no action opens a dialog the user may not expect, and
+  a form field is empty until the user sets it, because the form does not apply the default
+  (the same as the layout); the default of `hold` depends on the layout, so the stub config of
+  the picker does not write it. If Home Assistant documents `visible`, the actions can be hidden
+  with their presses. A user who sets a double tap on a card with a tap that opens the
+  pop-up waits a quarter of a second for it. A double tap on an iPhone or an iPad may still
+  zoom the page if Safari ignores `touch-action: manipulation` on the body; no test drives
+  WebKit, so this is for a device check before a release.
+  Tests: `card/test/press.test.ts` (a tap opens the pop-up by default on both layouts; a single
+  tap still opens it when a double tap is set; a double tap does the double tap action alone;
+  two taps further apart than the window are two taps; Enter and Space act at once; the wait is
+  dropped when the card leaves the page, and a click after the card is set again is counted once;
+  a long press acts on the pill when set, and a round tile set to nothing leaves it alone; each
+  choice; `hass-action` with the target and only the actions set, for each press, and nothing
+  before the lookup has found the timer, and the event heard on the page from inside a shadow
+  root; no button and no tab stop with all three presses `none`, and both with one that acts; a
+  long press that starts during the wait stops pulsing when the tap opens the pop-up, and still
+  acts when the tap opens nothing; a pointer that comes up or is cancelled off the card ends the
+  press, another finger's does not, and no listener is left when the card leaves the page),
+  `card/test/config.test.ts` (the defaults, the six choices, the refusals), `card/test/editor.test.ts`
+  (the Interactions group, its labels and helper in both languages, the shape check),
+  `card/test/round.test.ts` (the long press of 1.0.0 under its default, which stops with
+  `timerify.stop` since the Turn off entry below), `card/test/card.test.ts` (`is not zoomed by a
+  double tap where the card can be pressed, and is left alone where not`: the body says
+  `touch-action: manipulation` on both layouts, and does not when all three presses are
+  `none`); end to end
+  `opens the more-info dialog of the device, and starts nothing` (`round.spec.ts`), `runs the
+  timer on a double tap` and `opens the pop-up on a single tap` (`pill.spec.ts`), `sets what a
+  tap does in the Interactions group` (`editor.spec.ts`, which also reads the group in Russian),
+  `goes back to opening the pop-up when what a tap does is cleared` and `leaves the action out
+  when it is put back to Default` (`editor.spec.ts`), and `is not zoomed by a double tap, which
+  Safari does unless the body says otherwise` (`pill.spec.ts` and `round.spec.ts`).
+
+- **The card has an optional Turn off button, `show_turn_off` (default `false`): while the target
+  runs, with a countdown or without one, the pill shows it beside its name, before the chip, and the
+  round tile below its name; pressing it calls `timerify.stop` and nothing else (#37).** It is shown
+  when the option is on and the view is `counting` or `open` (`isRunning`, which the pop-up's Stop
+  and Start or stop use too). It is not shown while the timer is unavailable (the lookup has not
+  found it, or its number or "Ends at" is unavailable) and not while it is idle, which includes a
+  target that is unavailable with nothing counting. It is a `<button>` of its own in the content
+  layer, beside the body as the chip is, so a press on it never reaches the body's handlers: it is
+  no tap, no double tap and no long press of the card, and it does not open the pop-up. It does
+  not cancel pending commands or do anything else beyond the stop command: what a stop does to
+  them is the server's rule ("the user's last word", above). `parseConfig` takes `true` and
+  `false` and refuses anything else with `card_error_show_turn_off` (a string such as `"yes"`
+  would otherwise be a silent no); `assertShape` sends the editor to YAML for a value of another
+  kind; the editor shows a boolean selector after the chip, labelled "Show a Turn off button".
+  The words are `card_turn_off` ("Turn off"; its Russian is the word of the timer's own
+  `button.turn_off` entity in `ru.json`, so the device page and the card agree) and
+  `card_editor_show_turn_off` ("Show a Turn off button", with that same word in Russian).
+  The card has one command for stopping: the Turn off button, the pop-up's Stop, a press set to
+  Stop and a press set to Start or stop while the timer runs all call `timerify.stop`. Before,
+  the pop-up's Stop and the round tile's default long press set the number to 0. The two ended in
+  the same code (`async_set_native_value` and `async_stop` both call `async_set_minutes`, in
+  `number.py`), so the user saw the same thing; only the logbook context differed. The pop-up's
+  Stop was already enabled while the target runs with no countdown, so the option adds the button
+  to the card and the pop-up needed nothing but the new call. `setMinutes` is left to the
+  presets. The round tile that has the button is 184 px high, three rows of the sections grid
+  (3 x 56 px and two gaps of 8 px), against 120 px without it: `getGridOptions` answers 3 rows
+  (minimum and maximum too) and `getCardSize` 4. The button's place, a slot of 40 px under the
+  name, is kept while the target is off, so the dial and the name do not move when the button
+  comes and goes. The pill is as high as before.
+  The button is its words on a wide card and its icon alone on a narrow one, and the sizes are
+  measured, not guessed. A narrow card shows the power icon (`mdi:power`, 40 px, a target for a
+  finger) in a round button that is still named "Turn off" (`aria-label`, and a `title` for the
+  pointer); both forms are in the DOM and the styles choose, by a container query on the card's
+  `.content` (`container-type: inline-size`), not by script. Only the content of a card that
+  has the button is a container (the card has the class `with-turn-off`), so a card without it
+  is laid out exactly as before, in any dashboard layout, including one that sizes a card by
+  its content, where a container's width would not count. Why not just more columns:
+  `min_columns` is one number for every screen, and a screen's columns are different widths (a
+  section is 12 columns with gaps of 8 px, at most 500 px, narrower on a phone). The words need
+  11 columns on a phone 320 px wide, and that would be 11 of 12 on a desktop where 7 are enough.
+  So the minimum carries only what the icon form needs on the narrowest phone, and the words
+  come where there is room. The words show from a content width of 245 px for a pill (the icon
+  40, a gap 12, the name 80, a gap 12, the button 101 in Russian, the longer word), 335 px with
+  a chip (a gap 12 and the chip 78 more), and 101 px for the round tile (`WORDS_FROM` in
+  `layout.ts`). The name keeps 80 px, about ten characters, and gives way first, so a longer
+  word in another language is taken up by the name; a longer word that fills the round tile's
+  width needs its number raised. A pill with a chip has a class, `with-chip`, so that its
+  threshold is its own. The round tile's slot is 40 px, as the button.
+  At its first size, 6 columns, a pill without a chip shows the icon on every screen (its content
+  is 224 px on a 1280 px desktop, below the 245 px the words need); the words come from 7
+  columns on a wide screen (266 px), and the documentation says so. A pill with a chip starts at
+  9 columns, which is 351 px on a desktop and shows the words there, and the icon on a phone.
+  The fewest columns at which the controls end inside the card's padding and nothing overflows,
+  by the icon form, in the Home Assistant of the end-to-end tests, in Russian, at 1280 px, 390 px,
+  768 px (two sections) and 320 px:
+  - a pill with the button: 4, 5, 5, 6;
+  - a pill with the button and a chip: 6, 8, 8, 9;
+  - a round tile with the button, inside the tile with the card's 8 px: 2, 2, 3, 3. The tile's
+    height is 184 px, three rows, and its content 170 px, so two rows (120 px) cannot hold it.
+  `getGridOptions` takes the 320 px values, `min_columns` 6, 9 and 3, and a card starts at its
+  old size, 6 for a pill and 3 for the round tile, where that fits on a phone 390 px wide, and
+  at the minimum where it does not: a pill with a chip starts at 9 (8 would fit on 390 px but
+  Home Assistant never gives fewer than the minimum). With the option off the sizes are what
+  they were (pill 6 and at least 3, round tile 3 and at least 2). The end-to-end test
+  `sizes.spec.ts` asks for one column on a 320 px phone, in Russian, and checks that the icon,
+  the button as its icon, its name for a screen reader, its size and the chip are as they
+  should be and inside the card; with room it checks the words, a pill of 6 columns and one of
+  7 on the two sides of the width where they begin, and the keyboard in both forms.
+  The dial of the round tile, 80 px, is wider than a tile of 3 columns on a phone 320 px wide
+  (by 5 px on each side) and than one of 2 columns on any screen (by 2 px to 18 px), with the
+  button or without it: that is the tile's own size, found here and left as it was; it needs a
+  higher minimum of the option-off tile, or a dial that shrinks with it (#52).
+  When a press that leaves the focus on the button takes the button away (a keyboard user tabs
+  to it, presses Enter, the target goes off and the button leaves), the focus goes to the body
+  of the card, as it does when the pop-up closes, if the body is a button (`isPressable`): the
+  next Tab goes on from the card, not from the top of the dashboard. The rule is "the button had
+  the focus", not "a key was pressed", so a mouse press in Chrome or Firefox, which focus a
+  button they press, and a tap on Android, move the focus to the body too. That is harmless:
+  the focus stays on the same card, and no ring shows without the keyboard. A card whose three
+  presses are `none` has no focusable body, and then no focus is moved: there is nowhere better
+  to put it. A focus that was not on the button (on the chip, say) stays where it was.
+  Why: the spec asks that the option make the card and its pop-up show a Turn off button while the
+  target is on; the pop-up has its Stop, so the option puts the same command on the card, for a
+  user who wants to switch a device off from the dashboard without opening a dialog. One command
+  for one meaning keeps the logbook the same whichever way the user stops the device, and keeps
+  the button, the pop-up and the presses from drifting apart. The slot keeps a dashboard still:
+  a tile whose dial jumped when the target went on would be hard to hit. The minimum widths are
+  what the controls need, found by measuring the card: a narrower pill cuts its buttons off, and
+  a note in the documentation would leave them cut off; the icon form keeps the minimum small,
+  so that one phone does not set the size of the card on every screen. The focus rule keeps a
+  keyboard user's place, where a stop would otherwise drop it.
+  Cost if wrong: a round tile is a row taller with the option than without it, so switching it on
+  moves the cards below it on a sections dashboard. A pill with the button is also wider, and at
+  its narrowest, on a phone 320 px wide, the name and the state have little room left (the
+  controls are all that fits: that is what the minimum measures); the documentation says so, and
+  a wider card shows the name. The `grid_options` of a dashboard can make no card narrower than
+  the minimum: the end-to-end test asks for one column and gets the minimum. The thresholds are
+  in px, so a user who scales the font or a language with a much longer word needs them raised;
+  the end-to-end test of the Russian words is what shows it. A
+  target that is unavailable while a countdown still counts is `counting`, so the button shows and
+  ends the countdown, as the pop-up's Stop does; if that should hide it, `isRunning` is the one
+  rule to change, for the button, the pop-up and Start or stop together. The logbook now credits
+  a stop by the long press of the round tile to `timerify.stop` and no longer to
+  `number.set_value`.
+  Tests: `card/test/pill.test.ts` and `card/test/round.test.ts` (shown while the boiler runs with
+  and without a countdown; hidden while it is off, without the option, while the timer or the
+  boiler is unavailable and before the timer is found; comes and goes with the boiler; a press
+  stops with one `timerify.stop` and opens nothing, also on a loose timer; a long press on the
+  button is no hold, and presses at once are no double tap; the keys of the card do not reach it;
+  it is a control of its own, outside the body and before the chip; Russian wording; a refusal
+  leaves the card as it was; the slot is there while the boiler is off; shown for a countdown
+  that goes on while the boiler is unavailable, and a press ends it; a press by a finger is no
+  tap, hold or double tap either; the focus goes to the body when a keyboard press takes the
+  button away, stays on the chip when it was there, and goes nowhere when the body is not a
+  button), `card/test/popup.test.ts`
+  (`offers Stop while the boiler runs without a countdown`, and a stop is `timerify.stop`),
+  `card/test/press.test.ts` (Start or stop stops with `timerify.stop`), `card/test/config.test.ts`,
+  `card/test/editor.test.ts` and `card/test/card.test.ts` (the option, its refusals, the field, the
+  sizes with the option on and off); the button is named "Turn off" in both forms, in both
+  languages, and a pill with a chip says so, and only a card with the button is marked as one
+  (`pill.test.ts`, `round.test.ts`); end to end `turns off a boiler that runs with no
+  countdown` and `leaves the keyboard on the card when the button goes` (`pill.spec.ts`, the
+  button reached by Tab from the card's body), `leaves its content as it was when it has no Turn
+  off button` (`pill.spec.ts`, `round.spec.ts`: no container), the nine tests of `sizes.spec.ts`
+  (a pill and a round tile with the button at their narrowest, in Russian, on a 320 px phone,
+  and the keyboard on the icon button; and, in English and in Russian, wide cards with the
+  words, a pill of 6 and one of 7 columns, and the keyboard on the words),
+  `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
+  and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
+  Russian).
+
+- **The card has an optional Mushroom style, `mushroom` (default `false`): a card that asks for
+  it, on a page where Mushroom's cards are defined, takes the look of Mushroom's cards by
+  reading Mushroom's theme variables (#41).**
+  The card is marked `data-mushroom` while its config asks for the style and
+  `customElements.get("mushroom-entity-card")` is defined, and the styles under
+  `:host([data-mushroom])` read `var(--mush-<name>, <Mushroom's default>)` for the spacing, the
+  icon's size, shape and symbol, the fonts of the name and the state, the height and radius of
+  the Turn off button and of the chip, the chip's padding, border and background, and the
+  colours of what is on (`--mush-rgb-state-entity`, Mushroom's blue) and of what is off
+  (`--mush-rgb-disabled`, a grey that follows the theme). The names and the default values are
+  in `card/src/mushroom.ts`, in one table. The icon becomes Mushroom's shape (round, tinted
+  blue while the target runs or counts, grey otherwise); the pill takes the radius of a card
+  instead of its round ends, and its height and the round tile's height are those of a
+  Mushroom card with the same icon and spacing, so the card sits in a grid with them. The
+  pop-up is not restyled.
+  Mushroom is a resource of the dashboard and may load before or after the card, so a card
+  that asks for the style and finds none waits. One `customElements.whenDefined` serves every
+  card on the page: it holds a set of the cards that are connected and wait, and a card is
+  taken out of the set when it leaves the page or stops asking. A card that leaves before
+  Mushroom arrives is not kept alive by the wait and is not redrawn; back on the page it asks
+  again. The wait is not part of the card's `updateComplete`. The visual editor says "Mushroom
+  was not found. The card keeps the Home Assistant look." under the field while Mushroom is not
+  defined (the text is `card_editor_mushroom_missing`, next to `card_editor_mushroom` and
+  `card_error_mushroom`, in English and in Russian).
+  A theme that sets Mushroom's variables changes the card too, in the style: that is what the
+  option is for, and the user page says it (`docs/en/card.md`, `docs/ru/card.md`).
+  Why: the rules apply only under the attribute and are more specific than the card's own, so
+  a card without the option, or on a page without Mushroom, is drawn as it always was, and the
+  tests pin the computed style of both looks. Reading Mushroom's own variables, with its
+  defaults, is what makes the card sit with Mushroom's cards in any theme, and keeps a theme's
+  author to one set of variables. The detection is the one that a page offers: a card of
+  Mushroom is defined or it is not, and a wait that holds only the connected cards neither
+  delays the card's first draw nor leaks a card that went. Licence: Mushroom is Apache-2.0
+  licensed and is not part of this repository or of the bundle. Only the names of its theme
+  variables and their default values are used, written down in the card's own table with its
+  own styles around them; no code of Mushroom is copied and no file of it is committed. Its
+  default values are public in its documentation and its themes, so there is nothing to
+  attribute beyond this note.
+  The pictures: `docs/screenshots/card-pill-mushroom.png` and `card-round-mushroom.png` are
+  taken with the real Mushroom 5.2.3, never a stand-in, and the way a user who installs it by
+  hand has it. The manual `screenshots` project of Playwright downloads `mushroom.js` of that
+  release from GitHub, once, into `card/e2e/.mushroom/` (git-ignored), checks its SHA-256
+  against the one written in `card/e2e/mushroom.ts`, and writes it to the `www` folder of the
+  Home Assistant of the run (`scripts/e2e/config/www/`, git-ignored with the rest of that
+  configuration), which Home Assistant serves at `/local`. The dashboard gets
+  `/local/mushroom-5.2.3.js` as a Lovelace resource (`lovelace/resources/create`); the
+  resource and the file are removed when the test is over. Home Assistant registers `/local`
+  only when `www` exists as it starts, so the harness makes the folder after it empties the
+  configuration and before it starts Home Assistant (`Instance.start_fresh`). The `e2e`
+  project needs neither the network nor Mushroom: it defines a stand-in for one of Mushroom's
+  cards (the only thing the card looks for) and sets the theme's variables itself. The
+  existing pictures of the card were not changed by this task: the screenshots run draws them
+  again with a few pixels of drift (the "until" time and the end of the ring's arc, which move
+  with the clock of the run), and they were put back.
+  Cost if wrong: if Mushroom changes a default, the card keeps the old one until the table is
+  changed; a theme that sets a variable wins over either. A theme that sets a large
+  `--mush-spacing` or `--mush-icon-size` makes the card taller, as it does a Mushroom card.
+  The thresholds that choose between the Turn off button's words and its icon (`WORDS_FROM` in
+  `layout.ts`: 245, 335 and 101 px) were written for Home Assistant's spacing and a 40 px icon,
+  and Mushroom's defaults (10 px, 36 px, 42 px control) need less room, so they stay; a theme
+  that makes the parts larger than Home Assistant's can leave the words in a card narrower than
+  they fit. That is left to the theme's author, as the same variables do in Mushroom's own
+  cards. A page whose Mushroom loads its cards late shows the Home Assistant look until they
+  are defined, and the card then changes without a reload.
+  Tests: `card/test/mushroom.test.ts` (the scenarios run in the order of the file, since a
+  custom element cannot be undefined: no option, and the option without Mushroom, are in
+  Home Assistant's look whatever the theme says; the wait does not hold `updateComplete`;
+  Mushroom arriving gives the style to the waiting cards, and not to the card that has gone,
+  which takes it when it is back, nor to the card that stopped asking while it waited; the
+  style follows the config, survives a move on the page, and reads the theme for spacing,
+  fonts, icon, control and chip), `card/test/config.test.ts`, `card/test/editor.test.ts` (the
+  option, its refusal, the field and the note), and end to end `card/e2e/mushroom.spec.ts` (the
+  look and the fill's colour in a real browser before and after Mushroom's cards are defined,
+  a theme's variables, cards without the option, the Turn off button at its narrowest on a
+  320 px phone in Russian and the words and icon in 6 and 7 columns, in English and in
+  Russian, in the style) and `editor.spec.ts` (the field and the note).
+
+- **The editor's helper texts are made with the `localize` that the frontend hands to
+  `computeHelper`, and the language of that `localize` is read from the card's own
+  `card_language` string; only the names of a select's options still come from `lastLoaded()`
+  (#9).** The three helpers (the presets, the note under an action and the Mushroom note) are
+  each `t({ localize }, key)`. The presets helper lists the default presets with
+  `Intl.ListFormat` and `formatMinutes` in the language that `card_language` gives, so the
+  minutes words and the "and" follow the editor, and not the card that was loaded last. The
+  labels of the fields already went through `localize`. The names of the two layouts, the
+  labels of the preset options and the six press choices stay on `lastLoaded()`: English before
+  any card has loaded. Where the `localize` has no strings of the card, every helper is in
+  English, as the Mushroom note was.
+  `card_language` is the one text of `common` that is not a translation: the tag of the file it
+  is in (`en`, `ru`), which `tests/test_translations.py` pins to the file's name, so a language
+  added later cannot leave it out or mistake it.
+  Why: `getConfigForm()` is given no `hass`, and in 2026.10.4 and 2026.11.0b2 `hui-form-editor`
+  hands `localize` to `computeLabel` and `computeHelper` only and never sets `localizeValue` on
+  `ha-form`, so the form cannot translate the labels of options (research note
+  `.superpowers/research-part-e-frontend.md`, section 3). The one supported way around it, a
+  custom editor element, gives up the built-in form. A `localize` is a bare function, and the
+  frontend hands no language beside it: reading it from the page (`document.documentElement.lang`
+  is never set to the profile's language, and `home-assistant.hass` is private) would be an
+  unsupported hack, and the language of the last card loaded is the very thing that was wrong.
+  The strings are the only thing of the card that the frontend translates, so they say their
+  own language.
+  Cost if wrong: a translation file with a wrong tag in `card_language` would format its lengths
+  in another language; the test refuses it. One more key stays in step in every language file.
+  In a language Timerify has no strings for, the labels of the preset options follow the
+  profile's language and the helper follows English, so the presets field can show two
+  formats.
+  If the frontend ever gives `getConfigForm` a `hass`, or sets `localizeValue`, the option names
+  can follow it too, and `speaking()` goes. #9 stays open for that, labelled `upstream`.
+  Tests: `card/test/editor.test.ts` (`words the presets helper in the editor's language before
+  any card has loaded`, `says which presses use a Home Assistant action in the editor's language
+  before any card has loaded`, `words the helpers in the language of the editor, whatever the
+  last card loaded`, which also keeps the option names in the language of the last card, and
+  `words the helpers in English until the editor's strings have reached the frontend`) and
+  `tests/test_translations.py::test_card_strings_name_their_own_language`.

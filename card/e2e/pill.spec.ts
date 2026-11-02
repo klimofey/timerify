@@ -1,16 +1,21 @@
 // The pill in a real Home Assistant: it counts down a timer that was started somewhere else,
 // opens its pop-up from a tap anywhere on it (its border too) but the chip, adds the chip's
 // minutes without opening the pop-up, and carries on to the same end when Home Assistant
-// restarts.
-// View "pill": one pill card on the strict timer, with a chip of 15.
-import type { Locator } from "@playwright/test";
+// restarts, and counts by Home Assistant's clock on a browser whose own is wrong. View "pill":
+// one pill card on the strict timer, with a chip of 15. A pill whose double tap runs the timer
+// is in the view "presses", and one with a Turn off button, on the loose timer, in "turn-off".
+import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { runHarness } from "./harness";
-import { tapBorder } from "./press";
+import { tabToButton } from "./focus";
+import { doubleTap, tap, tapBorder } from "./press";
+import { isReady } from "./ready";
 import { hassWs } from "./ws";
 
 const CHIP_MINUTES = 15;
+/** The strict timer's default duration, which a run with no duration takes. */
+const DEFAULT_MINUTES = "30";
 const MINUTE = 60_000;
 /** The browser's time zone, which the user's profile follows by default (the config's). */
 const ZONE = "America/New_York";
@@ -47,6 +52,10 @@ async function expectUntil(card: Locator, end: number, timeout = 10_000): Promis
   }).toPass({ timeout });
 }
 
+/** The pill among the cards of a view that has another layout too. */
+const pillOf = (page: Page) =>
+  page.locator("timerify-card").filter({ has: page.locator("ha-card.pill") });
+
 test.describe("the pill in Home Assistant", () => {
   test.beforeEach(async ({ page, openDashboard }) => {
     await openDashboard(page, "pill");
@@ -71,6 +80,28 @@ test.describe("the pill in Home Assistant", () => {
     };
     const first = await seconds();
     await expect.poll(seconds).toBeLessThan(first);
+  });
+
+  test("leaves its content as it was when it has no Turn off button", async ({ page }) => {
+    // The content of a card with the button is the container its form follows (sizes.spec.ts);
+    // that of a card without it is no container, whatever page it is on.
+    const content = pillOf(page).locator(".content");
+    await expect(content).toBeVisible();
+    expect(await content.evaluate((element) => getComputedStyle(element).containerType)).toBe(
+      "normal",
+    );
+  });
+
+  test("is not zoomed by a double tap, which Safari does unless the body says otherwise", async ({
+    page,
+  }) => {
+    // Chromium has no double-tap zoom, so this reads what the browser makes of the rule that
+    // keeps WebKit from it: panning and pinch-zoom stay, the double tap is the card's.
+    const body = pillOf(page).locator(".body");
+    await expect(body).toBeVisible();
+    expect(await body.evaluate((element) => getComputedStyle(element).touchAction)).toBe(
+      "manipulation",
+    );
   });
 
   test("opens the pop-up from a tap anywhere on the pill but the chip", async ({ page }) => {
@@ -169,5 +200,107 @@ test.describe("the pill in Home Assistant", () => {
     // Neither the card's own warning nor the dashboard's error card was left behind.
     await expect(card.locator('[role="alert"]')).toHaveCount(0);
     await expect(page.locator("hui-error-card")).toHaveCount(0);
+  });
+});
+
+test.describe("the pill on a browser whose clock is wrong", () => {
+  test("counts by Home Assistant's clock when the browser's is 5 minutes fast", async ({
+    page,
+    openDashboard,
+    state,
+    ws,
+  }) => {
+    await openDashboard(page, "pill");
+    // Playwright's clock stays on for the pages that load next, and replaces what the frontend
+    // asks of `performance` while it starts: so the page is opened first, as everywhere, and
+    // loaded again on the wrong clock, where the card asks its first question.
+    await page.clock.setSystemTime(Date.now() + 5 * MINUTE);
+    await page.reload({ waitUntil: "load" });
+    const card = page.locator("timerify-card");
+    await expect(card.locator("ha-card")).toBeVisible();
+    expect(await page.evaluate(() => Date.now())).toBeGreaterThan(Date.now() + 4 * MINUTE);
+
+    const { strict } = state.timers;
+    await ws.callService("number", "set_value", { value: 10 }, { entity_id: strict.run_for });
+
+    // Ten minutes by Home Assistant's clock; the browser's would say five.
+    await expect(card.getByText(/^(9:5\d|10:00)$/)).toBeVisible();
+    const ends = (await ws.state(strict.ends_at))?.state ?? "";
+    expect(Date.parse(ends), "Ends at should hold the end of the countdown").not.toBeNaN();
+    await expectUntil(card, Date.parse(ends));
+  });
+});
+
+test.describe("the pill with a double tap", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "presses");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("runs the timer on a double tap, and opens nothing", async ({ page, state, ws }) => {
+    const { strict } = state.timers;
+    const pill = pillOf(page);
+
+    await doubleTap(page, pill);
+
+    await expect.poll(async () => (await ws.state(strict.run_for))?.state).toBe(DEFAULT_MINUTES);
+    await expect(pill.locator("dialog")).toBeHidden();
+  });
+
+  test("opens the pop-up on a single tap, and starts nothing", async ({ page, state, ws }) => {
+    const { strict } = state.timers;
+    const pill = pillOf(page);
+
+    await tap(page, pill);
+
+    await expect(pill.locator("dialog")).toBeVisible();
+    expect((await ws.state(strict.run_for))?.state).toBe("0");
+  });
+});
+
+test.describe("the pill with a Turn off button", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "turn-off");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("turns off a boiler that runs with no countdown", async ({ page, state, ws }) => {
+    const { loose } = state.timers;
+    const pill = pillOf(page);
+    const turnOff = pill.getByRole("button", { name: "Turn off", exact: true });
+    // Nothing runs, so there is nothing to turn off, once the card has found its timer.
+    await isReady(pill);
+    await expect(turnOff).toHaveCount(0);
+
+    // Somewhere else the boiler is run with no duration: a loose timer turns its target on,
+    // and nothing counts.
+    await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("on");
+    expect((await ws.state(loose.ends_at))?.state).toBe("unknown");
+    await expect(turnOff).toBeVisible();
+
+    await turnOff.click();
+
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    // A press on the button is not a tap of the card.
+    await expect(pill.locator("dialog")).toBeHidden();
+  });
+
+  test("leaves the keyboard on the card when the button goes", async ({ page, state, ws }) => {
+    const { loose } = state.timers;
+    const pill = pillOf(page);
+    const turnOff = pill.getByRole("button", { name: "Turn off", exact: true });
+    await isReady(pill);
+    await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
+    await expect(turnOff).toBeVisible();
+
+    await tabToButton(page, pill, turnOff);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await ws.state(loose.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    // The next Tab goes on from the card, not from the top of the dashboard.
+    await expect(pill.locator(".body")).toBeFocused();
   });
 });

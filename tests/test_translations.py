@@ -116,3 +116,13 @@ def test_card_strings_are_common_slugs_prefixed_card(language: str) -> None:
     for key, text in common.items():
         assert re.fullmatch(r"card_[a-z0-9_]+", key), key
         assert isinstance(text, str), key
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_card_strings_name_their_own_language(language: str) -> None:
+    """The visual editor writes the lists and lengths of its helper text with nothing
+    but the frontend's `localize` of the card's strings, which cannot be asked its
+    language. So `card_language` is the one text that is not a translation: the tag of
+    the file, as Intl reads it. A new language that forgets it would have its helper
+    text written in English."""
+    assert translations_of(language)["common"]["card_language"] == language

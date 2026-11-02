@@ -29,11 +29,16 @@ describe("the config of the card", () => {
     expect(refusal({}).message).toBe(english.card_error_entity);
   });
 
-  it("defaults to the pill layout and the default presets", () => {
+  it("defaults to the pill layout, the default presets and a tap that opens the pop-up", () => {
     expect(parseConfig({ entity: NUMBER })).toStrictEqual({
       entity: NUMBER,
       layout: "pill",
       presets: [15, 30, 45, 60, 120],
+      tap: "popup",
+      double_tap: "none",
+      hold: "none",
+      show_turn_off: false,
+      mushroom: false,
     });
     expect([...DEFAULT_PRESETS]).toEqual([15, 30, 45, 60, 120]);
   });
@@ -102,7 +107,115 @@ describe("the config of the card", () => {
       entity: NUMBER,
       layout: "pill",
       presets: [15, 30, 45, 60, 120],
+      tap: "popup",
+      double_tap: "none",
+      hold: "none",
+      show_turn_off: false,
+      mushroom: false,
     });
+  });
+});
+
+describe("the Turn off button of the card", () => {
+  it("is not shown unless the config asks for it", () => {
+    expect(parseConfig({ entity: NUMBER }).show_turn_off).toBe(false);
+    expect(parseConfig({ entity: NUMBER, show_turn_off: undefined }).show_turn_off).toBe(false);
+  });
+
+  it("takes true and false, as the visual editor writes them", () => {
+    expect(parseConfig({ entity: NUMBER, show_turn_off: true }).show_turn_off).toBe(true);
+    expect(parseConfig({ entity: NUMBER, show_turn_off: false }).show_turn_off).toBe(false);
+  });
+
+  it("refuses anything else, which would be taken for a yes or a no without a word", () => {
+    for (const given of ["true", "yes", 1, 0, null, [true], {}]) {
+      expect(
+        refusal({ entity: NUMBER, show_turn_off: given }).key,
+        JSON.stringify(given),
+      ).toBe("card_error_show_turn_off");
+    }
+  });
+});
+
+describe("the Mushroom style of the card", () => {
+  it("is off unless the config turns it on", () => {
+    expect(parseConfig({ entity: NUMBER }).mushroom).toBe(false);
+    expect(parseConfig({ entity: NUMBER, mushroom: undefined }).mushroom).toBe(false);
+  });
+
+  it("takes true and false, as the visual editor writes them", () => {
+    expect(parseConfig({ entity: NUMBER, mushroom: true }).mushroom).toBe(true);
+    expect(parseConfig({ entity: NUMBER, mushroom: false }).mushroom).toBe(false);
+  });
+
+  it("refuses anything else, which would be taken for a yes or a no without a word", () => {
+    for (const given of ["true", "yes", 1, 0, null, [true], {}]) {
+      expect(refusal({ entity: NUMBER, mushroom: given }).key, JSON.stringify(given)).toBe(
+        "card_error_mushroom",
+      );
+    }
+  });
+});
+
+describe("the presses of the card", () => {
+  it("lets a long press on the round tile start or stop the timer, and none do anything on the pill", () => {
+    expect(parseConfig({ entity: NUMBER, layout: "round" })).toMatchObject({
+      tap: "popup",
+      double_tap: "none",
+      hold: "run_or_stop",
+    });
+    expect(parseConfig({ entity: NUMBER, layout: "pill" })).toMatchObject({
+      tap: "popup",
+      double_tap: "none",
+      hold: "none",
+    });
+  });
+
+  it("takes each of the six choices for each press", () => {
+    for (const choice of ["popup", "run", "stop", "run_or_stop", "action", "none"] as const) {
+      expect(
+        parseConfig({ entity: NUMBER, tap: choice, double_tap: choice, hold: choice }),
+        choice,
+      ).toMatchObject({ tap: choice, double_tap: choice, hold: choice });
+    }
+  });
+
+  it("lets the user turn off the long press of the round tile", () => {
+    expect(parseConfig({ entity: NUMBER, layout: "round", hold: "none" }).hold).toBe("none");
+  });
+
+  it("refuses a choice it does not know, whichever press it is for", () => {
+    for (const press of ["tap", "double_tap", "hold"]) {
+      for (const choice of ["toggle", "Popup", "", 5, null, ["popup"], true]) {
+        expect(refusal({ entity: NUMBER, [press]: choice }).key, `${press}: ${choice}`).toBe(
+          "card_error_press",
+        );
+      }
+    }
+  });
+
+  it("keeps the Home Assistant actions as they are given", () => {
+    const tap_action = { action: "more-info" };
+    const double_tap_action = { action: "perform-action", perform_action: "light.turn_on" };
+    const hold_action = { action: "navigate", navigation_path: "/lovelace/0" };
+
+    const config = parseConfig({ entity: NUMBER, tap_action, double_tap_action, hold_action });
+
+    expect(config).toMatchObject({ tap_action, double_tap_action, hold_action });
+    expect(parseConfig({ entity: NUMBER })).not.toHaveProperty("tap_action");
+    expect(parseConfig({ entity: NUMBER, hold_action: undefined })).not.toHaveProperty(
+      "hold_action",
+    );
+  });
+
+  it("refuses a Home Assistant action that is not a set of settings", () => {
+    for (const key of ["tap_action", "double_tap_action", "hold_action"]) {
+      for (const action of ["more-info", 5, null, ["more-info"], true]) {
+        expect(refusal({ entity: NUMBER, [key]: action }).key, `${key}: ${action}`).toBe(
+          "card_error_action",
+        );
+      }
+    }
   });
 });
 
@@ -131,5 +244,28 @@ describe("the errors of a card on a page that is not in English", () => {
     await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
 
     expect(refusal({ entity: NUMBER, chip: 1441 }).message).toBe(russian.card_error_chip);
+  });
+
+  it("words the errors of a press and of an action in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, hold: "toggle" }).message).toBe(russian.card_error_press);
+    expect(refusal({ entity: NUMBER, hold_action: "toggle" }).message).toBe(
+      russian.card_error_action,
+    );
+  });
+
+  it("words the error of the Turn off button in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, show_turn_off: "yes" }).message).toBe(
+      russian.card_error_show_turn_off,
+    );
+  });
+
+  it("words the error of the Mushroom style in that language too", async () => {
+    await mountCard(fakeHass({ language: "ru", stringsLoaded: false }));
+
+    expect(refusal({ entity: NUMBER, mushroom: "yes" }).message).toBe(russian.card_error_mushroom);
   });
 });

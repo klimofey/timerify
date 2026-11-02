@@ -1,10 +1,13 @@
 // The round card in a real Home Assistant: a tap opens its pop-up, and a long press starts the
 // timer with no duration, or stops it when it runs, without opening the pop-up. View "round":
-// the strict timer's round card, then the loose timer's.
+// the strict timer's round card, then the loose timer's. A long press that is set to a Home
+// Assistant action does that action: the view "presses" has such a card. The view "turn-off"
+// has a round card with a Turn off button.
 import type { Locator, Page } from "@playwright/test";
 import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { hold, tap, tapBorder } from "./press";
+import { isReady } from "./ready";
 
 /** The strict timer's default duration, which a bare run takes (Task 4's fixture). */
 const DEFAULT_MINUTES = "30";
@@ -15,14 +18,6 @@ function cardsOf(page: Page): { strict: Locator; loose: Locator } {
   return { strict: cards.nth(0), loose: cards.nth(1) };
 }
 
-/**
- * Returns when the card has found its timer: until then it is a card of a timer that is not
- * there, and a long press on it does nothing.
- */
-async function isReady(card: Locator): Promise<void> {
-  await expect(card.locator("timerify-card-popup")).toBeAttached();
-}
-
 test.describe("the round card in Home Assistant", () => {
   test.beforeEach(async ({ page, openDashboard }) => {
     await openDashboard(page, "round");
@@ -31,6 +26,28 @@ test.describe("the round card in Home Assistant", () => {
     await expect(strict.locator(".name")).toHaveText(STRICT_NAME);
     await isReady(strict);
     await isReady(loose);
+  });
+
+  test("leaves its content as it was when it has no Turn off button", async ({ page }) => {
+    const { strict } = cardsOf(page);
+    const content = strict.locator(".content");
+    await expect(content).toBeVisible();
+    expect(await content.evaluate((element) => getComputedStyle(element).containerType)).toBe(
+      "normal",
+    );
+  });
+
+  test("is not zoomed by a double tap, which Safari does unless the body says otherwise", async ({
+    page,
+  }) => {
+    // Chromium has no double-tap zoom, so this reads what the browser makes of the rule that
+    // keeps WebKit from it: panning and pinch-zoom stay, the double tap is the card's.
+    const { strict } = cardsOf(page);
+    const body = strict.locator(".body");
+    await expect(body).toBeVisible();
+    expect(await body.evaluate((element) => getComputedStyle(element).touchAction)).toBe(
+      "manipulation",
+    );
   });
 
   test("opens the pop-up on a tap, also on the border of the card", async ({ page, state, ws }) => {
@@ -109,5 +126,77 @@ test.describe("the round card in Home Assistant", () => {
     // The ring is empty again, and nothing opened.
     await expect(ring).not.toHaveAttribute("stroke-dashoffset", "0");
     await expect(loose.locator("dialog")).toBeHidden();
+  });
+});
+
+test.describe("a round card whose long press is a Home Assistant action", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "presses");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("opens the more-info dialog of the device, and starts nothing", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const round = page.locator("timerify-card").filter({ has: page.locator("ha-card.round") });
+    await isReady(round);
+
+    await hold(page, round);
+
+    // The dialog of the switch the timer runs, not of the number the card is set to: it is
+    // named for the device, and has the device's switch. The card's own pop-up stays shut.
+    const dialog = page.locator("ha-more-info-dialog");
+    await expect(dialog.getByText(STRICT_NAME, { exact: true })).toBeVisible();
+    await expect(dialog.getByRole("switch")).toBeVisible();
+    await expect(round.locator("dialog")).toBeHidden();
+    expect((await ws.state(state.timers.strict.run_for))?.state).toBe("0");
+  });
+});
+
+test.describe("a round card with a Turn off button", () => {
+  test.beforeEach(async ({ page, openDashboard }) => {
+    await openDashboard(page, "turn-off");
+    await expect(page.locator("timerify-card")).toHaveCount(2);
+  });
+
+  test("turns off a countdown from under the name, and the dial stays where it was", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const { strict: entities } = state.timers;
+    const round = page.locator("timerify-card").filter({ has: page.locator("ha-card.round") });
+    await isReady(round);
+    const turnOff = round.getByRole("button", { name: "Turn off", exact: true });
+    await expect(turnOff).toHaveCount(0);
+    const dial = round.locator(".dial");
+    const before = await dial.boundingBox();
+
+    await ws.callService("number", "set_value", { value: 30 }, { entity_id: entities.run_for });
+    await expect(round.locator(".time")).toBeVisible();
+    await expect(turnOff).toBeVisible();
+
+    // The button is under the name, and inside the card; the dial did not move to make room.
+    const [card, name, button] = await Promise.all([
+      round.locator("ha-card").boundingBox(),
+      round.locator(".name").boundingBox(),
+      turnOff.boundingBox(),
+    ]);
+    if (card === null || name === null || button === null) {
+      throw new Error("The card, its name and its button should be on the page");
+    }
+    expect(button.y).toBeGreaterThanOrEqual(name.y + name.height);
+    expect(button.y + button.height).toBeLessThanOrEqual(card.y + card.height);
+    expect(await dial.boundingBox()).toEqual(before);
+
+    await turnOff.click();
+
+    await expect.poll(async () => (await ws.state(entities.run_for))?.state).toBe("0");
+    await expect.poll(async () => (await ws.state(entities.target))?.state).toBe("off");
+    await expect(turnOff).toHaveCount(0);
+    await expect(round.locator("dialog")).toBeHidden();
+    expect(await dial.boundingBox()).toEqual(before);
   });
 });

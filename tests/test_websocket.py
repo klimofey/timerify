@@ -7,13 +7,16 @@ not depend on whether the timer is running, loaded or even set up. Every scenari
 through a real websocket connection, as the dashboard does.
 """
 
+from datetime import timedelta
 from typing import Any
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.setup import async_setup_component
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry, MockUser
 from pytest_homeassistant_custom_component.typing import (
     MockHAClientWebSocket,
@@ -37,6 +40,7 @@ from .helpers import (
     NEXT,
     NUMBER,
     SENSOR,
+    START,
     TARGET_ID,
     add_interval,
     at,
@@ -126,7 +130,8 @@ async def restart_without_target(
 
 def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
     """What Timerify tells about the boiler's timer, for a timer that is set up with
-    the defaults of the scenarios; `different` changes what the scenario changes."""
+    the defaults of the scenarios, at the time on the frozen clock now; `different`
+    changes what the scenario changes."""
     return {
         "entry_id": entry.entry_id,
         "target": TARGET_ID,
@@ -138,6 +143,7 @@ def told_about(entry: MockConfigEntry, **different: Any) -> dict[str, Any]:
         "target_on": {"match": "is", "states": ["on"]},
         "percent_settings": [],
         "disabled_sensors": [],
+        "server_time": dt_util.utcnow().isoformat(),
         **different,
     }
 
@@ -169,7 +175,28 @@ async def test_card_finds_the_timer_of_its_number(
         "target_on": {"match": "is", "states": ["on"]},
         "percent_settings": [],
         "disabled_sensors": [],
+        "server_time": "2026-01-05T07:00:00+00:00",
     }
+
+
+async def test_the_answer_says_the_server_time(
+    client: MockHAClientWebSocket,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Every answer carries the time on Home Assistant's clock when it was given, which
+    the card sets its own clock against: a dashboard on a tablet whose clock is wrong
+    still counts down by the server's. The time is the moment of the answer, not of
+    the first one."""
+    await setup_target()
+    assert (await found(client, NUMBER))["server_time"] == START.isoformat()
+
+    freezer.tick(timedelta(minutes=7, microseconds=250))
+
+    assert (await found(client, NUMBER))["server_time"] == (
+        START + timedelta(minutes=7, microseconds=250)
+    ).isoformat()
 
 
 async def test_command_waits_for_a_websocket_api_that_comes_later(

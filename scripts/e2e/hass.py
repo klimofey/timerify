@@ -101,6 +101,37 @@ def timerify_card(timer: Timer, **options: Any) -> dict[str, Any]:
     return {"type": "custom:timerify-card", "entity": timer.run_for, **options}
 
 
+def narrow_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, Any]]:
+    """The cards of the "sizes" views: each asks for one column, and gets the fewest it
+    declares."""
+    narrow = {"show_turn_off": True, "grid_options": {"columns": 1}, **options}
+    return [
+        timerify_card(loose, layout="pill", chip=QUICK_CHIP_MINUTES, **narrow),
+        timerify_card(loose, layout="pill", **narrow),
+        timerify_card(strict, layout="round", **narrow),
+    ]
+
+
+def wide_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, Any]]:
+    """The cards of the "wide" views: three of 12 columns, and a pill on each side of
+    the width where the words of the Turn off button begin."""
+
+    def columns(count: int) -> dict[str, Any]:
+        return {
+            "show_turn_off": True,
+            "grid_options": {"columns": count},
+            **options,
+        }
+
+    return [
+        timerify_card(loose, layout="pill", **columns(12)),
+        timerify_card(loose, layout="pill", chip=QUICK_CHIP_MINUTES, **columns(12)),
+        timerify_card(strict, layout="round", **columns(12)),
+        timerify_card(loose, layout="pill", **columns(6)),
+        timerify_card(loose, layout="pill", **columns(7)),
+    ]
+
+
 def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, Any]:
     """The views of the dashboard, one for each file of tests. Each task that adds a
     file of tests adds its view here."""
@@ -149,6 +180,75 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 ],
             },
             {
+                # What is pressed besides a tap: the round tile of the strict timer
+                # whose long press is a Home Assistant action, and a pill of the same
+                # timer whose double tap runs it.
+                "title": "Presses",
+                "path": "presses",
+                "cards": [
+                    timerify_card(
+                        strict,
+                        layout="round",
+                        hold="action",
+                        hold_action={"action": "more-info"},
+                    ),
+                    timerify_card(strict, layout="pill", double_tap="run"),
+                ],
+            },
+            {
+                # The Turn off button: a pill of the loose timer, which can run with no
+                # countdown, and a round tile of the strict one, which counts.
+                "title": "Turn off",
+                "path": "turn-off",
+                "cards": [
+                    timerify_card(loose, layout="pill", show_turn_off=True),
+                    timerify_card(strict, layout="round", show_turn_off=True),
+                ],
+            },
+            {
+                # The fewest columns a card with a Turn off button may have, in a
+                # sections view: each card asks for one column, which is less than it
+                # declares, so that Home Assistant gives it the fewest it declares. A
+                # pill of the loose timer with the chip and without it, and a round
+                # tile of the strict one. At that size the button is its icon alone.
+                "title": "Sizes",
+                "path": "sizes",
+                "type": "sections",
+                "sections": [{"type": "grid", "cards": narrow_cards(strict, loose)}],
+            },
+            {
+                # Cards with a Turn off button that are wide enough for its words, and
+                # one pill on each side of the width where the words begin: 6 columns
+                # of a section 500 px wide hold only the icon, 7 hold the words.
+                "title": "Wide",
+                "path": "wide",
+                "type": "sections",
+                "sections": [{"type": "grid", "cards": wide_cards(strict, loose)}],
+            },
+            {
+                # The same cards in the Mushroom style, which the tests turn on by
+                # defining a stand-in for one of Mushroom's cards on the page: the
+                # Turn off button has to fit as well as it does in the Home Assistant
+                # look.
+                "title": "Mushroom sizes",
+                "path": "mushroom-sizes",
+                "type": "sections",
+                "sections": [
+                    {
+                        "type": "grid",
+                        "cards": narrow_cards(strict, loose, mushroom=True),
+                    }
+                ],
+            },
+            {
+                "title": "Mushroom wide",
+                "path": "mushroom-wide",
+                "type": "sections",
+                "sections": [
+                    {"type": "grid", "cards": wide_cards(strict, loose, mushroom=True)}
+                ],
+            },
+            {
                 # Empty: the editor tests add a card to it from the card picker, and the
                 # reset that every test starts with saves the dashboard as it was.
                 "title": "Editor",
@@ -174,6 +274,39 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                                 strict, layout="pill", chip=QUICK_CHIP_MINUTES
                             ),
                             timerify_card(loose, layout="pill"),
+                        ],
+                    }
+                ],
+            },
+            {
+                # The Mushroom style, in the two layouts: the pictures of the
+                # documentation, taken with the real Mushroom on the page.
+                "title": "Mushroom pill",
+                "path": "mushroom-pill",
+                "cards": [
+                    {
+                        "type": "vertical-stack",
+                        "cards": [
+                            timerify_card(
+                                strict,
+                                layout="pill",
+                                chip=QUICK_CHIP_MINUTES,
+                                mushroom=True,
+                            ),
+                            timerify_card(loose, layout="pill", mushroom=True),
+                        ],
+                    }
+                ],
+            },
+            {
+                "title": "Mushroom round",
+                "path": "mushroom-round",
+                "cards": [
+                    {
+                        "type": "horizontal-stack",
+                        "cards": [
+                            timerify_card(strict, layout="round", mushroom=True),
+                            timerify_card(loose, layout="round", mushroom=True),
                         ],
                     }
                 ],

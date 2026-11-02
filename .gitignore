@@ -17,3 +17,5 @@ card/node_modules/
 card/test-results/
 card/playwright-report/
 card/e2e/.state.json
+# The Mushroom release that the pictures of the documentation are taken with: downloaded, never committed
+card/e2e/.mushroom/

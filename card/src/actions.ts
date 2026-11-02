@@ -25,7 +25,7 @@ async function callOnEntity(
   }
 }
 
-/** Runs the timer for `minutes` from now; 0 stops it. */
+/** Runs the timer for `minutes` from now. The card stops it with `stop`, never with 0. */
 export function setMinutes(hass: HomeAssistant, runFor: string, minutes: number): Promise<void> {
   return callOnEntity(hass, "number", "set_value", { value: minutes }, runFor);
 }
@@ -42,6 +42,11 @@ export function addMinutes(hass: HomeAssistant, runFor: string, minutes: number)
  */
 export function runWithoutDuration(hass: HomeAssistant, runFor: string): Promise<void> {
   return callOnEntity(hass, "timerify", "run", {}, runFor);
+}
+
+/** Stops the timer with Timerify's own action: the countdown ends and the target turns off. */
+export function stop(hass: HomeAssistant, runFor: string): Promise<void> {
+  return callOnEntity(hass, "timerify", "stop", {}, runFor);
 }
 
 /** Turns the switch of a schedule interval on, or off: the interval is then open or not. */

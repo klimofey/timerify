@@ -6,6 +6,21 @@ export const DEFAULT_PRESETS = [15, 30, 45, 60, 120] as const;
 /** The most minutes a preset or the chip can stand for: a day. */
 export const MAX_MINUTES = 1440;
 
+/** What a tap, a double tap or a long press can be set to. */
+export const PRESS_CHOICES = ["popup", "run", "stop", "run_or_stop", "action", "none"] as const;
+export type PressChoice = (typeof PRESS_CHOICES)[number];
+
+/** The presses of the card, which are also the names of the config keys that set them. */
+export const PRESSES = ["tap", "double_tap", "hold"] as const;
+export type Press = (typeof PRESSES)[number];
+
+/** A Home Assistant action, such as the visual editor writes for `ui_action`: kept as given. */
+export type ActionConfig = Record<string, unknown>;
+
+/** The keys that hold the Home Assistant action of each press. */
+export const ACTION_KEYS = ["tap_action", "double_tap_action", "hold_action"] as const;
+export type ActionKey = (typeof ACTION_KEYS)[number];
+
 export interface CardConfig {
   /** The "Run for" number of the timer. */
   entity: string;
@@ -16,6 +31,19 @@ export interface CardConfig {
   presets: number[];
   /** The minutes the pill's chip adds; the round layout has no chip. */
   chip?: number;
+  /** Whether the card shows a Turn off button while the device is on; the pop-up has its Stop. */
+  show_turn_off: boolean;
+  /** Whether the card takes Mushroom's look, when Mushroom is on the page: see `mushroom.ts`. */
+  mushroom: boolean;
+  /** What a tap does: it opens the pop-up unless the config says otherwise. */
+  tap: PressChoice;
+  double_tap: PressChoice;
+  /** What a long press does: on the round layout it starts or stops, on the pill nothing. */
+  hold: PressChoice;
+  /** The Home Assistant action of each press, for a press that is set to "action". */
+  tap_action?: ActionConfig;
+  double_tap_action?: ActionConfig;
+  hold_action?: ActionConfig;
 }
 
 /** A config the card cannot work with; the message is for the user, in the loaded language. */
@@ -75,6 +103,51 @@ function parseChip(raw: unknown): number | undefined {
 const recordOf = (raw: unknown): Record<string, unknown> =>
   (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
 
+const isPressChoice = (given: unknown): given is PressChoice =>
+  PRESS_CHOICES.some((choice) => choice === given);
+
+/** What a press is set to, or `fallback` when the config does not say. */
+function parsePress(raw: unknown, fallback: PressChoice): PressChoice {
+  if (raw === undefined) {
+    return fallback;
+  }
+  if (!isPressChoice(raw)) {
+    throw new ConfigError("card_error_press");
+  }
+  return raw;
+}
+
+/** An option that is on only when the config says `true`; `error` is what any other kind says. */
+function parseSwitch(raw: unknown, error: StringKey): boolean {
+  if (raw === undefined) {
+    return false;
+  }
+  if (typeof raw !== "boolean") {
+    throw new ConfigError(error);
+  }
+  return raw;
+}
+
+/** A Home Assistant action is a set of settings; anything else is not one. */
+const isAction = (given: unknown): given is ActionConfig =>
+  typeof given === "object" && given !== null && !Array.isArray(given);
+
+/** The Home Assistant actions the config gives, as they are given. */
+function parseActions(given: Record<string, unknown>): Partial<Record<ActionKey, ActionConfig>> {
+  const actions: Partial<Record<ActionKey, ActionConfig>> = {};
+  for (const key of ACTION_KEYS) {
+    const action = given[key];
+    if (action === undefined) {
+      continue;
+    }
+    if (!isAction(action)) {
+      throw new ConfigError("card_error_action");
+    }
+    actions[key] = action;
+  }
+  return actions;
+}
+
 /** A value the visual editor can show as minutes: a number, or the text of one. */
 const isMinutesText = (given: unknown): boolean =>
   typeof given === "number" || typeof given === "string";
@@ -87,7 +160,8 @@ const isMinutesText = (given: unknown): boolean =>
  * a form check their configs.
  */
 export function assertShape(raw: unknown): void {
-  const { entity, layout, presets, chip } = recordOf(raw);
+  const given = recordOf(raw);
+  const { entity, layout, presets, chip } = given;
   if (entity !== undefined && typeof entity !== "string") {
     throw new ConfigError("card_error_entity");
   }
@@ -100,6 +174,18 @@ export function assertShape(raw: unknown): void {
   if (chip !== undefined && !isMinutesText(chip)) {
     throw new ConfigError("card_error_chip");
   }
+  if (given.show_turn_off !== undefined && typeof given.show_turn_off !== "boolean") {
+    throw new ConfigError("card_error_show_turn_off");
+  }
+  if (given.mushroom !== undefined && typeof given.mushroom !== "boolean") {
+    throw new ConfigError("card_error_mushroom");
+  }
+  for (const press of PRESSES) {
+    if (given[press] !== undefined && typeof given[press] !== "string") {
+      throw new ConfigError("card_error_press");
+    }
+  }
+  parseActions(given);
 }
 
 /** Checks the config Home Assistant hands to `setConfig`; keys the card does not know are left out. */
@@ -120,5 +206,12 @@ export function parseConfig(raw: unknown): CardConfig {
     ...(typeof icon === "string" && icon !== "" && { icon }),
     presets: parsePresets(given.presets),
     ...(chip !== undefined && { chip }),
+    show_turn_off: parseSwitch(given.show_turn_off, "card_error_show_turn_off"),
+    mushroom: parseSwitch(given.mushroom, "card_error_mushroom"),
+    tap: parsePress(given.tap, "popup"),
+    double_tap: parsePress(given.double_tap, "none"),
+    // Only the round tile has had a long press, and it keeps it unless the user turns it off.
+    hold: parsePress(given.hold, layout === "round" ? "run_or_stop" : "none"),
+    ...parseActions(given),
   };
 }

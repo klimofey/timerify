@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
-import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import {
+  common as russian,
+  entity as russianEntities,
+} from "../../custom_components/timerify/translations/ru.json";
 import type { TimerifyCard } from "../src/timerify-card";
 import {
   BOILER,
@@ -10,7 +13,7 @@ import {
   counting,
   fakeHass,
 } from "./fake-hass";
-import { bodyOf, mountCard, popupOf, textOf } from "./mount";
+import { bodyOf, mountCard, popupOf, textOf, turnOffOf } from "./mount";
 
 const MINUTE = 60_000;
 const SECOND = 1000;
@@ -31,13 +34,22 @@ const addTime = (minutes: number) => ({
   data: { minutes },
   target: { entity_id: NUMBER },
 });
+const stopped = {
+  domain: "timerify",
+  service: "stop",
+  data: {},
+  target: { entity_id: NUMBER },
+};
 
 const fillOf = (card: TimerifyCard) =>
   card.shadowRoot?.querySelector<HTMLElement>(".fill")?.style.width;
 const dialogOf = (card: TimerifyCard) => popupOf(card).shadowRoot?.querySelector("dialog");
 
+/** The boiler runs with no countdown: a target that is on, and nothing counting. */
+const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+
 function chipOf(card: TimerifyCard): HTMLButtonElement {
-  const chip = card.shadowRoot?.querySelector("button");
+  const chip = card.shadowRoot?.querySelector<HTMLButtonElement>("button.chip");
   if (!chip) {
     throw new Error("The card has no chip");
   }
@@ -417,6 +429,318 @@ describe("the quick chip", () => {
 
     // Home Assistant has shown its toast; the card neither fails nor changes.
     expect(hass.calls).toEqual([addTime(15)]);
+    expect(textOf(card)).toBe(before);
+    expect(dialogOf(card)?.open).toBe(false);
+  });
+});
+
+describe("the Turn off button of the pill", () => {
+  const WITH_BUTTON = { entity: NUMBER, show_turn_off: true } as const;
+
+  it("shows Turn off while the boiler runs, with or without a countdown", async () => {
+    const counts = await mountCard(counting(45), WITH_BUTTON);
+    const runs = await mountCard(running(), WITH_BUTTON);
+
+    expect(turnOffOf(counts)).not.toBeNull();
+    expect(turnOffOf(runs)).not.toBeNull();
+  });
+
+  it("is hidden while the boiler is off, and without the option", async () => {
+    const idle = await mountCard(fakeHass(), WITH_BUTTON);
+    const counts = await mountCard(counting(45), { entity: NUMBER });
+    const runs = await mountCard(running(), { entity: NUMBER, show_turn_off: false });
+
+    expect(turnOffOf(idle)).toBeNull();
+    expect(turnOffOf(counts)).toBeNull();
+    expect(turnOffOf(runs)).toBeNull();
+    expect(textOf(runs)).toBe("Boiler on");
+  });
+
+  it("comes with the boiler's running and goes with it", async () => {
+    const off = fakeHass();
+    const card = await mountCard(off, WITH_BUTTON);
+    expect(turnOffOf(card)).toBeNull();
+
+    const on = off.state(BOILER, "on", { friendly_name: "Boiler" });
+    card.hass = on;
+    await card.updateComplete;
+    expect(turnOffOf(card)).not.toBeNull();
+
+    card.hass = on.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+    expect(turnOffOf(card)).toBeNull();
+
+    card.hass = counting(45);
+    await card.updateComplete;
+    expect(turnOffOf(card)).not.toBeNull();
+
+    card.hass = counting(45).state(ENDS_AT, "unknown");
+    await card.updateComplete;
+    expect(turnOffOf(card)).toBeNull();
+  });
+
+  it("is hidden while the timer is unavailable, whatever the boiler does", async () => {
+    const hass = running().state(NUMBER, "unavailable");
+    const card = await mountCard(hass, WITH_BUTTON);
+    expect(turnOffOf(card)).toBeNull();
+
+    card.hass = hass.state(NUMBER, "0");
+    await card.updateComplete;
+    expect(turnOffOf(card)).not.toBeNull();
+  });
+
+  it("is hidden while the boiler is unavailable", async () => {
+    const card = await mountCard(
+      fakeHass().state(BOILER, "unavailable", { friendly_name: "Boiler" }),
+      WITH_BUTTON,
+    );
+
+    expect(turnOffOf(card)).toBeNull();
+  });
+
+  it("is hidden until the card has found its timer", async () => {
+    const hass = running();
+    hass.holdAnswers();
+    const card = document.createElement("timerify-card") as TimerifyCard;
+    card.setConfig(WITH_BUTTON);
+    card.hass = hass;
+    document.body.append(card);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(turnOffOf(card)).toBeNull();
+
+    hass.answerNext();
+    await card.updateComplete;
+    expect(turnOffOf(card)).not.toBeNull();
+  });
+
+  it("stops the timer, and does not open the pop-up", async () => {
+    for (const hass of [counting(45), running()]) {
+      const card = await mountCard(hass, WITH_BUTTON);
+
+      turnOffOf(card)?.click();
+      await popupOf(card).updateComplete;
+
+      expect(hass.calls).toEqual([stopped]);
+      expect(dialogOf(card)?.open).toBe(false);
+      card.remove();
+    }
+  });
+
+  it("stops the timer in one call, whichever the minutes it counts", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    turnOffOf(card)?.click();
+    await card.updateComplete;
+
+    // Not `number.set_value`: one command for one meaning, as the pop-up and a press set to Stop.
+    expect(hass.calls.map(({ domain, service }) => `${domain}.${service}`)).toEqual([
+      "timerify.stop",
+    ]);
+  });
+
+  it.each(["mouse", "touch"] as const)("is no tap, double tap or long press of the card, by a %s", async (pointerType) => {
+    const hass = counting(45);
+    const card = await mountCard(hass, {
+      ...WITH_BUTTON,
+      tap: "popup",
+      double_tap: "run",
+      hold: "run",
+    });
+    const button = turnOffOf(card);
+    const event = (type: string) =>
+      new PointerEvent(type, {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType,
+      });
+
+    // A long press on the button is no long press of the card: nothing is held, and letting
+    // go starts nothing; the click that follows is the button's own.
+    button?.dispatchEvent(event("pointerdown"));
+    await vi.advanceTimersByTimeAsync(600);
+    expect(card.hasAttribute("data-held")).toBe(false);
+    button?.dispatchEvent(event("pointerup"));
+    button?.click();
+    // Two more presses at once are two more stops, not a double tap of the card.
+    button?.click();
+    button?.click();
+    await vi.advanceTimersByTimeAsync(1000);
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped, stopped, stopped]);
+    expect(dialogOf(card)?.open).toBe(false);
+  });
+
+  it("is shown for a countdown that goes on while the boiler is unavailable, and ends it", async () => {
+    const hass = counting(45).state(BOILER, "unavailable", { friendly_name: "Boiler" });
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    expect(textOf(card)).toContain("45:00");
+    turnOffOf(card)?.click();
+    await popupOf(card).updateComplete;
+
+    expect(hass.calls).toEqual([stopped]);
+  });
+
+  it("gives the focus to the body of the card when a keyboard press takes the button away", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, WITH_BUTTON);
+    const button = turnOffOf(card);
+    button?.focus();
+    expect(card.shadowRoot?.activeElement).toBe(button);
+
+    // The keyboard presses a button with Enter, which the browser makes a click.
+    button?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, composed: true }),
+    );
+    button?.click();
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(bodyOf(card));
+  });
+
+  it("leaves the focus alone when it was not on the button", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, { ...WITH_BUTTON, chip: 15 });
+    chipOf(card).focus();
+
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(turnOffOf(card)).toBeNull();
+    expect(card.shadowRoot?.activeElement).toBe(chipOf(card));
+  });
+
+  it("gives the focus to no one when the body of the card is no button", async () => {
+    const running = fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
+    const card = await mountCard(running, { ...WITH_BUTTON, tap: "none" });
+    // Nothing is set to act on a press, so the body is no button and has no tab stop.
+    expect(card.shadowRoot?.querySelector('[role="button"]')).toBeNull();
+    turnOffOf(card)?.focus();
+
+    card.hass = running.state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(card.shadowRoot?.activeElement ?? null).toBeNull();
+  });
+
+  it("does not hear the keys that press the card", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass, WITH_BUTTON);
+    const button = turnOffOf(card);
+    const key = (type: "keydown" | "keyup", pressed: string) =>
+      new KeyboardEvent(type, { key: pressed, bubbles: true, composed: true, cancelable: true });
+
+    button?.dispatchEvent(key("keydown", "Enter"));
+    button?.dispatchEvent(key("keyup", " "));
+    await popupOf(card).updateComplete;
+
+    // The browser makes its click of these keys itself; the card's own handlers see none.
+    expect(hass.calls).toEqual([]);
+    expect(dialogOf(card)?.open).toBe(false);
+  });
+
+  it("is a control of its own, beside the button that opens the pop-up and before the chip", async () => {
+    const card = await mountCard(counting(45), { ...WITH_BUTTON, chip: 15 });
+    const button = turnOffOf(card);
+
+    expect(button).not.toBeNull();
+    expect(bodyOf(card).contains(button)).toBe(false);
+    expect(button?.closest('[role="button"]')).toBeNull();
+    expect(card.shadowRoot?.querySelectorAll("button, [role='button']")).toHaveLength(3);
+    expect(
+      button?.compareDocumentPosition(chipOf(card)) === Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBe(true);
+  });
+
+  it("leaves the rest of the pill to open the pop-up", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass, WITH_BUTTON);
+
+    bodyOf(card).click();
+    await popupOf(card).updateComplete;
+
+    expect(dialogOf(card)?.open).toBe(true);
+    expect(hass.calls).toEqual([]);
+  });
+
+  it("is not part of the name of the button that opens the pop-up", async () => {
+    const card = await mountCard(counting(45), WITH_BUTTON);
+
+    const label = card.shadowRoot?.getElementById(
+      bodyOf(card).getAttribute("aria-labelledby") ?? "",
+    );
+
+    expect(label?.textContent?.replace(/\s+/g, " ").trim()).toBe(`Boiler 45:00 ${until("09:45")}`);
+  });
+
+  it("is worded in the user's language", async () => {
+    const card = await mountCard(counting(45, { language: "ru" }), WITH_BUTTON);
+
+    expect(turnOffOf(card, russian.card_turn_off)).not.toBeNull();
+    expect(turnOffOf(card)).toBeNull();
+    // The word of the timer's own Turn off button on the device page, so that both agree.
+    expect(russian.card_turn_off).toBe(russianEntities.button.turn_off.name);
+  });
+
+  it("is a button named Turn off, whether the card shows its words or only its icon", async () => {
+    const card = await mountCard(counting(45), WITH_BUTTON);
+    const button = turnOffOf(card);
+
+    // A wide card shows the words and a narrow one the power icon: the styles choose, from the
+    // width of the card, and both are in the button. The name and the tip hold in both.
+    expect(button?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:power");
+    expect(button?.getAttribute("aria-label")).toBe(english.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(english.card_turn_off);
+  });
+
+  it("is named in the user's language in its icon form too", async () => {
+    const card = await mountCard(counting(45, { language: "ru" }), WITH_BUTTON);
+    const button = turnOffOf(card, russian.card_turn_off);
+
+    expect(button?.getAttribute("aria-label")).toBe(russian.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(russian.card_turn_off);
+  });
+
+  it("marks its card as one with the button, and only then", async () => {
+    const with_ = await mountCard(counting(45), WITH_BUTTON);
+    const without = await mountCard(counting(45), { entity: NUMBER, show_turn_off: false });
+
+    // The styles make the content of a marked card the container its button's form follows;
+    // a card without the button is left as it was.
+    expect(with_.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off")).toBe(
+      true,
+    );
+    expect(
+      without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-turn-off"),
+    ).toBe(false);
+  });
+
+  it("tells its card whether there is a chip, which the room the words need depends on", async () => {
+    const withChip = await mountCard(counting(45), { ...WITH_BUTTON, chip: 15 });
+    const without = await mountCard(counting(45), WITH_BUTTON);
+
+    expect(withChip.shadowRoot?.querySelector("ha-card")?.classList.contains("with-chip")).toBe(true);
+    expect(without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-chip")).toBe(false);
+  });
+
+  it("leaves the pill as it was when Home Assistant refuses it", async () => {
+    const hass = counting(45);
+    const card = await mountCard(hass, WITH_BUTTON);
+    const before = textOf(card);
+    hass.rejectNext(new Error("The timer refused"));
+
+    turnOffOf(card)?.click();
+    await vi.advanceTimersByTimeAsync(0);
+    await card.updateComplete;
+
+    expect(hass.calls).toEqual([stopped]);
     expect(textOf(card)).toBe(before);
     expect(dialogOf(card)?.open).toBe(false);
   });

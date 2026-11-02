@@ -11,12 +11,21 @@ import {
   cancelCommand,
   setIntervalEnabled,
   setMinutes,
+  stop,
 } from "./actions";
 import type { CardConfig } from "./config";
 import { formatClock, formatMinutes, formatRemaining, settingText } from "./format";
-import type { HassEntity, HomeAssistant, IntervalInfo, TimerInfo } from "./hass";
+import type { HassEntity, HomeAssistant, IntervalInfo } from "./hass";
 import { t } from "./strings";
-import { isDisabled, mattersToRender, watchedEntities, type TimerView } from "./timer";
+import {
+  isDisabled,
+  isRunning,
+  mattersToRender,
+  serverNow,
+  watchedEntities,
+  type FoundLookup,
+  type TimerView,
+} from "./timer";
 
 /** A command that waits for its time, as the "Next command" sensor lists it. */
 interface PendingCommand {
@@ -26,6 +35,18 @@ interface PendingCommand {
   /** How long a command to turn on runs; none when it turns on with no countdown. */
   minutes: number | null;
   settings: [key: string, value: unknown][];
+}
+
+/**
+ * The presets the timer can run for: those that are not longer than the maximum its number
+ * states in `max`, in the order of the card. A number that states no maximum, or one that is
+ * not a number, leaves no limit, so that every preset shows.
+ */
+function presetsWithinMaximum(presets: readonly number[], runFor: HassEntity | undefined): number[] {
+  const max: unknown = runFor?.attributes["max"];
+  return typeof max === "number" && Number.isFinite(max)
+    ? presets.filter((minutes) => minutes <= max)
+    : [...presets];
 }
 
 /**
@@ -71,7 +92,7 @@ export class TimerifyCardPopup extends LitElement {
   static override properties = {
     hass: { attribute: false },
     config: { attribute: false },
-    info: { attribute: false },
+    lookup: { attribute: false },
     view: { attribute: false },
     opened: { state: true },
   };
@@ -279,8 +300,8 @@ export class TimerifyCardPopup extends LitElement {
 
   declare hass: HomeAssistant;
   declare config: CardConfig;
-  /** What Timerify told of the timer. */
-  declare info: TimerInfo;
+  /** What Timerify told of the timer, and how far the browser's clock is from the server's. */
+  declare lookup: FoundLookup;
   /** What the card shows of the timer; the card makes a new one at every render, so it ticks. */
   declare view: TimerView;
   /** Whether the dialog is open; only then does the pop-up have anything to render. */
@@ -363,7 +384,7 @@ export class TimerifyCardPopup extends LitElement {
     if (!this.hasUpdated || changed.has("opened")) {
       return true;
     }
-    const watched = watchedEntities(this.config.entity, this.info);
+    const watched = watchedEntities(this.config.entity, this.lookup.info);
     return this.opened && mattersToRender(changed, this.hass, watched);
   }
 
@@ -392,7 +413,7 @@ export class TimerifyCardPopup extends LitElement {
 
   #content(): TemplateResult {
     const { hass, view } = this;
-    const now = Date.now();
+    const now = serverNow(this.lookup);
     return html`
       <div class="wrapper">
         <header>
@@ -425,24 +446,31 @@ export class TimerifyCardPopup extends LitElement {
     const { hass, config, view } = this;
     const step = formatMinutes(hass, STEP_MINUTES);
     const counting = view.state === "counting";
-    const running = counting || view.state === "open";
+    const running = isRunning(view);
     // A timer that is unavailable has nothing to act on: Home Assistant would leave it out of
     // the call without a word, and a press would seem to do nothing.
     const unavailable = view.state === "unavailable";
+    // Home Assistant refuses a value above the maximum of the number, so none is offered. The
+    // row is left out when nothing is left: empty, it would still take its gap in the column.
+    const presets = presetsWithinMaximum(config.presets, hass.states[config.entity]);
     return html`
-      <div class="presets">
-        ${config.presets.map(
-          (minutes) => html`
-            <button
-              class="action preset"
-              ?disabled=${unavailable}
-              @click=${() => void setMinutes(hass, config.entity, minutes)}
-            >
-              ${formatMinutes(hass, minutes)}
-            </button>
-          `,
-        )}
-      </div>
+      ${presets.length === 0
+        ? nothing
+        : html`
+            <div class="presets">
+              ${presets.map(
+                (minutes) => html`
+                  <button
+                    class="action preset"
+                    ?disabled=${unavailable}
+                    @click=${() => void setMinutes(hass, config.entity, minutes)}
+                  >
+                    ${formatMinutes(hass, minutes)}
+                  </button>
+                `,
+              )}
+            </div>
+          `}
       <div class="adjust">
         <button
           class="action step"
@@ -463,7 +491,7 @@ export class TimerifyCardPopup extends LitElement {
         <button
           class="action stop"
           ?disabled=${!running}
-          @click=${() => void setMinutes(hass, config.entity, 0)}
+          @click=${() => void stop(hass, config.entity)}
         >
           ${t(hass, "card_stop")}
         </button>
@@ -473,7 +501,7 @@ export class TimerifyCardPopup extends LitElement {
 
   /** The intervals of the schedule, each with the switch that enables it. */
   #schedule() {
-    const { intervals } = this.info;
+    const { intervals } = this.lookup.info;
     if (intervals.length === 0) {
       return nothing;
     }
@@ -518,7 +546,8 @@ export class TimerifyCardPopup extends LitElement {
 
   /** The commands that wait for their time, each with a button that cancels it. */
   #commands(now: number) {
-    const { hass, config, info, view } = this;
+    const { hass, config, view } = this;
+    const { info } = this.lookup;
     // Without its sensor the card cannot list the commands, and says so: a list that is
     // missing would look like a timer with nothing pending.
     if (isDisabled(info, info.next_command)) {
@@ -585,7 +614,7 @@ export class TimerifyCardPopup extends LitElement {
     }
     return html`
       <footer>
-        <a href=${settingsPath(this.info.entry_id)} @click=${this.#onSettingsClick}>
+        <a href=${settingsPath(this.lookup.info.entry_id)} @click=${this.#onSettingsClick}>
           ${t(this.hass, "card_settings")}
         </a>
       </footer>

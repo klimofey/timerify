@@ -5,9 +5,16 @@
 // the fields, keeps the card's config in step with them, and asks `assertConfig` whether the
 // form can show what they hold; whether the card can work with it is the card's own `setConfig`.
 // Nothing here renders anything.
-import { DEFAULT_PRESETS, MAX_MINUTES, assertShape } from "./config";
+import {
+  DEFAULT_PRESETS,
+  MAX_MINUTES,
+  PRESS_CHOICES,
+  assertShape,
+  type PressChoice,
+} from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant, Localize } from "./hass";
+import { mushroomIsDefined } from "./mushroom";
 import { lastLoaded, loadStrings, localizeName, t, type StringKey } from "./strings";
 
 /** The word each field is labelled with. */
@@ -18,7 +25,26 @@ const LABELS = {
   icon: "card_editor_icon",
   presets: "card_editor_presets",
   chip: "card_editor_chip",
+  show_turn_off: "card_editor_show_turn_off",
+  mushroom: "card_editor_mushroom",
+  interactions: "card_editor_interactions",
+  tap: "card_editor_tap",
+  double_tap: "card_editor_double_tap",
+  hold: "card_editor_hold",
+  tap_action: "card_editor_tap_action",
+  double_tap_action: "card_editor_double_tap_action",
+  hold_action: "card_editor_hold_action",
 } as const satisfies Record<string, StringKey>;
+
+/** The word each choice of a press is offered with. */
+const PRESS_LABELS = {
+  popup: "card_editor_press_popup",
+  run: "card_editor_press_run",
+  stop: "card_editor_press_stop",
+  run_or_stop: "card_editor_press_run_or_stop",
+  action: "card_editor_press_action",
+  none: "card_editor_press_none",
+} as const satisfies Record<PressChoice, StringKey>;
 
 interface Option {
   value: string;
@@ -34,7 +60,9 @@ interface SelectorField {
     | { select: { options: Option[]; multiple?: boolean; custom_value?: boolean } }
     | { text: Record<string, never> }
     | { icon: Record<string, never> }
-    | { number: { min: number; max: number; mode: "box" } };
+    | { number: { min: number; max: number; mode: "box" } }
+    | { boolean: Record<string, never> }
+    | { ui_action: { default_action: "more-info" } };
 }
 
 /** Fields side by side. The frontend names a grid with the empty string. */
@@ -44,36 +72,60 @@ interface GridField {
   schema: SelectorField[];
 }
 
+/**
+ * A group the user opens to see its fields. Its fields are the card's own keys, not keys of
+ * the group (`flatten`), and its title is the label of its name.
+ */
+interface ExpandableField {
+  name: "interactions";
+  type: "expandable";
+  flatten: true;
+  icon: string;
+  schema: SelectorField[];
+}
+
 /** What `getConfigForm` hands Home Assistant; the frontend's `LovelaceConfigForm`. */
 export interface LovelaceConfigForm {
-  schema: (SelectorField | GridField)[];
+  schema: (SelectorField | GridField | ExpandableField)[];
   /** Throws, with a message for the user, when the form cannot show the config at all. */
   assertConfig(config: unknown): void;
   computeLabel(field: { name: string }, localize: Localize): string;
-  computeHelper(field: { name: string }): string | undefined;
+  computeHelper(field: { name: string }, localize: Localize): string | undefined;
 }
 
 const isLabelled = (name: string): name is keyof typeof LABELS => Object.hasOwn(LABELS, name);
 
+/** Whether the field is the Home Assistant action of a press. */
+const isActionField = (name: string): boolean => name.endsWith("_action");
+
 const ENGLISH = { locale: { language: "en" } };
 
 /**
- * What the editor's own words are said in: the language of the last strings a card loaded, and
- * English before any card has. `getConfigForm` is given no `hass`, and the form that Home
- * Assistant builds is given no way to translate the labels of a select's options, so these
- * come from the card.
+ * What the labels of the editor's options are said in: the language of the last strings a card
+ * loaded, and English before any card has. `getConfigForm` is given no `hass`, and the form
+ * that Home Assistant builds is given no way to translate the labels of a select's options, so
+ * these come from the card. The rest of the editor's words are made with the `localize` that
+ * the frontend hands to `computeLabel` and `computeHelper`.
  */
 function speaking(): { locale: { language: string } } {
   return lastLoaded() ?? ENGLISH;
 }
 
+/**
+ * The language that `localize` speaks. A function cannot be asked, so the card's strings say
+ * it themselves, in the one text of them that is not a translation: the tag of their language
+ * (`card_language`). English where `localize` has no strings of the card yet.
+ */
+function languageOf(localize: Localize): string {
+  return t({ localize }, "card_language");
+}
+
 /** The default presets, in words: "15 min, 30 min, 45 min, 1 hr, and 2 hr" in English. */
-function defaultPresetsText(): string {
-  const language = speaking();
-  return new Intl.ListFormat(language.locale.language, {
-    style: "long",
-    type: "conjunction",
-  }).format(DEFAULT_PRESETS.map((minutes) => formatMinutes(language, minutes)));
+function defaultPresetsText(localize: Localize): string {
+  const language = languageOf(localize);
+  return new Intl.ListFormat(language, { style: "long", type: "conjunction" }).format(
+    DEFAULT_PRESETS.map((minutes) => formatMinutes({ locale: { language } }, minutes)),
+  );
 }
 
 /**
@@ -82,6 +134,10 @@ function defaultPresetsText(): string {
  */
 export async function getConfigForm(): Promise<LovelaceConfigForm> {
   const words = lastLoaded();
+  const pressOptions = PRESS_CHOICES.map((choice) => ({
+    value: choice,
+    label: t(words, PRESS_LABELS[choice]),
+  }));
   return {
     schema: [
       {
@@ -125,16 +181,43 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       },
       // The label says that these are minutes, so the field has no unit of its own.
       { name: "chip", selector: { number: { min: 1, max: MAX_MINUTES, mode: "box" } } },
+      { name: "show_turn_off", selector: { boolean: {} } },
+      { name: "mushroom", selector: { boolean: {} } },
+      {
+        name: "interactions",
+        type: "expandable",
+        flatten: true,
+        icon: "mdi:gesture-tap",
+        // Each press is followed by its action, which it uses when it is set to one. The
+        // selector of an action cannot offer the pop-up or Timerify's own actions, so the
+        // press is chosen first. An action that is not set is Home Assistant's default for
+        // it, the more-info dialog of the entity.
+        schema: [
+          { name: "tap", selector: { select: { options: pressOptions } } },
+          { name: "tap_action", selector: { ui_action: { default_action: "more-info" } } },
+          { name: "double_tap", selector: { select: { options: pressOptions } } },
+          { name: "double_tap_action", selector: { ui_action: { default_action: "more-info" } } },
+          { name: "hold", selector: { select: { options: pressOptions } } },
+          { name: "hold_action", selector: { ui_action: { default_action: "more-info" } } },
+        ],
+      },
     ],
     // Only the shape: a value that is wrong stays in the form, and the card's own check of
     // it (`setConfig`, which the preview runs) tells the user what it should be.
     assertConfig: assertShape,
     computeLabel: ({ name }, localize) =>
       isLabelled(name) ? localize(localizeName(LABELS[name])) : "",
-    computeHelper: ({ name }) =>
-      name === "presets"
-        ? t(lastLoaded(), "card_editor_presets_helper", { presets: defaultPresetsText() })
-        : undefined,
+    computeHelper: ({ name }, localize) => {
+      if (name === "presets") {
+        return t({ localize }, "card_editor_presets_helper", {
+          presets: defaultPresetsText(localize),
+        });
+      }
+      if (name === "mushroom") {
+        return mushroomIsDefined() ? undefined : t({ localize }, "card_editor_mushroom_missing");
+      }
+      return isActionField(name) ? t({ localize }, "card_editor_action_helper") : undefined;
+    },
   };
 }
 

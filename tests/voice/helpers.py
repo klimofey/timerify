@@ -47,7 +47,9 @@ from homeassistant.setup import async_setup_component
 from custom_components.timerify.const import (
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
+    CONTEXT_HVAC_MODES,
     DOMAIN,
+    LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_TARGET,
     MANUAL_SENTENCES_DIR,
@@ -489,6 +491,40 @@ def listed(
     written = yaml.safe_load(managed_file(hass, language).read_text("utf-8"))
     values: list[dict[str, Any]] = written["lists"][list_name]["values"]
     return values
+
+
+def pending(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
+    """The commands a "Next command" sensor lists in its attributes."""
+    state = hass.states.get(entity_id)
+    assert state is not None
+    commands: list[dict[str, Any]] = state.attributes["commands"]
+    return commands
+
+
+def hvac_blocks(hass: HomeAssistant, language: str) -> list[dict[str, Any]]:
+    """Every data block of the managed file of `language` that is for the thermostats of
+    one set of HVAC modes: the blocks that require a set (`CONTEXT_HVAC_MODES`), in the
+    order of the file."""
+    written = yaml.safe_load(managed_file(hass, language).read_text("utf-8"))
+    return [
+        data
+        for intent_type in written["intents"].values()
+        for data in intent_type["data"]
+        if CONTEXT_HVAC_MODES in data.get("requires_context", {})
+    ]
+
+
+def hvac_words(hass: HomeAssistant, language: str) -> dict[str, list[str]]:
+    """The HVAC modes that the managed file of `language` has words for, by the key of
+    the set of modes whose thermostats understand them: the modes the words in the
+    blocks that require the key mean, in the order of the words. Every block of a key
+    has the same words, which this asserts."""
+    found: dict[str, list[str]] = {}
+    for block in hvac_blocks(hass, language):
+        key = block["requires_context"][CONTEXT_HVAC_MODES]
+        modes = outs(block["lists"][LIST_HVAC_MODE]["values"])
+        assert found.setdefault(key, modes) == modes, key
+    return found
 
 
 def outs(values: list[dict[str, Any]]) -> list[Any]:

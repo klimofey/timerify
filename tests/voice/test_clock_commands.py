@@ -29,6 +29,7 @@ from ..helpers import (
     NEXT,
     NUMBER,
     SENSOR,
+    SMALL_AC_NEXT,
     SUNDAY,
     advance_to,
     call_service,
@@ -390,6 +391,35 @@ async def test_turn_on_at_a_time_for_a_while_with_settings(
         (60, {"hvac_mode": "cool", "temperature": 24.0})
     ]
     assert fake_full_ac.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_command_at_a_time_takes_only_the_hvac_modes_of_its_ac(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The small AC cannot heat: "heating" after its name keeps no command for 7:30,
+    while a mode it has is kept with the command."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
+
+    heated = await converse(hass, "turn on the small AC at 7:30 heating")
+
+    assert reached(heated) != CLOCK, speech(heated)
+    assert pending(hass, SMALL_AC_NEXT) == []
+    assert pending(hass, AC_NEXT) == []
+
+    cooled = await converse(hass, "turn on the small AC at 7:30 cooling")
+
+    assert reached(cooled) == CLOCK, speech(cooled)
+    assert [c["settings"] for c in pending(hass, SMALL_AC_NEXT)] == [
+        {"hvac_mode": "cool"}
+    ]
+    assert pending(hass, AC_NEXT) == []
+    assert fake_small_ac.calls == fake_full_ac.calls == []
 
 
 @pytest.mark.usefixtures("assist")

@@ -67,6 +67,7 @@ from ..helpers import (
     NEXT,
     NUMBER,
     SENSOR,
+    SMALL_AC_NEXT,
     START,
     TURN_OFF,
     TURN_ON,
@@ -82,6 +83,7 @@ from .helpers import (
     call_tool,
     converse,
     copy_sentences,
+    pending,
     reached,
     readings,
     refusal_of,
@@ -112,14 +114,6 @@ WORDS_LIST = "timerify_delay_words"
 """The lists of the delay in days and weeks: the days, the weeks, and the delays that
 are said in words ("a day", "half a day", "a week")."""
 DELAYED_TOOL = "timerify__delayed_command"
-
-
-def pending(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
-    """The commands a "Next command" sensor lists in its attributes."""
-    state = hass.states.get(entity_id)
-    assert state is not None
-    commands: list[dict[str, Any]] = state.attributes["commands"]
-    return commands
 
 
 def said_after(text: str, delay: str, after: str) -> str:
@@ -452,6 +446,37 @@ async def test_a_word_for_a_mode_is_said_of_a_thermostat_only(
     assert reached(boiled) != DELAYED_COMMAND
     assert pending(hass, NEXT) == []
     assert [c["settings"] for c in pending(hass, AC_NEXT)] == [{"hvac_mode": "cool"}]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_delayed_turn_on_takes_only_the_hvac_modes_of_its_ac(
+    hass: HomeAssistant,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The small AC cannot heat: "heating" after its name keeps no command and
+    switches nothing, while the mode it has is kept with the command; the AC that
+    can heat is not put in its place."""
+    await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
+
+    heated = await converse(hass, "turn on the small AC in 15 minutes heating")
+
+    assert reached(heated) != DELAYED_COMMAND, speech(heated)
+    assert pending(hass, SMALL_AC_NEXT) == []
+    assert pending(hass, AC_NEXT) == []
+    assert fake_small_ac.calls == []
+    assert fake_full_ac.calls == []
+
+    cooled = await converse(hass, "turn on the small AC in 15 minutes cooling")
+
+    assert reached(cooled) == DELAYED_COMMAND, speech(cooled)
+    assert [c["settings"] for c in pending(hass, SMALL_AC_NEXT)] == [
+        {"hvac_mode": "cool"}
+    ]
+    assert pending(hass, AC_NEXT) == []
+    assert fake_small_ac.calls == []
+    assert fake_full_ac.calls == []
 
 
 @pytest.mark.usefixtures("assist")

@@ -32,9 +32,9 @@ from custom_components.timerify.const import (
     CONF_KIND,
     CONF_LANGUAGES,
     CONF_WRITE_SENTENCES,
+    CONTEXT_HVAC_MODES,
     DOMAIN,
     KIND_VOICE_SETTINGS,
-    LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_MODE,
     MANAGED_HEADER,
@@ -52,6 +52,7 @@ from custom_components.timerify.voice.sentences import (
 )
 
 from ..conftest import (
+    CLIMATE_SERVICES,
     SWITCH_SERVICES,
     FakeTarget,
     HeldCall,
@@ -59,7 +60,9 @@ from ..conftest import (
     SetupTarget,
 )
 from ..helpers import (
+    AC_ATTRS,
     AC_ID,
+    SMALL_AC_ID,
     TARGET_ID,
     add_interval,
     advance,
@@ -72,6 +75,8 @@ from .helpers import (
     conversation_reloads,
     converse,
     copy_sentences,
+    hvac_blocks,
+    hvac_words,
     listed,
     managed_file,
     outs,
@@ -627,14 +632,16 @@ async def test_words_for_settings_come_with_the_targets_that_take_them(
     await setup_target()
     await add_voice_entry(hass, languages=("en",))
     reloads = conversation_reloads(hass)
-    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert hvac_words(hass, "en") == {}
     assert listed(hass, "en", LIST_MODE) == []
 
     await setup_target(target=AC_ID)
     await setup_target(target=fake_vent.entity_id)
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
-    assert outs(listed(hass, "en", LIST_HVAC_MODE)) == ["cool", "heat", "fan_only"]
+    assert hvac_words(hass, "en") == {
+        "cool fan_only heat": ["cool", "heat", "fan_only"]
+    }
     assert outs(listed(hass, "en", LIST_MODE)) == [
         "auto",
         "eco",
@@ -666,7 +673,7 @@ async def test_words_for_settings_leave_with_the_target(
     await hass.async_block_till_done()
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
 
-    assert listed(hass, "en", LIST_HVAC_MODE) == []
+    assert hvac_words(hass, "en") == {}
     assert listed(hass, "en", LIST_MODE) == []
 
 
@@ -711,15 +718,111 @@ async def test_every_language_gets_the_same_modes(
     await add_voice_entry(hass)
 
     hvac = {
-        language: set(outs(listed(hass, language, LIST_HVAC_MODE)))
+        language: {key: set(modes) for key, modes in hvac_words(hass, language).items()}
         for language in VOICE_LANGUAGES
     }
     modes = {
         language: set(outs(listed(hass, language, LIST_MODE)))
         for language in VOICE_LANGUAGES
     }
-    assert hvac["en"] == hvac["ru"] == {"cool", "heat", "fan_only"}
+    assert (
+        hvac["en"] == hvac["ru"] == {"cool fan_only heat": {"cool", "heat", "fan_only"}}
+    )
     assert modes["en"] == modes["ru"] == {"auto", "high", "low"}
+
+
+@pytest.mark.usefixtures("assist")
+async def test_each_thermostat_is_listed_with_the_modes_it_has(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The name of a thermostat carries the key of its modes, which is what ties it to
+    the sentences with the words for those modes; a target that is no thermostat has no
+    key. Each set of modes has its own copy of the sentences for thermostats."""
+    await setup_target()
+    await setup_target(target=fake_full_ac.entity_id)
+    await setup_target(target=fake_small_ac.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+
+    assert {value["out"]: value["context"] for value in listed(hass, "en")} == {
+        "Boiler": {"domain": "switch"},
+        "AC": {
+            "domain": "climate",
+            CONTEXT_HVAC_MODES: "auto cool dry fan_only heat heat_cool",
+        },
+        "Small AC": {"domain": "climate", CONTEXT_HVAC_MODES: "cool fan_only"},
+    }
+    assert sorted(hvac_words(hass, "en")) == [
+        "auto cool dry fan_only heat heat_cool",
+        "cool fan_only",
+    ]
+    assert len(hvac_blocks(hass, "en")) == 6
+
+
+@pytest.mark.usefixtures("assist")
+async def test_thermostats_with_the_same_modes_share_their_sentences(
+    hass: HomeAssistant,
+    fake_climate: FakeTarget,
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """Two air conditioners that can be turned on in the same modes, whatever order
+    their integrations list them in, are known by one copy of the sentences."""
+    second = provide_target(
+        SMALL_AC_ID,
+        CLIMATE_SERVICES,
+        name="Small AC",
+        capability_attributes={
+            **AC_ATTRS,
+            "hvac_modes": ["fan_only", "cool", "off", "heat"],
+        },
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+    await setup_target(target=fake_climate.entity_id)
+    await setup_target(target=second.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+
+    assert hvac_words(hass, "en") == {
+        "cool fan_only heat": ["cool", "heat", "fan_only"]
+    }
+    assert len(hvac_blocks(hass, "en")) == 3
+    assert {value["context"][CONTEXT_HVAC_MODES] for value in listed(hass, "en")} == {
+        "cool fan_only heat"
+    }
+
+
+@pytest.mark.usefixtures("assist")
+async def test_the_sentences_for_thermostats_follow_the_thermostats_of_the_house(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    fake_small_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A thermostat added later brings its own copy after the cooldown, and one taken
+    away takes its copy with it; the agent reads the sentences once for the change."""
+    await setup_target(target=fake_full_ac.entity_id)
+    await add_voice_entry(hass, languages=("en",))
+    assert len(hvac_blocks(hass, "en")) == 3
+    reloads = conversation_reloads(hass)
+
+    small_timer = await setup_target(target=fake_small_ac.entity_id)
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert len(hvac_blocks(hass, "en")) == 6
+    assert len(reloads) == 1
+    cooled = await converse(hass, "turn on the small AC for an hour cooling")
+    assert reached(cooled) == "TimerifyRun"
+
+    await hass.config_entries.async_remove(small_timer.entry_id)
+    await hass.async_block_till_done()
+    await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
+
+    assert len(hvac_blocks(hass, "en")) == 3
+    assert sorted(hvac_words(hass, "en")) == ["auto cool dry fan_only heat heat_cool"]
 
 
 # Schedule interval titles

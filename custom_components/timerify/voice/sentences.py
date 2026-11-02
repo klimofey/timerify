@@ -3,9 +3,11 @@ the proof that the built-in agent can read them.
 
 The shipped sentences (`sentences/<language>/*.yaml`) are complete but for the names of
 the devices, the titles of the schedule intervals and the modes the devices take; those
-are what this module adds. A file that Home Assistant cannot load makes the built-in
-agent fail for the whole language, whatever the request, so a file is built here, parsed
-the way the agent parses it, and written only when it passes (`validate`).
+are what this module adds, and with them a copy of the sentences for thermostats for
+each set of HVAC modes that thermostats have. A file that Home Assistant cannot load
+makes the built-in agent fail for the whole language, whatever the request, so a file is
+built here, parsed the way the agent parses it, and written only when it passes
+(`validate`).
 
 Everything here is blocking, and runs in the executor, except the functions that read
 what Home Assistant knows (`voice_names`, `interval_names`, `voice_setting_values`,
@@ -38,6 +40,7 @@ from homeassistant.helpers import intent
 from homeassistant.helpers.translation import async_get_translations
 
 from ..const import (
+    CONTEXT_HVAC_MODES,
     LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_MODE,
@@ -46,7 +49,7 @@ from ..const import (
     SENTENCES_DIR,
     SUBENTRY_INTERVAL,
 )
-from ..domains import supported_settings
+from ..domains import SettingChoice, supported_settings
 from ..spelling import fold_yo
 from .base import loaded_timers
 
@@ -56,6 +59,9 @@ RULE_PREFIX: Final = "timerify_"
 NAME_LISTS: Final = (LIST_TARGET, LIST_INTERVAL, LIST_MODE)
 """The lists of the sentences that hold names as people say them, which `validate`
 proves are matched as said and `BuiltSentences.said` has the texts of."""
+
+CLIMATE_DOMAIN: Final = "climate"
+"""The domain of thermostats, whose sentences are copied for each set of HVAC modes."""
 
 _TEMPLATE_CHARACTERS: Final = re.compile(r"([\\()\[\]{}<>|@])")
 
@@ -108,6 +114,9 @@ class VoiceName:
     with what it hears."""
     domain: str
     """The domain of the target."""
+    hvac_modes: frozenset[str] | None = None
+    """For a thermostat, the HVAC modes it can be turned on with (none at all is the
+    empty set); None for any other target."""
 
 
 @dataclass(frozen=True)
@@ -146,8 +155,9 @@ class ModeSource:
 class VoiceSettingValues:
     """The values of the settings that the targets support, which a person may say."""
 
-    hvac_modes: frozenset[str] = frozenset()
-    """The HVAC modes of the targets, as Home Assistant names them."""
+    hvac_sets: frozenset[frozenset[str]] = frozenset()
+    """The sets of HVAC modes the thermostats among the targets can be turned on with,
+    as Home Assistant names the modes: one set for every different one."""
     mode_sources: tuple[ModeSource, ...] = ()
     """The modes of the targets that "mode" means: the fan modes of thermostats, the
     presets of fans, the modes of humidifiers, the operation modes of water heaters."""
@@ -163,6 +173,12 @@ NO_SETTING_VALUES: Final = VoiceSettingValues()
 
 NO_MODE_WORDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType({})
 """No mode has a word of Home Assistant's translations."""
+
+
+def hvac_key(modes: Iterable[str]) -> str:
+    """The context that tells a set of HVAC modes: the modes, sorted, joined by a space,
+    whichever order a device lists them in."""
+    return " ".join(sorted(modes))
 
 
 def spoken_form(name: str) -> str:
@@ -220,8 +236,22 @@ def voice_names(hass: HomeAssistant) -> list[VoiceName]:
         else:
             aliases = []
         domain = split_entity_id(entity_id)[0]
-        names.extend(VoiceName(alias, domain) for alias in aliases)
+        hvac_modes = _hvac_modes(entity_id, supported_settings(hass, entity_id))
+        names.extend(VoiceName(alias, domain, hvac_modes) for alias in aliases)
     return names
+
+
+def _hvac_modes(
+    entity_id: str, choices: Iterable[SettingChoice]
+) -> frozenset[str] | None:
+    """The HVAC modes the target can be turned on with, among its `choices` of settings:
+    the empty set for a thermostat that has none; None for a target that is none."""
+    if split_entity_id(entity_id)[0] != CLIMATE_DOMAIN:
+        return None
+    for choice in choices:
+        if choice.name == "hvac_mode":
+            return frozenset(choice.options)
+    return frozenset()
 
 
 @callback
@@ -245,16 +275,17 @@ def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
     states or, without one, their registry entries: the same judgement a command is
     judged by, so that nothing is offered that a target would refuse."""
     registry = er.async_get(hass)
-    hvac_modes: set[str] = set()
+    hvac_sets: set[frozenset[str]] = set()
     sources: dict[ModeSource, None] = {}
     for entry in loaded_timers(hass):
         entity_id = entry.runtime_data.target_entity_id
         registered = registry.async_get(entity_id)
         state = hass.states.get(entity_id)
-        for choice in supported_settings(hass, entity_id):
-            if choice.name == "hvac_mode":
-                hvac_modes.update(choice.options)
-            elif choice.voice == "mode":
+        choices = supported_settings(hass, entity_id)
+        if (hvac_modes := _hvac_modes(entity_id, choices)) is not None:
+            hvac_sets.add(hvac_modes)
+        for choice in choices:
+            if choice.voice == "mode":
                 source = ModeSource(
                     domain=split_entity_id(entity_id)[0],
                     platform=None if registered is None else registered.platform,
@@ -270,7 +301,7 @@ def voice_setting_values(hass: HomeAssistant) -> VoiceSettingValues:
                     modes=choice.options,
                 )
                 sources[source] = None
-    return VoiceSettingValues(frozenset(hvac_modes), tuple(sources))
+    return VoiceSettingValues(frozenset(hvac_sets), tuple(sources))
 
 
 async def async_mode_words(
@@ -350,20 +381,29 @@ def build(
     the schedule intervals are called and what can be turned on in filled in.
 
     A name is listed under what is said (`in`, escaped so that it is read as text) and
-    what it means (`out`), with the domain of its target as context; an interval, which
-    is told apart by its title alone, without a context. What is said is made of the
-    name, the title or the mode as it is written by `spoken_variants`: a Russian "yo" in
-    it makes two values, with "yo" and with "ye", both meaning the same, and one that is
-    nothing but punctuation is left out, since it would match anywhere. The words for an
-    HVAC mode are those of the sources that mean a mode some target supports; a mode is
-    listed as the device names it, said with spaces for underscores, and in each of the
-    words of `mode_words` for it (see `async_mode_words`).
+    what it means (`out`), with the domain of its target as context, and for a
+    thermostat the key of its HVAC modes (`hvac_key`); an interval, which is told apart
+    by its title alone, without a context. What is said is made of the name, the title
+    or the mode as it is written by `spoken_variants`: a Russian "yo" in it makes two
+    values, with "yo" and with "ye", both meaning the same, and one that is nothing but
+    punctuation is left out, since it would match anywhere.
+
+    Every data block of the sources that requires the domain `climate` alone is
+    replaced by one copy for each of the sets of HVAC modes in `settings`, in the order
+    of their keys. A copy requires the key of its set, so that a thermostat is
+    understood with the words for its own modes and no other, and has a list of those
+    words of its own, the words of the sources that mean one of the modes. The list of
+    the file itself is empty; without a set no block for thermostats is left. A block
+    that requires `climate` with another domain cannot be copied that way, and raises
+    `InvalidSentences`. A mode is listed as the device names it, said with spaces for
+    underscores, and in each of the words of `mode_words` for it (see
+    `async_mode_words`).
     """
     built = copy.deepcopy(dict(sources))
     lists = built.setdefault("lists", {})
     said: dict[str, tuple[str, ...]] = {}
     lists[LIST_TARGET], said[LIST_TARGET] = _name_list(
-        (spoken, {"out": name.name, "context": {"domain": name.domain}})
+        (spoken, {"out": name.name, "context": _context_of(name)})
         for name in names
         for spoken in spoken_variants(name.name)
     )
@@ -372,17 +412,68 @@ def build(
         for interval in intervals
         for spoken in spoken_variants(interval.title)
     )
-    lists[LIST_HVAC_MODE] = {
-        "values": [
-            word
-            for word in lists.get(LIST_HVAC_MODE, {}).get("values", [])
-            if word["out"] in settings.hvac_modes
-        ]
-    }
+    hvac_words = lists.get(LIST_HVAC_MODE, {}).get("values", [])
+    lists[LIST_HVAC_MODE] = {"values": []}
+    _scope_climate_blocks(built.get("intents", {}), hvac_words, settings.hvac_sets)
     lists[LIST_MODE], said[LIST_MODE] = _name_list(
         _mode_entries(settings.modes, mode_words)
     )
     return BuiltSentences(built, said)
+
+
+def _context_of(name: VoiceName) -> dict[str, str]:
+    """What the sentences know of a target from its name: its domain and, for a
+    thermostat, the key of its HVAC modes."""
+    context = {"domain": name.domain}
+    if name.hvac_modes is not None:
+        context[CONTEXT_HVAC_MODES] = hvac_key(name.hvac_modes)
+    return context
+
+
+def _scope_climate_blocks(
+    intents: Mapping[str, Any],
+    words: Sequence[Mapping[str, Any]],
+    hvac_sets: Iterable[frozenset[str]],
+) -> None:
+    """Replace, in place, every data block of `intents` that requires the domain
+    `climate` alone by a copy for each of the `hvac_sets`, in the order of their keys.
+
+    A copy requires the key of its set (`CONTEXT_HVAC_MODES`) as well, and has the list
+    of the words for an HVAC mode (`words`) cut down to those that mean a mode of the
+    set.
+    """
+    ordered = sorted(hvac_sets, key=hvac_key)
+    for intent_name, definition in intents.items():
+        blocks: list[dict[str, Any]] = []
+        for block in definition["data"]:
+            domains = block.get("requires_context", {}).get("domain", [])
+            if isinstance(domains, str):
+                domains = [domains]
+            if CLIMATE_DOMAIN not in domains:
+                blocks.append(block)
+            elif len(domains) > 1:
+                raise InvalidSentences(
+                    f"A block of {intent_name} is for climate and other domains: it"
+                    " cannot be copied for each set of HVAC modes"
+                )
+            else:
+                blocks.extend(_copy_for_modes(block, words, modes) for modes in ordered)
+        definition["data"] = blocks
+
+
+def _copy_for_modes(
+    block: Mapping[str, Any], words: Sequence[Mapping[str, Any]], modes: frozenset[str]
+) -> dict[str, Any]:
+    """The data block `block` for the thermostats that can be turned on with `modes`."""
+    scoped = copy.deepcopy(dict(block))
+    scoped["requires_context"][CONTEXT_HVAC_MODES] = hvac_key(modes)
+    scoped["lists"] = {
+        **scoped.get("lists", {}),
+        LIST_HVAC_MODE: {
+            "values": [copy.deepcopy(dict(w)) for w in words if w["out"] in modes]
+        },
+    }
+    return scoped
 
 
 def _name_list(

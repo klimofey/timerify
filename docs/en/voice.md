@@ -167,6 +167,8 @@ A name is listed the way Home Assistant lists every entity: with its aliases. Th
 
 Some modes have no word in the language of the file. Home Assistant then shows the English one, and so does the file. A mode that Home Assistant has no word for at all is listed as the device names it. A word that is also the name of another mode is listed for that mode only, so it cannot start the wrong one. A word that two modes of different devices share is listed for one of them only. The other mode is then said by its own name.
 
+Each thermostat is understood with the HVAC modes it has, and with no others. Say you have an AC that cools and heats, and a small AC that only cools. "Heating" after the name of the small AC is then not understood. Nothing is turned on, and Assist answers that it could not understand you. The same goes for a delayed command and a command at a time. Thermostats with the same modes share their sentences. The file grows a little for each different set of modes.
+
 A name, an interval title or a mode that has the Russian letter yo (the one with two dots) is listed twice. One value has yo and the other has ye. Speech recognition often writes ye where Russian prints yo. So either is understood, and the answer gives the name as the device has it.
 
 Timerify writes the file again when any of these happens:
@@ -215,7 +217,7 @@ For each language you want (`en`, `ru`):
    - `in` is the name as it is said, with the punctuation that Home Assistant ignores removed. Say it has any of the characters `( ) [ ] { } < > | @`. Then put a backslash before each of them, and before every backslash in it. Home Assistant would otherwise read them as a sentence template. `out` is the name as Home Assistant shows it.
    - Give each name its `context: domain`, which is the part of the entity id before the dot. Settings are said only of a device that has them. A thermostat's HVAC mode and temperature need `climate`. A water heater's temperature needs `water_heater`. A name with no domain gets the sentences that fit every device, and nothing more.
    - `timerify_interval` is needed only to switch a schedule interval by its title. The whole schedule needs none.
-   - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. A mode that the device does not have is refused when it is said.
+   - To say a thermostat's fan mode, a fan's preset or a humidifier's mode, list the values under `timerify_mode` the same way. `in` is the mode as it is said, with a space for an underscore. `out` is the mode as the device names it. The words for the HVAC modes are in `timerify.yaml` already, for every mode. Every thermostat takes every one of them. A mode that a thermostat does not have is refused when it is said.
    - List the word Home Assistant shows for a mode as well, if you want to say it. Give it the same `out` as the mode. The entry does this for you, but a copy made by hand holds only what you write.
    - List a name with the Russian letter yo twice: once with yo and once with ye. Both values have the same `out`. Do the same for a title and a mode. Speech recognition often writes ye, and Home Assistant does not treat the two letters as one.
 4. Restart Home Assistant, or call `conversation.reload`.
@@ -253,7 +255,6 @@ If the interval is empty, the whole schedule is switched.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
 - **An interval by the title it is made with.** Rename it first.
-- **Two thermostats with different HVAC modes.** The words are the modes of all of them. So if you say a mode that only one of them has to the other, it is refused. The answer lists the modes that thermostat has.
 
 ---
 

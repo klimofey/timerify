@@ -21,7 +21,7 @@ from ..conftest import (
     sets_attribute,
     switches_to,
 )
-from ..helpers import AC_ATTRS, AC_ID, JERUSALEM
+from ..helpers import AC_ATTRS, AC_ID, JERUSALEM, SMALL_AC_ID
 from .helpers import copy_sentences
 
 
@@ -134,6 +134,20 @@ def fake_full_ac(provide_target: ProvideTarget) -> FakeTarget:
         CLIMATE_SERVICES,
         name="AC",
         capability_attributes={**AC_ATTRS, "hvac_modes": HVAC_MODES},
+        state_attributes={"temperature": 20, "fan_mode": "auto"},
+    )
+
+
+@pytest.fixture
+def fake_small_ac(provide_target: ProvideTarget) -> FakeTarget:
+    """`climate.small_ac` on a device called Small AC, switched off: a second air
+    conditioner, for a house where two thermostats have different modes. It has the
+    modes `off`, `cool` and `fan_only`, and the fan modes of `fake_climate`."""
+    return provide_target(
+        SMALL_AC_ID,
+        CLIMATE_SERVICES,
+        name="Small AC",
+        capability_attributes={**AC_ATTRS, "hvac_modes": ["off", "cool", "fan_only"]},
         state_attributes={"temperature": 20, "fan_mode": "auto"},
     )
 

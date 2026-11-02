@@ -7,8 +7,10 @@
 # and the names to custom_sentences/en/timerify.yaml, or by hand, as the README says. So
 # are timerify_mode, the modes that the devices take besides the HVAC modes (the fan
 # mode of a thermostat, the preset of a fan, the mode of a humidifier),
-# timerify_interval, the titles of the schedule intervals, and timerify_hvac_mode, which
-# the Voice settings entry cuts down to the HVAC modes that the devices have.
+# timerify_interval, the titles of the schedule intervals. The list timerify_hvac_mode has
+# every word for an HVAC mode here, for the copy made by hand. The Voice settings entry
+# empties it, and copies each block for thermostats once for each set of HVAC modes that
+# thermostats have, with a list of its own that has the words for those modes only.
 #
 # A setting is said only of a device that has it: the names in timerify_target carry the
 # domain of their device, and a block of TimerifyRun below takes the names of the domains

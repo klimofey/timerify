@@ -904,12 +904,56 @@ those of the spec.
   Before the scoping it was a refusal about the setting "Temperature" that also misled.
   Cost if wrong: that wording; and a user who lists a thermostat by hand without its
   domain gets no HVAC words.
-- **The list of HVAC words is the union of the modes of every thermostat.** Two air
-  conditioners with different modes, one without "auto": a bare "auto" said of the one that
-  lacks it is understood and refused truthfully, naming the modes that AC has ("fan auto"
-  and "in auto mode" still reach the fan mode). One block of sentences per distinct set of
-  modes would close it and is its own step (issue #25). Cost if wrong: that
-  refusal.
+- **Each thermostat is understood with the HVAC modes it has, by one copy of the sentences
+  for thermostats per distinct set of modes (Decision 8, #25).** The name of a thermostat
+  carries the context `timerify_hvac_modes`: its modes sorted and joined by a space
+  (`hvac_key`), from `supported_settings`, which leaves `off` out; a thermostat with none
+  has the empty key, and is still run for a time. `build` replaces every data block of the
+  sources that requires the domain `climate` alone (`TimerifyRun`, `TimerifyDelayedCommand`
+  and `TimerifyCommandAt`: three in each language) by one copy for each set in
+  `VoiceSettingValues.hvac_sets`, in the order of the keys. A copy requires its key as well
+  as the domain, and has a list `timerify_hvac_mode` of its own with the words of the
+  sources that mean its modes, in their order. The list of the file stays, empty, since
+  the rules refer to it; without a set no block for thermostats is left. A block that
+  requires `climate` with another domain makes `build` raise `InvalidSentences`: the
+  sources are Timerify's own and have none. The shipped files, which the manual route
+  copies, keep the one block with every word, so there every thermostat takes every word
+  and the handler refuses a mode it lacks, truthfully, naming the modes it has. Checked in
+  hassil: a data block takes `requires_context` and `lists` of its own
+  (`hassil/intents.py`, `IntentData` and `Intents.from_dict`), the `context` of a matched
+  name joins the context that `requires_context` is checked against (`string_matcher.py`,
+  after the match of a list value), and a block's lists win over those of the file
+  (`recognize.py`). The words are Timerify's own templates, copied as they are, so
+  `validate` has no text to hold them to (`said` is for the names that come from devices),
+  and a copy is pinned by the structure test instead. Why: with the union, a mode only one
+  thermostat had was understood of the other and refused. Now it is not understood, and in
+  English the built-in name fallback (the gazetteer) could have acted on the rest of the
+  sentence; the tests say it does not, for "turn on the small AC for an hour heating", the
+  same after a delay or at a clock time, and nothing is switched on either thermostat and
+  no command is kept. A bare "auto" said of a thermostat with no HVAC mode `auto` is its
+  fan mode `auto`, if it has one. Growth, measured with `len(render(built.data))`: one set
+  makes the English file 41985 characters and the Russian 34779 (the union of six modes
+  made 41556 and 34376); each further set adds about 4.3 KB in English and 3.9 KB in
+  Russian, so three sets make 50600 and 42590; building, rendering and `validate` take
+  about 0.03 s. The test helper's `EVERY_TEXT_LIMIT` counts the texts of the shipped
+  sentences, which have one block, so it does not grow. Cost if wrong: in English, a
+  sentence with a mode the thermostat lacks is not understood, where it was refused with
+  the modes it has.
+  Tests: `test_each_ac_understands_only_its_own_hvac_modes`,
+  `test_a_mode_only_another_ac_has_switches_neither_on`,
+  `test_a_delayed_turn_on_takes_only_the_hvac_modes_of_its_ac`,
+  `test_a_command_at_a_time_takes_only_the_hvac_modes_of_its_ac`,
+  `test_russian_hvac_words_are_scoped_per_ac`,
+  `test_a_hand_listed_ac_keeps_every_hvac_word`,
+  `test_a_thermostat_that_no_mode_is_listed_for_is_still_run_for_a_time`,
+  `test_each_set_of_hvac_modes_adds_its_climate_blocks_once`,
+  `test_without_a_set_of_hvac_modes_the_sentences_for_thermostats_go`,
+  `test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own`,
+  `test_a_block_for_climate_and_another_domain_is_refused`,
+  `test_a_thermostat_is_listed_with_the_key_of_the_modes_it_has`,
+  `test_each_thermostat_is_listed_with_the_modes_it_has`,
+  `test_thermostats_with_the_same_modes_share_their_sentences` and
+  `test_the_sentences_for_thermostats_follow_the_thermostats_of_the_house`.
 - **Pending commands are cancelled by voice as "all" (the default) or "the next one",
   which repeats; an LLM may also cancel by id.** A voice cannot say an id. The tool that
   cancels by id says it cancelled one command, and one by "next" or "all" says that, so the
@@ -2937,8 +2981,8 @@ in `docs/followups.md`.
   "Auto" of `auto` is the name again, and every mode is listed by its name before any
   word is, so a word that is said like another mode cannot mean the wrong one. A word
   that two modes of different devices share goes to the one that sorts first, and the
-  other is said by its name, since the values of the list are not scoped to a device (as
-  those of the HVAC words are not, #25).
+  other is said by its name, since the values of the list are not scoped to a device (the
+  HVAC words are scoped to a set of modes, #25, and these are not).
   `SentenceFiles.async_sync` asks for the words of each language it writes, in the event
   loop, before the executor job that builds the file; `VoiceSettingValues.mode_sources`
   replaces the set of modes, which stays as the property `modes`. Why: a person who reads

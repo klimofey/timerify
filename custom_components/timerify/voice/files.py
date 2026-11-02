@@ -4,9 +4,10 @@ them in step with the timers, and takes them away again.
 The file of a language is `custom_sentences/<language>/timerify.yaml`. It is the shipped
 sentences with the names of the timers' targets in them, the titles of their schedule
 intervals and the modes of their devices, in the words that Home Assistant translates
-them to in that language, and it is rewritten whenever those may have changed. Writing
-a file and removing one are followed by a reload of the built-in agent's sentences, so
-that the change is heard at once.
+them to in that language, and with the sentences for thermostats copied for each set of
+HVAC modes that thermostats have. It is rewritten whenever those may have changed.
+Writing a file and removing one are followed by a reload of the built-in agent's
+sentences, so that the change is heard at once.
 
 The path is the user's directory, and a file at it is Timerify's only if its first line
 is `MANAGED_HEADER`: Timerify writes where there is no file or its own, removes only its

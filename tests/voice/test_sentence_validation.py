@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from custom_components.timerify.const import (
+    CONTEXT_HVAC_MODES,
     LIST_HVAC_MODE,
     LIST_INTERVAL,
     LIST_MODE,
@@ -30,6 +31,7 @@ from custom_components.timerify.voice.sentences import (
     VoiceTitle,
     build,
     dump_sentences,
+    hvac_key,
     load_sources,
     read_back,
     render,
@@ -221,7 +223,7 @@ def test_the_text_of_a_file_is_read_as_the_built_in_agent_reads_it() -> None:
 
 
 SETTINGS = VoiceSettingValues(
-    hvac_modes=frozenset({"cool", "heat_cool", "fan_only"}),
+    hvac_sets=frozenset({frozenset({"cool", "heat_cool", "fan_only"})}),
     mode_sources=(
         ModeSource("climate", None, None, None, "fan_mode", ("low",)),
         ModeSource(
@@ -238,22 +240,158 @@ def built_with_settings(language: str = "en") -> BuiltSentences:
     return build(load_sources(language), NAMES, SETTINGS)
 
 
+def climate_blocks(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every data block of the intents in `data` that requires the domain `climate`,
+    alone or in a list, in the order the file has them."""
+    blocks: list[dict[str, Any]] = []
+    for intent in data["intents"].values():
+        for block in intent["data"]:
+            domains = block.get("requires_context", {}).get("domain", [])
+            if "climate" in ([domains] if isinstance(domains, str) else domains):
+                blocks.append(block)
+    return blocks
+
+
+HVAC_SETS = (
+    frozenset({"cool", "fan_only"}),
+    frozenset({"cool", "heat", "heat_cool"}),
+    frozenset({"auto"}),
+)
+"""Three different sets of HVAC modes that thermostats can have."""
+
+
+def scoped(block: dict[str, Any], words: list[dict[str, str]], modes: set[str]) -> dict:
+    """The block of the sources as it is once it is for the thermostats that have
+    `modes`, which are said with those of `words` that mean one of them."""
+    copy_of = copy.deepcopy(block)
+    copy_of["requires_context"][CONTEXT_HVAC_MODES] = hvac_key(modes)
+    copy_of["lists"] = {
+        LIST_HVAC_MODE: {"values": [w for w in words if w["out"] in modes]}
+    }
+    return copy_of
+
+
+def test_the_key_of_a_set_of_hvac_modes_does_not_depend_on_their_order() -> None:
+    assert hvac_key(["fan_only", "cool", "heat"]) == "cool fan_only heat"
+    assert hvac_key({"heat", "cool", "fan_only"}) == "cool fan_only heat"
+    assert hvac_key([]) == ""
+
+
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)
-def test_the_words_for_a_mode_are_those_of_the_modes_the_targets_have(
+def test_the_words_for_a_mode_are_those_of_the_modes_the_thermostats_have(
     language: str,
 ) -> None:
-    """Of the words of the sources only those that mean a mode some target supports
-    are kept, in the order of the sources."""
+    """Of the words of the sources only those that mean a mode the thermostats of the
+    set have are kept, in the order of the sources, in a list of the blocks for them;
+    the list of the file itself has none."""
     sources = load_sources(language)
 
     built = build(sources, NAMES, SETTINGS)
 
-    kept = [value["out"] for value in built.data["lists"][LIST_HVAC_MODE]["values"]]
-    assert kept == ["cool", "fan_only", "heat_cool"]
-    assert built.data["lists"][LIST_HVAC_MODE]["values"] == [
-        value
-        for value in sources["lists"][LIST_HVAC_MODE]["values"]
-        if value["out"] in SETTINGS.hvac_modes
+    assert built.data["lists"][LIST_HVAC_MODE] == {"values": []}
+    blocks = climate_blocks(built.data)
+    assert len(blocks) == 3
+    for block in blocks:
+        kept = block["lists"][LIST_HVAC_MODE]["values"]
+        assert [value["out"] for value in kept] == ["cool", "fan_only", "heat_cool"]
+        assert kept == [
+            value
+            for value in sources["lists"][LIST_HVAC_MODE]["values"]
+            if value["out"] in {"cool", "fan_only", "heat_cool"}
+        ]
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+@pytest.mark.parametrize("count", [1, 2, 3])
+def test_each_set_of_hvac_modes_adds_its_climate_blocks_once(
+    language: str, count: int
+) -> None:
+    """The sources have three blocks for thermostats (run, delayed, at a clock time).
+    Each distinct set of modes has a copy of each, which requires the key of the set
+    and has the words of its modes only, and nothing else of the block is changed: the
+    copies come in the order of the keys, one block after the other."""
+    sources = load_sources(language)
+    shipped = climate_blocks(sources)
+    assert len(shipped) == 3
+    words = sources["lists"][LIST_HVAC_MODE]["values"]
+    sets = HVAC_SETS[:count]
+
+    built = build(sources, NAMES, VoiceSettingValues(hvac_sets=frozenset(sets)))
+
+    assert climate_blocks(built.data) == [
+        scoped(block, words, set(modes))
+        for block in shipped
+        for modes in sorted(sets, key=hvac_key)
+    ]
+    validate(language, built.data, built.said)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_without_a_set_of_hvac_modes_the_sentences_for_thermostats_go(
+    language: str,
+) -> None:
+    """No thermostat is a target, so no sentence of the file is for one; the other
+    blocks stay."""
+    sources = load_sources(language)
+
+    built = build(sources, NAMES)
+
+    assert climate_blocks(built.data) == []
+    before = len(sources["intents"]["TimerifyRun"]["data"])
+    assert len(built.data["intents"]["TimerifyRun"]["data"]) == before - 1
+    validate(language, built.data, built.said)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_thermostat_with_no_mode_to_be_turned_on_in_has_a_set_of_its_own(
+    language: str,
+) -> None:
+    """The empty set is a set: a thermostat that can only be off is still run for a
+    time, with no word for a mode to say."""
+    built = build(
+        load_sources(language),
+        NAMES,
+        VoiceSettingValues(hvac_sets=frozenset({frozenset()})),
+    )
+
+    blocks = climate_blocks(built.data)
+    assert len(blocks) == 3
+    for block in blocks:
+        assert block["requires_context"][CONTEXT_HVAC_MODES] == ""
+        assert block["lists"][LIST_HVAC_MODE] == {"values": []}
+    validate(language, built.data, built.said)
+
+
+def test_a_block_for_climate_and_another_domain_is_refused() -> None:
+    """Only the blocks that are for thermostats alone can be copied for each set of
+    modes: Timerify's own sources have no other, so one is a mistake in them."""
+    sources = load_sources("en")
+    sources["intents"]["TimerifyRun"]["data"].append(
+        {
+            "sentences": ["run {timerify_target:name}"],
+            "requires_context": {"domain": ["climate", "water_heater"]},
+        }
+    )
+
+    with pytest.raises(InvalidSentences, match="climate"):
+        build(sources, NAMES, SETTINGS)
+
+
+def test_a_thermostat_is_listed_with_the_key_of_the_modes_it_has() -> None:
+    names = (
+        VoiceName("AC", "climate", frozenset({"heat", "cool"})),
+        VoiceName("Heater", "climate", frozenset()),
+        VoiceName("Boiler", "switch"),
+    )
+
+    built = build(load_sources("en"), names)
+
+    assert [
+        value["context"] for value in built.data["lists"][LIST_TARGET]["values"]
+    ] == [
+        {"domain": "climate", CONTEXT_HVAC_MODES: "cool heat"},
+        {"domain": "climate", CONTEXT_HVAC_MODES: ""},
+        {"domain": "switch"},
     ]
 
 

@@ -84,6 +84,9 @@ AC_NUMBER = "number.ac_run_for"
 AC_ENDS_AT = "sensor.ac_ends_at"
 AC_NEXT = "sensor.ac_next_command"
 AC_RUNTIME = "sensor.ac_runtime"
+SMALL_AC_ID = "climate.small_ac"
+SMALL_AC_NUMBER = "number.small_ac_run_for"
+SMALL_AC_NEXT = "sensor.small_ac_next_command"
 
 
 async def call_service(

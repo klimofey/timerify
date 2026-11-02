@@ -243,6 +243,78 @@ describe("the form of the visual editor", () => {
     );
   });
 
+  it("words the presets helper in the editor's language before any card has loaded", async () => {
+    const { getConfigForm, lastLoaded } = await freshEditor();
+    expect(lastLoaded()).toBeUndefined();
+
+    const form = await getConfigForm();
+
+    const russianLengths = lengths("ru");
+    expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).toBe(
+      russian.card_editor_presets_helper.replace(
+        "{presets}",
+        russianLengths.listOf(russianLengths.presets),
+      ),
+    );
+    // Not a word of the English file is glued to a number.
+    expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).not.toMatch(/\b(min|hr)\b/);
+  });
+
+  it("says which presses use a Home Assistant action in the editor's language before any card has loaded", async () => {
+    const { getConfigForm, lastLoaded } = await freshEditor();
+    expect(lastLoaded()).toBeUndefined();
+
+    const form = await getConfigForm();
+
+    for (const field of ["tap_action", "double_tap_action", "hold_action"]) {
+      expect(form.computeHelper({ name: field }, localizeFor("ru")), field).toBe(
+        russian.card_editor_action_helper,
+      );
+    }
+  });
+
+  it("words the helpers in the language of the editor, whatever the last card loaded", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass({ language: "ru" }));
+
+    const form = await getConfigForm();
+
+    const englishLengths = lengths("en");
+    expect(form.computeHelper({ name: "presets" }, localizeFor("en"))).toBe(
+      english.card_editor_presets_helper.replace(
+        "{presets}",
+        englishLengths.listOf(englishLengths.presets),
+      ),
+    );
+    expect(form.computeHelper({ name: "hold_action" }, localizeFor("en"))).toBe(
+      english.card_editor_action_helper,
+    );
+    // The names of the options are all the form can take from the card: they stay in the
+    // language of the last card, which is not the editor's here.
+    const [, layout] = form.schema;
+    expect(layout).toMatchObject({
+      selector: { select: { options: [{ label: russian.card_editor_layout_pill }, {}] } },
+    });
+  });
+
+  it("words the helpers in English until the editor's strings have reached the frontend", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass({ language: "ru" }));
+    const form = await getConfigForm();
+    const unlocalized = fakeHass({ stringsLoaded: false }).localize;
+
+    const englishLengths = lengths("en");
+    expect(form.computeHelper({ name: "presets" }, unlocalized)).toBe(
+      english.card_editor_presets_helper.replace(
+        "{presets}",
+        englishLengths.listOf(englishLengths.presets),
+      ),
+    );
+    expect(form.computeHelper({ name: "tap_action" }, unlocalized)).toBe(
+      english.card_editor_action_helper,
+    );
+  });
+
   it("explains the presets, and which presses use a Home Assistant action", async () => {
     const { getConfigForm } = await freshEditor();
 

@@ -252,6 +252,8 @@ The card's module is served to everyone, because the browser loads it before any
 
 The card's own words, its buttons and messages, are in English and Russian, in the language of your profile. For any other language they are in English. Times, durations and numbers are written by the browser for your language, so they are right in every language. The names and states of entities are Home Assistant's.
 
+In the visual editor, the names of the layouts, the presets and the press choices come from the last Timerify card that your browser loaded. Until a card has loaded since you opened Home Assistant, they can be in English.
+
 ---
 
 [All pages](README.md) · [Back to the README](../../README.md)

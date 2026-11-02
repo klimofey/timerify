@@ -101,22 +101,31 @@ const isActionField = (name: string): boolean => name.endsWith("_action");
 const ENGLISH = { locale: { language: "en" } };
 
 /**
- * What the editor's own words are said in: the language of the last strings a card loaded, and
- * English before any card has. `getConfigForm` is given no `hass`, and the form that Home
- * Assistant builds is given no way to translate the labels of a select's options, so these
- * come from the card.
+ * What the labels of the editor's options are said in: the language of the last strings a card
+ * loaded, and English before any card has. `getConfigForm` is given no `hass`, and the form
+ * that Home Assistant builds is given no way to translate the labels of a select's options, so
+ * these come from the card. The rest of the editor's words are made with the `localize` that
+ * the frontend hands to `computeLabel` and `computeHelper`.
  */
 function speaking(): { locale: { language: string } } {
   return lastLoaded() ?? ENGLISH;
 }
 
+/**
+ * The language that `localize` speaks. A function cannot be asked, so the card's strings say
+ * it themselves, in the one text of them that is not a translation: the tag of their language
+ * (`card_language`). English where `localize` has no strings of the card yet.
+ */
+function languageOf(localize: Localize): string {
+  return t({ localize }, "card_language");
+}
+
 /** The default presets, in words: "15 min, 30 min, 45 min, 1 hr, and 2 hr" in English. */
-function defaultPresetsText(): string {
-  const language = speaking();
-  return new Intl.ListFormat(language.locale.language, {
-    style: "long",
-    type: "conjunction",
-  }).format(DEFAULT_PRESETS.map((minutes) => formatMinutes(language, minutes)));
+function defaultPresetsText(localize: Localize): string {
+  const language = languageOf(localize);
+  return new Intl.ListFormat(language, { style: "long", type: "conjunction" }).format(
+    DEFAULT_PRESETS.map((minutes) => formatMinutes({ locale: { language } }, minutes)),
+  );
 }
 
 /**
@@ -200,14 +209,14 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       isLabelled(name) ? localize(localizeName(LABELS[name])) : "",
     computeHelper: ({ name }, localize) => {
       if (name === "presets") {
-        return t(lastLoaded(), "card_editor_presets_helper", { presets: defaultPresetsText() });
+        return t({ localize }, "card_editor_presets_helper", {
+          presets: defaultPresetsText(localize),
+        });
       }
       if (name === "mushroom") {
-        // The one helper that is made with the `localize` the frontend gives, in English when it
-        // does not have the card's strings yet.
         return mushroomIsDefined() ? undefined : t({ localize }, "card_editor_mushroom_missing");
       }
-      return isActionField(name) ? t(lastLoaded(), "card_editor_action_helper") : undefined;
+      return isActionField(name) ? t({ localize }, "card_editor_action_helper") : undefined;
     },
   };
 }

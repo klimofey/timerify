@@ -567,6 +567,7 @@
     }
   },
   "common": {
+    "card_language": "en",
     "card_entity_not_found": "Entity not found: {entity}",
     "card_not_a_timer": "{entity} is not the Run for number of a Timerify timer",
     "card_timer_incomplete": "The timer of {entity} cannot be shown: its target or one of its sensors is missing. Open the timer's page to see why.",

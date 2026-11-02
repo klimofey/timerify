@@ -1494,6 +1494,8 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   fails `tsc`, a stale bundle fails `build:check`, and a page whose first card is invalid shows
   that error in English. Cost if wrong: the editor's option labels and helper come from the last
   strings a card loaded, and are English when none has (issue #9).
+  Changed in 1.1.0: the text under the fields no longer comes from `lastLoaded()`: see "The
+  editor's helper texts are made with the `localize` the frontend gives" under Release 1.1.0.
 
 ### The editor and the picker
 
@@ -3613,3 +3615,38 @@ in `docs/followups.md`.
   a theme's variables, cards without the option, the Turn off button at its narrowest on a
   320 px phone in Russian and the words and icon in 6 and 7 columns, in English and in
   Russian, in the style) and `editor.spec.ts` (the field and the note).
+
+- **The editor's helper texts are made with the `localize` that the frontend hands to
+  `computeHelper`, and the language of that `localize` is read from the card's own
+  `card_language` string; only the names of a select's options still come from `lastLoaded()`
+  (#9).** The three helpers (the presets, the note under an action and the Mushroom note) are
+  each `t({ localize }, key)`. The presets helper lists the default presets with
+  `Intl.ListFormat` and `formatMinutes` in the language that `card_language` gives, so the
+  minutes words and the "and" follow the editor, and not the card that was loaded last. The
+  labels of the fields already went through `localize`. The names of the two layouts, the
+  labels of the preset options and the six press choices stay on `lastLoaded()`: English before
+  any card has loaded. Where the `localize` has no strings of the card, every helper is in
+  English, as the Mushroom note was.
+  `card_language` is the one text of `common` that is not a translation: the tag of the file it
+  is in (`en`, `ru`), which `tests/test_translations.py` pins to the file's name, so a language
+  added later cannot leave it out or mistake it.
+  Why: `getConfigForm()` is given no `hass`, and in 2026.10.4 and 2026.11.0b2 `hui-form-editor`
+  hands `localize` to `computeLabel` and `computeHelper` only and never sets `localizeValue` on
+  `ha-form`, so the form cannot translate the labels of options (research note
+  `.superpowers/research-part-e-frontend.md`, section 3). The one supported way around it, a
+  custom editor element, gives up the built-in form. A `localize` is a bare function, and the
+  frontend hands no language beside it: reading it from the page (`document.documentElement.lang`
+  is never set to the profile's language, and `home-assistant.hass` is private) would be an
+  unsupported hack, and the language of the last card loaded is the very thing that was wrong.
+  The strings are the only thing of the card that the frontend translates, so they say their
+  own language.
+  Cost if wrong: a translation file with a wrong tag in `card_language` would format its lengths
+  in another language; the test refuses it. One more key stays in step in every language file.
+  If the frontend ever gives `getConfigForm` a `hass`, or sets `localizeValue`, the option names
+  can follow it too, and `speaking()` goes. #9 stays open for that, labelled `upstream`.
+  Tests: `card/test/editor.test.ts` (`words the presets helper in the editor's language before
+  any card has loaded`, `says which presses use a Home Assistant action in the editor's language
+  before any card has loaded`, `words the helpers in the language of the editor, whatever the
+  last card loaded`, which also keeps the option names in the language of the last card, and
+  `words the helpers in English until the editor's strings have reached the frontend`) and
+  `tests/test_translations.py::test_card_strings_name_their_own_language`.

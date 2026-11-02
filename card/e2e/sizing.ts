@@ -39,7 +39,10 @@ export function isCutOff(part: Locator): Promise<boolean> {
   return part.evaluate((element) => element.scrollWidth > element.clientWidth);
 }
 
-/** The state both timers are put in: the loose one runs with no countdown, the strict one counts. */
+/**
+ * The state both timers are put in: the loose one runs with no countdown, the strict one
+ * counts.
+ */
 export async function runBothTimers(ws: HassWs, state: E2EState): Promise<void> {
   const { strict, loose } = state.timers;
   await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });

@@ -16,6 +16,13 @@ import { stringsIn } from "./strings";
 const loadMushroom = (page: Page) =>
   page.evaluate(() => customElements.define("mushroom-entity-card", class extends HTMLElement {}));
 
+/** What a theme says in Mushroom's variables: larger spacing and icon, and another colour. */
+const THEME = `:root {
+  --mush-spacing: 20px;
+  --mush-icon-size: 48px;
+  --mush-rgb-state-entity: 255, 0, 0;
+}`;
+
 /** The sizes of a card's parts, as the browser computes them. */
 interface Look {
   card: { height: string; borderRadius: string };
@@ -56,6 +63,11 @@ function lookOf(card: Locator): Promise<Look> {
   });
 }
 
+/** The colour of the pill's fill, which shows the share of the countdown that has gone. */
+function fillColour(card: Locator): Promise<string> {
+  return card.locator(".fill").evaluate((fill) => getComputedStyle(fill).backgroundColor);
+}
+
 /** The card as it is in the Home Assistant look, which is what a card has without Mushroom. */
 const HOME_ASSISTANT_PILL: Look = {
   card: { height: "56px", borderRadius: "28px" },
@@ -63,6 +75,8 @@ const HOME_ASSISTANT_PILL: Look = {
   icon: { width: "40px", height: "40px", borderRadius: "0px" },
   name: { fontSize: "14px", fontWeight: "500", lineHeight: "22.4px", letterSpacing: "normal" },
 };
+/** The amber of Home Assistant's default theme for what is on: `--state-active-color`. */
+const HOME_ASSISTANT_FILL = "rgb(255, 193, 7)";
 
 /** The card as Mushroom's own cards are, with the sizes Mushroom has when no theme sets them. */
 const MUSHROOM_PILL: Look = {
@@ -71,6 +85,8 @@ const MUSHROOM_PILL: Look = {
   icon: { width: "36px", height: "36px", borderRadius: "50%" },
   name: { fontSize: "14px", fontWeight: "500", lineHeight: "20px", letterSpacing: "0.1px" },
 };
+/** Mushroom's blue, the colour of what is on: `--mush-rgb-state-entity` when no theme sets it. */
+const MUSHROOM_FILL = "rgb(33, 150, 243)";
 
 test.describe("the pill that asks for the Mushroom style", () => {
   test.beforeEach(async ({ page, openDashboard }) => {
@@ -85,6 +101,7 @@ test.describe("the pill that asks for the Mushroom style", () => {
     for (const card of await page.locator("timerify-card").all()) {
       await expect(card).not.toHaveAttribute("data-mushroom", "");
       expect(await lookOf(card)).toEqual(HOME_ASSISTANT_PILL);
+      expect(await fillColour(card)).toBe(HOME_ASSISTANT_FILL);
     }
   });
 
@@ -98,8 +115,10 @@ test.describe("the pill that asks for the Mushroom style", () => {
       // The card's own transitions (the frontend gives it a fraction of a second to change
       // its shape) are over when it has this look.
       await expect.poll(() => lookOf(card)).toEqual(MUSHROOM_PILL);
+      // The countdown's fill has Mushroom's colour of what is on.
+      expect(await fillColour(card)).toBe(MUSHROOM_FILL);
     }
-    // The chip has Mushroom's height, and the countdown's fill its colour of what is on.
+    // The chip has Mushroom's height.
     const chip = page.locator("timerify-card").first().locator(".chip");
     expect((await boxOf(chip)).height).toBe(36);
   });
@@ -110,9 +129,7 @@ test.describe("the pill that asks for the Mushroom style", () => {
     await expect(card).toHaveAttribute("data-mushroom", "");
 
     // A theme sets its variables on the page, as Home Assistant does with the ones of a theme.
-    await page.addStyleTag({
-      content: ":root { --mush-spacing: 20px; --mush-icon-size: 48px; }",
-    });
+    await page.addStyleTag({ content: THEME });
 
     await expect.poll(() => lookOf(card)).toMatchObject({
       // The card is as high as its icon and the spacing around it make it.
@@ -120,6 +137,7 @@ test.describe("the pill that asks for the Mushroom style", () => {
       content: { paddingLeft: "20px", paddingRight: "20px", gap: "20px" },
       icon: { width: "48px", height: "48px" },
     });
+    expect(await fillColour(card)).toBe("rgb(255, 0, 0)");
   });
 });
 
@@ -134,10 +152,11 @@ test("a card that does not ask for the style stays as it is, whatever Mushroom a
   await isReady(card);
 
   await loadMushroom(page);
-  await page.addStyleTag({ content: ":root { --mush-spacing: 20px; --mush-icon-size: 48px; }" });
+  await page.addStyleTag({ content: THEME });
 
   await expect(card).not.toHaveAttribute("data-mushroom", "");
   expect(await lookOf(card)).toEqual(HOME_ASSISTANT_PILL);
+  expect(await fillColour(card)).toBe(HOME_ASSISTANT_FILL);
 });
 
 test.describe("the round tile that asks for the Mushroom style", () => {

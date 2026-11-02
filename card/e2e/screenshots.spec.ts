@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { REPO_ROOT, type TimerEntities } from "./constants";
 import { expect, test } from "./fixtures";
-import { mushroomBundle, serveMushroom } from "./mushroom";
+import { installMushroom, mushroomBundle } from "./mushroom";
 import type { HassWs } from "./ws";
 
 const MINUTE = 60_000;
@@ -88,6 +88,7 @@ test("pill", async ({ page, openDashboard, state, ws }) => {
   await pillsAreDrawn(cards);
   await takePicture(page, cards, "card-pill.png");
 });
+
 test("round", async ({ page, openDashboard, state, ws }) => {
   const began = await startCountdown(ws, state.timers.strict);
   await openDashboard(page, "round");
@@ -100,23 +101,27 @@ test("round", async ({ page, openDashboard, state, ws }) => {
 });
 
 /**
- * Mushroom, the real release, as a resource of the dashboard: the way a user has it. The
- * resource is taken away again when the test is over, whatever came of it, so that the other
- * pictures, and the end-to-end tests, are taken without it.
+ * Mushroom, the real release, as a user who installs it by hand has it: its file in the `www`
+ * folder of Home Assistant, which serves it at `/local`, and a resource of the dashboard that
+ * points there. The resource and the file are taken away again when the test is over, whatever
+ * came of it, so that the other pictures, and the end-to-end tests, are taken without it.
  */
 const withMushroom = test.extend<{ mushroomResource: void }>({
   mushroomResource: [
     async ({ ws }, use) => {
-      const served = await serveMushroom(await mushroomBundle());
-      const created = await ws.command<{ id: string }>("lovelace/resources/create", {
-        res_type: "module",
-        url: served.url,
-      });
+      const installed = await installMushroom(await mushroomBundle());
       try {
-        await use();
+        const created = await ws.command<{ id: string }>("lovelace/resources/create", {
+          res_type: "module",
+          url: installed.url,
+        });
+        try {
+          await use();
+        } finally {
+          await ws.command("lovelace/resources/delete", { resource_id: created.id });
+        }
       } finally {
-        await ws.command("lovelace/resources/delete", { resource_id: created.id });
-        await served.close();
+        await installed.remove();
       }
     },
     // Every test of this one is a test with Mushroom on the dashboard.

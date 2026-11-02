@@ -31,7 +31,7 @@ function loadMushroom(): void {
 
 const inMushroomStyle = (card: TimerifyCard) => card.hasAttribute("data-mushroom");
 
-/** A card of the layout on a timer that counts, which shows the countdown, the chip and Turn off. */
+/** A card of the layout on a timer that counts: it shows the countdown, the chip and Turn off. */
 function mushroomCard(layout: Layout, options: Record<string, unknown> = {}, hass = counting(45)) {
   return mountCard(hass, {
     entity: NUMBER,
@@ -99,9 +99,8 @@ function expectHomeAssistantLook(card: TimerifyCard, layout: Layout): void {
   for (const [selector, look] of Object.entries(HOME_ASSISTANT_LOOK[layout])) {
     const style = styleOf(card, selector);
     for (const [property, wanted] of Object.entries(look)) {
-      expect(style[property as keyof CSSStyleDeclaration], `${layout} ${selector} ${property}`).toBe(
-        wanted,
-      );
+      const shown = style[property as keyof CSSStyleDeclaration];
+      expect(shown, `${layout} ${selector} ${property}`).toBe(wanted);
     }
   }
 }
@@ -146,7 +145,9 @@ describe("a card that asks for the Mushroom style where Mushroom is not", () => 
 });
 
 describe("Mushroom loading after the cards, as a resource of a dashboard does", () => {
-  it("gives the style to the cards that wait, and does not touch the one that has gone", async () => {
+  // Mushroom can arrive once in a file, so the cards that it must and must not reach are all
+  // on the page before it does.
+  it("styles the cards that ask, and not the one that went or the one that stopped asking", async () => {
     const waiting = [
       await mushroomCard("pill", { mushroom: true }),
       await mushroomCard("round", { mushroom: true }),
@@ -155,6 +156,17 @@ describe("Mushroom loading after the cards, as a resource of a dashboard does", 
     const gone = await mushroomCard("pill", { mushroom: true });
     gone.remove();
     const drawn = renders(gone);
+    // This one waits for Mushroom, and then its config says that the style is not wanted.
+    const declined = await mushroomCard("pill", { mushroom: true });
+    declined.setConfig({
+      entity: NUMBER,
+      layout: "pill",
+      show_turn_off: true,
+      chip: 15,
+      mushroom: false,
+    });
+    await declined.updateComplete;
+    const declinedDrawn = renders(declined);
     expect(waiting.map(inMushroomStyle)).toEqual([false, false, false]);
 
     loadMushroom();
@@ -166,8 +178,14 @@ describe("Mushroom loading after the cards, as a resource of a dashboard does", 
     // Nobody asked the card that went to draw, so it did not find out that Mushroom came.
     expect(renders(gone)).toBe(drawn);
     expect(inMushroomStyle(gone)).toBe(false);
+    // The card that no longer asks was not waiting for it: it is not drawn again, and it keeps
+    // the look it has, whatever the theme says of Mushroom.
+    applyTheme(declined, MUSHROOM_THEME);
+    expect(renders(declined)).toBe(declinedDrawn);
+    expect(inMushroomStyle(declined)).toBe(false);
+    expectHomeAssistantLook(declined, "pill");
 
-    // Back on the page, it finds out then.
+    // Back on the page, the card that went finds out then.
     document.body.append(gone);
     await gone.updateComplete;
     expect(inMushroomStyle(gone)).toBe(true);

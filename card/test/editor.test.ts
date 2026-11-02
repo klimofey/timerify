@@ -249,7 +249,9 @@ describe("the form of the visual editor", () => {
     const form = await getConfigForm();
 
     for (const field of ["tap_action", "double_tap_action", "hold_action"]) {
-      expect(form.computeHelper({ name: field }, localizeFor("en")), field).toBe(english.card_editor_action_helper);
+      expect(form.computeHelper({ name: field }, localizeFor("en")), field).toBe(
+        english.card_editor_action_helper,
+      );
     }
     for (const field of [
       ...["entity", "layout", "name", "icon", "chip", "show_turn_off"],
@@ -265,7 +267,9 @@ describe("the form of the visual editor", () => {
 
     const form = await getConfigForm();
 
-    expect(form.computeHelper({ name: "hold_action" }, localizeFor("ru"))).toBe(russian.card_editor_action_helper);
+    expect(form.computeHelper({ name: "hold_action" }, localizeFor("ru"))).toBe(
+      russian.card_editor_action_helper,
+    );
   });
 
   it("refuses a config of the wrong kind, as the card does", async () => {

@@ -5,6 +5,11 @@ import { fileURLToPath } from "node:url";
 export const BASE_URL = "http://localhost:18124";
 export const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /**
+ * The folder that Home Assistant serves at `/local`: the `www` of the configuration that
+ * `scripts.e2e.hass` starts it on (`CONFIG_DIR` there). Home Assistant has it from its start.
+ */
+export const LOCAL_DIR = fileURLToPath(new URL("../../scripts/e2e/config/www", import.meta.url));
+/**
  * What the strict timer's target is called on the dashboard: `scripts.e2e.hass` gives it this
  * name in the entity registry, as a user renames an entity (`STRICT_NAME` there says the same).
  */

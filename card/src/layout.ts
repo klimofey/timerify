@@ -244,7 +244,6 @@ export const commonStyles = css`
   }
 `;
 
-
 /**
  * What the Mushroom style changes in what the layouts share, where it is on (`data-mushroom`
  * on the card, see `mushroom.ts`). It only adds to the rules above, with a selector that is

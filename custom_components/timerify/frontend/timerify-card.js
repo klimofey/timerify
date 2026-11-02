@@ -803,7 +803,9 @@ var nt=globalThis,it=nt.ShadowRoot&&(nt.ShadyCSS===void 0||nt.ShadyCSS.nativeSha
   :host([data-mushroom]) ha-card.round.with-turn-off {
     height: max(
       184px,
-      calc(2 * ${a.spacing} + ${k}px + ${a.primaryLineHeight} + 4px + ${a.controlHeight})
+      calc(
+        2 * ${a.spacing} + ${k}px + ${a.primaryLineHeight} + 4px + ${a.controlHeight}
+      )
     );
   }
   :host([data-mushroom]) .round .content {

@@ -5,7 +5,12 @@
 // the page can only be asked whether its cards are defined: `customElements.get`. So a card
 // asks again when Mushroom's cards become defined, and until then it keeps the Home Assistant
 // look. Only the names of Mushroom's theme variables are shared; none of its code is used.
-import { unsafeCSS, type CSSResult, type ReactiveController, type ReactiveControllerHost } from "lit";
+import {
+  unsafeCSS,
+  type CSSResult,
+  type ReactiveController,
+  type ReactiveControllerHost,
+} from "lit";
 
 /** One of Mushroom's cards, whose definition says that Mushroom is on the page. */
 export const MUSHROOM_CARD = "mushroom-entity-card";

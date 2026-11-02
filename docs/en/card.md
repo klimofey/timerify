@@ -192,7 +192,7 @@ Turn it on with **Mushroom style** in the visual editor. In YAML, write `mushroo
 ![The round tile in the Mushroom style: a ring around 30:00, beside a timer that is off, with its icon in a round shape](../screenshots/card-round-mushroom.png)
 
 - The style needs Mushroom. Install it yourself, for example through HACS. Timerify does not install it, and does not use its code.
-- The card looks for Mushroom in your browser. Mushroom counts as there once its cards are loaded. It may load after the card. The card then takes the style at once.
+- The card looks for Mushroom in your browser. It sees Mushroom once Mushroom's cards have loaded. That can be after the card itself has loaded. The card then takes the style at once.
 - Without Mushroom, the card keeps the Home Assistant look. The visual editor says **Mushroom was not found** under the field.
 - The icon stands in a round shape. The shape is tinted while the device is on, and grey while it is off. The pill has the corners of any card, not round ends.
 - The name, the state, the **Turn off** button and the chip take Mushroom's sizes and fonts. The card is as high as a Mushroom card with the same icon.

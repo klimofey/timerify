@@ -87,10 +87,18 @@ class Instance:
             raise HarnessFailure(f"`{' '.join(command)}` failed")
 
     async def start_fresh(self) -> None:
-        """Start Home Assistant on an empty configuration; it is not up yet when this
-        returns, see `wait_until_up`."""
+        """Start Home Assistant on an empty configuration that has a `www` folder; it is
+        not up yet when this returns, see `wait_until_up`.
+
+        Home Assistant serves the files of `www` at `/local`, and only when the folder
+        exists as it starts: the configuration of a user who serves files of his own
+        has it, so this one has it too. The configuration directory is made here, by
+        the user who runs the harness, so that the same user can put files into `www`
+        afterwards; the container is not the one to create it."""
         await self.compose("down", "--remove-orphans")
+        await asyncio.to_thread(self.config_dir.mkdir, parents=True, exist_ok=True)
         await self.compose("run", "--rm", "wipe")
+        await asyncio.to_thread((self.config_dir / "www").mkdir)
         await self.compose("up", "--detach", "homeassistant")
 
     async def restart(self, session: aiohttp.ClientSession) -> None:

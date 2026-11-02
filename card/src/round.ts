@@ -215,7 +215,9 @@ export const roundStyles = css`
   :host([data-mushroom]) ha-card.round.with-turn-off {
     height: max(
       184px,
-      calc(2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight} + 4px + ${mush.controlHeight})
+      calc(
+        2 * ${mush.spacing} + ${SIZE}px + ${mush.primaryLineHeight} + 4px + ${mush.controlHeight}
+      )
     );
   }
   :host([data-mushroom]) .round .content {

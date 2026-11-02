@@ -1,17 +1,16 @@
 // The real Mushroom, for the pictures of the documentation. A picture of the Mushroom style
 // has to be taken with Mushroom on the page, so the screenshots load its release the way a user
-// does: as a resource of the dashboard. The release is downloaded once, from GitHub, into a
-// folder that git ignores, and checked against the hash written here; the end-to-end tests
-// never come here, and need neither the network nor Mushroom.
+// does who installs it by hand: the file is in the `www` folder of Home Assistant, which serves
+// it at `/local`, and the dashboard has it as a resource. The release is downloaded once, from
+// GitHub, into a folder that git ignores, and checked against the hash written here; the
+// end-to-end tests never come here, and need neither the network nor Mushroom.
 //
 // Mushroom is Apache-2.0 licensed, and is not part of this repository: the file is fetched for
 // the run and left in the folder of the cache.
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
-import type { AddressInfo } from "node:net";
+import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { REPO_ROOT } from "./constants";
+import { LOCAL_DIR, REPO_ROOT } from "./constants";
 
 /** The release that the pictures are taken with, and the hash of its `mushroom.js`. */
 export const MUSHROOM_VERSION = "5.2.3";
@@ -61,41 +60,30 @@ export async function mushroomBundle(): Promise<Buffer> {
   return bytes;
 }
 
-/** Mushroom served to the browser from this machine: where the dashboard finds it. */
-export interface ServedMushroom {
+/** Mushroom in the folder that Home Assistant serves: where the dashboard finds it. */
+export interface InstalledMushroom {
+  /** The address of the file on Home Assistant's own origin, as a dashboard's resource has it. */
   url: string;
-  close(): Promise<void>;
+  remove(): Promise<void>;
 }
 
 /**
- * Serves the bytes on a port of this machine that nothing else uses, with the header that lets
- * a page of another origin, Home Assistant's, load them as a module.
+ * Puts the bytes into the `www` folder of the Home Assistant of this run, the way a user
+ * installs Mushroom by hand. The file is named by the release, so that nothing else of the
+ * folder is in its way. Home Assistant serves `/local` only when the folder was there as it
+ * started, which `scripts.e2e.hass up` takes care of; a folder that is not there is an
+ * error that says so, not a resource that quietly fails to load.
  */
-export async function serveMushroom(bytes: Buffer): Promise<ServedMushroom> {
-  const server = createServer((request, response) => {
-    if (request.url !== "/mushroom.js") {
-      response.writeHead(404).end();
-      return;
-    }
-    response
-      .writeHead(200, {
-        "content-type": "text/javascript; charset=utf-8",
-        "access-control-allow-origin": "*",
-        "cache-control": "no-store",
-      })
-      .end(bytes);
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  const { port } = server.address() as AddressInfo;
-  return {
-    url: `http://127.0.0.1:${port}/mushroom.js`,
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-        server.closeAllConnections();
-      }),
-  };
+export async function installMushroom(bytes: Buffer): Promise<InstalledMushroom> {
+  const folder = await stat(LOCAL_DIR).catch(() => undefined);
+  if (!folder?.isDirectory()) {
+    throw new Error(
+      `${LOCAL_DIR} is not there, so this Home Assistant does not serve /local; ` +
+        "`scripts.e2e.hass up` makes it, so start the run again",
+    );
+  }
+  const name = `mushroom-${MUSHROOM_VERSION}.js`;
+  const file = join(LOCAL_DIR, name);
+  await writeFile(file, bytes);
+  return { url: `/local/${name}`, remove: () => rm(file, { force: true }) };
 }

@@ -36,6 +36,18 @@ interface PendingCommand {
 }
 
 /**
+ * The presets the timer can run for: those that are not longer than the maximum its number
+ * states in `max`, in the order of the card. A number that states no maximum, or one that is
+ * not a number, leaves no limit, so that every preset shows.
+ */
+function presetsWithinMaximum(presets: readonly number[], runFor: HassEntity | undefined): number[] {
+  const max: unknown = runFor?.attributes["max"];
+  return typeof max === "number" && Number.isFinite(max)
+    ? presets.filter((minutes) => minutes <= max)
+    : [...presets];
+}
+
+/**
  * The commands the "Next command" sensor lists, in its order. A row the card cannot read
  * (no id, no time, an action it does not know) is left out, so that the others still show.
  */
@@ -436,20 +448,27 @@ export class TimerifyCardPopup extends LitElement {
     // A timer that is unavailable has nothing to act on: Home Assistant would leave it out of
     // the call without a word, and a press would seem to do nothing.
     const unavailable = view.state === "unavailable";
+    // Home Assistant refuses a value above the maximum of the number, so none is offered. The
+    // row is left out when nothing is left: empty, it would still take its gap in the column.
+    const presets = presetsWithinMaximum(config.presets, hass.states[config.entity]);
     return html`
-      <div class="presets">
-        ${config.presets.map(
-          (minutes) => html`
-            <button
-              class="action preset"
-              ?disabled=${unavailable}
-              @click=${() => void setMinutes(hass, config.entity, minutes)}
-            >
-              ${formatMinutes(hass, minutes)}
-            </button>
-          `,
-        )}
-      </div>
+      ${presets.length === 0
+        ? nothing
+        : html`
+            <div class="presets">
+              ${presets.map(
+                (minutes) => html`
+                  <button
+                    class="action preset"
+                    ?disabled=${unavailable}
+                    @click=${() => void setMinutes(hass, config.entity, minutes)}
+                  >
+                    ${formatMinutes(hass, minutes)}
+                  </button>
+                `,
+              )}
+            </div>
+          `}
       <div class="adjust">
         <button
           class="action step"

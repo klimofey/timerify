@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
 import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import type { HassEntity } from "../src/hass";
 import type { TimerifyCard } from "../src/timerify-card";
 import {
   AC,
@@ -147,6 +148,15 @@ async function settle(card: TimerifyCard): Promise<void> {
   await popupOf(card).updateComplete;
 }
 
+/** The home, with the "Run for" number ending at `max` minutes, as its `max` attribute says. */
+function endingAt(hass: FakeHass, max: unknown): FakeHass {
+  const number = hass.states[NUMBER] as HassEntity;
+  return hass.state(NUMBER, number.state, { ...number.attributes, max });
+}
+
+/** The presets on offer, as a person reads them. */
+const presetsOf = (root: ShadowRoot) => [...root.querySelectorAll(".preset")].map(textIn);
+
 describe("the presets", () => {
   it("runs a preset and stays open", async () => {
     const hass = boilerHass();
@@ -168,6 +178,68 @@ describe("the presets", () => {
 
     expect(presets).toEqual(["1 hr 30 min", "15 min", "1 hr"]);
   });
+
+  it("the pop-up hides a preset longer than the timer's maximum", async () => {
+    const hass = endingAt(boilerHass(), 60);
+    const { card, root } = await opened(hass, {
+      entity: NUMBER,
+      presets: [15, 30, 45, 60, 120],
+    });
+
+    // 60 minutes is the maximum itself, so it stays; 120 is longer than the timer can run.
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr"]);
+
+    control(root, "1 hr").click();
+    await settle(card);
+    expect(hass.calls).toEqual([
+      { domain: "number", service: "set_value", data: { value: 60 }, target: { entity_id: NUMBER } },
+    ]);
+  });
+
+  it("the pop-up shows no presets when each is above the maximum", async () => {
+    const hass = endingAt(boilerHass({ counting: 8 }), 10);
+    const { card, root } = await opened(hass);
+
+    expect(presetsOf(root)).toEqual([]);
+    // An empty row of presets would still take its share of the gap between the rows.
+    expect(root.querySelector(".presets")).toBeNull();
+
+    control(root, "Add 5 min").click();
+    control(root, "Take off 5 min").click();
+    control(root, "Stop").click();
+    await settle(card);
+    expect(hass.calls).toEqual([addTime(5), addTime(-5), stopped()]);
+  });
+
+  it("the presets follow a maximum that changes", async () => {
+    const hass = endingAt(boilerHass(), 60);
+    const { card, root } = await opened(hass);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr"]);
+
+    card.hass = endingAt(hass, 30);
+    await settle(card);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min"]);
+
+    card.hass = endingAt(hass, 1440);
+    await settle(card);
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+  });
+
+  it("shows every preset while the number states no maximum", async () => {
+    // The fake's number has no `max` attribute.
+    const { root } = await opened(boilerHass());
+
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+  });
+
+  it.each([null, "unknown", Number.NaN])(
+    "shows every preset when the maximum is not a number (%s)",
+    async (max) => {
+      const { root } = await opened(endingAt(boilerHass(), max));
+
+      expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+    },
+  );
 
   it("labels presets in the user's language", async () => {
     const { root } = await opened(boilerHass(), { entity: NUMBER, presets: [15, 60, 90] });

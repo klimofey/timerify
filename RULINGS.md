@@ -3308,3 +3308,28 @@ in `docs/followups.md`.
   `popup.test.ts` for the round tile and the pop-up; end to end, `Timerify's answer says the time on
   the server's clock` (`ws.spec.ts`) and `counts by Home Assistant's clock when the browser's is 5
   minutes fast` (`pill.spec.ts`, a real card on a browser whose clock Playwright moved).
+
+- **The pop-up offers only the presets that are not longer than the maximum of the timer's "Run
+  for" number, which it reads from the `max` attribute of that number's state at every render
+  (#35).** `presetsWithinMaximum` keeps `minutes <= max` in the order of the card, so a preset equal
+  to the maximum is shown. A number that has no `max`, or whose `max` is not a finite number
+  (missing, `null`, text, `NaN`), sets no limit, and every preset is shown. The list is filtered
+  from the live state each time the pop-up renders and is never kept: the number is one of the
+  entities the pop-up watches, so a new maximum reaches an open pop-up with the next `hass`. When
+  no preset is left, the row is not rendered, and the plus, minus and Stop buttons remain.
+  Why: `number.set_value` raises `out_of_range` for a value above the number's maximum, so the
+  button of a longer preset would answer every press with an error. The card's `presets` cannot
+  be checked once, when the config is read: the maximum belongs to the timer, not to the card
+  (two cards of one timer share it), and the timer's settings change it, which reloads the
+  entry, while the dashboard stays open. Clamping a preset to the maximum would give a button
+  that says "2 hr" and runs for 1 hr, and a preset left out of the config would not come back
+  when the maximum is raised. The row is left out, rather than left empty, because an empty row
+  would still take its 16 px gap in the column of the pop-up.
+  Cost if wrong: a card whose presets are all above the maximum shows no preset and does not say
+  why; the docs name the maximum as the cause. If a future Home Assistant wrote `max` as text,
+  every preset would show again and a press of a long one would be refused as before.
+  Tests (`card/test/popup.test.ts`): `the pop-up hides a preset longer than the timer's maximum`
+  (the preset equal to the maximum stays and runs), `the pop-up shows no presets when each is
+  above the maximum` (no row; plus, minus and Stop work), `the presets follow a maximum that
+  changes` (a lower and a higher maximum, each in a new `hass`), `shows every preset while the
+  number states no maximum` and `shows every preset when the maximum is not a number`.

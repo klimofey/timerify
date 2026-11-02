@@ -69,7 +69,7 @@ chip: 15                                  # no chip by default: the pill's "+15 
 | `layout` | `pill` | `pill` or `round`. |
 | `name` | the device's name | Replaces the name. |
 | `icon` | the device's icon | An icon such as `mdi:water-boiler`. It does not follow the state. |
-| `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. Home Assistant refuses a preset that is longer than the timer's **Maximum of Run for**. |
+| `presets` | 15, 30, 45, 60 and 120 | The durations the pop-up offers, in whole minutes from 1 to 1440, each shown once, in the order given. Numbers and text of digits (`"30"`) both work. An empty list means the defaults. The pop-up does not show a preset that is longer than the timer's **Maximum of Run for**, because Home Assistant would refuse it. |
 | `chip` | none | Whole minutes from 1 to 1440, added to the countdown by the pill's chip. The round tile ignores it. |
 
 An option that the card does not know is ignored. A value that it cannot use is shown as a message on the card, which says what is wrong.
@@ -91,7 +91,7 @@ A tap anywhere on the card opens it, the border included. The chip is the except
 The pop-up is a modal dialog. Escape, the **Close** button and a click on the dimmed page behind it close it. From top to bottom it holds:
 
 - **The time left**, and when it ends, while a countdown runs.
-- **The presets.** Pressing one runs the timer for that long, as setting **Run for** does. It restarts a countdown that runs.
+- **The presets.** Pressing one runs the timer for that long, as setting **Run for** does. It restarts a countdown that runs. A preset that is longer than the timer's **Maximum of Run for** is not shown. If none is left, the row is left out.
 - **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown runs. Adding time to a timer that is idle starts it, as the [**Add time** action](services.md#add-time) does. Stop is offered while the timer runs, with a countdown or without. It turns the device off and ends the countdown.
 - **Schedule**, when the timer has intervals. It shows a switch for each interval, named by its title. Each one turns the [switch of the interval](schedules.md#switch-an-interval-on-or-off) on and off. You do not create or edit intervals here. Use the timer's page. An interval whose switch is unavailable is shown as that and cannot be pressed.
 - **Pending commands**, when there are some. Each shows like "On at 7:30 AM for 1 hr" or "Off at Tue 7:00 AM". It also shows its settings ("Cool, 24 °C") and a × button that cancels it. If the **Next command** sensor is disabled, one line stands here instead. It says that the commands are hidden because of it.

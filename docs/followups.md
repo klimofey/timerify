@@ -15,6 +15,7 @@ One line per issue: its number and its title, under the area it belongs to.
 ## Engine
 
 - [#42](https://github.com/klimofey/timerify/issues/42) Carry out a command at the moment it was given, not when it gets the lock
+- [#47](https://github.com/klimofey/timerify/issues/47) Timerify's events carry no context of what caused them
 
 ## Forms
 

@@ -474,7 +474,7 @@ async def test_two_intervals_that_open_together_fire_the_end_the_boiler_shows(
     fake_target: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """A weekday interval and a Workday interval both open at half past six. The
+    """Two intervals open at half past six, one to 07:15 and one to 07:45. The
     countdown is one, and it runs to the later end: the event says the end the Ends at
     sensor shows, not the end of the window that happened to be folded first."""
     await open_sunday(hass, freezer)

@@ -3359,8 +3359,10 @@ in `docs/followups.md`.
   acts keeps it a button. A press ends wherever its pointer comes up or is taken away, even off
   the card, and a tap that opens the pop-up ends the press at once: a long press that starts
   while a tap waits for a second one may find the pop-up open under the pointer when the wait
-  ends, the release then lands on the dialog, and the card must not go on pulsing. A long press
-  that starts during the wait, and a tap that opens nothing, both still act as set.
+  ends, the release then lands on the dialog, and the card must not go on pulsing. When the tap
+  opens nothing, the tap and a long press that starts during its wait both act as set. A tap set
+  to a Home Assistant action that opens a dialog of its own (more info) does not end the press,
+  as Home Assistant's own cards do not: the release still ends it wherever it lands.
   Why: the `ui_action` selector writes only the standard actions (its list is typed
   `UiAction[]` and its labels are Home Assistant's own words for them), so "open the pop-up",
   "run" and "stop" cannot be offered by it; and a custom value in it would be shown with no

@@ -144,7 +144,7 @@ Enter and Space do what a tap does, at once. The keyboard has no double tap and 
 
 ### Home Assistant actions
 
-Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action** and **Assist**. The field is used only when its press is set to **Home Assistant action**.
+Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used only when its press is set to **Home Assistant action**.
 
 - The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
 - Leave the field on **Default**, and Home Assistant opens the dialog of the device.

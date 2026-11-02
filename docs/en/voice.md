@@ -107,7 +107,7 @@ The Russian column is transliterated because this page is in English. The real s
 - Without any of these, an hour from 1 to 12 is the nearer of its two times ahead. That holds for "7", "7:30" and "seven thirty", which have no leading zero. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
 - With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
 - The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
-- An hour written with a leading zero is on the 24-hour clock too. "At 07:30" and "at 07" are the next 07:30 and 07:00, whichever comes first, today or tomorrow. Said at 08:00, "at 07:30" means 07:30 tomorrow, but "at 7:30" means 19:30 today.
+- An hour written with a leading zero is on the 24-hour clock too. "At 07:30" and "at 07" are the next 07:30 and 07:00, whichever comes first, today or tomorrow. Said at 08:00, "at 07:30" means 07:30 tomorrow, but "at 7:30" means 19:30 today. When you speak, your speech recognition decides whether the hour is written with a zero. When you type "07", it is always the 24-hour clock.
 - If you say "am", "pm" or a part of the day, it decides, and the zero does not matter. "At 07:30 pm" is 19:30, and "at 07 in the evening" is 19:00.
 - "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
 - With a day word, "midnight" is the one that ends that day. "Today at midnight" is tonight's 00:00, and "tomorrow at midnight" is the one after tomorrow. "Tomorrow at 12 am" and "tomorrow at 0:00" are the start of tomorrow.

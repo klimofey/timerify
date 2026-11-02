@@ -2896,9 +2896,9 @@ in `docs/followups.md`.
     `timerify_clock_minute_words` (a range with `digits: false`, so spelled minutes work as
     before: "seven thirty"); both fill `clock_minute`. In Russian the minutes said with
     their word ("v 7 chasov 5 minut") keep the range `timerify_clock_minutes`, where one
-    digit is no ambiguity. Minutes of
-    one digit spelled as words ("seven five") are unchanged. Cost if wrong: a person who
-    writes "7:5" is told that it was not understood, and nothing is kept. Tests:
+    digit is no ambiguity. Minutes of one digit spelled as words ("seven five") are
+    unchanged. Cost if wrong: a person who writes "7:5" is told that it was not
+    understood, and nothing is kept. Tests:
     `test_a_minute_of_one_digit_after_a_separator_is_no_time`,
     `test_a_temperature_said_before_how_long_is_no_time_of_day`,
     `test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs`,
@@ -2967,11 +2967,11 @@ in `docs/followups.md`.
     AC for an hour at 21" stays a run at 21 degrees), so in the `climate` and `water_heater`
     blocks of `TimerifyRun` the rule `timerify_clock_after_extras` is
     `<timerify_exact_clock>`: a time with minutes, "o'clock", "am" or "pm", "noon" or
-    "midnight", not a bare hour (written "7" or "07") or "H.MM". The generator copies that override into the
-    clock blocks of those scopes (`Scope.rules`). Before the settings, and in every other
-    block, any form works. Russian needs no override: it says a time with "v" and a
-    temperature with "na" or nothing. Cost if wrong: "turn on the AC for an hour at 7"
-    sets 7 degrees, as it did.
+    "midnight", not a bare hour (written "7" or "07") or "H.MM". The generator copies that
+    override into the clock blocks of those scopes (`Scope.rules`). Before the settings,
+    and in every other block, any form works. Russian needs no override: it says a time
+    with "v" and a temperature with "na" or nothing. Cost if wrong: "turn on the AC for an
+    hour at 7" sets 7 degrees, as it did.
   - **The generator writes the blocks of both intents with one function.** `timed_sentences`
     (which replaced `delayed_sentences`) says the command with the time after it, for a
     command to turn on also with the settings first and the time after them, and with the

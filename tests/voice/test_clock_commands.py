@@ -550,13 +550,18 @@ async def test_a_bare_hour_after_the_settings_is_no_time_with_a_zero_either(
 ) -> None:
     """A zero does not make a bare number after the settings of a thermostat a time: it
     stays what it was before there were clock times, the temperature, and nothing is
-    kept."""
+    kept. The AC takes 16 to 30 degrees, so 7 is refused as a temperature, which is
+    how it shows that it was read as one."""
     await open_sunday(hass, freezer)
     await with_voice_settings(hass, setup_target, fake_full_ac)
 
     response = await converse(hass, f"turn on the AC for an hour at {hour}")
 
-    assert reached(response) != CLOCK, speech(response)
+    assert reached(response) == RUN, speech(response)
+    assert refusal_of(response) == (
+        "7 is not a valid Temperature: it must be between 16 and 30."
+    )
+    assert fake_full_ac.call_data == []
     assert state_of(hass, AC_NEXT) == "unknown"
 
 

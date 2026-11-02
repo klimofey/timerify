@@ -46,5 +46,16 @@
     "cancel_command": {
       "service": "mdi:clock-remove-outline"
     }
+  },
+  "triggers": {
+    "countdown_started": {
+      "trigger": "mdi:timer-play-outline"
+    },
+    "countdown_ended": {
+      "trigger": "mdi:timer-off-outline"
+    },
+    "command_due": {
+      "trigger": "mdi:calendar-clock"
+    }
   }
 }

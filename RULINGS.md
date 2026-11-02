@@ -2455,3 +2455,39 @@ in `docs/followups.md`.
   `test_the_end_of_a_schedule_window_fires_start_and_expired`, and
   `test_running_and_stopping_the_boiler_by_voice_fires_start_and_stop` with its LLM twin
   in `tests/voice/test_events_by_voice.py`.
+- **The triggers are integration triggers on the Run for entities, matched against their
+  target at each event.** The platform is `trigger.py` with `async_get_triggers`, the
+  kind behind Home Assistant's own "Timer started" and "Button pressed": every loaded
+  integration's `trigger` platform is registered (`ha/helpers/trigger/__init__.py:186-257`),
+  the key `timerify.<name>` loads it (:451-476), and a `Trigger`
+  (`ha/helpers/trigger/models.py:108-182`, its config at :27-33) validates its config
+  and attaches a runner. `ENTITY_STATE_TRIGGER_SCHEMA`
+  (`ha/helpers/trigger/entity_trigger.py:99-104`) is a required target and no options.
+  The descriptions are read from `triggers.yaml` (`ha/helpers/trigger/descriptions.py:60-80`,
+  :158-160). hassfest accepts the `triggers.yaml` and the `triggers` strings of a custom
+  integration, and refuses a trigger whose description is missing from `en.json`.
+  - **The target filter is the one of the services** (`entity: integration: timerify,
+    domain: number`, in the normalised list form so that the description equals it), so
+    **By target** offers the actions and the triggers for the same devices.
+  - **The target is resolved at each event**, never cached
+    (`async_extract_referenced_entity_ids`, `expand_group=False`): a timer added to the
+    device, deleted, or moved to another area needs no tracking, and an automation saved
+    before the timer existed covers it. A deleted timer is never matched, and nothing is
+    logged: its automation stays on and simply hears no event of it. Events come a few
+    times a day, so the lookup costs nothing.
+  - **No options**: no "for", and no "first" or "last" of several timers. An event has no
+    duration, and each timer's event stands alone, so a device with two timers fires the
+    trigger twice and `trigger.entity_id` tells which.
+  Why: #39 and Decision 1 of the plan: pick the boiler and choose a trigger.
+  Cost if wrong: an automation aimed at a Run for whose entity id the user renames never
+  fires again, as with any entity id in Home Assistant; a device target avoids it, and the
+  docs say so.
+  Tests: `tests/test_automation_triggers.py`, among them
+  `test_the_boilers_device_offers_the_three_triggers_by_target`,
+  `test_a_trigger_ignores_the_timers_of_other_devices`,
+  `test_a_relay_trigger_names_the_channel_whose_countdown_ended`,
+  `test_a_trigger_aimed_at_one_run_for_ignores_the_other_channel`,
+  `test_a_trigger_of_a_deleted_timer_never_fires`,
+  `test_a_timer_added_later_is_covered_by_the_device_trigger`,
+  `test_a_countdown_that_ended_while_down_triggers_once_at_start_up` and
+  `test_a_command_that_came_due_while_down_triggers_at_start_up`.

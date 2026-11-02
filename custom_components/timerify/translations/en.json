@@ -447,6 +447,20 @@
       }
     }
   },
+  "triggers": {
+    "countdown_started": {
+      "name": "Countdown started",
+      "description": "Triggers when a timer that was not counting down starts a countdown: by an action, by hand in strict mode, by a pending command or by a schedule window. A change of a countdown that is already running does not trigger it."
+    },
+    "countdown_ended": {
+      "name": "Countdown ended",
+      "description": "Triggers when the countdown of a timer ends. Its reason says how: expired when it ran out, stopped when Timerify stopped it, turned_off when the entity was switched off outside Timerify."
+    },
+    "command_due": {
+      "name": "Pending command came due",
+      "description": "Triggers when a pending command of a timer comes due and is carried out. It gives the id of the command and whether it turns the entity on or off."
+    }
+  },
   "exceptions": {
     "target_not_found": {
       "message": "The entity this timer was set up for no longer exists. Remove this timer and add it again for another entity."

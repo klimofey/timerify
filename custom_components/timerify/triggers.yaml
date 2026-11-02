@@ -1,0 +1,8 @@
+countdown_started: &run_for
+  target:
+    entity:
+      - integration: timerify
+        domain:
+          - number
+countdown_ended: *run_for
+command_due: *run_for

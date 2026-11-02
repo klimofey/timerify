@@ -56,7 +56,7 @@ The dashboard card comes with Timerify. Refresh your browser once after you inst
 - [Timers](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md): run a switch, a light, a fan or an air conditioner for a set time, and it turns itself off.
 - [Pending commands](https://github.com/klimofey/timerify/blob/main/docs/en/pending-commands.md): tell a timer to turn its device on or off at a time you choose, up to 7 days ahead.
 - [Schedules](https://github.com/klimofey/timerify/blob/main/docs/en/schedules.md): run a device at set times of the week, on the weekdays you pick, or by your Workday sensor.
-- [Automations](https://github.com/klimofey/timerify/blob/main/docs/en/automations.md): run, extend and stop a timer from an automation.
+- [Automations](https://github.com/klimofey/timerify/blob/main/docs/en/automations.md): run, extend and stop a timer from an automation, and react when a countdown starts or ends, or a pending command comes due.
 - [Voice](https://github.com/klimofey/timerify/blob/main/docs/en/voice.md): tell Assist "turn on the boiler for 10 minutes" or ask how long is left, in English or Russian.
 - [Dashboard card](https://github.com/klimofey/timerify/blob/main/docs/en/card.md): show a timer on a dashboard, and run, extend and stop it from a pop-up.
 - [Runtime counter](https://github.com/klimofey/timerify/blob/main/docs/en/runtime.md): optionally add up how long a device was on, to see how many hours the boiler ran this week.

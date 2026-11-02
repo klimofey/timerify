@@ -7,7 +7,7 @@ These pages tell you how to use Timerify. The [README](../../README.md) shows ho
 - [Timers](timers.md): add a timer to a device, run it for a set time, and choose its mode.
 - [Pending commands](pending-commands.md): turn a device on or off at a time you choose.
 - [Schedules](schedules.md): run a device at set times of the week.
-- [Automations](automations.md): run, extend and stop a timer from an automation.
+- [Automations](automations.md): run, extend and stop a timer from an automation, and react when a countdown starts or ends, or a pending command comes due.
 - [Voice](voice.md): what you can say to Assist, and how to set it up.
 - [Dashboard card](card.md): show a timer on a dashboard and run it from a pop-up.
 - [Runtime counter](runtime.md): add up how long a device was on.

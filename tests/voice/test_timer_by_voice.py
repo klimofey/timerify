@@ -80,6 +80,7 @@ RUN = "TimerifyRun"
 ADD_TIME = "TimerifyAddTime"
 STOP = "TimerifyStop"
 LAMP_NUMBER = "number.lamp_run_for"
+TANK_NUMBER = "number.tank_run_for"
 VENT_NUMBER = "number.vent_run_for"
 SETTING_LISTS = ("timerify_hvac_mode", "timerify_mode")
 """The lists of the words for a setting: a sample that leaves them out is a sentence for
@@ -134,6 +135,19 @@ async def test_run_phrasings(
     assert reached(response) == RUN, speech(response)
     assert state_of(hass, NUMBER) == str(minutes)
     assert fake_target.calls == [TURN_ON]
+
+
+async def test_for_an_hour_and_bare_minutes_runs_a_switch_for_90_minutes(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """A speaker drops the word "minutes" after the hours: "for 1 hour 30" is what
+    "for 1 hour 30 minutes" means, for a device that takes no temperature."""
+    response = await converse(hass, "turn on the boiler for 1 hour 30")
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, NUMBER) == "90"
+    assert fake_target.calls == [TURN_ON]
+    assert speech(response).startswith("Boiler runs for 1 hour and 30 minutes, until")
 
 
 async def test_a_day_is_the_longest_run(
@@ -537,13 +551,12 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
     fake_tank: FakeTarget,
     setup_target: SetupTarget,
 ) -> None:
-    """A boiler has no temperature to be turned on at, so a number after the time is
-    not read as one ("for 1 hour 30" is not 30 degrees), and the words for an HVAC mode
-    are the thermostat's alone. The water heater has a temperature but no HVAC mode."""
+    """A boiler has no temperature to be turned on at, so a temperature after the time
+    is not understood, and the words for an HVAC mode are the thermostat's alone. The
+    water heater has a temperature but no HVAC mode."""
     await with_voice_settings(hass, setup_target, fake_target, fake_full_ac, fake_tank)
 
     for text in (
-        "turn on the boiler for 1 hour 30",
         "turn on the boiler for an hour at 55 degrees",
         "turn on the tank for an hour cooling",
     ):
@@ -556,6 +569,78 @@ async def test_a_temperature_is_said_only_of_a_target_that_has_one(
         ("turn_on", {}),
         ("set_temperature", {"temperature": 55.0}),
     ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature(
+    hass: HomeAssistant, fake_full_ac: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A thermostat reads the bare number after the hours as its temperature, so the
+    air conditioner runs for the hour and is set at 30 degrees."""
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, "turn on the AC for 1 hour 30")
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, AC_NUMBER) == "60"
+    assert fake_full_ac.call_data == [
+        ("turn_on", {}),
+        ("set_temperature", {"temperature": 30.0}),
+    ]
+
+
+@pytest.mark.usefixtures("assist")
+async def test_for_an_hour_and_a_bare_number_is_not_minutes_to_a_thermostat(
+    hass: HomeAssistant, fake_full_ac: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A thermostat keeps the spelled-out form of how long: with "and" before the bare
+    number, which cannot be a temperature, the sentence is not understood, and nothing
+    is switched. A person says "minutes" there."""
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, "turn on the AC for 1 hour and 30")
+
+    assert reached(response) != RUN, speech(response)
+    assert fake_full_ac.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature(
+    hass: HomeAssistant, fake_tank: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A water heater reads the bare number after the hours as its temperature, as a
+    thermostat does."""
+    await with_voice_settings(hass, setup_target, fake_tank)
+
+    response = await converse(hass, "turn on the tank for 1 hour 30")
+
+    assert reached(response) == RUN, speech(response)
+    assert state_of(hass, TANK_NUMBER) == "60"
+    assert fake_tank.call_data == [
+        ("turn_on", {}),
+        ("set_temperature", {"temperature": 30.0}),
+    ]
+
+
+async def test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """Every Russian way to ask for an hour, followed by 30 with no word for the
+    minutes, with or without the word for "and", runs the boiler for 90 minutes.
+
+    The sampler takes the first alternative of a rule, which is the hours alone, so the
+    minutes are added to what it samples."""
+    hours = samples("ru", RUN, numbers={"timerify_hours": 1}, absent=SETTING_LISTS)
+    and_word = "\N{CYRILLIC SMALL LETTER I}"
+    texts = [f"{text} {more}" for text in hours for more in ("30", f"{and_word} 30")]
+    assert texts
+
+    for text in texts:
+        response = await converse(hass, text, language="ru")
+
+        assert reached(response) == RUN, text
+        assert state_of(hass, NUMBER) == "90", text
+        await set_number(hass, NUMBER, 0)
 
 
 HOT_WATER = [("turn_on", {}), ("set_temperature", {"temperature": 120.0})]
@@ -825,6 +910,15 @@ async def test_add_time_on_an_idle_timer_starts_it(
     assert fake_target.calls == [TURN_ON]
     assert state_of(hass, NUMBER) == "20"
     assert speech(response) == "Boiler runs for 20 minutes, until 09:20."
+
+
+async def test_add_an_hour_and_bare_minutes_adds_90_minutes(
+    hass: HomeAssistant, boiler: MockConfigEntry
+) -> None:
+    response = await converse(hass, "add 1 hour 30 to the boiler")
+
+    assert reached(response) == ADD_TIME, speech(response)
+    assert state_of(hass, NUMBER) == "90"
 
 
 async def test_add_time_past_a_day_runs_a_day(

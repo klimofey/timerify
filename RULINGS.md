@@ -871,23 +871,26 @@ those of the spec.
   the first Russian request in a language.
 - **The unit of the temperature is optional, so the spec's own "cooling, 24" matches.** A
   bare number after a duration is taken as a temperature, and only for a target that takes
-  one (the next entry scopes it). Cost if wrong: a number that was meant as something else
-  after a duration ("for 1 hour 30", "for 2 hours 120") is a temperature, which a
-  thermostat or a water heater then checks and refuses when it is out of its range, and a
-  device without one does not understand. The temperature is understood up to 250, so
-  "turn on the AC for 2 hours 120" is answered "120 is not a valid Temperature: it must be
-  between 16 and 30." and nothing is switched, while a water heater that counts in
-  Fahrenheit takes the same 120 as its temperature (probed on both).
+  one (the next entry scopes it). A device without a temperature reads hours followed by a
+  bare number up to 59 as minutes instead ("for 1 hour 30" is 90 minutes: see "A scope of
+  settings carries every rule of its block" in the voice section of release 1.1.0).
+  Cost if wrong: a number that was meant as something else after a duration ("for 1 hour
+  30" said to a thermostat, "for 2 hours 120") is a temperature, which a thermostat or a
+  water heater then checks and refuses when it is out of its range. The temperature is
+  understood up to 250, so "turn on the AC for 2 hours 120" is answered "120 is not a
+  valid Temperature: it must be between 16 and 30." and nothing is switched, while a water
+  heater that counts in Fahrenheit takes the same 120 as its temperature (probed on both).
 - **The HVAC and temperature parts are scoped to the domains that have them (`requires_context`
   on the domain of the name), in blocks of their own.** Before that, any thermostat with an
   "auto" HVAC mode made a bare "auto" an HVAC mode for a fan or a humidifier too, which
   refused it. The managed route always writes the domain of a name; a name listed by hand
   with no domain gets the sentences that fit every device and nothing more, so the README
   shows `context: domain` on a hand-listed thermostat or water heater. Said of a device that
-  takes no temperature, "turn on the boiler for 1 hour 30" is not understood, and the
-  answer is the built-in agent's "not aware of any device called boiler", which says that a
-  device that exists is unknown: the mechanism of the entry above on names that are not a
-  device with a timer, where a sentence of Timerify's wins the stage for unknown names.
+  takes no temperature, "turn on the boiler for an hour at 55 degrees" is not understood,
+  and the answer is the built-in agent's "not aware of any device called boiler", which
+  says that a device that exists is unknown: the mechanism of the entry above on names that
+  are not a device with a timer, where a sentence of Timerify's wins the stage for unknown
+  names.
   Before the scoping it was a refusal about the setting "Temperature" that also misled.
   Cost if wrong: that wording; and a user who lists a thermostat by hand without its
   domain gets no HVAC words.
@@ -2535,3 +2538,41 @@ in `docs/followups.md`.
   `test_every_case_has_a_name_of_its_own`,
   `test_cyrillic_is_allowed_in_the_russian_files_of_the_repository` and
   `test_cyrillic_is_refused_everywhere_else`.
+- **A scope of settings carries every rule of its block, so a scope can change how a
+  duration is said.** `Scope.rules` of `scripts/generate_core_commands.py` is every
+  expansion rule of a block of `TimerifyRun` that has `timerify_settings`, and the delayed
+  blocks of `core_commands.yaml` copy all of them, not `timerify_settings` alone. The first
+  rule that uses it is `timerify_duration` (#26). Everywhere it is
+  `timerify_spelled_duration`, which is what it was (hours and minutes, each alone or both,
+  or a phrase such as "half an hour"), or hours followed by a bare number of minutes from 1
+  to 59, with "and" between them or not, in English and in Russian: "for 1 hour 30" is 90
+  minutes. The `climate` and `water_heater` blocks of `TimerifyRun` set `timerify_duration`
+  to `timerify_spelled_duration`, so for them "for 1 hour 30" stays one hour at 30 degrees,
+  and "for 1 hour and 30" is not understood. The rule is shared by every sentence that says
+  a duration: "set the boiler timer to 1 hour 30", "add 1 hour 30 to the boiler" (a
+  thermostat takes that one too, since adding time has no settings) and the delayed command
+  "turn on the boiler in 15 minutes for 1 hour 30", whose block copies the override for a
+  thermostat and a water heater.
+  Why: hours followed by a bare number is a temperature only where there is a temperature;
+  for the devices without one the issue's fix adds no new ambiguity, and the devices with
+  one keep the old reading. A block's rule replaces a global one inside the global rules
+  that its sentences use (`timerify_for_part` is global and says `timerify_duration`), so
+  the override reaches the delayed command without a copy of the sentences. The override is
+  not only a label: probed with hassil 3.12.1, without it "turn on the AC for 1 hour 30"
+  has two parses of the same score (`text_chunks_matched` 16), the temperature and the 90
+  minutes, and `recognize_best` (`hassil/recognize.py:814`, `_get_result_score` at :819)
+  keeps the first of them, which is the temperature only because the rule lists the
+  spelled-out form first; and "for 1 hour and 30" would be 90 minutes. The override leaves
+  one parse, not the winner of a tie.
+  Cost if wrong: "for 1 hour 30" said to a thermostat sets 30 degrees, as before. A
+  thermostat or water heater listed by hand with no domain gets the sentences that fit
+  every device, so it takes "for 1 hour 30" as 90 minutes. A person who says "for 1 hour
+  and 30" to a thermostat is not understood and must say "minutes".
+  Tests: `test_for_an_hour_and_bare_minutes_runs_a_switch_for_90_minutes`,
+  `test_add_an_hour_and_bare_minutes_adds_90_minutes`,
+  `test_russian_hours_and_bare_minutes_run_a_switch_for_90_minutes`,
+  `test_a_delayed_turn_on_runs_a_switch_for_hours_and_bare_minutes`,
+  `test_for_an_hour_and_a_bare_number_stays_a_thermostat_s_temperature`,
+  `test_for_an_hour_and_a_bare_number_stays_a_water_heater_s_temperature`,
+  `test_for_an_hour_and_a_bare_number_is_not_minutes_to_a_thermostat` and
+  `test_a_scope_carries_every_rule_of_its_block`.

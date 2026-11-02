@@ -25,8 +25,10 @@ widen or narrow the takeover without a word.
 The settings a delayed "turn on" can be said with come from the sentences of the
 language (`sentences/<language>/src/timerify.yaml`): each device, thermostat and water
 heater has the settings of its own there, for "turn on for an hour", and the delayed
-command copies each of those blocks' scope, so a word for an HVAC mode or a temperature
-follows a thermostat's name and nothing else.
+command copies the scope and every rule of each of those blocks. So a word for an HVAC
+mode or a temperature follows a thermostat's name and nothing else, and a rule that a
+block says in its own way (how long, for a thermostat, whose temperature a bare number
+after the hours is) is said so in the delayed command too.
 """
 
 import re
@@ -142,8 +144,10 @@ class Scope:
 
     requires: tuple[str, ...]
     excludes: tuple[str, ...]
-    settings: str
-    """The expansion rule `timerify_settings` of the block that has the scope."""
+    rules: Mapping[str, str]
+    """Every expansion rule of the block of `TimerifyRun` that has the scope, by name.
+    It holds `timerify_settings`, and may hold a rule that changes how another is said
+    for these devices alone (the words for how long, for a thermostat)."""
 
 
 def _domains_of(values: object) -> tuple[str, ...]:
@@ -322,7 +326,7 @@ def delayed_sentences(block: CommandBlock, rules: Mapping[str, str]) -> list[str
 def run_scopes(sources: Mapping[str, Any]) -> list[Scope]:
     """The scopes of the settings that a command to turn on is said with, from the
     sentences `sources` of a language: the blocks of `TimerifyRun` that have a rule
-    `timerify_settings` of their own.
+    `timerify_settings` of their own, with every rule they have.
 
     Raises ValueError if there are none.
     """
@@ -330,7 +334,7 @@ def run_scopes(sources: Mapping[str, Any]) -> list[Scope]:
         Scope(
             _domains_of(block.get("requires_context", {}).get("domain")),
             _domains_of(block.get("excludes_context", {}).get("domain")),
-            block["expansion_rules"]["timerify_settings"],
+            dict(block["expansion_rules"]),
         )
         for block in sources["intents"][TIMERIFY_COMMANDS["on"]]["data"]
         if "timerify_settings" in block.get("expansion_rules", {})
@@ -410,7 +414,7 @@ def _delayed_blocks(
                         **context,
                         "expansion_rules": {
                             **rules,
-                            "timerify_settings": settings.settings,
+                            **settings.rules,
                             "timerify_run_extras": EXTRAS_RULE,
                         },
                     }

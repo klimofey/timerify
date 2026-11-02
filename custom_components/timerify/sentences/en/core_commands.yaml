@@ -93,6 +93,7 @@ intents:
         - climate
       expansion_rules:
         timerify_command: (<turn> on [<the>] {timerify_target}|[<turn>] [<the>] {timerify_target} [to] on|activate [<the>] {timerify_target}|[<the>] {timerify_target})
+        timerify_duration: <timerify_spelled_duration>
         timerify_settings: (<timerify_hvac_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_temperature_part> ([<timerify_hvac_part>]; [<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_hvac_part>]; [<timerify_temperature_part>]; [<timerify_percent_part>]))
         timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
     - sentences:
@@ -108,6 +109,7 @@ intents:
         - water_heater
       expansion_rules:
         timerify_command: (<turn> on [<the>] {timerify_target}|[<turn>] [<the>] {timerify_target} [to] on|activate [<the>] {timerify_target}|[<the>] {timerify_target})
+        timerify_duration: <timerify_spelled_duration>
         timerify_settings: (<timerify_temperature_part> ([<timerify_percent_part>]; [<timerify_mode_part>])|<timerify_percent_part> ([<timerify_temperature_part>]; [<timerify_mode_part>])|<timerify_mode_part> ([<timerify_temperature_part>]; [<timerify_percent_part>]))
         timerify_run_extras: (<timerify_for_part> [<timerify_settings>]|<timerify_settings> [<timerify_for_part>])
     - sentences:

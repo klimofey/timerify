@@ -40,6 +40,7 @@ from scripts.generate_core_commands import (
     DELAYED_COMMAND,
     EXTRAS,
     FILE_NAME,
+    SOURCE_FILE,
     TIMERIFY_COMMANDS,
     CommandBlock,
     command_blocks,
@@ -47,6 +48,7 @@ from scripts.generate_core_commands import (
     delay_rules,
     delayed_shapes,
     render,
+    run_scopes,
 )
 
 from ..conftest import FakeTarget, SetupTarget
@@ -338,6 +340,17 @@ async def test_the_example_of_the_spec_and_the_ways_to_say_it(
     assert fake_climate.call_data == COOL_24
     assert state_of(hass, AC_NUMBER) == "60"
     assert state_of(hass, AC_NEXT) == "unknown"
+
+
+async def test_a_delayed_turn_on_runs_a_switch_for_hours_and_bare_minutes(
+    hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
+) -> None:
+    """The way to say how long a boiler runs ("for 1 hour 30") is the same after the
+    delay as it is alone."""
+    response = await converse(hass, "turn on the boiler in 15 minutes for 1 hour 30")
+
+    assert reached(response) == DELAYED_COMMAND, speech(response)
+    assert [command["minutes"] for command in pending(hass, NEXT)] == [90]
 
 
 @pytest.mark.usefixtures("assist")
@@ -961,6 +974,44 @@ def test_a_file_that_leaves_something_out_or_adds_something_is_caught(
     mutate(generated)
 
     assert gaps(data, generated)
+
+
+@pytest.mark.parametrize("language", VOICE_LANGUAGES)
+def test_a_scope_carries_every_rule_of_its_block(language: str) -> None:
+    """The thermostat and the water heater say how long with the old words alone, since
+    a bare number after the hours is their temperature, and the delayed commands of
+    those two kinds of device say it the same way; the other kinds do not."""
+    sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
+    thermostats = {"climate", "water_heater"}
+
+    overriding = {
+        domain
+        for scope in run_scopes(sources)
+        if scope.rules.get("timerify_duration") == "<timerify_spelled_duration>"
+        for domain in scope.requires
+    }
+    delayed = [
+        block
+        for block in shipped(language)["intents"][DELAYED_COMMAND]["data"]
+        if block["slots"]["action"] == "on"
+    ]
+    overridden = {
+        domain
+        for block in delayed
+        if "timerify_duration" in block["expansion_rules"]
+        for domain in block["requires_context"]["domain"]
+    }
+
+    assert overriding == thermostats
+    assert overridden == thermostats
+    for block in delayed:
+        domains = set(block.get("requires_context", {}).get("domain", []))
+        if domains and domains <= thermostats:
+            assert block["expansion_rules"]["timerify_duration"] == (
+                "<timerify_spelled_duration>"
+            )
+        else:
+            assert "timerify_duration" not in block["expansion_rules"]
 
 
 @pytest.mark.parametrize("language", VOICE_LANGUAGES)

@@ -86,6 +86,8 @@ The Russian column is transliterated because this page is in English. The real s
 - A command to turn off sets the countdown of a running device to end then. It replaces the end, whether the device had a countdown or not. For a device that is off, nothing changes, and the answer says so.
 - A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these limits is refused with a message.
 - You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count beyond a week is not understood at all.
+- You can also say a delay in days, such as "turn on the boiler in 2 days". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 100, and you cannot join them with hours or minutes.
+- The limits above hold for days. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 8 days" is refused too. The answer names the limit.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
 
 **What is planned**
@@ -104,6 +106,7 @@ The Russian column is transliterated because this page is in English. The real s
 - It switches every interval of the timer's schedule on or off, as the interval switches do. It has the same effects, on the same conditions. See [How a schedule and your own changes meet](schedules.md#how-a-schedule-and-your-own-changes-meet).
 - Switching off while a window runs stops the timer only if the schedule is running it. That means the end of the countdown came from that interval, and nobody has changed the timer since. Otherwise the run is yours, and it stays. If another open window wants the device, that window takes the timer over instead.
 - Switching on inside a window runs the device for the rest of the window. The exception is a timer that already ends later. An interval that is on already is left as it is. So a device that was turned off during its window stays off until the next one.
+- In English, you can say "scheduling" instead of "schedule", and you can leave out "the" before it. Examples are "turn off scheduling for the boiler" and "turn off schedule for the boiler".
 - To switch one interval, say its title, such as "the Morning schedule of the boiler". Give your intervals titles of your own. The title that Timerify makes, such as `06:30–07:15, Sun–Thu`, cannot be said to the built-in agent.
 - A title that two intervals share switches both. A title that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
 
@@ -119,7 +122,7 @@ A few things work the way Home Assistant does, not the way Timerify does.
 
 - "Turn it off" and "them", after a question or a command about a device, are answered by Home Assistant's own commands. They switch the device, and the timer follows. But the answer is Home Assistant's. A device that is unavailable is not switched. Timerify keeps nothing of what you asked.
 - Suppose a sentence of Timerify's names something that is not a device with a timer. Home Assistant then answers "not aware of any device". An example is "what is planned for the fan".
-- Home Assistant can take a wording that Timerify does not have for a plain turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off scheduling for the boiler" and "turn off the boiler in 2 days". Home Assistant then turns the device off at once. Use the wordings above.
+- Home Assistant can take a wording that Timerify does not have for a plain turn off of the device. This happens when it mentions a device with a timer and has "turn on" or "turn off" in it. Examples are "turn off the boiler in 3 weeks" and "turn off the boiler tonight". Home Assistant then turns the device off at once. It does this in English only. Use the wordings above.
 - Say two entities have the same name, and one of them has a timer. Then "turn off the boiler" and the other sentences above mean the one with the timer. Likewise, "turn off the boiler schedule" means the schedule of the timer called Boiler. This holds even when another exposed entity is called "Boiler schedule". That entity is reached by other wordings, and by the interface.
 
 ## Set up the sentences for the built-in agent

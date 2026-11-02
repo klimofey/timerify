@@ -14,7 +14,10 @@ as two rules of the file that every command refers to. Home Assistant counts the
 minutes and seconds of a delay up to 100. These sentences count the hours and minutes
 with Timerify's own lists, the ones a duration uses, which reach a week (`DELAY_LISTS`):
 a delay past the limit of a command is then refused by the controller, and the answer
-names the limit, instead of the sentence not being understood. Timerify's sentences
+names the limit, instead of the sentence not being understood. Home Assistant has no
+delay in days, and its gazetteer takes "turn off the boiler in 2 days" for a plain turn
+off of the device, so the sentences of the language may define one (`OWN_DELAY_RULE`),
+and each way to say a delay then has it as one more alternative. Timerify's sentences
 name only the devices that have a timer, and the built-in agent prefers a custom
 sentence to its own, so a device without one still reaches Home Assistant's. A
 phrasing that this file does not repeat, such as one a newer release of the intents
@@ -101,6 +104,10 @@ DELAY_BEFORE_RULE_NAME: Final = "timerify_delay_before_command"
 """The rules, in the file, that say a delay in the ways Home Assistant says it after the
 command and before it ("in 15 minutes", "in an hour and 5 minutes"). Written once, since
 each command in each block says the same delays (`delay_rules`)."""
+OWN_DELAY_RULE: Final = "timerify_delay_in_days"
+"""The rule, in the sentences of a language (`SOURCE_FILE`), that says a delay in days,
+which Home Assistant has no sentence for: one more way to say a delay, wherever the
+rules above say one, if the language defines it."""
 EXTRAS: Final = "<timerify_run_extras>"
 """What a command to turn on may say besides when: how long to run, and the settings."""
 EXTRAS_RULE: Final = (
@@ -280,14 +287,16 @@ def command_group(block: CommandBlock) -> str:
     return "(" + "|".join(_about_the_target(s) for s in block.sentences) + ")"
 
 
-def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
+def delay_rules(data: Mapping[str, Any], sources: Mapping[str, Any]) -> dict[str, str]:
     """The rules that say a delay, from the delayed commands in the intents `data`: the
     delays that Home Assistant says after the command, and those it says before it, by
     the name of the rule; a rule only if there is a delay to say in that place.
 
     A delay is said with the slots `delay_hours`, `delay_minutes` and `delay_seconds`,
     since `hours` and `minutes` are how long a command to turn on runs, and its hours
-    and minutes with Timerify's lists (`DELAY_LISTS`).
+    and minutes with Timerify's lists (`DELAY_LISTS`). If the sentences `sources` of the
+    language define the rule of a delay in days (`OWN_DELAY_RULE`), each rule has it as
+    one more way to say a delay.
 
     Raises ValueError for a shape whose command is not at one end and set apart by a
     space, or that has anything but the command and the delay in it.
@@ -311,9 +320,13 @@ def delay_rules(data: Mapping[str, Any]) -> dict[str, str]:
             raise ValueError(
                 f"A delayed command with the command not at an end: {shape!r}"
             )
+    defined = OWN_DELAY_RULE in sources.get("expansion_rules", {})
+    own = [f"<{OWN_DELAY_RULE}>"] if defined else []
     places = {DELAY_AFTER_RULE_NAME: after, DELAY_BEFORE_RULE_NAME: before}
     return {
-        name: "(" + "|".join(delays) + ")" for name, delays in places.items() if delays
+        name: "(" + "|".join([*delays, *own]) + ")"
+        for name, delays in places.items()
+        if delays
     }
 
 
@@ -449,7 +462,7 @@ def render(language: str) -> str:
         raise ValueError(f"home-assistant-intents has no sentences in {language}")
     sources = read_back((SENTENCES_DIR / language / SOURCE_FILE).read_text("utf-8"))
     blocks = command_blocks(data)
-    delays = delay_rules(data)
+    delays = delay_rules(data, sources)
     sentences = {
         "language": language,
         "expansion_rules": delays,

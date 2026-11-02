@@ -749,7 +749,7 @@ def readings(
     return found
 
 
-EVERY_TEXT_LIMIT: Final = 2000
+EVERY_TEXT_LIMIT: Final = 4000
 """The most texts `every_text` returns, so that an intent with a long list of values is
 refused where a bounded sample (`samples`) is meant."""
 

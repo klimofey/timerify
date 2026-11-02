@@ -69,27 +69,27 @@ intents:
   TimerifySetSchedule:
     data:
     - sentences:
-      - <turn> on [<the>] {timerify_target:name} schedule
-      - <turn> [<the>] {timerify_target:name} schedule on
-      - <turn> on the schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> the schedule (of|for) [<the>] {timerify_target:name} on
-      - (enable|resume) [<the>] {timerify_target:name} schedule
-      - (enable|resume) the schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> on [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} on
-      - (enable|resume) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> on [<the>] {timerify_target:name} (schedule|scheduling)
+      - <turn> [<the>] {timerify_target:name} (schedule|scheduling) on
+      - <turn> on [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on
+      - (enable|resume) [<the>] {timerify_target:name} (schedule|scheduling)
+      - (enable|resume) [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> on [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on
+      - (enable|resume) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
       slots:
         enabled: true
     - sentences:
-      - <turn> off [<the>] {timerify_target:name} schedule
-      - <turn> [<the>] {timerify_target:name} schedule off
-      - <turn> off the schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> the schedule (of|for) [<the>] {timerify_target:name} off
-      - (disable|pause) [<the>] {timerify_target:name} schedule
-      - (disable|pause) the schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> off [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
-      - <turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} off
-      - (disable|pause) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}
+      - <turn> off [<the>] {timerify_target:name} (schedule|scheduling)
+      - <turn> [<the>] {timerify_target:name} (schedule|scheduling) off
+      - <turn> off [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off
+      - (disable|pause) [<the>] {timerify_target:name} (schedule|scheduling)
+      - (disable|pause) [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> off [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
+      - <turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off
+      - (disable|pause) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}
       slots:
         enabled: false
 expansion_rules:
@@ -101,6 +101,7 @@ expansion_rules:
   timerify_minutes_part: <timerify_minutes_count> minute[s]
   timerify_minutes_count: ({timerify_minutes:minutes}|{timerify_long_minutes:minutes})
   timerify_for_part: for <timerify_duration>
+  timerify_delay_in_days: (in|after) ({timerify_delay_days:delay_hours}|{timerify_delay_long_days:delay_hours})( |-)day[s]
   timerify_hvac_part: '{timerify_hvac_mode:hvac_mode} [mode]'
   timerify_temperature_part: '[at] {timerify_temperature:temperature} [degree[s]]'
   timerify_percent_part: '[at] {timerify_percent:percent} percent'
@@ -125,6 +126,16 @@ lists:
     range:
       from: 1
       to: 59
+  timerify_delay_days:
+    range:
+      from: 1
+      to: 7
+      multiplier: 24
+  timerify_delay_long_days:
+    range:
+      from: 8
+      to: 100
+      multiplier: 24
   timerify_temperature:
     range:
       from: 1

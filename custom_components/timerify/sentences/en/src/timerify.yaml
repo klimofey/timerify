@@ -94,29 +94,31 @@ intents:
       # which timerify_interval holds. The schedule "of" and "for" a device are one, and
       # on or off comes before the noun or after it, since a phrasing that is left out
       # here is not left alone: the built-in agent takes "turn off the schedule for the
-      # boiler" for a turn off of the boiler.
+      # boiler" for a turn off of the boiler. So does it "turn off scheduling for the
+      # boiler", which is why "scheduling" is a word for the schedule too, and the
+      # article before the noun is optional.
       - sentences:
-          - "<turn> on [<the>] {timerify_target:name} schedule"
-          - "<turn> [<the>] {timerify_target:name} schedule on"
-          - "<turn> on the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} on"
-          - "(enable|resume) [<the>] {timerify_target:name} schedule"
-          - "(enable|resume) the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> on [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} on"
-          - "(enable|resume) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "<turn> [<the>] {timerify_target:name} (schedule|scheduling) on"
+          - "<turn> on [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on"
+          - "(enable|resume) [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "(enable|resume) [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> on [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} on"
+          - "(enable|resume) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: true
       - sentences:
-          - "<turn> off [<the>] {timerify_target:name} schedule"
-          - "<turn> [<the>] {timerify_target:name} schedule off"
-          - "<turn> off the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> the schedule (of|for) [<the>] {timerify_target:name} off"
-          - "(disable|pause) [<the>] {timerify_target:name} schedule"
-          - "(disable|pause) the schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> off [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
-          - "<turn> [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name} off"
-          - "(disable|pause) [<the>] {timerify_interval:interval} schedule (of|for) [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "<turn> [<the>] {timerify_target:name} (schedule|scheduling) off"
+          - "<turn> off [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off"
+          - "(disable|pause) [<the>] {timerify_target:name} (schedule|scheduling)"
+          - "(disable|pause) [the] (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> off [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
+          - "<turn> [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name} off"
+          - "(disable|pause) [<the>] {timerify_interval:interval} (schedule|scheduling) (of|for) [<the>] {timerify_target:name}"
         slots:
           enabled: false
 # How long: hours and minutes, each alone or both, or a phrase such as "half an hour";
@@ -135,6 +137,10 @@ expansion_rules:
 # How long a command that turns a device on runs for, said before or after the delay of
 # core_commands.yaml: "turn on the AC in 15 minutes for an hour".
   timerify_for_part: "for <timerify_duration>"
+# A delay in days, one more way to say the delay of core_commands.yaml. Home Assistant has
+# no sentence for it, and its gazetteer takes "turn off the boiler in 2 days" for a turn
+# off of the device. The count fills the slot of the hours of a delay, 24 to the day.
+  timerify_delay_in_days: "(in|after) ({timerify_delay_days:delay_hours}|{timerify_delay_long_days:delay_hours})( |-)day[s]"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -170,6 +176,24 @@ lists:
     range:
       from: 1
       to: 59
+  # The days of a delay, up to a hundred as the delays of Home Assistant count: a number
+  # of days fills the slot of the hours with its count times 24, so that no slot is new.
+  # The days a command can wait and the days beyond, which the controller refuses with
+  # the limit, are two lists with bounds that no other range has. hassil keeps the words
+  # of a range by its bounds, not by its multiplier (`_RANGE_TRIE_CACHE` of
+  # `hassil/string_matcher.py`), so a range of 1 to 100 with a multiplier would be handed
+  # the words of any other range of 1 to 100, and hand out its own: "forty percent" would
+  # be 960. A test holds the bounds apart.
+  timerify_delay_days:
+    range:
+      from: 1
+      to: 7
+      multiplier: 24
+  timerify_delay_long_days:
+    range:
+      from: 8
+      to: 100
+      multiplier: 24
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the

@@ -774,13 +774,15 @@ those of the spec.
   timer called Boiler next to one called "Boiler schedule" is the same case. Cost if wrong:
   a user who has an entity with a timer's name, or one called "<timer> schedule", must say
   it another way.
-- **The English phrasings of the schedule take "of" and "for", and on or off before or
-  after the noun, because a phrasing that is left out is not left alone.** The built-in
-  agent takes "turn off the schedule for the boiler" for a turn off of the boiler, so the
-  near misses that were found are sentences. The set is open ended: a phrasing with a
-  device's name that Timerify does not have, and "turn on" or "turn off" in it, can still be
-  matched by core's gazetteer (English only), which is issue #21. Cost if
-  wrong: the boiler is switched off by a sentence meant for its schedule.
+- **The English phrasings of the schedule take "of" and "for", "schedule" or
+  "scheduling" with the article optional, and on or off before or after the noun, because a
+  phrasing that is left out is not left alone.** The built-in agent takes "turn off the
+  schedule for the boiler" and "turn off scheduling for the boiler" for a turn off of the
+  boiler, so the near misses that were found are sentences. The set is open ended: a
+  phrasing with a device's name that Timerify does not have, and "turn on" or "turn off" in
+  it, can still be matched by core's gazetteer (English only), which is issue #21 (see
+  Release 1.1.0, Voice). Cost if wrong: the boiler is switched off by a sentence meant for
+  its schedule.
 - **There is no sentence for subtracting time.** §6.4 lists set, add and stop, and setting
   the countdown to the new length covers shortening. "10 minutes less" has no match.
   Cost if wrong: none.
@@ -2615,3 +2617,75 @@ in `docs/followups.md`.
   `test_a_delay_beyond_a_week_in_one_unit_is_not_understood`,
   `test_a_delay_counts_its_hours_and_minutes_as_a_duration_does` and
   `test_the_file_covers_every_command_of_home_assistant_for_every_kind_of_device`.
+- **The phrasings core's gazetteer took are added as they are found; the gazetteer itself
+  cannot be told to leave Timerify's devices alone.** In Home Assistant 2026.10.4 the
+  built-in agent hands a sentence to the gazetteer when hassil has no result or one with
+  unmatched entities (`conversation/default_agent.py:495`), and skips it only for a custom
+  sentence that matched with an unmatched entity (`:704-718`). The gazetteer builds its home
+  from every exposed entity, with no way to leave one out (`conversation/gazetteer.py:96-136`),
+  and reads English only (`:206-208`). So a sentence in English that names a device with a
+  timer, has "turn on" or "turn off" in it, and that no sentence of Timerify's matches,
+  switches the device at once, with no timer. 2026.11.0b1, the newest release on PyPI
+  (2026-10-29), has the same gate (`default_agent.py:502` and `:720-734`), and
+  `gazetteer.py` differs only in naming `async_get_matcher` (`:222`, `:263`). There is no
+  way to keep a custom intent's names out of it, so #21 stays open, labelled upstream, and
+  each phrasing found is made Timerify's own (#21):
+  - "in N days", N from 1 to 100, in English ("in" or "after", "day" or "days") and in
+    Russian, as one more way to say a delay, for every command that takes one. The count
+    fills the slot of the hours with its value times 24 (a range with `multiplier: 24`),
+    so no slot is new and the tool of an LLM agent is as it was. The controller refuses
+    what the command cannot wait: "turn on in 8 days" with `command_too_far` (7 days),
+    "turn off in 2 days" with `duration_out_of_range` (24 h). `delay_rules` of the
+    generator appends `<timerify_delay_in_days>` to each rule it writes, when the
+    sentences of the language define it.
+  - "scheduling" for "schedule" in the English schedule sentences, with "the" before the
+    noun optional, since "turn off scheduling for the boiler" has none (and "turn off
+    schedule for the boiler", which the gazetteer took too, is then a sentence).
+  - Probed and rejected by the gazetteer, so nothing is switched: "turn off the boiler in
+    200 hours", "turn off the boiler in 2 days and 3 hours", "turn off the boiler's
+    scheduling", "turn on the boiler at 7:30".
+  - Probed and still taken by it, in English: "in 101 days" and more, "in a day", "in half
+    a day", "in a week", "in 2 weeks", "in 3 weeks", "tonight", "tomorrow", "next week",
+    "this evening", "at 7", "tomorrow at 7", "at noon".
+  Why: each phrasing found is then refused or done as asked, instead of switching the
+  device. The bound of 100 days, as the delays of Home Assistant count, refuses "in 8 days"
+  with the limit. Cost if wrong: a phrasing not yet found switches the device at once, in
+  English. Russian is not affected, since the gazetteer has no Russian.
+  Tests: `test_turn_on_in_2_days_keeps_a_command_two_days_ahead`,
+  `test_turn_on_in_7_days_is_the_longest_delay_that_is_kept`,
+  `test_turn_on_in_8_days_is_refused_with_the_limit`,
+  `test_a_delay_in_more_days_is_refused_with_the_limit_too`,
+  `test_turn_off_in_2_days_is_refused_and_leaves_the_boiler_on`,
+  `test_a_delay_in_days_can_be_followed_by_how_long_the_boiler_runs`,
+  `test_a_thermostat_is_turned_on_in_days_with_its_settings`,
+  `test_a_delay_in_days_can_be_said_in_words`,
+  `test_english_delays_in_days_reach_the_handler`,
+  `test_russian_delays_in_days_reach_the_handler`,
+  `test_llm_delayed_command_takes_no_day_slot`,
+  `test_the_rule_of_the_days_is_a_delay_only_when_the_sources_have_it`,
+  `test_turning_off_scheduling_switches_the_schedule_not_the_boiler`,
+  `test_scheduling_asked_off_in_other_words_switches_the_schedule_only` and
+  `test_scheduling_asked_on_in_other_words_switches_the_schedule_only`.
+- **The days of a delay are two lists of numbers with bounds that no other range has,
+  because hassil keeps the words of a range by its bounds, not by its multiplier.** The
+  trie of number words is cached by `(start, stop, step, fractions)` per language
+  (`hassil/string_matcher.py:889-904`), and the multiplier is applied when the trie is
+  built (`:1094`). So a range of 1 to 100 with `multiplier: 24` is handed the words of the
+  first range of 1 to 100 that was read, and hands its own to the others: probed with a
+  percentage and a list of days in one `Intents`, both say "two" as 2 when the percentage
+  is read first (so "in two days" would be two hours), and both say it as 48 when the days
+  are (so "at forty percent" would be 960). Digits are multiplied on the spot and are right
+  either way. Core has ranges of 1 to 100 (its timers),
+  and Timerify has one (`timerify_percent`), so the days are `timerify_delay_days` (1 to 7,
+  what a command can wait) and `timerify_delay_long_days` (8 to 100, refused with the limit),
+  which fill the same slot through the rule `timerify_delay_in_days`. A test reads the
+  bounds of every range that may be said in words in the sentences of Home Assistant and of
+  Timerify, and fails if one has those of a list of days. Why: the days must be said in
+  words ("in two days" is taken by the gazetteer) and must not be hours or change another
+  list. Cost if wrong: a range added later, here or in a release of Home Assistant, with
+  the bounds of a list of days, makes "in two days" mean two hours or the days make a
+  number of percent wrong; the test catches it for the sentences it reads, not for a
+  custom sentence of the user's own. The upstream fix is a key that holds the multiplier.
+  Tests: `test_no_other_list_of_numbers_has_the_bounds_of_the_days_of_a_delay`,
+  `test_the_days_of_a_delay_count_hours_up_to_a_hundred` and
+  `test_a_delay_in_days_can_be_said_in_words`.

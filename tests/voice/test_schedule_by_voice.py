@@ -562,6 +562,90 @@ async def test_the_schedule_asked_on_in_other_words_is_not_a_bare_turn_on(
     assert fake_target.calls == ([TURN_ON] if expected[0] == "on" else [])
 
 
+# Core's gazetteer takes "turn off scheduling for the boiler" for a turn off of the
+# boiler, so "scheduling" is a word for the schedule too, in English, and the article
+# before the noun is optional: "turn off schedule for the boiler" is taken as well.
+
+
+async def test_turning_off_scheduling_switches_the_schedule_not_the_boiler(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+) -> None:
+    """The schedule is switched off, as "turn off the schedule for the boiler" does, and
+    the gazetteer, which would have turned the boiler off, does not act."""
+    response = await converse(hass, "turn off scheduling for the boiler")
+
+    assert reached(response) == SET_SCHEDULE
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert speech(response) == OFF
+    assert switches(hass) == ("off", "off")
+    assert fake_target.calls == []
+    await advance_to(hass, freezer, local(SUNDAY, "06:30"))
+    assert fake_target.calls == []
+
+
+SCHEDULING_OFF = [
+    ("turn off schedule for the boiler", ("off", "off")),
+    ("turn off the scheduling for the boiler", ("off", "off")),
+    ("turn off the scheduling of the boiler", ("off", "off")),
+    ("turn the scheduling for the boiler off", ("off", "off")),
+    ("turn the scheduling of the boiler off", ("off", "off")),
+    ("turn off the boiler scheduling", ("off", "off")),
+    ("turn off boiler scheduling", ("off", "off")),
+    ("turn the boiler scheduling off", ("off", "off")),
+    ("disable scheduling for the boiler", ("off", "off")),
+    ("pause the scheduling of the boiler", ("off", "off")),
+    ("turn off the morning scheduling for the boiler", ("off", "on")),
+    ("turn the morning scheduling of the boiler off", ("off", "on")),
+]
+SCHEDULING_ON = [
+    ("turn on schedule for the boiler", ("on", "on")),
+    ("turn on scheduling for the boiler", ("on", "on")),
+    ("turn on the scheduling of the boiler", ("on", "on")),
+    ("turn the scheduling for the boiler on", ("on", "on")),
+    ("turn on the boiler scheduling", ("on", "on")),
+    ("enable scheduling for the boiler", ("on", "on")),
+    ("resume the scheduling of the boiler", ("on", "on")),
+    ("turn on the morning scheduling for the boiler", ("on", "off")),
+    ("turn the morning scheduling of the boiler on", ("on", "off")),
+]
+
+
+@pytest.mark.parametrize(("text", "expected"), SCHEDULING_OFF)
+async def test_scheduling_asked_off_in_other_words_switches_the_schedule_only(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+    text: str,
+    expected: tuple[str, str],
+) -> None:
+    response = await converse(hass, text)
+
+    assert reached(response) == SET_SCHEDULE, speech(response)
+    assert switches(hass) == expected
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(("text", "expected"), SCHEDULING_ON)
+async def test_scheduling_asked_on_in_other_words_switches_the_schedule_only(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    scheduled: MockConfigEntry,
+    text: str,
+    expected: tuple[str, str],
+) -> None:
+    await set_schedule(hass, "switches", False)
+
+    response = await converse(hass, text)
+
+    assert reached(response) == SET_SCHEDULE, speech(response)
+    assert switches(hass) == expected
+    assert fake_target.calls == []
+    assert state_of(hass, TARGET_ID) == "off"
+
+
 # --- Titles --------------------------------------------------------------------------
 
 

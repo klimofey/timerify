@@ -1,23 +1,32 @@
-// The narrowest a card with a Turn off button can be made, on the narrowest phone, in the
-// longer of the two languages: everything it shows is inside it, and nothing is cut off or
-// laid over something else. View "sizes": a sections view of one section, whose cards ask
-// for one column, which is less than they declare, so Home Assistant gives each the fewest
-// columns it declares (`min_columns`, which `getGridOptions` of the card pins).
+// The cards with a Turn off button at their narrowest, and at their widest: a narrow card shows
+// the button as its icon alone, a wide one shows its words, and the card has room for what it
+// shows at the fewest columns it declares (`min_columns`, which `getGridOptions` pins). View
+// "sizes": a sections view of one section, whose cards ask for one column, which is less than
+// they declare, so Home Assistant gives each the fewest columns it declares; the test narrows
+// the page to the narrowest phone, 320 px, and reads it in Russian, the longer language, whose
+// words need the most room. View "wide": cards of 12 columns, and one pill on each side of the
+// width where the words begin.
 import type { Locator, Page } from "@playwright/test";
+import type { E2EState } from "./constants";
 import { expect, test } from "./fixtures";
 import { isReady } from "./ready";
 import { stringsIn } from "./strings";
+import type { HassWs } from "./ws";
 
 /** The width of the narrowest phone a dashboard is meant for. */
 const PHONE = { width: 320, height: 700 };
-
-test.use({ locale: "ru-RU" });
+/** The side of a button that a finger may press, at least. */
+const TARGET = 40;
+/** The space the pill leaves at its right: its padding and the border of the card. */
+const PILL_EDGE = 13;
 
 interface Box {
   left: number;
   right: number;
   top: number;
   bottom: number;
+  width: number;
+  height: number;
 }
 
 /** Where a part of the card is on the page, which it must be. */
@@ -26,7 +35,14 @@ async function boxOf(part: Locator): Promise<Box> {
   if (box === null) {
     throw new Error("The part of the card should be on the page");
   }
-  return { left: box.x, right: box.x + box.width, top: box.y, bottom: box.y + box.height };
+  return {
+    left: box.x,
+    right: box.x + box.width,
+    top: box.y,
+    bottom: box.y + box.height,
+    width: box.width,
+    height: box.height,
+  };
 }
 
 /** Whether the part is wider inside than it shows: something of it is cut off. */
@@ -34,18 +50,30 @@ function isCutOff(part: Locator): Promise<boolean> {
   return part.evaluate((element) => element.scrollWidth > element.clientWidth);
 }
 
-/** The cards of the view, in the order of the dashboard. */
-function cardsOf(page: Page): { pillWithChip: Locator; pill: Locator; round: Locator } {
-  const cards = page.locator("timerify-card");
-  return { pillWithChip: cards.nth(0), pill: cards.nth(1), round: cards.nth(2) };
+/** The state both timers are put in: the loose one runs with no countdown, the strict one counts. */
+async function run(ws: HassWs, state: E2EState): Promise<void> {
+  const { strict, loose } = state.timers;
+  await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
+  await ws.callService("number", "set_value", { value: 30 }, { entity_id: strict.run_for });
+}
+
+/** Turns on the keyboard's way of showing the focus, which a key press does, and focuses. */
+async function focusByKeyboard(page: Page, button: Locator): Promise<void> {
+  await page.keyboard.press("Shift");
+  await button.focus();
 }
 
 test.describe("the cards with a Turn off button at their narrowest", () => {
+  test.use({ locale: "ru-RU" });
+
+  /** The cards of the view, in the order of the dashboard. */
+  function cardsOf(page: Page): { pillWithChip: Locator; pill: Locator; round: Locator } {
+    const cards = page.locator("timerify-card");
+    return { pillWithChip: cards.nth(0), pill: cards.nth(1), round: cards.nth(2) };
+  }
+
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-    const { strict, loose } = state.timers;
-    // The loose timer runs with no countdown, the strict one counts: both show the button.
-    await ws.callService("timerify", "run", {}, { entity_id: loose.run_for });
-    await ws.callService("number", "set_value", { value: 30 }, { entity_id: strict.run_for });
+    await run(ws, state);
     await openDashboard(page, "sizes");
     // The login waits for the sidebar, which a phone hides: the page is narrowed after it, and
     // loaded again, as a phone loads it.
@@ -58,46 +86,152 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     }
   });
 
-  test("show a pill with its icon, its button and its chip side by side", async ({ page }) => {
+  test("show a pill with its icon, the button as an icon alone, and its chip side by side", async ({
+    page,
+  }) => {
     const russian = await stringsIn("ru");
     const { pillWithChip, pill } = cardsOf(page);
 
     for (const card of [pillWithChip, pill]) {
+      // Named by its words for assistive technology, and shown as the power icon.
       const button = card.getByRole("button", { name: russian.card_turn_off, exact: true });
       await expect(button).toBeVisible();
+      await expect(button).toHaveAttribute("title", russian.card_turn_off);
+      await expect(card.locator(".turn-off-icon")).toBeVisible();
+      await expect(card.locator(".turn-off-label")).toBeHidden();
       const outline = await boxOf(card.locator("ha-card"));
       const icon = await boxOf(card.locator(".icon"));
       const turnOff = await boxOf(button);
 
       expect(await isCutOff(card.locator(".content"))).toBe(false);
-      expect(await isCutOff(button)).toBe(false);
+      expect(turnOff.width).toBeGreaterThanOrEqual(TARGET);
+      expect(turnOff.height).toBeGreaterThanOrEqual(TARGET);
       expect(icon.left).toBeGreaterThanOrEqual(outline.left);
       expect(turnOff.left).toBeGreaterThanOrEqual(icon.right);
-      expect(turnOff.right).toBeLessThanOrEqual(outline.right);
     }
 
-    const outline = await boxOf(pillWithChip.locator("ha-card"));
+    const outline = await boxOf(pill.locator("ha-card"));
+    expect((await boxOf(pill.locator(".turn-off"))).right).toBeLessThanOrEqual(
+      outline.right - PILL_EDGE,
+    );
+    const withChip = await boxOf(pillWithChip.locator("ha-card"));
     const turnOff = await boxOf(pillWithChip.locator(".turn-off"));
     const chip = await boxOf(pillWithChip.locator(".chip"));
     expect(chip.left).toBeGreaterThanOrEqual(turnOff.right);
-    expect(chip.right).toBeLessThanOrEqual(outline.right);
+    expect(chip.right).toBeLessThanOrEqual(withChip.right - PILL_EDGE);
   });
 
-  test("show a round tile with its button under its dial and inside it", async ({ page }) => {
+  test("show a round tile with the button as an icon alone under its dial, inside it", async ({
+    page,
+  }) => {
     const russian = await stringsIn("ru");
     const { round } = cardsOf(page);
     const button = round.getByRole("button", { name: russian.card_turn_off, exact: true });
     await expect(button).toBeVisible();
+    await expect(round.locator(".turn-off-label")).toBeHidden();
 
     const outline = await boxOf(round.locator("ha-card"));
     const dial = await boxOf(round.locator(".dial"));
     const turnOff = await boxOf(button);
 
-    expect(await isCutOff(round.locator(".content"))).toBe(false);
-    expect(await isCutOff(button)).toBe(false);
-    expect(turnOff.left).toBeGreaterThanOrEqual(outline.left);
-    expect(turnOff.right).toBeLessThanOrEqual(outline.right);
+    // The dial is wider than the content of a tile of 3 columns on this phone, with the button or
+    // without it, and that is the tile's own size (the follow-up in RULINGS), so what is checked
+    // is what the button adds: it is as big as a finger needs, and inside the tile.
+    expect(turnOff.width).toBeGreaterThanOrEqual(TARGET);
+    expect(turnOff.height).toBeGreaterThanOrEqual(TARGET);
+    // The card's own padding, 8 px, is left on each side.
+    expect(turnOff.left).toBeGreaterThanOrEqual(outline.left + 8);
+    expect(turnOff.right).toBeLessThanOrEqual(outline.right - 8);
     expect(turnOff.top).toBeGreaterThanOrEqual(dial.bottom);
     expect(turnOff.bottom).toBeLessThanOrEqual(outline.bottom);
+  });
+
+  test("show where the keyboard is on the icon button, and leave it on the card when it goes", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const russian = await stringsIn("ru");
+    const { pill } = cardsOf(page);
+    const button = pill.getByRole("button", { name: russian.card_turn_off, exact: true });
+
+    await focusByKeyboard(page, button);
+    await expect(button).toBeFocused();
+    const ring = await button.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { style: style.outlineStyle, width: style.outlineWidth };
+    });
+    expect(ring).toEqual({ style: "solid", width: "2px" });
+
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(async () => (await ws.state(state.timers.loose.target))?.state)
+      .toBe("off");
+    await expect(button).toHaveCount(0);
+    await expect(pill.locator(".body")).toBeFocused();
+  });
+});
+
+test.describe("the cards with a Turn off button, wide", () => {
+  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+    await run(ws, state);
+    await openDashboard(page, "wide");
+    await expect(page.locator("timerify-card")).toHaveCount(5);
+  });
+
+  /** The cards of the view, in the order of the dashboard. */
+  function cardsOf(page: Page): Locator[] {
+    const cards = page.locator("timerify-card");
+    return [0, 1, 2, 3, 4].map((index) => cards.nth(index));
+  }
+
+  test("show the words of the button, and not its icon, where there is room for them", async ({
+    page,
+  }) => {
+    const [pill, pillWithChip, round, , wider] = cardsOf(page);
+
+    for (const card of [pill, pillWithChip, round, wider]) {
+      await isReady(card);
+      const button = card.getByRole("button", { name: "Turn off", exact: true });
+      await expect(button).toBeVisible();
+      await expect(card.locator(".turn-off-label")).toHaveText("Turn off");
+      await expect(card.locator(".turn-off-icon")).toBeHidden();
+      expect(await isCutOff(card.locator(".content"))).toBe(false);
+    }
+  });
+
+  test("show the icon of the button in a card of 6 columns, and its words in one of 7", async ({
+    page,
+  }) => {
+    const [, , , narrow, wider] = cardsOf(page);
+    await isReady(narrow);
+    await isReady(wider);
+
+    await expect(narrow.locator(".turn-off-icon")).toBeVisible();
+    await expect(narrow.locator(".turn-off-label")).toBeHidden();
+    await expect(wider.locator(".turn-off-label")).toBeVisible();
+    await expect(wider.locator(".turn-off-icon")).toBeHidden();
+    // The name keeps room beside the words, which is what the width they begin at is for.
+    expect((await boxOf(wider.locator(".name"))).width).toBeGreaterThanOrEqual(80);
+  });
+
+  test("leave the keyboard on the card when the button with its words goes", async ({
+    page,
+    state,
+    ws,
+  }) => {
+    const [pill] = cardsOf(page);
+    await isReady(pill);
+    const button = pill.getByRole("button", { name: "Turn off", exact: true });
+
+    await focusByKeyboard(page, button);
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(async () => (await ws.state(state.timers.loose.target))?.state)
+      .toBe("off");
+    await expect(button).toHaveCount(0);
+    await expect(pill.locator(".body")).toBeFocused();
   });
 });

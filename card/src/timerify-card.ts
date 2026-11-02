@@ -31,14 +31,16 @@ const TAG = "timerify-card";
 const GRID_OPTIONS = {
   pill: { columns: 6, rows: 1, min_columns: 3, min_rows: 1, max_rows: 1 },
   round: { columns: 3, rows: 2, min_columns: 2, min_rows: 2, max_rows: 3 },
-  // The Turn off button needs room: a row taller on the round tile, and columns enough for
-  // the icon, the button (in Russian, the longer word) and the chip, if there is one, on the
-  // narrowest sections Home Assistant makes (a phone 320 px wide). The columns are the
-  // fewest that fit there, measured in a real Home Assistant (see RULINGS), and are also
-  // where the card starts, so that it does not start narrower than it can be.
-  pillWithTurnOff: { columns: 8, rows: 1, min_columns: 8, min_rows: 1, max_rows: 1 },
-  pillWithTurnOffAndChip: { columns: 11, rows: 1, min_columns: 11, min_rows: 1, max_rows: 1 },
-  roundWithTurnOff: { columns: 5, rows: 3, min_columns: 5, min_rows: 3, max_rows: 3 },
+  // The Turn off button needs room: a row taller on the round tile, and columns for the icon
+  // form of the button (a narrow card shows only that, see `turnOffAsIcon`) on the narrowest
+  // sections Home Assistant makes, a phone 320 px wide. A minimum is one number for every
+  // screen, so it is the fewest columns that fit there, and no more: a wider card shows the
+  // words. Measured in a real Home Assistant, see RULINGS. A card starts at its old size where
+  // that fits on a phone 390 px wide, and at the minimum where it does not (the pill with a
+  // chip).
+  pillWithTurnOff: { columns: 6, rows: 1, min_columns: 6, min_rows: 1, max_rows: 1 },
+  pillWithTurnOffAndChip: { columns: 9, rows: 1, min_columns: 9, min_rows: 1, max_rows: 1 },
+  roundWithTurnOff: { columns: 3, rows: 3, min_columns: 3, min_rows: 3, max_rows: 3 },
 } as const;
 
 export class TimerifyCard extends LitElement {

@@ -179,7 +179,7 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 # sections view: each card asks for one column, which is less than it
                 # declares, so that Home Assistant gives it the fewest it declares. A
                 # pill of the loose timer with the chip and without it, and a round
-                # tile of the strict one.
+                # tile of the strict one. At that size the button is its icon alone.
                 "title": "Sizes",
                 "path": "sizes",
                 "type": "sections",
@@ -205,6 +205,52 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                                 layout="round",
                                 show_turn_off=True,
                                 grid_options={"columns": 1},
+                            ),
+                        ],
+                    }
+                ],
+            },
+            {
+                # Cards with a Turn off button that are wide enough for its words, and
+                # one pill on each side of the width where the words begin: 6 columns
+                # of a section 500 px wide hold only the icon, 7 hold the words.
+                "title": "Wide",
+                "path": "wide",
+                "type": "sections",
+                "sections": [
+                    {
+                        "type": "grid",
+                        "cards": [
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                show_turn_off=True,
+                                grid_options={"columns": 12},
+                            ),
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                chip=QUICK_CHIP_MINUTES,
+                                show_turn_off=True,
+                                grid_options={"columns": 12},
+                            ),
+                            timerify_card(
+                                strict,
+                                layout="round",
+                                show_turn_off=True,
+                                grid_options={"columns": 12},
+                            ),
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                show_turn_off=True,
+                                grid_options={"columns": 6},
+                            ),
+                            timerify_card(
+                                loose,
+                                layout="pill",
+                                show_turn_off=True,
+                                grid_options={"columns": 7},
                             ),
                         ],
                     }

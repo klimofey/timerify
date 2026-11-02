@@ -8,7 +8,15 @@ import { ifDefined } from "lit/directives/if-defined.js";
 import type { CardConfig } from "./config";
 import { formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
-import { isPressable, popupAnnounced, renderIcon, renderStatus, renderTurnOff } from "./layout";
+import {
+  WORDS_FROM,
+  isPressable,
+  popupAnnounced,
+  renderIcon,
+  renderStatus,
+  renderTurnOff,
+  turnOffAsIcon,
+} from "./layout";
 import type { PressBinding } from "./press";
 import type { TimerView } from "./timer";
 
@@ -167,8 +175,11 @@ export const roundStyles = css`
     flex: none;
     align-items: center;
     justify-content: center;
-    height: 32px;
+    height: 40px;
     margin-top: 4px;
+  }
+  @container (width < ${WORDS_FROM.round}px) {
+    ${turnOffAsIcon(css`.round`)}
   }
   /* For assistive technology only: what the ring and the icon say. */
   .round .status {

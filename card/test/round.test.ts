@@ -530,6 +530,17 @@ describe("the Turn off button of the round tile", () => {
   const WITH_BUTTON = { ...ROUND, show_turn_off: true } as const;
   const running = () => fakeHass().state(BOILER, "on", { friendly_name: "Boiler" });
 
+  it("is a button named Turn off, whether the tile shows its words or only its icon", async () => {
+    const card = await mountCard(counting(45), WITH_BUTTON);
+    const button = turnOffOf(card);
+
+    // A wide tile shows the words and a narrow one the power icon: the styles choose, from the
+    // width of the tile, and both are in the button. The name and the tip hold in both.
+    expect(button?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:power");
+    expect(button?.getAttribute("aria-label")).toBe(english.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(english.card_turn_off);
+  });
+
   it("shows Turn off below the dial and the name while the boiler runs, with or without a countdown", async () => {
     for (const hass of [counting(45), running()]) {
       const card = await mountCard(hass, WITH_BUTTON);

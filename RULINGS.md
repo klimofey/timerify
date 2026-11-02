@@ -3435,23 +3435,42 @@ in `docs/followups.md`.
   (minimum and maximum too) and `getCardSize` 4. The button's place, a slot of 32 px under the
   name, is kept while the target is off, so the dial and the name do not move when the button
   comes and goes. The pill is as high as before.
-  The card is wider with the option, and the numbers are measured, not guessed. A sections view
-  is 12 columns with gaps of 8 px, and a section is at most 500 px wide and narrower on a small
-  screen, so a column count is a different width on each device. In the Home Assistant of the
-  end-to-end tests, in Russian (its word for the button is the longer one: 101 px, and the chip
-  is 78 px), the fewest columns at which nothing of the card overflows were:
-  - a pill with the button and a chip: 7 on a 1280 px screen, 9 on one 390 px wide, 10 with two
-    sections on 768 px, and 11 on a 320 px phone;
-  - a pill with the button and no chip: 5, 6, 7 and 8 on the same screens;
-  - a round tile with the button: 3, 4, 5 and 5.
-  The option answers the numbers of the narrowest screen, so that the card fits on every one:
-  `getGridOptions` gives a pill with the button `columns` and `min_columns` of 8, with a chip 11,
-  and a round tile with it 5 (`min_rows` and `max_rows` 3). `columns` is the minimum, so a card
-  starts as narrow as it may be, and Home Assistant never gives it fewer, whatever a dashboard's
-  `grid_options` ask for. With the option off, the sizes are what they were (pill 6 and at least
-  3 columns, round tile 3 and at least 2). The end-to-end test `sizes.spec.ts` asks for one
-  column on a 320 px phone in Russian, and checks that the icon, the button, the chip and the
-  tile's button are inside the card, in order, and that nothing is cut off.
+  The button is its words on a wide card and its icon alone on a narrow one, and the sizes are
+  measured, not guessed. A narrow card shows the power icon (`mdi:power`, 40 px, a target for a
+  finger) in a round button that is still named "Turn off" (`aria-label`, and a `title` for the
+  pointer); both forms are in the DOM and the styles choose, by a container query on the card's
+  `.content` (`container-type: inline-size`), not by script. Why not just more columns:
+  `min_columns` is one number for every screen, and a screen's columns are different widths (a
+  section is 12 columns with gaps of 8 px, at most 500 px, narrower on a phone). The words need
+  11 columns on a phone 320 px wide, and that would be 11 of 12 on a desktop where 7 are enough.
+  So the minimum carries only what the icon form needs on the narrowest phone, and the words
+  come where there is room. The words show from a content width of 245 px for a pill (the icon
+  40, a gap 12, the name 80, a gap 12, the button 101 in Russian, the longer word), 335 px with
+  a chip (a gap 12 and the chip 78 more), and 101 px for the round tile (`WORDS_FROM` in
+  `layout.ts`). The name keeps 80 px, about ten characters, and gives way first, so a longer
+  word in another language is taken up by the name; a longer word that fills the round tile's
+  width needs its number raised. A pill with a chip has a class, `with-chip`, so that its
+  threshold is its own. The round tile's slot is 40 px, as the button.
+  The fewest columns at which the controls end inside the card's padding and nothing overflows,
+  by the icon form, in the Home Assistant of the end-to-end tests, in Russian, at 1280 px, 390 px,
+  768 px (two sections) and 320 px:
+  - a pill with the button: 4, 5, 5, 6;
+  - a pill with the button and a chip: 6, 8, 8, 9;
+  - a round tile with the button, inside the tile with the card's 8 px: 2, 2, 3, 3. The tile's
+    height is 184 px, three rows, and its content 170 px, so two rows (120 px) cannot hold it.
+  `getGridOptions` takes the 320 px values, `min_columns` 6, 9 and 3, and a card starts at its
+  old size, 6 for a pill and 3 for the round tile, where that fits on a phone 390 px wide, and
+  at the minimum where it does not: a pill with a chip starts at 9 (8 would fit on 390 px but
+  Home Assistant never gives fewer than the minimum). With the option off the sizes are what
+  they were (pill 6 and at least 3, round tile 3 and at least 2). The end-to-end test
+  `sizes.spec.ts` asks for one column on a 320 px phone, in Russian, and checks that the icon,
+  the button as its icon, its name for a screen reader, its size and the chip are as they
+  should be and inside the card; with room it checks the words, a pill of 6 columns and one of
+  7 on the two sides of the width where they begin, and the keyboard in both forms.
+  The dial of the round tile, 80 px, is wider than a tile of 3 columns on a phone 320 px wide
+  (by 5 px on each side) and than one of 2 columns on any screen (by 2 px to 18 px), with the
+  button or without it: that is the tile's own size, found here and left as it was; it needs a
+  higher minimum of the option-off tile, a follow-up.
   When a keyboard press takes the button away (the user tabs to it, presses Enter, the target
   goes off and the button leaves), the focus goes to the body of the card, as it does when the
   pop-up closes, if the body is a button (`isPressable`): the next Tab goes on from the card, not
@@ -3465,14 +3484,17 @@ in `docs/followups.md`.
   the button, the pop-up and the presses from drifting apart. The slot keeps a dashboard still:
   a tile whose dial jumped when the target went on would be hard to hit. The minimum widths are
   what the controls need, found by measuring the card: a narrower pill cuts its buttons off, and
-  a note in the documentation would leave them cut off. The focus rule keeps a keyboard user's
-  place, where a stop would otherwise drop it.
+  a note in the documentation would leave them cut off; the icon form keeps the minimum small,
+  so that one phone does not set the size of the card on every screen. The focus rule keeps a
+  keyboard user's place, where a stop would otherwise drop it.
   Cost if wrong: a round tile is a row taller with the option than without it, so switching it on
   moves the cards below it on a sections dashboard. A pill with the button is also wider, and at
-  its narrowest, on a phone 320 px wide, the name and the state have no room left (the icon, the
-  button and the chip are all that fits: that is what the minimum measures); the documentation
-  says so, and a wider card shows the name. The `grid_options` of a dashboard can make no card
-  narrower than the minimum: the end-to-end test asks for one column and gets the minimum. A
+  its narrowest, on a phone 320 px wide, the name and the state have little room left (the
+  controls are all that fits: that is what the minimum measures); the documentation says so, and
+  a wider card shows the name. The `grid_options` of a dashboard can make no card narrower than
+  the minimum: the end-to-end test asks for one column and gets the minimum. The thresholds are
+  in px, so a user who scales the font or a language with a much longer word needs them raised;
+  the end-to-end test of the Russian words is what shows it. A
   target that is unavailable while a countdown still counts is `counting`, so the button shows and
   ends the countdown, as the pop-up's Stop does; if that should hide it, `isRunning` is the one
   rule to change, for the button, the pop-up and Start or stop together. The logbook now credits
@@ -3492,10 +3514,13 @@ in `docs/followups.md`.
   (`offers Stop while the boiler runs without a countdown`, and a stop is `timerify.stop`),
   `card/test/press.test.ts` (Start or stop stops with `timerify.stop`), `card/test/config.test.ts`,
   `card/test/editor.test.ts` and `card/test/card.test.ts` (the option, its refusals, the field, the
-  sizes with the option on and off); end to end `turns off a boiler that runs with no countdown`
-  and `leaves the keyboard on the card when the button goes` (`pill.spec.ts`), the two tests of
-  `sizes.spec.ts` (a pill and a round tile with the button at their narrowest, in Russian, on a
-  320 px phone),
+  sizes with the option on and off); the button is named "Turn off" in both forms, in both
+  languages, and a pill with a chip says so (`pill.test.ts`, `round.test.ts`); end to end
+  `turns off a boiler that runs with no countdown` and `leaves the keyboard on the card when the
+  button goes` (`pill.spec.ts`), the six tests of `sizes.spec.ts` (a pill and a round tile with
+  the button at their narrowest, in Russian, on a 320 px phone, and the keyboard on the icon
+  button; wide cards with the words, a pill of 6 and one of 7 columns, and the keyboard on the
+  words),
   `turns off a countdown from under the name, and the dial stays where it was` (`round.spec.ts`)
   and `turns the Turn off button on in the form` (`editor.spec.ts`, which also reads the label in
   Russian).

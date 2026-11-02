@@ -119,12 +119,12 @@ The pop-up has a **Stop** button. You can also show a **Turn off** button on the
 
 - The button shows while the device is on, with a countdown or without one. While a countdown runs, it shows even if the device is unavailable.
 - It is not shown while the device is off. It is not shown while the timer is unavailable, or before the card has found its timer.
-- On the pill it stands beside the name, before the chip. On the round tile it is below the name.
+- On the pill it stands beside the name, before the chip. On the round tile it is below the name. On a narrow card the button shows only a power icon. Screen readers still say **Turn off**, and a tip shows it when you point at the button.
 - Pressing it does what **Stop** does in the pop-up. It ends the countdown and turns the device off. That is the [**Stop** action](services.md#stop). It also turns off a device that runs without a countdown in **Loose** mode.
 - A press on it is not a tap, a double tap or a long press of the card. The pop-up does not open.
 - It works with or without the timer's own **Turn off button** setting. That setting adds a button to the device page. See [What a timer adds to the device page](timers.md#what-a-timer-adds-to-the-device-page).
-- In a dashboard with sections, a pill with the button starts 8 columns wide and cannot be made narrower. With a chip as well, it starts 11 columns wide. On a phone as narrow as 320 pixels, the name then has no room. The icon, the button and the chip still fit.
-- A round tile with the button is bigger: 5 columns wide and 3 rows high in a dashboard with sections, not 3 by 2. It cannot be made narrower. Its place stays free while the device is off. So the ring does not move when the button comes.
+- In a dashboard with sections, a pill with the button cannot be made narrower than 6 columns. With a chip as well, it starts at 9 columns and cannot be made narrower. On a phone as narrow as 320 pixels, the name then has little room.
+- A round tile with the button is taller: 3 rows high in a dashboard with sections, not 2, and at least 3 columns wide. Its place stays free while the device is off. So the ring does not move when the button comes.
 
 ## Presses
 

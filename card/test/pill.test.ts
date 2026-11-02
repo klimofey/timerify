@@ -689,6 +689,33 @@ describe("the Turn off button of the pill", () => {
     expect(russian.card_turn_off).toBe(russianEntities.button.turn_off.name);
   });
 
+  it("is a button named Turn off, whether the card shows its words or only its icon", async () => {
+    const card = await mountCard(counting(45), WITH_BUTTON);
+    const button = turnOffOf(card);
+
+    // A wide card shows the words and a narrow one the power icon: the styles choose, from the
+    // width of the card, and both are in the button. The name and the tip hold in both.
+    expect(button?.querySelector("ha-icon")?.getAttribute("icon")).toBe("mdi:power");
+    expect(button?.getAttribute("aria-label")).toBe(english.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(english.card_turn_off);
+  });
+
+  it("is named in the user's language in its icon form too", async () => {
+    const card = await mountCard(counting(45, { language: "ru" }), WITH_BUTTON);
+    const button = turnOffOf(card, russian.card_turn_off);
+
+    expect(button?.getAttribute("aria-label")).toBe(russian.card_turn_off);
+    expect(button?.getAttribute("title")).toBe(russian.card_turn_off);
+  });
+
+  it("tells its card whether there is a chip, which the room the words need depends on", async () => {
+    const withChip = await mountCard(counting(45), { ...WITH_BUTTON, chip: 15 });
+    const without = await mountCard(counting(45), WITH_BUTTON);
+
+    expect(withChip.shadowRoot?.querySelector("ha-card")?.classList.contains("with-chip")).toBe(true);
+    expect(without.shadowRoot?.querySelector("ha-card")?.classList.contains("with-chip")).toBe(false);
+  });
+
   it("leaves the pill as it was when Home Assistant refuses it", async () => {
     const hass = counting(45);
     const card = await mountCard(hass, WITH_BUTTON);

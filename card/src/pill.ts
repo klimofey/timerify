@@ -7,7 +7,15 @@ import { styleMap } from "lit/directives/style-map.js";
 import type { CardConfig } from "./config";
 import { formatMinutes } from "./format";
 import type { HomeAssistant } from "./hass";
-import { isPressable, popupAnnounced, renderIcon, renderStatus, renderTurnOff } from "./layout";
+import {
+  WORDS_FROM,
+  isPressable,
+  popupAnnounced,
+  renderIcon,
+  renderStatus,
+  renderTurnOff,
+  turnOffAsIcon,
+} from "./layout";
 import type { PressBinding } from "./press";
 import { t } from "./strings";
 import type { TimerView } from "./timer";
@@ -33,7 +41,7 @@ export function renderPill(
   const filled = Math.round(view.progress * 1000) / 10;
   const pressable = isPressable(config);
   return html`
-    <ha-card class="pill ${view.state}">
+    <ha-card class="pill ${view.state} ${config.chip === undefined ? "" : "with-chip"}">
       <div
         class="body"
         role=${ifDefined(pressable ? "button" : undefined)}
@@ -129,6 +137,13 @@ export const pillStyles = css`
   .chip:disabled {
     color: var(--disabled-text-color);
     cursor: default;
+  }
+  /* The room the words of Turn off need: the icon, the name, the button, and the chip. */
+  @container (width < ${WORDS_FROM.pill}px) {
+    ${turnOffAsIcon(css`.pill`)}
+  }
+  @container (width < ${WORDS_FROM.pillWithChip}px) {
+    ${turnOffAsIcon(css`.pill.with-chip`)}
   }
   /*
    * The pill has a long press only when the config gives it one. While letting go would act,

@@ -770,9 +770,9 @@ describe("its size", () => {
     const round = await mountCard(hass, { entity: NUMBER, layout: "round", show_turn_off: true });
     expect(round.getCardSize()).toBe(4);
     expect(round.getGridOptions()).toEqual({
-      columns: 5,
+      columns: 3,
       rows: 3,
-      min_columns: 5,
+      min_columns: 3,
       min_rows: 3,
       max_rows: 3,
     });
@@ -788,7 +788,7 @@ describe("its size", () => {
     });
   });
 
-  it("starts the pill with its Turn off button at the fewest columns that hold what it shows", async () => {
+  it("holds the pill with its Turn off button to the columns its icon form needs", async () => {
     const hass = fakeHass();
     const sizes = async (config: Record<string, unknown>) =>
       (await mountCard(hass, { entity: NUMBER, layout: "pill", ...config })).getGridOptions();
@@ -797,12 +797,14 @@ describe("its size", () => {
       min_columns,
     });
 
-    // The icon, the button, and the chip if there is one, in the longer Russian word, fit in
-    // these on the narrowest sections: the measurement is in RULINGS, and in the E2E.
-    expect(columns(await sizes({ show_turn_off: true }))).toEqual({ columns: 8, min_columns: 8 });
+    // The icon, the button as its icon alone, and the chip if there is one, fit in the minimum
+    // on the narrowest sections (a phone 320 px wide), and a card starts at the old size where
+    // that fits on a phone 390 px wide, or else at the minimum: measured, see RULINGS and the
+    // end-to-end test of the sizes. A wide card shows the words, which its styles decide.
+    expect(columns(await sizes({ show_turn_off: true }))).toEqual({ columns: 6, min_columns: 6 });
     expect(columns(await sizes({ show_turn_off: true, chip: 15 }))).toEqual({
-      columns: 11,
-      min_columns: 11,
+      columns: 9,
+      min_columns: 9,
     });
     // Without the button the pill is as it was, with the chip or without it.
     expect(columns(await sizes({ chip: 15 }))).toEqual({ columns: 6, min_columns: 3 });

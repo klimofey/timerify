@@ -1,7 +1,7 @@
 // What the two layouts of the card have in common: the icon, what the card says of the timer's
 // state, and the styles of the layer that is pressed and of the text above it. Each layout
 // (pill.ts, round.ts) draws only its own shape.
-import { css, html, nothing, type TemplateResult } from "lit";
+import { css, html, nothing, type CSSResult, type TemplateResult } from "lit";
 import type { CardConfig } from "./config";
 import { formatClock, formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
@@ -44,10 +44,47 @@ export function renderTurnOff(
   if (!config.show_turn_off || !isRunning(view)) {
     return nothing;
   }
+  const label = t(hass, "card_turn_off");
+  // Both forms are in the button, and the styles choose, from the width of the card, which one
+  // shows (`turnOffAsIcon`); the name and the tip are the same in both.
   return html`
-    <button class="turn-off" type="button" @click=${turnOff}>${t(hass, "card_turn_off")}</button>
+    <button class="turn-off" type="button" aria-label=${label} title=${label} @click=${turnOff}>
+      <ha-icon class="turn-off-icon" icon="mdi:power"></ha-icon>
+      <span class="turn-off-label">${label}</span>
+    </button>
   `;
 }
+
+/**
+ * The width of a card's content, in px, from which the Turn off button shows its words and not
+ * its icon alone. The button is 101 px wide in Russian, the longer of the two words, the chip
+ * is 78 px, the icon 40 px, the gaps 12 px. The pill keeps 80 px for the name beside the words
+ * (about ten characters), so it is 40 + 12 + 80 + 12 + 101 without a chip, and 90 more with
+ * one: a longer word in another language is taken up by the name, which gives way first. The
+ * round tile has the whole width under its dial, so the words need 101. Measured in a real
+ * Home Assistant: see RULINGS and `card/e2e/sizes.spec.ts`.
+ */
+export const WORDS_FROM = { pill: 245, pillWithChip: 335, round: 101 } as const;
+
+/**
+ * The Turn off button as its icon alone, for a card too narrow for its words: a round button
+ * that is a comfortable target for a finger, 40 px. `scope` is the selector of the cards it is
+ * for, and the rules go in an `@container` block of the layout's own, where the width is.
+ */
+export const turnOffAsIcon = (scope: CSSResult) => css`
+  ${scope} .turn-off {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 20px;
+  }
+  ${scope} .turn-off-label {
+    display: none;
+  }
+  ${scope} .turn-off-icon {
+    display: flex;
+  }
+`;
 
 /**
  * What the card says under the name while nothing counts: the state of the target in the
@@ -124,6 +161,8 @@ export const commonStyles = css`
     position: relative;
     box-sizing: border-box;
     height: 100%;
+    /* The width of the content is what the Turn off button chooses its form by. */
+    container-type: inline-size;
     /* A press anywhere on the card reaches the body underneath, except on a control. */
     pointer-events: none;
   }
@@ -141,6 +180,16 @@ export const commonStyles = css`
     font-size: var(--ha-font-size-m, 14px);
     cursor: pointer;
     pointer-events: auto;
+  }
+  .turn-off {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* The words by default; a narrow card shows the icon instead, see turnOffAsIcon. */
+  .turn-off-icon {
+    --mdc-icon-size: 24px;
+    display: none;
   }
   .chip:focus-visible,
   .turn-off:focus-visible {

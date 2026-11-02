@@ -9,6 +9,7 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#7](https://github.com/klimofey/timerify/issues/7) Raise the minimum Home Assistant to 2026.11 to drop the first-load "Custom element doesn't exist" error
 - [#9](https://github.com/klimofey/timerify/issues/9) Card editor option labels can be in the wrong language before any card has loaded
+- [#51](https://github.com/klimofey/timerify/issues/51) Card: say why the pop-up shows no presets when each is above the maximum
 
 ## Engine
 

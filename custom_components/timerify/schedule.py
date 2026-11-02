@@ -263,14 +263,15 @@ def has_generated_title(subentry: ConfigSubentry, labels: Mapping[str, str]) -> 
 
 def start_aliases(start: str) -> tuple[str, ...]:
     """The ways a speech recogniser writes the time `start`, an `HH:MM`, without a
-    repeat: the hour with and without its leading zero, after a colon and then after a
-    dot. So `06:30` is `6:30`, `06:30`, `6.30` and `06.30`, and `18:00` is `18:00` and
-    `18.00`. They are the same in every language."""
+    repeat: the hour with and without its leading zero, after a colon, then after a dot,
+    then after a space, as the clock sentences take a time. So `06:30` is `6:30`,
+    `06:30`, `6.30`, `06.30`, `6 30` and `06 30`, and `18:00` is `18:00`, `18.00` and
+    `18 00`. They are the same in every language."""
     clock = time.fromisoformat(start)
     hours = dict.fromkeys((str(clock.hour), f"{clock.hour:02d}"))
     return tuple(
         f"{hour}{separator}{clock.minute:02d}"
-        for separator in (":", ".")
+        for separator in (":", ".", " ")
         for hour in hours
     )
 

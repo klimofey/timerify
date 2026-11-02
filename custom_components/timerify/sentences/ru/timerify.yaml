@@ -91,7 +91,8 @@ expansion_rules:
   timerify_clock_before_command: <timerify_clock>
   timerify_clock: (<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])
   timerify_clock_day: '{timerify_clock_days:clock_day}'
-  timerify_clock_time: в ({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})
+  timerify_clock_minute: ({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})
+  timerify_clock_time: в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
   timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
@@ -144,6 +145,133 @@ lists:
     range:
       from: 0
       to: 59
+  timerify_clock_minute_digits:
+    values:
+    - in: '00'
+      out: 0
+    - in: '01'
+      out: 1
+    - in: '02'
+      out: 2
+    - in: '03'
+      out: 3
+    - in: '04'
+      out: 4
+    - in: '05'
+      out: 5
+    - in: '06'
+      out: 6
+    - in: '07'
+      out: 7
+    - in: 08
+      out: 8
+    - in: 09
+      out: 9
+    - in: '10'
+      out: 10
+    - in: '11'
+      out: 11
+    - in: '12'
+      out: 12
+    - in: '13'
+      out: 13
+    - in: '14'
+      out: 14
+    - in: '15'
+      out: 15
+    - in: '16'
+      out: 16
+    - in: '17'
+      out: 17
+    - in: '18'
+      out: 18
+    - in: '19'
+      out: 19
+    - in: '20'
+      out: 20
+    - in: '21'
+      out: 21
+    - in: '22'
+      out: 22
+    - in: '23'
+      out: 23
+    - in: '24'
+      out: 24
+    - in: '25'
+      out: 25
+    - in: '26'
+      out: 26
+    - in: '27'
+      out: 27
+    - in: '28'
+      out: 28
+    - in: '29'
+      out: 29
+    - in: '30'
+      out: 30
+    - in: '31'
+      out: 31
+    - in: '32'
+      out: 32
+    - in: '33'
+      out: 33
+    - in: '34'
+      out: 34
+    - in: '35'
+      out: 35
+    - in: '36'
+      out: 36
+    - in: '37'
+      out: 37
+    - in: '38'
+      out: 38
+    - in: '39'
+      out: 39
+    - in: '40'
+      out: 40
+    - in: '41'
+      out: 41
+    - in: '42'
+      out: 42
+    - in: '43'
+      out: 43
+    - in: '44'
+      out: 44
+    - in: '45'
+      out: 45
+    - in: '46'
+      out: 46
+    - in: '47'
+      out: 47
+    - in: '48'
+      out: 48
+    - in: '49'
+      out: 49
+    - in: '50'
+      out: 50
+    - in: '51'
+      out: 51
+    - in: '52'
+      out: 52
+    - in: '53'
+      out: 53
+    - in: '54'
+      out: 54
+    - in: '55'
+      out: 55
+    - in: '56'
+      out: 56
+    - in: '57'
+      out: 57
+    - in: '58'
+      out: 58
+    - in: '59'
+      out: 59
+  timerify_clock_minute_words:
+    range:
+      from: 0
+      to: 59
+      digits: false
   timerify_day_parts:
     values:
     - in: утра

@@ -100,6 +100,7 @@ The Russian column is transliterated because this page is in English. The real s
 - The time can come after the command or before it: "at 7:30 turn on the boiler".
 - You can add a day: "today", "tomorrow" or "the day after tomorrow". Say it before the time or after it: "tomorrow at 7" or "at 7 tomorrow".
 - You can say the time as "7:30", "7.30" or "7 30", or in words, such as "seven thirty". "7 o'clock", "noon" and "midnight" work too.
+- After the colon, the dot or the space, the minutes are two digits: "7:05", not "7:5". "At 7.5" is not understood.
 - "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
 - You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
 - In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
@@ -133,7 +134,7 @@ The Russian column is transliterated because this page is in English. The real s
 - Switching on inside a window runs the device for the rest of the window. The exception is a timer that already ends later. An interval that is on already is left as it is. So a device that was turned off during its window stays off until the next one.
 - In English, you can say "scheduling" instead of "schedule", and you can leave out "the" before it. Examples are "turn off scheduling for the boiler" and "turn off schedule for the boiler".
 - To switch one interval, say its title, such as "the Morning schedule of the boiler".
-- An interval that still has the title Timerify made, such as `06:30–07:15, Sun–Thu`, can be said by its start time. An example is "turn off the 6:30 schedule of the boiler". Say the time as "6:30", "06:30", "6.30" or "06.30". Every interval of the timer that starts then is switched, and the answer names each of them.
+- An interval that still has the title Timerify made, such as `06:30–07:15, Sun–Thu`, can be said by its start time. An example is "turn off the 6:30 schedule of the boiler". Say the time as "6:30", "06:30", "6.30", "06.30", "6 30" or "06 30". Every interval of the timer that starts then is switched, and the answer names each of them.
 - The days of a title that Timerify made cannot be said. Two intervals that start together are told apart only by a title of your own. An interval you renamed is said by its new title, not by its start time. An interval you titled like a time, such as "6:30", is named by that text. Every interval with Timerify's title that starts then is switched with it.
 - A title that two intervals share switches both. A title or a start time that another timer has, and this one does not, is refused. The answer names the first five titles this timer has.
 
@@ -258,6 +259,7 @@ If the interval is empty, the whole schedule is switched.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
 - **The days of a title that Timerify made.** The title has them, such as `Sun–Thu`, and they cannot be said. Say the start time, or give the interval a title of your own.
+- **Some ways of saying the time.** "Half past 7", "quarter to 8", "7:30am" written together, "tonight at 7" and "this morning at 7" are not understood yet ([issue #49](https://github.com/klimofey/timerify/issues/49)). Say "at 7:30", "at 7:45", "at 7:30 am", "at 7 in the evening" or "at 7 in the morning" instead.
 
 ---
 

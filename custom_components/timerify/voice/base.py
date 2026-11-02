@@ -308,6 +308,10 @@ class TimerifyIntentHandler(intent.IntentHandler):
     that says nothing: the least safe ones."""
     idempotent: ClassVar[bool] = False
     """Calling the tool again with the same arguments changes nothing more."""
+    offered_as_tool: ClassVar[bool] = True
+    """Whether an LLM agent is offered the handler as a tool. A handler that only the
+    sentences of the built-in agent reach says `False`; it still has its own tool name,
+    title and description, so that none is taken for another handler's."""
 
     @final
     @override

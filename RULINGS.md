@@ -987,13 +987,13 @@ those of the spec.
   fold of the repository), runs of space one space.** So "morning" means `Morning!` and
   `06:30-07:15, Mon-Sun` means the generated title with en dashes. The asked text is held
   against the key of the title of each interval and the key of each of its start times
-  (`spoken_aliases`); the key keeps a colon or a dot between digits, so "6:30", "06:30",
-  "6.30" and "06.30" are four keys, and each of them is an alias. The sentence files list a
-  title with a yo under both spellings, since the built-in agent cannot be told to fold
-  (Decision 6 of the voice part, below). A title of nothing but punctuation has the key
-  `""`, which matches nothing: the built-in agent does not know such a title either, so an
-  LLM cannot ask for it and it is reached by the whole schedule or its own switch. Cost if
-  wrong: such an interval is not named by an agent.
+  (`spoken_aliases`); the key keeps a colon, a dot or a space between digits, so "6:30",
+  "06:30", "6.30", "06.30", "6 30" and "06 30" are six keys, and each of them is an alias.
+  The sentence files list a title with a yo under both spellings, since the built-in agent
+  cannot be told to fold (Decision 6 of the voice part, below). A title of nothing but
+  punctuation has the key `""`, which matches nothing: the built-in agent does not know such
+  a title either, so an LLM cannot ask for it and it is reached by the whole schedule or its
+  own switch. Cost if wrong: such an interval is not named by an agent.
 - **A refusal for an unknown title lists the titles that can be asked for, bare, each
   once, joined by semicolons, at most five; the translation chooses the quotes around the
   asked title.** A placeholder can be put in quotes as a whole but not each element of a
@@ -2807,10 +2807,16 @@ in `docs/followups.md`.
   with its own handler (`ClockCommandHandler`, a `DelayedCommandHandler` whose `when` is the
   moment of the time said, where the delayed one's is a delay). It is registered for the
   built-in agent in `HANDLER_TYPES` and left out of `TOOL_HANDLER_TYPES`, which
-  `llm.async_get_tools` offers. Why: the tool `timerify__delayed_command` already takes `at`,
-  and the sentence slots (`clock_hour`, `clock_minute`, `clock_part`, `clock_day`) would only
-  confuse a model. Cost if wrong: a model that is shown a second way to plan a command at a
-  time chooses between two tools that do the same.
+  `llm.async_get_tools` offers. The exclusion is a class attribute of the handler,
+  `offered_as_tool = False` (the base class says `True`), that `TOOL_HANDLER_TYPES` filters
+  on, not a test of the class's identity; and the handler has a tool name
+  (`timerify__clock_command`), a title and a description of its own, since a subclass of the
+  delayed command's handler would otherwise inherit its identity and a loop over every
+  handler would offer two tools under one name (the final review of part D). Why: the tool
+  `timerify__delayed_command` already takes `at`, and the sentence slots (`clock_hour`,
+  `clock_minute`, `clock_part`, `clock_day`) would only confuse a model. Cost if wrong: a
+  model that is shown a second way to plan a command at a time chooses between two tools
+  that do the same.
   - **Reading (owner's decision, 2026-11-02).** An hour from 1 to 12 said with no "am",
     "pm" and no Russian word for a part of the day is the nearer of its two times ahead:
     "at 7" at 18:00 is 19:00 today, at 06:00 is 07:00 today, at 20:00 is 07:00 tomorrow;
@@ -2828,6 +2834,25 @@ in `docs/followups.md`.
     still starts at the first). Cost if wrong: a speaker who says "at 7" at 18:00 meaning
     tomorrow morning hears "19:00" in the answer and must say "in the morning" or "am"
     (Russian: "utra") to get 07:00. The answer always says the time that was chosen.
+  - **The minutes after a separator are exactly two digits (the final review of part D).**
+    After ":", "." or a space the minutes are "00" to "59": "at 7:05",
+    "at 7.05" and "at 7 05" are 07:05, and "at 7.5" and "at 7:5" are not a time at all.
+    Why: nobody writes 07:05 as "7.5", which reads as seven and a half if anything, and
+    "turn on the AC at 22.5 for an hour" (a temperature said first) was planned for 22:05.
+    The sources say the minutes with the rule `timerify_clock_minute`, the text list
+    `timerify_clock_minute_digits` ("00" to "59", each with its number as the value, since a
+    range list reads "5" and "05" alike) or the number words `timerify_clock_minute_words`
+    (a range with `digits: false`, so spelled minutes work as before: "seven thirty"); both
+    fill `clock_minute`. In Russian the minutes said with their word ("v 7 chasov 5 minut")
+    keep the range `timerify_clock_minutes`, where one digit is no ambiguity. Minutes of
+    one digit spelled as words ("seven five") are unchanged. Cost if wrong: a person who
+    writes "7:5" is told that it was not understood, and nothing is kept. Tests:
+    `test_a_minute_of_one_digit_after_a_separator_is_no_time`,
+    `test_a_temperature_said_before_how_long_is_no_time_of_day`,
+    `test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs`,
+    `test_russian_minute_of_one_digit_after_a_separator_is_no_time`,
+    `test_russian_minutes_of_two_digits_make_a_time` and
+    `test_russian_minutes_said_with_their_word_may_be_one_digit`.
   - **Parts of the day in English words are Timerify's.** "In the morning" is `am`, "in the
     afternoon" and "in the evening" are `pm`, "at night" is `night` (the small hours for 1 to
     5, the evening for 6 to 11, as in Russian), said after the time ("at 7 in the
@@ -2841,7 +2866,8 @@ in `docs/followups.md`.
     sentences for an area or a floor called "7" and refused ("no zone 7"), and nothing is
     switched, so it is not taken over here; it is a followup for the owner to decide.
     Cost if wrong: a form of the part of the day that is not here ("this morning at 7",
-    "tonight at 7") is not understood, and nothing is switched.
+    "tonight at 7") is not understood, and nothing is switched; the voice pages list them
+    ("What you cannot say", `test_the_clock_forms_not_understood_yet_are_not_understood`).
   - **Midnight with a day word is the one that ends that day.** Alone, "at midnight" is the
     next 00:00. "Today at midnight" is tonight's 00:00 (the 00:00 of tomorrow's date), and
     is never refused; "tomorrow at midnight" is the 00:00 after tomorrow; "the day after
@@ -2933,6 +2959,7 @@ in `docs/followups.md`.
   `test_russian_clock_forms_reach_the_clock_handler`,
   `test_russian_day_parts_mean_the_hours_they_name`,
   `test_the_clock_sentences_add_no_llm_tool`,
+  `test_a_handler_that_is_no_tool_has_a_tool_identity_of_its_own`,
   `test_the_file_says_every_command_at_a_clock_time_for_every_kind_of_device` and
   `test_the_generator_refuses_sentences_that_lack_a_way_to_say_the_time`.
 - **A name, a title and a mode with a Russian yo are listed under both spellings, and
@@ -3033,11 +3060,13 @@ in `docs/followups.md`.
   keeps none, so one edited there after a downgrade has none when the entry comes back),
   equals the title its data makes in the language of the house now (`labels`, from
   `async_title_labels`, which the form, the sentence files and the controller each fetch
-  where they run). `start_aliases("06:30")` is "6:30", "06:30", "6.30" and "06.30",
-  `start_aliases("18:00")` is "18:00" and "18.00": the hour with and without its leading
-  zero, after a colon and then after a dot, as a recogniser writes it, without repeats, in
-  that order, and the same in every language. `spoken_aliases(subentry, labels)` is those
-  of the start of such an interval and nothing for a renamed one. `interval_names` lists
+  where they run). `start_aliases("06:30")` is "6:30", "06:30", "6.30", "06.30", "6 30" and
+  "06 30", `start_aliases("18:00")` is "18:00", "18.00" and "18 00": the hour with and
+  without its leading zero, after a colon, then after a dot, then after a space (the forms
+  of the clock sentences, so a person who learned "at 7 30" can say "the 6 30 schedule"; the
+  final review of part D), as a recogniser writes it, without repeats, in that order, and
+  the same in every language. `spoken_aliases(subentry, labels)` is those of the start of
+  such an interval and nothing for a renamed one. `interval_names` lists
   the title of each loaded interval and then its aliases, each text once for the house, and
   the file lists an alias with itself as the value (`in` and `out` are the text that was
   said), so the intent receives what was said and the controller works out what it names:
@@ -3066,9 +3095,9 @@ in `docs/followups.md`.
   plural form per count, so it is not in `answers.yaml`. The description of the LLM tool
   says the start time may be given. Why: a value that meant a title would make "6:30"
   ambiguous between two timers, since the list is one for the house. Checked: hassil strips
-  punctuation at the edges of a word only, so `spoken_form` leaves "6:30" and "6.30" as
-  they are, `normalize_text` does too, and `validate` reads each alias back as it was
-  written; the writer quotes the values that YAML would read as numbers (unquoted, `6:30`
+  punctuation at the edges of a word only, so `spoken_form` leaves "6:30", "6.30" and
+  "6 30" as they are, `normalize_text` does too, and `validate` reads each alias back as it
+  was written; the writer quotes the values that YAML would read as numbers (unquoted, `6:30`
   is the integer 390 and `6.30` the float 6.3), which
   `test_the_file_lists_each_start_time_with_itself_as_the_value` and
   `test_the_start_times_are_listed_as_the_built_in_agent_reads_them` read back. A
@@ -3091,6 +3120,8 @@ in `docs/followups.md`.
   Tests (`tests/voice/test_schedule_start_times.py`, the answers also in
   `test_each_russian_schedule_answer_reads_as_the_fixture_says`):
   `test_start_aliases_are_the_ways_a_recogniser_writes_the_time`,
+  `test_an_interval_is_meant_by_a_start_time_as_it_was_written`,
+  `test_a_start_time_said_with_a_space_names_the_interval_too`,
   `test_a_generated_title_is_said_by_its_start_time`,
   `test_every_way_a_recogniser_writes_the_start_time_names_the_interval`,
   `test_the_file_lists_each_start_time_with_itself_as_the_value`,

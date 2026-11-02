@@ -244,8 +244,9 @@ class ClockCommandHandler(DelayedCommandHandler):
 
     It is for the sentences of the built-in agent only, which say the time with
     `clock_hour`, `clock_minute`, `clock_part` and `clock_day` as a person says it. An
-    LLM agent has no such tool: the tool of the delayed command takes `at`, a moment,
-    and these slots would only confuse a model. The rest is the delayed command's.
+    LLM agent has no such tool (`offered_as_tool`): the tool of the delayed command
+    takes `at`, a moment, and these slots would only confuse a model. The rest is the
+    delayed command's.
 
     "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
     is not the bare 12 of "at 12", which is the nearer of the two.
@@ -260,6 +261,18 @@ class ClockCommandHandler(DelayedCommandHandler):
     """
 
     intent_type = "TimerifyCommandAt"
+    tool_name = "timerify__clock_command"
+    title = "Plan a command for a time of day"
+    description = (
+        "Plans to turn a device on or off at a time of day, said as a person says it:"
+        " 'clock_hour' (0 to 23, or 1 to 12 with 'clock_part'), 'clock_minute' (0 to"
+        " 59), 'clock_part' ('am', 'pm' or 'night') and 'clock_day' (0 for today, 1 for"
+        " tomorrow, 2 for the day after). Only the sentences of the built-in agent say"
+        " a time so; a model plans a command at a time of day with the tool of the"
+        " delayed command, which takes 'at'. 'name', 'action', 'hours', 'minutes' and"
+        " the settings are those of that tool."
+    )
+    offered_as_tool = False
     slot_schema: ClassVar[dict[Any, Any]] = {
         probatio.Required("name"): cv.string,
         probatio.Required("action"): probatio.In(["on", "off"]),

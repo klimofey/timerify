@@ -32,13 +32,11 @@ HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = (
 )
 """Every handler Timerify registers, one per intent type."""
 TOOL_HANDLER_TYPES: Final[tuple[type[TimerifyIntentHandler], ...]] = tuple(
-    handler_type
-    for handler_type in HANDLER_TYPES
-    if handler_type is not ClockCommandHandler
+    handler_type for handler_type in HANDLER_TYPES if handler_type.offered_as_tool
 )
-"""The handlers that an LLM agent is offered as tools: every handler but the one that
-only sentences reach. A clock time is said to a model with `at`, a moment, in the tool
-of the delayed command."""
+"""The handlers that an LLM agent is offered as tools: every handler but the ones that
+only sentences reach (`offered_as_tool`). A clock time is said to a model with `at`, a
+moment, in the tool of the delayed command."""
 
 
 @callback

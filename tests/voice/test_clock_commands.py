@@ -61,7 +61,11 @@ NUMBERS = {
     "timerify_clock_minutes": 30,
     "timerify_half_day_hours": 7,
 }
-"""The numbers with which a clock time is said: 7:30, or 7 with a part of the day."""
+"""The numbers with which a clock time is said: 7:30, or 7 with a part of the day. The
+minutes are said as digits after a separator (`MINUTES`), and as this number only with
+their word in Russian: "7 hours 30 minutes"."""
+MINUTES = {"timerify_clock_minute_digits": "30"}
+"""The minutes said after a separator, which are two digits: the 30 of 7:30."""
 
 
 @pytest.fixture
@@ -118,12 +122,13 @@ def turn_on_at(language: str, clock: str) -> str:
     """The sentence of the shipped files that turns the Boiler on, with `clock` as the
     time it says: the first sentence with a command before the time, taken from the
     samples of the language."""
-    forms = spoken_rule(language, "timerify_clock", NUMBERS)
+    forms = spoken_rule(language, "timerify_clock", NUMBERS, MINUTES)
     for sample in samples(
         language,
         CLOCK,
         takeover=True,
         numbers=NUMBERS,
+        texts=MINUTES,
         absent=SETTING_LISTS,
         admitting="switch",
     ):
@@ -142,7 +147,9 @@ def russian_form(
     gives (the first value of a list without one)."""
     forms = [
         form
-        for form in spoken_rule("ru", "timerify_clock", numbers or NUMBERS, texts)
+        for form in spoken_rule(
+            "ru", "timerify_clock", numbers or NUMBERS, {**MINUTES, **(texts or {})}
+        )
         if re.fullmatch(pattern, form)
     ]
     assert len(forms) == 1, (pattern, forms)
@@ -172,6 +179,9 @@ async def test_turn_on_at_a_clock_time_keeps_a_command_for_then(
         ("at 07:30", "07:30", 0),
         ("at 7 30", "07:30", 0),
         ("at 7.30", "07:30", 0),
+        ("at 7:05", "07:05", 0),
+        ("at 7.05", "07:05", 0),
+        ("at 7 05", "07:05", 0),
         ("at 7", "07:00", 0),
         ("at 7 o'clock", "07:00", 0),
         ("at 7 pm", "19:00", 0),
@@ -879,11 +889,13 @@ async def test_russian_clock_forms_reach_the_clock_handler(
         CLOCK,
         takeover=True,
         numbers=NUMBERS,
+        texts=MINUTES,
         absent=SETTING_LISTS,
         admitting="switch",
     )
     sentences += [
-        turn_on_at("ru", form) for form in spoken_rule("ru", "timerify_clock", NUMBERS)
+        turn_on_at("ru", form)
+        for form in spoken_rule("ru", "timerify_clock", NUMBERS, MINUTES)
     ]
     assert len(sentences) > 100
 
@@ -904,11 +916,13 @@ async def test_english_clock_forms_reach_the_clock_handler(
         CLOCK,
         takeover=True,
         numbers=NUMBERS,
+        texts=MINUTES,
         absent=SETTING_LISTS,
         admitting="switch",
     )
     sentences += [
-        turn_on_at("en", form) for form in spoken_rule("en", "timerify_clock", NUMBERS)
+        turn_on_at("en", form)
+        for form in spoken_rule("en", "timerify_clock", NUMBERS, MINUTES)
     ]
     assert len(sentences) > 40
 
@@ -916,6 +930,75 @@ async def test_english_clock_forms_reach_the_clock_handler(
         response = await converse(hass, text, "en")
 
         assert reached(response) == CLOCK, text
+        await cancel_pending(hass, NUMBER, NEXT)
+    assert fake_target.calls == []
+
+
+def russian_minute_form(hour: int, separator: str, minute: str) -> str:
+    """The Russian way of saying `hour` and `minute` with `separator` between them, read
+    from the shipped sentences with the minute written as `minute`: it may be one digit,
+    which the sentences do not say."""
+    numbers = {**NUMBERS, "timerify_clock_hours": hour}
+    return russian_form(
+        rf"\S+ {hour}{re.escape(separator)}{minute}",
+        numbers,
+        {"timerify_clock_minute_digits": minute},
+    )
+
+
+@pytest.mark.parametrize("separator", [":", ".", " "])
+async def test_russian_minutes_of_two_digits_make_a_time(
+    hass: HomeAssistant,
+    clock_boiler: MockConfigEntry,
+    separator: str,
+) -> None:
+    form = russian_minute_form(7, separator, "05")
+
+    response = await converse(hass, turn_on_at("ru", form), "ru")
+
+    assert reached(response) == CLOCK, form
+    assert state_of(hass, NEXT) == at(SUNDAY, "07:05")
+
+
+@pytest.mark.parametrize("hour", [7, 22])
+@pytest.mark.parametrize("separator", [":", ".", " "])
+async def test_russian_minute_of_one_digit_after_a_separator_is_no_time(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    hour: int,
+    separator: str,
+) -> None:
+    """As in English, "v 7.5" is no 7:05: the sentence is not understood, no command is
+    kept, and the boiler is left alone."""
+    form = russian_minute_form(hour, separator, "5")
+
+    response = await converse(hass, turn_on_at("ru", form), "ru")
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+async def test_russian_minutes_said_with_their_word_may_be_one_digit(
+    hass: HomeAssistant, fake_target: FakeTarget, clock_boiler: MockConfigEntry
+) -> None:
+    """ "7 hours 5 minutes" names the minutes with their word, so a single digit says
+    them as plainly as two: it is 07:05."""
+    numbers = {**NUMBERS, "timerify_clock_minutes": 5}
+    forms = [
+        form
+        for form in spoken_rule("ru", "timerify_clock", numbers, MINUTES)
+        if re.fullmatch(r"\S+ 7 \S+ 5 \S+", form)
+    ]
+    assert forms
+
+    for form in forms:
+        response = await converse(hass, turn_on_at("ru", form), "ru")
+
+        assert reached(response) == CLOCK, form
+        assert state_of(hass, NEXT) == at(SUNDAY, "07:05"), form
         await cancel_pending(hass, NUMBER, NEXT)
     assert fake_target.calls == []
 
@@ -1105,9 +1188,9 @@ async def test_the_russian_start_of_a_day_is_said_with_the_hour_0(
     """The 00:00 that starts tomorrow is "tomorrow at 0:00": the hour 0 is the 24-hour
     clock's, with a day word as without one."""
     day_text = spoken_values("ru", "timerify_clock_days")["1"][0]
-    texts = {"timerify_clock_days": day_text}
-    numbers = {**NUMBERS, "timerify_clock_hours": 0, "timerify_clock_minutes": 0}
-    form = russian_form(rf"{re.escape(day_text)} \S+ 0:0", numbers, texts)
+    texts = {"timerify_clock_days": day_text, "timerify_clock_minute_digits": "00"}
+    numbers = {**NUMBERS, "timerify_clock_hours": 0}
+    form = russian_form(rf"{re.escape(day_text)} \S+ 0:00", numbers, texts)
 
     response = await say_at(
         hass, freezer, SUNDAY, "06:00", turn_on_at("ru", form), "ru"
@@ -1175,6 +1258,114 @@ async def test_a_time_that_is_none_is_not_understood(
     assert response.response_type is intent.IntentResponseType.ERROR
     assert pending(hass) == []
     assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "turn on the boiler at half past 7",
+        "turn on the boiler at quarter to 8",
+        "turn on the boiler at 7:30am",
+        "turn on the boiler tonight at 7",
+        "turn on the boiler this morning at 7",
+    ],
+)
+async def test_the_clock_forms_not_understood_yet_are_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+) -> None:
+    """The forms that the voice page lists as not understood yet (issue 49) reach no
+    handler: nothing is kept for a time that was not read, and the boiler is not turned
+    on at once. "At 7 am" and "at 7:30 am" are read."""
+    response = await converse(hass, said)
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "turn on the boiler at 7.5",
+        "turn on the boiler at 7:5",
+        "turn on the boiler at 7 5",
+        "turn on the boiler at 19:5",
+        "turn on the boiler at 7.5 pm",
+        "turn on the boiler in the morning at 7.5",
+        "turn on the boiler at 7:015",
+        "turn off the boiler at 7.5",
+    ],
+)
+async def test_a_minute_of_one_digit_after_a_separator_is_no_time(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+) -> None:
+    """ "7.5" is seven and a half, if it is anything, and nobody writes 7:05 as "7:5": a
+    minute after a colon, a dot or a space is two digits. The sentence is not
+    understood, so no command is kept for a time nobody said, and the boiler, which
+    Home Assistant's own sentences could turn on at once, is left alone."""
+    response = await converse(hass, said)
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    "said",
+    [
+        "turn on the AC at 22.5 for an hour",
+        "turn on the AC at 22:5 for an hour",
+        "turn on the AC at 7.5 for an hour",
+    ],
+)
+async def test_a_temperature_said_before_how_long_is_no_time_of_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    said: str,
+) -> None:
+    """A temperature with a dot, said before how long the AC runs, is not read as the
+    time 22:05: the sentence is not understood, nothing is kept for any time, and the
+    AC is neither turned on nor given the temperature."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, said)
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass, AC_NEXT) == []
+    assert fake_full_ac.call_data == []
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """ "At 22.05 for an hour" is a time: the command waits for 22:05, and the AC is not
+    turned on now."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, "turn on the AC at 22.05 for an hour")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, AC_NEXT) == at(SUNDAY, "22:05")
+    assert [c["minutes"] for c in pending(hass, AC_NEXT)] == [60]
+    assert fake_full_ac.call_data == []
 
 
 @pytest.mark.parametrize(
@@ -1267,9 +1458,10 @@ def test_the_hour_of_the_day_follows_the_part_it_is_said_with(
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:
-    """Every way the shipped rule is said, with the numbers of `NUMBERS` and the words
-    of the lists `texts` names (the first value of the others)."""
-    return set(spoken_rule(language, rule, NUMBERS, texts))
+    """Every way the shipped rule is said, with the numbers of `NUMBERS`, the minutes
+    of `MINUTES` and the words of the lists `texts` names (the first value of the
+    others)."""
+    return set(spoken_rule(language, rule, NUMBERS, {**MINUTES, **(texts or {})}))
 
 
 def time_of(form: str) -> str:

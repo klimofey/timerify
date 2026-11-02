@@ -130,8 +130,12 @@ async def test_the_clock_sentences_add_no_llm_tool(
     tools = timerify_tools(api)
 
     assert ClockCommandHandler in HANDLER_TYPES
+    assert not ClockCommandHandler.offered_as_tool
     assert ClockCommandHandler not in TOOL_HANDLER_TYPES
     assert set(HANDLER_TYPES) - set(TOOL_HANDLER_TYPES) == {ClockCommandHandler}
+    assert {handler for handler in HANDLER_TYPES if handler.offered_as_tool} == set(
+        TOOL_HANDLER_TYPES
+    )
     assert set(tools) == {handler.tool_name for handler in TOOL_HANDLER_TYPES}
     assert len(tools) == len(TOOL_HANDLER_TYPES)
     for tool in tools.values():
@@ -166,6 +170,17 @@ async def test_no_two_tools_are_described_alike(
 
     assert len({tool.description for tool in tools}) == len(tools)
     assert len({tool.title for tool in tools}) == len(tools)
+
+
+def test_a_handler_that_is_no_tool_has_a_tool_identity_of_its_own() -> None:
+    """The handler of the clock sentences is a subclass of the delayed command's, and
+    what it inherits is not what it is: with no name, title and description of its own
+    it would be a second tool with the name of another, the day that a loop over every
+    handler offered it. Every handler has its own, whether it is offered or not."""
+    for field in ("tool_name", "title", "description"):
+        values = [getattr(handler, field) for handler in HANDLER_TYPES]
+
+        assert len(set(values)) == len(HANDLER_TYPES), field
 
 
 @EVERY_HANDLER

@@ -36,6 +36,7 @@ from custom_components.timerify.schedule import (
     has_generated_title,
     spoken_aliases,
     start_aliases,
+    title_key,
 )
 from custom_components.timerify.voice.sentences import (
     VoiceName,
@@ -88,9 +89,26 @@ CLOCK_COMMAND = "TimerifyCommandAt"
 
 
 def test_start_aliases_are_the_ways_a_recogniser_writes_the_time() -> None:
-    assert start_aliases("06:30") == ("6:30", "06:30", "6.30", "06.30")
-    assert start_aliases("18:00") == ("18:00", "18.00")
-    assert start_aliases("00:05") == ("0:05", "00:05", "0.05", "00.05")
+    assert start_aliases("06:30") == ("6:30", "06:30", "6.30", "06.30", "6 30", "06 30")
+    assert start_aliases("18:00") == ("18:00", "18.00", "18 00")
+    assert start_aliases("00:05") == (
+        "0:05",
+        "00:05",
+        "0.05",
+        "00.05",
+        "0 05",
+        "00 05",
+    )
+
+
+@pytest.mark.parametrize("start", ["06:30", "18:00", "00:05", "23:59"])
+def test_an_interval_is_meant_by_a_start_time_as_it_was_written(start: str) -> None:
+    """The title key is what a time that was said is compared with, so a time keeps its
+    colon, its dot or its space: "6 30" is not "6:30" or "630", and no two ways of
+    writing a start time are one."""
+    aliases = start_aliases(start)
+
+    assert [title_key(alias) for alias in aliases] == list(aliases)
 
 
 LABELS = {
@@ -207,17 +225,20 @@ async def test_the_file_lists_each_start_time_with_itself_as_the_value(
     so that Home Assistant reads it back as the text it is."""
     assert listed(hass, "en", LIST_INTERVAL) == [
         {"in": "06:30–07:15 Mon–Sun", "out": MORNING_TITLE},
-        *({"in": said, "out": said} for said in ("6:30", "06:30", "6.30", "06.30")),
+        *(
+            {"in": said, "out": said}
+            for said in ("6:30", "06:30", "6.30", "06.30", "6 30", "06 30")
+        ),
         {"in": "18:00–19:00 Mon–Sun", "out": EVENING_TITLE},
-        *({"in": said, "out": said} for said in ("18:00", "18.00")),
+        *({"in": said, "out": said} for said in ("18:00", "18.00", "18 00")),
     ]
 
 
 def test_the_start_times_are_listed_as_the_built_in_agent_reads_them() -> None:
     """The proof that gates every write holds the start times to what is said: a colon
     or a dot between digits is not punctuation to the agent, so "6:30" and "6.30" are
-    read back as they were written, and the file reads back as text, not as the number
-    that YAML makes of `6:30` or `6.30` unquoted."""
+    read back as they were written, and so is "6 30"; the file reads back as text, not
+    as the number that YAML makes of `6:30` or `6.30` unquoted."""
     aliases = (*start_aliases("06:30"), *start_aliases("18:00"))
     built = build(
         load_sources("en"),
@@ -468,7 +489,7 @@ async def test_renaming_a_generated_interval_takes_its_start_times_out_of_the_fi
         if subentry.title == MORNING_TITLE
     )
     said = [value["out"] for value in listed(hass, "en", LIST_INTERVAL)]
-    assert {"6:30", "06:30", "6.30", "06.30"} <= set(said)
+    assert {"6:30", "06:30", "6.30", "06.30", "6 30", "06 30"} <= set(said)
 
     await retitle_interval(hass, generated, morning, "Morning")
     await advance(hass, freezer, seconds=VOICE_SYNC_COOLDOWN)
@@ -478,10 +499,12 @@ async def test_renaming_a_generated_interval_takes_its_start_times_out_of_the_fi
         EVENING_TITLE,
         "18:00",
         "18.00",
+        "18 00",
     ]
     for text in (
         "turn off the 6:30 schedule of the boiler",
         "turn off the 06.30 schedule of the boiler",
+        "turn off the 6 30 schedule of the boiler",
     ):
         response = await converse(hass, text)
         assert reached(response) != SET_SCHEDULE, text
@@ -521,7 +544,7 @@ async def test_an_unmarked_interval_with_the_generated_title_is_said_by_its_star
     await add_voice_entry(hass, languages=("en",))
 
     said = [value["out"] for value in listed(hass, "en", LIST_INTERVAL)]
-    assert {"6:30", "06:30", "6.30", "06.30"} <= set(said)
+    assert {"6:30", "06:30", "6.30", "06.30", "6 30", "06 30"} <= set(said)
     assert "18:00" not in said
     response = await converse(hass, "turn off the 6:30 schedule of the boiler")
 
@@ -657,6 +680,10 @@ def test_the_time_in_each_phrase_is_read_by_one_intent_only() -> None:
         SET_SCHEDULE
     }
     assert intent_types_reading("turn off the boiler at 6:30") == {CLOCK_COMMAND}
+    assert intent_types_reading("turn off the 6 30 schedule of the boiler") == {
+        SET_SCHEDULE
+    }
+    assert intent_types_reading("turn off the boiler at 6 30") == {CLOCK_COMMAND}
 
 
 async def test_a_start_time_is_not_a_clock_time_and_the_other_way_round(
@@ -678,6 +705,31 @@ async def test_a_start_time_is_not_a_clock_time_and_the_other_way_round(
     assert switches(hass) == ("off", "on")
     assert state_of(hass, NEXT) == iso(SUNDAY, "06:30")
     assert len(pending(hass, NEXT)) == 1
+    assert fake_target.calls == []
+
+
+async def test_a_start_time_said_with_a_space_names_the_interval_too(
+    hass: HomeAssistant, fake_target: FakeTarget, generated: MockConfigEntry
+) -> None:
+    """A person who says "at 6 30" says "the 6 30 schedule" too: the time said with a
+    space names the interval as it does with a colon or a dot, and in the sentence of
+    the clock it is still a time, so a command is kept and no schedule is switched."""
+    off = await converse(hass, "turn off the 6 30 schedule of the boiler")
+
+    assert reached(off) == SET_SCHEDULE, speech(off)
+    assert switches(hass) == ("off", "on")
+    assert pending(hass, NEXT) == []
+
+    on = await converse(hass, "turn on the 06 30 schedule of the boiler")
+
+    assert reached(on) == SET_SCHEDULE, speech(on)
+    assert switches(hass) == ("on", "on")
+
+    clock = await converse(hass, "turn on the boiler at 6 30")
+
+    assert reached(clock) == CLOCK_COMMAND, speech(clock)
+    assert state_of(hass, NEXT) == iso(SUNDAY, "06:30")
+    assert switches(hass) == ("on", "on")
     assert fake_target.calls == []
 
 

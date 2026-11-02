@@ -166,6 +166,8 @@ expansion_rules:
 # hour and minutes with a dot, which the temperature is said as ("for an hour at 21"):
 # those blocks of TimerifyRun say that rule their own way, and the delayed commands take
 # it from them. A part of the day before the hour is no temperature, so it is said there.
+# The minutes after a separator are two digits (timerify_clock_minute), so that "at 7.5"
+# and "at 22.5" are no time.
   timerify_clock_after_command: "<timerify_clock>"
   timerify_clock_after_extras: "<timerify_clock_after_command>"
   timerify_clock_before_command: "<timerify_clock>"
@@ -174,10 +176,11 @@ expansion_rules:
   timerify_clock_day: "{timerify_clock_days:clock_day}"
   timerify_clock_part_of_day: "(<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>)"
   timerify_clock_when: "(<timerify_clock_day> {timerify_clock_part_words:clock_part}|[<timerify_clock_day>] in the {timerify_clock_part_words:clock_part})"
-  timerify_part_hour: "({timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour})"
+  timerify_part_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour})"
+  timerify_clock_minute: "({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})"
   timerify_clock_time: "(<timerify_exact_time>|<timerify_loose_time>)"
-  timerify_exact_time: "({timerify_clock_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}(:| ){timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part}|{timerify_clock_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
-  timerify_loose_time: "({timerify_clock_hours:clock_hour}|{timerify_clock_hours:clock_hour}.{timerify_clock_minutes:clock_minute}|{timerify_half_day_hours:clock_hour}.{timerify_clock_minutes:clock_minute} {timerify_day_parts:clock_part})"
+  timerify_exact_time: "({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_clock_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})"
+  timerify_loose_time: "({timerify_clock_hours:clock_hour}|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part})"
 # What to turn a device on with, in any order, each part left out when it is not wanted:
 # an HVAC mode, a temperature, a percentage, and a mode of the device. Which of them a
 # device may be turned on with is the rule timerify_settings of each block of TimerifyRun.
@@ -249,10 +252,136 @@ lists:
     range:
       from: 1
       to: 12
-  timerify_clock_minutes:
+  # The minutes of a clock time said after a separator are two digits ("7:05", "7.05",
+  # "7 05"), or number words ("seven thirty"); both fill the same slot. One digit is no
+  # minute: "7.5" is not 7:05 and "22.5" is not 22:05.
+  timerify_clock_minute_digits:
+    values:
+      - in: "00"
+        out: 0
+      - in: "01"
+        out: 1
+      - in: "02"
+        out: 2
+      - in: "03"
+        out: 3
+      - in: "04"
+        out: 4
+      - in: "05"
+        out: 5
+      - in: "06"
+        out: 6
+      - in: "07"
+        out: 7
+      - in: "08"
+        out: 8
+      - in: "09"
+        out: 9
+      - in: "10"
+        out: 10
+      - in: "11"
+        out: 11
+      - in: "12"
+        out: 12
+      - in: "13"
+        out: 13
+      - in: "14"
+        out: 14
+      - in: "15"
+        out: 15
+      - in: "16"
+        out: 16
+      - in: "17"
+        out: 17
+      - in: "18"
+        out: 18
+      - in: "19"
+        out: 19
+      - in: "20"
+        out: 20
+      - in: "21"
+        out: 21
+      - in: "22"
+        out: 22
+      - in: "23"
+        out: 23
+      - in: "24"
+        out: 24
+      - in: "25"
+        out: 25
+      - in: "26"
+        out: 26
+      - in: "27"
+        out: 27
+      - in: "28"
+        out: 28
+      - in: "29"
+        out: 29
+      - in: "30"
+        out: 30
+      - in: "31"
+        out: 31
+      - in: "32"
+        out: 32
+      - in: "33"
+        out: 33
+      - in: "34"
+        out: 34
+      - in: "35"
+        out: 35
+      - in: "36"
+        out: 36
+      - in: "37"
+        out: 37
+      - in: "38"
+        out: 38
+      - in: "39"
+        out: 39
+      - in: "40"
+        out: 40
+      - in: "41"
+        out: 41
+      - in: "42"
+        out: 42
+      - in: "43"
+        out: 43
+      - in: "44"
+        out: 44
+      - in: "45"
+        out: 45
+      - in: "46"
+        out: 46
+      - in: "47"
+        out: 47
+      - in: "48"
+        out: 48
+      - in: "49"
+        out: 49
+      - in: "50"
+        out: 50
+      - in: "51"
+        out: 51
+      - in: "52"
+        out: 52
+      - in: "53"
+        out: 53
+      - in: "54"
+        out: 54
+      - in: "55"
+        out: 55
+      - in: "56"
+        out: 56
+      - in: "57"
+        out: 57
+      - in: "58"
+        out: 58
+      - in: "59"
+        out: 59
+  timerify_clock_minute_words:
     range:
       from: 0
       to: 59
+      digits: false
   # Which half of the day an hour of the 12-hour clock is in, said after the time. The
   # night is the small hours for 1 to 5 and the evening for 6 to 11.
   timerify_day_parts:

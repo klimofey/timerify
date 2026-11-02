@@ -253,8 +253,10 @@ class ClockCommandHandler(DelayedCommandHandler):
     With a day word, a time of the night's small hours (midnight, and 12 or 1 to 5 said
     with "night") is in the night that follows that day: "tomorrow at midnight" and
     "tomorrow night at 12" are the 00:00 after tomorrow, "tomorrow at 2 at night" is
-    the 02:00 after it, and "today at 2 at night" is the coming 02:00. "Am" says a
-    half of the clock, not a night: "tomorrow at 2 am" is 02:00 tomorrow.
+    the 02:00 after it, and "today at 2 at night" is the coming 02:00: the night in
+    progress when it is said in the small hours and that moment is still ahead, else
+    the next night's. "Am" says a half of the clock, not a night: "tomorrow at 2 am"
+    is 02:00 tomorrow.
     """
 
     intent_type = "TimerifyCommandAt"
@@ -295,16 +297,17 @@ class ClockCommandHandler(DelayedCommandHandler):
             in_the_night_after = (
                 part == "night" and hour_of_day(hour, part) < _NIGHT_ENDS
             )
+        now = dt_util.utcnow()
+        zone = dt_util.get_default_time_zone()
+        minute = 0 if minute is None else minute
         if in_the_night_after and day is not None:
+            if day == 0:
+                # Said in the small hours, "today" names the night in progress.
+                moment = clock_moment(now, zone, hour, minute, part, 0)
+                if moment > now:
+                    return moment
             day += 1
-        return clock_moment(
-            dt_util.utcnow(),
-            dt_util.get_default_time_zone(),
-            hour,
-            0 if minute is None else minute,
-            part,
-            day,
-        )
+        return clock_moment(now, zone, hour, minute, part, day)
 
 
 def command_slots(command: Command, now: datetime) -> dict[str, Any]:

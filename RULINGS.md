@@ -2791,6 +2791,10 @@ in `docs/followups.md`.
     "zavtra v 2 nochi" are Tuesday 02:00; "tomorrow night at 12" and "zavtra v 12 nochi" are
     Tuesday 00:00, the moment of "tomorrow at midnight"; "today at 2 at night" and
     "segodnya v 2 nochi" said at 20:00 are the coming 02:00, Monday's, and are not refused.
+    Said in the small hours, "today" names the night in progress while its moment is still
+    ahead (the owner's ruling, fix round 3): at 00:30 "today at 2 at night" and "segodnya
+    v 2 nochi" are Sunday's 02:00, answered without "tomorrow"; at 03:00 it has passed and
+    they are Monday's. "Tomorrow" and the day after are unchanged.
     "Am" and "utra" are halves of the clock, not nights: "tomorrow at 2 am" is Monday 02:00.
     The evening hours of the night (6 to 11) are the day itself ("tomorrow night at 11" is
     Monday 23:00), and a night with no day word keeps the next-ahead reading. The handler
@@ -2841,6 +2845,8 @@ in `docs/followups.md`.
   `test_the_night_with_a_day_word_is_the_night_that_follows_that_day`,
   `test_the_russian_night_with_a_day_is_the_night_that_follows_that_day`,
   `test_the_russian_start_of_a_day_is_said_with_the_hour_0`,
+  `test_the_answer_names_the_night_that_today_at_night_was_taken_for`,
+  `test_the_russian_answer_names_the_night_that_today_was_taken_for`,
   `test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day`,
   `test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead`,
   `test_a_wall_time_is_one_moment_but_when_the_clock_goes_back`,

@@ -4315,8 +4315,8 @@ klimofey/timerify, listed in `docs/followups.md`.
   refresh reaches the core with a moment earlier than the one the refresh folded to, and that
   is harmless: the tick finds nothing due that the core has not folded, and a report repeats
   the state that the start-up read or counts its change by hand from the earlier moment. The
-  core does not assume that the moments it is given only grow. Tests: none; the neighbours that pin the rule
-  above stay unchanged.
+  core does not assume that the moments it is given only grow. Tests: none; the neighbours
+  that pin the rule above stay unchanged.
 - **The core keeps its signatures and the guard in `add`.** Every core method already takes
   `now`, so the controller only hands it another moment. The guard in `add` that treats a
   passed end as no end stays, because a late alarm can still bring one (the alarm of the end

@@ -18,7 +18,6 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
@@ -128,11 +127,13 @@ async def say_at(
     return await converse(hass, text, language)
 
 
-async def say_slots(hass: HomeAssistant, slots: dict[str, object]) -> None:
+async def say_slots(
+    hass: HomeAssistant, slots: dict[str, object]
+) -> intent.IntentResponse:
     """Ask the clock handler to turn the Boiler on with the clock `slots`, as a sentence
     of the built-in agent would."""
     said = {"name": "Boiler", "action": "on", **slots}
-    await intent.async_handle(
+    return await intent.async_handle(
         hass, "test", CLOCK, {key: {"value": value} for key, value in said.items()}
     )
 
@@ -1681,8 +1682,24 @@ async def test_noon_and_midnight_are_the_only_times_with_no_hour(
         ({"clock_ordinal": 1, "clock_minute": 30, "clock_part": "night"}, 1, "00:30"),
         ({"clock_ordinal": 6, "clock_minute": 30, "clock_part": "night"}, 1, "05:30"),
         ({"clock_ordinal": 12, "clock_minute": 30, "clock_part": "am"}, 0, "11:30"),
+        (
+            {
+                "clock_ordinal": 1,
+                "clock_minute": 30,
+                "clock_part": "night",
+                "clock_day": 1,
+            },
+            2,
+            "00:30",
+        ),
     ],
-    ids=["the eighth", "the first at night", "the sixth at night", "the twelfth am"],
+    ids=[
+        "the eighth",
+        "the first at night",
+        "the sixth at night",
+        "the twelfth am",
+        "the first at night tomorrow",
+    ],
 )
 async def test_an_ordinal_hour_is_the_hour_that_ends_it(
     hass: HomeAssistant,
@@ -1707,6 +1724,11 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
         ({"clock_part": "am", "clock_before": 15}, 0, "23:45"),
         ({"clock_part": "am", "clock_before": 15, "clock_day": 0}, 0, "23:45"),
         ({"clock_part": "am", "clock_before": 15, "clock_day": 1}, 1, "23:45"),
+        (
+            {"clock_hour": 12, "clock_part": "am", "clock_before": 15, "clock_day": 1},
+            1,
+            "23:45",
+        ),
         ({"clock_hour": 12, "clock_before": 15, "clock_day": 0}, 0, "11:45"),
         ({"clock_hour": 12, "clock_before": 15, "clock_day": 1}, 1, "11:45"),
         ({"clock_hour": 1, "clock_before": 15, "clock_day": 1}, 1, "00:45"),
@@ -1717,6 +1739,7 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
         "midnight",
         "midnight today",
         "midnight tomorrow",
+        "12 am tomorrow",
         "12 today",
         "12 tomorrow",
         "1 tomorrow",
@@ -1736,6 +1759,46 @@ async def test_minutes_before_come_with_an_hour_or_noon_or_midnight(
     await say_slots(hass, slots)
 
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("now", "clock"), [("06:00", "11:45"), ("13:00", "23:45")], ids=["early", "late"]
+)
+async def test_today_at_quarter_to_12_is_the_next_of_its_two_times_today(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    clock: str,
+) -> None:
+    """The 12 of "today at quarter to 12" is noon or midnight, and the midnight that
+    ends today is today's: said at 13:00 the time is that night's 23:45, as "quarter to
+    12" with no day word is, and not 11:45, which has passed."""
+    await advance_to(hass, freezer, local(SUNDAY, now))
+
+    await say_slots(hass, {"clock_hour": 12, "clock_before": 15, "clock_day": 0})
+
+    assert state_of(hass, NEXT) == at(SUNDAY, clock)
+
+
+async def test_a_tonight_that_has_passed_is_refused_and_not_moved_to_tomorrow(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+) -> None:
+    """ "Tonight" names today, as "today" does: at eight in the evening 7 in the evening
+    has passed, and nothing is kept for tomorrow's."""
+    await advance_to(hass, freezer, local(SUNDAY, "20:00"))
+
+    response = await say_slots(hass, {"clock_part": "tonight", "clock_hour": 7})
+
+    assert refusal_of(response) == translated(
+        "en", "exceptions", "command_in_past", "message"
+    ).format(at="19:00")
+    assert pending(hass) == []
+    assert state_of(hass, NEXT) == "unknown"
+    assert fake_target.calls == []
 
 
 @pytest.mark.parametrize(
@@ -1768,7 +1831,6 @@ async def test_tonight_is_the_night_of_today(
         {"clock_hour": 8, "clock_before": 15, "clock_minute": 10},
         {"clock_hour": 8, "clock_before": 0},
         {"clock_hour": 8, "clock_before": 60},
-        {"clock_hour": 12, "clock_part": "am", "clock_before": 15, "clock_day": 1},
         {"clock_ordinal": 0, "clock_minute": 30},
         {"clock_ordinal": 13, "clock_minute": 30},
     ],
@@ -1778,7 +1840,6 @@ async def test_tonight_is_the_night_of_today(
         "minutes before and minutes after",
         "no minutes before",
         "an hour of minutes before",
-        "a quarter to the start of tomorrow",
         "the zeroth hour",
         "the thirteenth hour",
     ],
@@ -1790,9 +1851,9 @@ async def test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood
     slots: dict[str, object],
 ) -> None:
     """No sentence names two hours, or minutes both before and after one, or minutes
-    outside 1 to 59 or an hour outside 1 to 12 in the ordinal, or minutes before the
-    start of the day said. Slots that say it, from a caller that is not a sentence, are
-    refused as invalid, and nothing is kept or switched."""
+    outside 1 to 59 or an hour outside 1 to 12 in the ordinal. Slots that say it, from a
+    caller that is not a sentence, are refused as invalid, and nothing is kept or
+    switched."""
     with pytest.raises(intent.InvalidSlotInfo):
         await say_slots(hass, slots)
 
@@ -1992,6 +2053,10 @@ def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
         ("06:00", 1, "night", 1, True, 10, 2, "00:50"),
         ("00:20", 1, "night", 0, True, 10, 0, "00:50"),
         ("01:00", 1, "night", 0, True, 10, 1, "00:50"),
+        ("13:00", 12, None, 0, False, 15, 0, "23:45"),
+        ("06:00", 12, "am", 1, False, 15, 1, "23:45"),
+        ("06:00", 12, "am", 0, False, 15, 0, "23:45"),
+        ("06:00", 0, None, 1, False, 15, 1, "23:45"),
     ],
     ids=[
         "tomorrow at quarter to 12",
@@ -2003,6 +2068,10 @@ def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
         "tomorrow at ten to 1 at night",
         "today at ten to 1 at night, said before it",
         "today at ten to 1 at night, said after it",
+        "today at quarter to 12, said after 11:45",
+        "tomorrow at quarter to 12 am",
+        "today at quarter to 12 am",
+        "tomorrow at quarter to the hour 0",
     ],
 )
 def test_minutes_before_an_hour_stay_on_the_day_said(
@@ -2017,9 +2086,10 @@ def test_minutes_before_an_hour_stay_on_the_day_said(
 ) -> None:
     """A day word names the day of the time said, so the minutes before an hour do not
     take it to the day before: "tomorrow at quarter to 12" is 11:45 tomorrow and not the
-    23:45 before tomorrow's start. The midnight that ends the day is the exception only
-    because it is on the day it ends: "tomorrow at quarter to midnight" is 23:45
-    tomorrow, and the night after the day is read as it is without the minutes."""
+    23:45 before tomorrow's start. The midnight that ends the day is on the day it
+    ends, so the same words are 23:45 tomorrow once 11:45 has passed or with "am", as
+    "tomorrow at quarter to midnight" is, and the night after the day is read as it is
+    without the minutes."""
     moment = clock_moment(
         local(SUNDAY, now),
         ZoneInfo(JERUSALEM),
@@ -2035,24 +2105,38 @@ def test_minutes_before_an_hour_stay_on_the_day_said(
 
 
 @pytest.mark.parametrize(
-    ("hour", "part"), [(12, "am"), (0, None)], ids=["12 am", "the hour 0"]
+    ("hour", "part", "zero", "night_after"),
+    [(hour, None, True, False) for hour in range(24)]
+    + [(hour, None, False, False) for hour in range(1, 13)]
+    + [(12, "am", False, True)]
+    + [(hour, "night", False, True) for hour in (12, 1, 2, 3, 4, 5)],
 )
-def test_minutes_before_the_start_of_the_day_said_leave_no_time_on_it(
-    hour: int, part: DayPart | None
+def test_a_time_with_a_day_word_and_minutes_before_is_always_on_the_day_named(
+    hour: int, part: DayPart | None, zero: bool, night_after: bool
 ) -> None:
-    """The only hour of "tomorrow at quarter to 12 am" is the start of tomorrow, and a
-    quarter of an hour before it is not tomorrow. No sentence says that time, so it is
-    invalid, as slots no sentence makes are, and not read as another day."""
-    with pytest.raises(probatio.Invalid):
-        clock_moment(
-            local(SUNDAY, "06:00"),
-            ZoneInfo(JERUSALEM),
-            hour,
-            0,
-            part,
-            1,
-            before=15,
-        )
+    """Of the dates an hour is read on, the minutes before put one on the named day (the
+    night after it may also end on the day after), so a day word never leaves a time
+    without a moment: "tomorrow at quarter to 12 am" is not a case that is refused."""
+    zone = ZoneInfo(JERUSALEM)
+    for day in (0, 1, 2):
+        for before in (0, 1, 15, 30, 59):
+            moment = clock_moment(
+                local(SUNDAY, "06:00"),
+                zone,
+                hour,
+                0,
+                part,
+                day,
+                zero=zero,
+                before=before,
+                night_after=night_after,
+            )
+
+            named = SUNDAY + timedelta(days=day)
+            assert moment.astimezone(zone).date() in (
+                named,
+                named + timedelta(days=int(night_after)),
+            ), (day, before)
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:

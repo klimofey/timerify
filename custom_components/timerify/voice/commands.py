@@ -234,8 +234,6 @@ def clock_moment(
     whether the hour is of the small hours of the night that follows the day word
     (midnight, and 12 or 1 to 5 said with "night"), which is on the date after it.
 
-    Raises `probatio.Invalid` when no time is left on the day named (see below).
-
     An hour from 1 to 12 said with no part and no zero is the nearer of its morning and
     evening times that is ahead; any other hour is that of the 24-hour clock, and a
     part fixes the half of the day. A zero says the 24-hour clock as the hour 0 and the
@@ -255,12 +253,14 @@ def clock_moment(
     earlier than the hour, so with no day word today, tomorrow and the day after are
     searched: "quarter to midnight" said at 23:50 is tomorrow's 23:45.
 
-    With a day word the time is on that day, and the minutes before are not taken to an
-    earlier one: "tomorrow at quarter to 12" is 11:45 tomorrow, not the 23:45 that
-    comes before tomorrow's midnight, while "tomorrow at quarter to midnight" is 23:45
-    tomorrow, the midnight being the one that ends it. A candidate on an earlier day is
-    left out, and the time is invalid when none is left ("tomorrow at quarter to 12
-    am", whose only hour is the start of tomorrow).
+    With a day word the time is on that day, or in the night after it. The named date
+    and the one after it are searched, and a candidate is kept when, with the minutes
+    before taken off, it is on the named day (or, for the night after, the day after
+    that): "tomorrow at quarter to 12" is 11:45 tomorrow, or 23:45 tomorrow once that
+    has passed, and never the 23:45 of today that comes before tomorrow's 00:00. The
+    00:00 of the date after is the midnight that ends the named day, so a candidate is
+    always left: of the two dates an hour is read on, the minutes before put exactly
+    one of them on the named day.
 
     The wall time, once the minutes are off, follows `schedule.wall_moment`: a time the
     clock skips happens later by the gap, so "quarter to 3" on the night the clock
@@ -279,22 +279,20 @@ def clock_moment(
     elif night_after:
         dates_ahead = (0, 1) if day == 0 else (day + 1,)
     else:
-        dates_ahead = (day,)
+        dates_ahead = (day, day + 1)
     wall_times = (
         datetime.combine(today + timedelta(days=ahead), time(h, minute))
         - timedelta(minutes=before)
         for ahead in dates_ahead
         for h in hours
     )
-    named = None if day is None else today + timedelta(days=day)
+    on_days = None if day is None else range(day, day + 1 + night_after)
     moments = sorted(
         moment
         for wall in wall_times
-        if named is None or wall.date() >= named
+        if on_days is None or (wall.date() - today).days in on_days
         for moment in wall_moments(wall.date(), wall.time(), zone)
     )
-    if not moments:
-        raise probatio.Invalid("the minutes before take the time off the day named")
     return min((moment for moment in moments if moment > now), default=moments[0])
 
 
@@ -397,8 +395,8 @@ class ClockCommandHandler(DelayedCommandHandler):
 
         Raises `probatio.Invalid` for slots that no sentence makes, which the agents
         answer as not understood: a time with no hour that is not noon or midnight, an
-        ordinal hour with an hour or with minutes before, minutes before with minutes
-        after, and minutes before that take a day word's time off its day.
+        ordinal hour with an hour or with minutes before, and minutes before with
+        minutes after.
         """
         part = slots.get("clock_part", {}).get("value")
         day = slots.get("clock_day", {}).get("value")

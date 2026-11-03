@@ -4664,32 +4664,32 @@ now.
   `test_tonight_is_the_night_of_today` and
   `test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood`.
 - **A time said with a day word lands on the named day.** The day word names the day of the
-  time said, so the minutes before an hour may not take the time to an earlier day.
-  `clock_moment` leaves out a candidate whose wall date, after the minutes are taken off, is
-  before the day named; the rule is in that one place and names no hour. "Tomorrow at quarter
-  to 12", said on Sunday, is Monday 11:45: the bare 12 has two candidates, 00:00 and 12:00,
-  and the subtraction would have taken the first to Sunday 23:45, which the day word does not
-  say. "Tomorrow at quarter to 1" is still Monday 00:45, and "today at quarter to 12" is
-  still 11:45 (said after it, it is the 11:45 that has passed, which the controller refuses,
-  and not an old 23:45). The midnight that ends a day is on that day, so "tomorrow at quarter
-  to midnight" is Monday 23:45 and "tomorrow at quarter to 12 at night" is the same moment:
-  the night after the day word is on the date after it, and its 00:00 less the minutes is
-  on the named day. That date used to be reached by the handler adding a day, which left
-  `clock_moment` nothing to tell the named day from the day of the hour, so `clock_moment`
-  now takes `night_after` and works out the dates itself: the date after the day word, and
-  for "today" also the night in progress, whose time is taken if it is still ahead. The
-  handler no longer changes `day`. Every result without minutes before is as it was. If no
-  candidate is left, the only hour is the start of the named day and no sentence says the
-  time ("tomorrow at quarter to 12 am", or the hour 0 with minutes before): `clock_moment`
-  raises `probatio.Invalid`, the path of every slot combination no sentence makes, which
-  `intent.async_handle` turns into `InvalidSlotInfo` and the built-in agent answers as not
-  understood. Why: the day word is the first thing the speaker says about the time, and a
-  command that lands on the day before it is wrong in a way the answer ("turns on at 23:45
-  today") would show only after the fact. Cost if wrong: a rule that dropped too much would
-  refuse a time someone says (the only one refused is the start of a day with minutes before
-  it); one that dropped too little would plan the command a day early. Tests
+  time said, so the minutes before an hour may not take the time to another day. With a day
+  word `clock_moment` searches the named date and the one after it, and keeps a candidate
+  whose wall date, after the minutes are taken off, is the named day; the rule is in that one
+  place and names no hour. The date after is searched because the midnight that ends the
+  named day is its 00:00. So the bare 12 of "tomorrow at quarter to 12", said on Sunday, has
+  the candidates Monday 11:45 (noon on the named date) and Monday 23:45 (the next date's
+  00:00): the morning one is taken, as the owner's rule for a bare hour with a day word says,
+  and the 23:45 of Sunday, which the day word does not say, is not a candidate. "Today at
+  quarter to 12" is 11:45, and 23:45 today once 11:45 has passed, as "quarter to 12" with no
+  day word is. "Tomorrow at quarter to 1" is Monday 00:45, "tomorrow at quarter to midnight"
+  and "tomorrow at quarter to 12 am" are Monday 23:45. Of the two dates an hour is read on,
+  the minutes before (1 to 59) put exactly one on the named day, so a candidate is always
+  left and the function has no refusal. It must not get one: a `probatio.Invalid` from a
+  sentence's slots is turned by `intent.async_handle` into an `InvalidSlotInfo`, which the
+  agent speaks as an English string whatever the language. For the night after a day word the dates are those of the night, and a result on the named day or on the day
+  after it is kept. They are now worked out in `clock_moment`, which takes `night_after`:
+  the handler used to add a day for the night, which left `clock_moment` nothing to tell the
+  named day from the day of the hour. They are the date after the day word, and for "today"
+  also the night in progress, whose time is taken if it is still ahead. The handler no longer
+  changes `day`. Every result without minutes before is as it was: with none, a candidate of
+  the date after is never on the named day. Why: the day word is the first thing the speaker
+  says about the time, and a command planned on the day before it would show only in the
+  answer ("turns on at 23:45 today"). Cost if wrong: a rule that kept too much would plan the
+  command a day early; one that kept too little would refuse a time someone says. Tests
   (`tests/voice/test_clock_commands.py`): `test_minutes_before_an_hour_stay_on_the_day_said`,
-  `test_minutes_before_the_start_of_the_day_said_leave_no_time_on_it`, the rows with
-  `clock_day` of `test_minutes_before_come_with_an_hour_or_noon_or_midnight`, and the row "a
-  quarter to the start of tomorrow" of
-  `test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood`.
+  `test_a_time_with_a_day_word_and_minutes_before_is_always_on_the_day_named` (every hour,
+  day and number of minutes leaves a moment on the named day),
+  `test_today_at_quarter_to_12_is_the_next_of_its_two_times_today`, and the rows with
+  `clock_day` of `test_minutes_before_come_with_an_hour_or_noon_or_midnight`.

@@ -247,12 +247,15 @@ def timer_slots(
     hass: HomeAssistant, entry: TimerifyConfigEntry, now: datetime
 ) -> dict[str, Any]:
     """What an answer says about a timer: `target` is its name, `state` is `counting`
-    while the countdown runs, `open` while the target is on without one, `unavailable`
-    while it is not wanted on and the target is away (unavailable, unknown or missing,
-    as `actual_state` judges it), and `off` otherwise; the time left as `left_total`
-    minutes, rounded up, and as `left_hours` and `left_minutes`; and while it counts,
-    `ends_at` and `ends_in_days` (see `clock_slots`). Whether the target is on without a
-    countdown is what the controller's `wanted_running` says, as for "turn off in N"."""
+    while the countdown runs, `limit` while the target is on without one and the timer
+    has set a limit, `open` while it is on without either, `unavailable` while it is not
+    wanted on and the target is away (unavailable, unknown or missing, as `actual_state`
+    judges it), and `off` otherwise; the time left as `left_total` minutes, rounded up,
+    and as `left_hours` and `left_minutes`, all 0 for a limit, which is a bound and not
+    a time someone chose; and while it counts or has a limit, `ends_at` and
+    `ends_in_days` (see `clock_slots`), the moment the target turns off, at the latest
+    for a limit. Whether the target is on without a countdown is what the controller's
+    `wanted_running` says, as for "turn off in N"."""
     controller = entry.runtime_data
     snapshot = controller.snapshot
     left_total = remaining_minutes(snapshot, now)
@@ -268,6 +271,16 @@ def timer_slots(
         return {
             **slots,
             "state": "counting",
+            "ends_at": clock["at"],
+            "ends_in_days": clock["in_days"],
+        }
+    # A limit is a deadline of its own, never set together with an end (`Snapshot`), and
+    # one that is not ahead of `now` is no limit, as an end that is not is no countdown.
+    if snapshot.limit_at is not None and snapshot.limit_at > now:
+        clock = clock_slots(snapshot.limit_at, now)
+        return {
+            **slots,
+            "state": "limit",
             "ends_at": clock["at"],
             "ends_in_days": clock["in_days"],
         }

@@ -386,6 +386,43 @@ async def test_time_left_tool_returns_structured_data(
     assert data["response_type"] == "query_answer"
 
 
+async def test_time_left_tool_reports_a_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """A boiler that was left on has a limit, a bound and not a countdown: the agent is
+    given the state `limit` and the latest time, with no time left, so that it does not
+    tell the user how many minutes are left."""
+    await fake_target.set_state("on")
+    api = await assist_api(hass)
+
+    data = await call_tool(api, "timerify__time_left", {"name": "Boiler"})
+
+    assert data["speech_slots"] == {
+        "target": "Boiler",
+        "state": "limit",
+        "left_total": 0,
+        "left_hours": 0,
+        "left_minutes": 0,
+        "ends_at": "11:00",
+        "ends_in_days": 0,
+    }
+    assert data["response_type"] == "query_answer"
+
+
+async def test_run_tool_reports_the_limit_of_a_bare_turn_on(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """Turning the loose boiler on with no time gives the limit it got, as the question
+    does."""
+    api = await assist_api(hass)
+
+    data = await call_tool(api, "timerify__run", {"name": "Boiler"})
+
+    assert data["speech_slots"]["state"] == "limit"
+    assert data["speech_slots"]["ends_at"] == "11:00"
+    assert data["speech_slots"]["left_total"] == 0
+
+
 async def test_time_left_tool_tells_an_unavailable_target_from_an_off_one(
     hass: HomeAssistant, fake_target: FakeTarget, boiler: MockConfigEntry
 ) -> None:

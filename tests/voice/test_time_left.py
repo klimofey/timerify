@@ -22,6 +22,7 @@ from ..helpers import (
     NUMBER,
     TARGET_ID,
     TURN_OFF,
+    TURN_ON,
     advance,
     advance_to,
     local,
@@ -38,6 +39,7 @@ from .helpers import (
     copy_sentences,
     expose,
     reached,
+    russian_limit_answers,
     samples,
     speech,
     talk,
@@ -46,6 +48,7 @@ from .helpers import (
 )
 
 TIME_LEFT = "TimerifyTimeLeft"
+RUN = "TimerifyRun"
 SPRING_FORWARD_EVE = local(date(2026, 3, 26), "23:30")
 """Half an hour before the night the clocks of Jerusalem go forward: a full day later
 the wall clock shows 00:30 two dates on, since that day has 23 hours."""
@@ -244,6 +247,129 @@ async def test_time_left_on_a_loose_target_running_without_a_timer(
     response = await converse(hass, "how much time is left on the boiler")
 
     assert speech(response) == "Boiler is on without a timer."
+
+
+async def test_time_left_on_a_boiler_left_on_with_a_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """A boiler that was left on has no countdown, only a limit. The answer says the
+    latest time it turns off, and not minutes left: nobody chose a time, and the limit
+    is a bound."""
+    await fake_target.set_state("on")
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert response.response_type is intent.IntentResponseType.QUERY_ANSWER
+    assert reached(response) == TIME_LEFT
+    assert speech(response) == "Boiler turns off by 11:00 at the latest."
+
+
+async def left_on_for_a_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A loose boiler whose limit is a whole day, left on at 11:00: it turns off by
+    11:00 tomorrow at the latest."""
+    await setup_target(mode="loose", limit=1440)
+    await copy_sentences(hass, ["Boiler"])
+    await advance(hass, freezer, minutes=120)
+    await fake_target.set_state("on")
+
+
+async def test_time_left_on_a_limit_that_ends_tomorrow_says_the_day(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> None:
+    await left_on_for_a_day(hass, freezer, fake_target, setup_target)
+
+    response = await converse(hass, "how much time is left on the boiler")
+
+    assert speech(response) == "Boiler turns off by 11:00 tomorrow at the latest."
+
+
+async def test_time_left_follows_the_limit_to_a_time_that_was_chosen(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """Adding time to a limit gives a countdown that someone chose, from where the limit
+    was: the answers count the time left again, and say nothing of a latest time."""
+    await fake_target.set_state("on")
+
+    added = await converse(hass, "add 15 minutes to the boiler")
+    left = await converse(hass, "how much time is left on the boiler")
+
+    assert speech(added) == "Boiler runs for 2 hours and 15 minutes, until 11:15."
+    assert speech(left) == (
+        "2 hours and 15 minutes left on Boiler, it turns off at 11:15."
+    )
+
+
+async def test_a_bare_turn_on_answers_with_its_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """Turned on by name, the loose boiler has no countdown, so the answer to the
+    command says when it turns off at the latest, as the question does."""
+    response = await converse(hass, "turn on the boiler")
+
+    assert response.response_type is intent.IntentResponseType.ACTION_DONE
+    assert speech(response) == "Boiler is on and turns off by 11:00 at the latest."
+    assert fake_target.calls == [TURN_ON]
+    assert state_of(hass, NUMBER) == "0"
+
+
+async def test_a_bare_turn_on_of_a_boiler_with_a_limit_keeps_the_limit_it_finds(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    limited_boiler: MockConfigEntry,
+) -> None:
+    """The boiler is on already, so asking again starts no new limit, and the answer
+    gives the one it has."""
+    await converse(hass, "turn on the boiler")
+    await advance(hass, freezer, minutes=30)
+
+    response = await converse(hass, "turn on the boiler")
+
+    assert speech(response) == "Boiler is on and turns off by 11:00 at the latest."
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_russian_says_a_limit_as_a_time_at_the_latest(
+    hass: HomeAssistant, fake_target: FakeTarget, limited_boiler: MockConfigEntry
+) -> None:
+    """In Russian too, the question and the bare turn-on say the latest time the boiler
+    turns off, as the fixture of the hand-written answers has it."""
+    answers = russian_limit_answers()
+    ask = samples("ru", TIME_LEFT, numbers={})[0]
+    (turn_on, *_) = samples("ru", RUN, takeover=True, numbers={}, admitting="switch")
+
+    turned_on = await converse(hass, turn_on, "ru")
+    asked = await converse(hass, ask, "ru")
+
+    assert reached(turned_on) == RUN
+    assert speech(turned_on) == answers["run, a limit today"]["answer"]
+    assert speech(asked) == answers["time left, a limit today"]["answer"]
+    assert fake_target.calls == [TURN_ON]
+
+
+async def test_russian_says_the_day_of_a_limit_that_ends_tomorrow(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> None:
+    answers = russian_limit_answers()
+    await left_on_for_a_day(hass, freezer, fake_target, setup_target)
+    ask = samples("ru", TIME_LEFT, numbers={})[0]
+
+    asked = await converse(hass, ask, "ru")
+
+    assert speech(asked) == answers["time left, a limit tomorrow"]["answer"]
 
 
 async def test_a_follow_up_can_say_it_after_asking_how_long_is_left(

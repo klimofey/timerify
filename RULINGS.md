@@ -4045,3 +4045,28 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   `test_a_limit_ends_with_its_own_reason` (`tests/test_events.py`),
   `test_a_limit_gives_the_automation_its_mark` and
   `test_countdown_ended_tells_the_automation_how` (`tests/test_automation_triggers.py`).
+
+### Voice
+
+- **Assist and the LLM tools say a limit as a time at the latest, in a state of its own.**
+  `timer_slots` gives the state `limit` while the timer has a limit that is ahead, tested
+  after `counting` and before `open`, with `ends_at` and `ends_in_days` as for a countdown
+  and `left_total`, `left_hours` and `left_minutes` at 0, because nobody chose a time and a
+  bound is no time left. The one function feeds the built-in agent's answers and the tools,
+  so `timerify__time_left` and `timerify__run` give an agent the state and the latest time,
+  and their descriptions say to word it "by 13:30 at the latest". The English answers are
+  "Boiler turns off by 11:00 at the latest." to the question and "Boiler is on and turns
+  off by 11:00 at the latest." to a run. Add time and Stop share the macro of that answer,
+  but a limit never reaches them. The Russian ones say "ne pozzhe" (no later than) before the time,
+  transliterated here because this file is in English: "vyklyuchitsya ne pozzhe 11:00" and
+  "vklyucheno, vyklyuchitsya ne pozzhe 11:00", the fixture has the real text. A day other
+  than today goes before "at the latest" in English ("by 11:00 tomorrow") and before "ne
+  pozzhe" in Russian. The Russian answers do not name the limit with a noun, since "ne
+  pozzhe" says it; where the UI and the pages name it, the noun is "predel". Why: the card
+  says "by 13:30 at the latest" for the same thing, and the spec asks for the same of
+  Assist. Cost if wrong: an agent that ignores the state `limit` reads a limit as a device
+  on without a timer. Tests: `test_time_left_on_a_boiler_left_on_with_a_limit`,
+  `test_a_bare_turn_on_answers_with_its_limit`,
+  `test_russian_says_a_limit_as_a_time_at_the_latest` (`tests/voice/test_time_left.py`),
+  `test_time_left_tool_reports_a_limit` (`tests/voice/test_llm.py`) and
+  `limit_answers.yaml` (`tests/fixtures/ru/`).

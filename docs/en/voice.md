@@ -47,6 +47,7 @@ The Russian column is transliterated because this page is in English. The real s
 
 - It tells the time left and when the device turns off. It can also say that the device is off, is unavailable, or is on without a timer.
 - It says "unavailable" when the device does not answer (unavailable or unknown) and no timer wants it on.
+- A **Loose** device that was left on can have a [limit](timers.md#turn-off-a-device-that-was-left-on). The answer then gives the latest time it turns off: "Boiler turns off by 11:00 at the latest." It does not say how much time is left, because nobody chose a time. A time you choose gives a countdown, and the answer counts the time left again.
 
 **Run for a time**
 
@@ -73,8 +74,8 @@ The Russian column is transliterated because this page is in English. The real s
 **Turn on or off by name**
 
 - These are the bare "turn on the boiler" and "turn off the boiler". For a device that has a timer, they are Timerify's commands, not Home Assistant's.
-- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one. While a schedule window is open, both modes run it to the end of the window instead. In **Strict** mode the default duration is kept when it ends later.
-- Turning on a device that is running leaves it as it is. Its countdown keeps its end, whoever set it. The answer says how long is left.
+- Turning on a device that is off follows the timer's mode. The [Modes](timers.md#modes) section explains both. In **Strict** mode a device runs only while a countdown does, so it runs for the default duration. In **Loose** mode it may also run without a countdown, so it is on without one. If the timer has a [limit](timers.md#turn-off-a-device-that-was-left-on), the answer says when the device turns off at the latest: "Boiler is on and turns off by 11:00 at the latest." While a schedule window is open, both modes run it to the end of the window instead. In **Strict** mode the default duration is kept when it ends later.
+- Turning on a device that is running leaves it as it is. Its countdown keeps its end, whoever set it. So does its limit. The answer says how long is left, or when the limit is.
 - Turning off stops the countdown.
 - A device that is unavailable keeps what you asked for. It is switched when it is back.
 - Wordings with an area, a floor or a kind of device stay with Home Assistant. An example is "turn off the lights in the kitchen". So does every device without a timer.
@@ -244,8 +245,8 @@ An LLM agent that uses the Assist API is offered these tools. This holds while a
 
 | Tool | What it does |
 | --- | --- |
-| `timerify__time_left` | Tells how long is left, and when the device turns off. Or that it is off, unavailable, or on without a timer. |
-| `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, or to the end of a schedule window that is open. A device that is running keeps its countdown. |
+| `timerify__time_left` | Tells how long is left, and when the device turns off. Or that it is off, unavailable, or on without a timer. For a device left on with a limit, it gives the latest time the device turns off and no time left. |
+| `timerify__run` | Turns on for a number of hours and minutes, with settings. With neither, a device that is off runs for the usual time, or to the end of a schedule window that is open. A device that is running keeps its countdown or its limit. |
 | `timerify__add_time` | Adds hours and minutes to the countdown. |
 | `timerify__stop` | Stops the timer and turns the device off. |
 | `timerify__delayed_command` | Plans to turn on or off later. You give a delay in weeks, days, hours, minutes and seconds, or a date and time on the house's clock, never both. A turn-on can say how long it then runs, and its settings. It can be up to a week ahead. A turn-off can be up to a day ahead. |

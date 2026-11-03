@@ -1,6 +1,6 @@
 # Actions
 
-Timerify adds five actions to Home Assistant. This page lists them with their fields and limits. It also lists the three events that Timerify fires.
+Timerify adds five actions to Home Assistant. This page lists them with their fields and ranges. It also lists the three events that Timerify fires.
 
 | Action | Name in the form | What it does |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ A call can wait its turn behind a slow device. If the timer is unloaded meanwhil
 
 ## Add time
 
-`timerify.add_time` moves the end of the countdown by a number of minutes. A negative number takes time off. The limit is a day either way. Adding to a timer that is not running starts it. Taking off all the time that is left turns the device off.
+`timerify.add_time` moves the end of the countdown by a number of minutes. A negative number takes time off. One call moves the end by a day at most, either way. Adding to a timer that is not running starts it. Taking off all the time that is left turns the device off. If the device runs under a [limit](timers.md#turn-off-a-device-that-was-left-on), the minutes are added to the limit. The result is an ordinary countdown that you chose, and the limit is gone.
 
 | Field | Type | What it is |
 | --- | --- | --- |

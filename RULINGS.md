@@ -3949,6 +3949,7 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   the timer. Cost if wrong: a user who adds time to a limit and expects the limit to stay has
   to set it again by turning the device off and on. Tests:
   `test_adding_time_to_a_limit_gives_an_ordinary_countdown`,
+  `test_taking_a_little_off_a_limit_gives_an_ordinary_countdown`,
   `test_taking_more_than_a_limit_off_it_stops_the_timer`,
   `test_a_window_that_opens_replaces_a_limit` (`test_core.py`) and
   `test_adding_time_to_a_limit_on_the_device_page`.
@@ -4028,6 +4029,23 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   Cost if wrong: a template that reads only the state takes a limit for a countdown. Tests:
   `test_a_boiler_turned_on_by_hand_turns_off_after_its_limit` and
   `test_adding_time_to_a_limit_on_the_device_page`.
+- **"Limit" names the limit of a device left on and nothing else, on the pages and in the
+  translations (final review of 1.2.0).** Before 1.2.0 the words "limit" and "predel" also
+  meant the one-day and one-week bounds of a duration and the number of repeats of a rejected
+  turn-on, and in Russian the cap of 20 pending commands. They now say "range", "values" or
+  "repeat rules" (in Russian "dopustimye znacheniya", "pravila povtorov"), so that a word on a
+  page means one thing (CLAUDE.md). The refusal of a pending command at the cap in `ru.json`
+  (`too_many_commands`) says how many are there, not that a "predel" was reached. The page
+  "Limits" (`limits.md`, "Ogranicheniya" in Russian: what Timerify does not do yet) keeps its
+  name, because both READMEs link it and the tests pin the file names in pairs. Cost if wrong:
+  a reader of that page title may expect it to be about the limit of a device left on. Tests:
+  the link and heading checks of `tests/test_docs.py`.
+- **The Add time page and action say what it does to a limit.** Under a limit, "Run for" shows
+  0, so "the time that is left" says nothing there. The page (`services.md`) and the action's
+  description (`services.add_time.description` in `en.json` and `ru.json`) say that the minutes
+  are added to the limit, and that the result is an ordinary countdown that someone chose.
+  Cost if wrong: an automation that calls `add_time` with a negative number on a device under a
+  limit expects the device to be turned off, or the limit to be kept.
 
 ### Automations
 
@@ -4112,8 +4130,9 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   (`add` moves the limit by the delta and starts a countdown that someone chose), and a
   delta that empties the limit stops the timer. The three buttons are shown as for a
   countdown. Tests: "adds time to a limit and takes time off it with Timerify's own action"
-  (`popup.test.ts`); in the engine, `test_adding_time_to_a_limit_gives_an_ordinary_countdown`
-  and `test_taking_more_than_a_limit_off_it_stops_the_timer` (`tests/test_core.py`).
+  (`popup.test.ts`); in the engine, `test_adding_time_to_a_limit_gives_an_ordinary_countdown`,
+  `test_taking_a_little_off_a_limit_gives_an_ordinary_countdown` and
+  `test_taking_more_than_a_limit_off_it_stops_the_timer` (`tests/test_core.py`).
 - **The press choice `run` is named "Run" (#59).** "Run for the default duration" was no
   longer true with a schedule window open. The stored value does not change, so no saved card
   breaks. In Russian the label is the word the Run action has in `ru.json` («Zapustit'»), and

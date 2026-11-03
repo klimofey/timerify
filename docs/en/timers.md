@@ -165,7 +165,7 @@ An air conditioner is turned on by setting its HVAC mode, when you give one. Wit
 
 ### When a device cannot take the settings yet
 
-- The device is unavailable, or a call fails. The settings are kept and sent again when the device reports again. The limits are the same as for a rejected turn-on, described in [When the device does not answer](#when-the-device-does-not-answer). The countdown runs meanwhile.
+- The device is unavailable, or a call fails. The settings are kept and sent again when the device reports again. The repeat rules are the same as for a rejected turn-on, described in [When the device does not answer](#when-the-device-does-not-answer). The countdown runs meanwhile.
 - Settings you give later replace the ones that wait. A command that gives none leaves them alone. So they go out with the next turn-on, whatever causes it.
 - The countdown ending drops them, and so does turning the device off by hand.
 

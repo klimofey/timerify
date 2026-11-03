@@ -52,7 +52,7 @@ The Russian column is transliterated because this page is in English. The real s
 **Run for a time**
 
 - It does the same as setting **Run for**. The countdown is that long, from one minute to 24 hours. It replaces a countdown that runs.
-- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused with the limit, and nothing is turned on. A count of hours or minutes beyond a week is not understood at all.
+- You can say a longer time, as far as a week, such as "for 30 hours". Write minutes beyond a day in digits, such as "for 2000 minutes". The sentence is understood and refused. The answer says how long a timer can run, and nothing is turned on. A count of hours or minutes beyond a week is not understood at all.
 - If a number of minutes follows the hours, with or without "and", it adds to them. "For 1 hour 30" and "for 1 hour and 30" are both 90 minutes. You can leave out the word "minutes".
 - The exception is turning on a thermostat or a water heater for a time. There "for 1 hour 30" means one hour at 30 degrees. Say "and" or "minutes" for the minutes: "for 1 hour and 30" is 90 minutes.
 - A thermostat, a water heater, a light, a fan or a humidifier takes its settings in the same sentence, in any order:
@@ -87,12 +87,12 @@ The Russian column is transliterated because this page is in English. The real s
 - A command to turn on is kept as a [pending command](pending-commands.md). It survives a restart, shows on the **Next command** sensor and can be cancelled.
 - A command to turn on can say how long the device then runs, and its settings. An example is "turn on the AC in 15 minutes for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then. It replaces the end, whether the device had a countdown or not. For a device that is off, nothing changes, and the answer says so.
-- A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these limits is refused with a message.
-- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond the limit of the command is understood and refused, and the answer names the limit. A count of hours or minutes beyond a week is not understood at all.
+- A delay is at most a week for a command to turn on, and a day for a command to turn off. A timer keeps at most 20 pending commands. A command beyond these values is refused with a message.
+- You can say a delay as long as a week, as for "Run for a time". That is up to 168 hours, or up to 10080 minutes. Write minutes beyond a day in digits. Seconds go up to 100. A delay within a week but beyond what the command allows is understood and refused. The answer says what is allowed. A count of hours or minutes beyond a week is not understood at all.
 - You can also say a delay in days or weeks, such as "turn on the boiler in 2 days" or "turn on the boiler in 2 weeks". In Russian that is "vklyuchi Boiler cherez 2 dnya". Days go up to 365, and weeks up to 52. You cannot join days or weeks with hours or minutes.
 - "In a day", "in half a day" and "in a week" work too. In Russian they are "cherez den'", "cherez poldnya" and "cherez nedelyu".
 - In English, you can end a delay with "from now", "from today" or "later". It works with days, weeks and these words. Examples are "turn on the boiler 2 days from now" and "turn on the boiler a week later". You can say it before the command too: "a week from now turn on the boiler".
-- The limits above hold for days and weeks. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer names the limit. More than 365 days or 52 weeks is not understood at all.
+- The values above hold for days and weeks too. So "turn off the boiler in 2 days" is refused, because a countdown runs for a day at most. "Turn on the boiler in 2 weeks" is refused too. The answer says what is allowed. More than 365 days or 52 weeks is not understood at all.
 - Devices without a timer keep Home Assistant's delayed commands untouched.
 
 **Turn on or off at a time**
@@ -116,7 +116,7 @@ The Russian column is transliterated because this page is in English. The real s
 - Without a day, a time is the next one: today if it is still ahead, tomorrow if it has passed. With the word "today", a time that has passed is refused, and the answer names it.
 - A time that the change of the clock skips happens later by the length of the gap, as in [the schedules](schedules.md#clock-changes-and-time-zones). A time that it repeats happens twice. Timerify takes the first of the two that is still ahead.
 - A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
-- A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer names the limit.
+- A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer says what is allowed.
 - A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour ("at 7" or "at 07") and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
 
 **What is planned**

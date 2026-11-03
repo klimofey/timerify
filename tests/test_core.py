@@ -5207,6 +5207,21 @@ def test_adding_time_to_a_limit_gives_an_ordinary_countdown() -> None:
     assert c.take_announcements() == [CountdownStarted(NOW + minutes(135))]
 
 
+def test_taking_a_little_off_a_limit_gives_an_ordinary_countdown() -> None:
+    """Five minutes taken off at 07:10 from a limit of 09:00 move it to 08:55: the
+    countdown that someone chose runs to then, and the limit is gone with no end of its
+    own. The device keeps running."""
+    c = limited()
+
+    fx = c.add(NOW + minutes(10), minutes(-5))
+
+    assert fx == [Arm(NOW + minutes(115)), Changed()]
+    assert c.snapshot.end == NOW + minutes(115)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(115))]
+
+
 def test_taking_more_than_a_limit_off_it_stops_the_timer() -> None:
     """A result that is not ahead is no countdown: the timer stops, and the limit ends
     as stopped."""

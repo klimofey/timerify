@@ -333,7 +333,7 @@
   "services": {
     "add_time": {
       "name": "Add time",
-      "description": "Adds minutes to the countdown of a timer, or takes them off with a negative number. Adding to a timer that is not running starts it; taking off all the time that is left turns the entity off. A countdown never goes beyond one day.",
+      "description": "Adds minutes to the countdown of a timer, or takes them off with a negative number. Adding to a timer that is not running starts it; taking off all the time that is left turns the entity off. For an entity left on under a limit, the minutes are added to the limit, and the result is an ordinary countdown that someone chose. A countdown never goes beyond one day.",
       "fields": {
         "minutes": {
           "name": "Minutes",

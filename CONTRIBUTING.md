@@ -23,7 +23,7 @@ never be bypassed.
 
 ## Verification
 
-What 1.0.0 was checked with before release:
+What a release is checked with before it is published:
 
 - The test suite (`uv run pytest`): every rule of the user pages is a scenario, with time
   moved explicitly, among them the days the clock changes, Home Assistant down overnight, a

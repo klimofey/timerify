@@ -1276,11 +1276,11 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   not refresh sees the old card, or none.
 - **Every npm package is pinned to an exact version at least two weeks old on 2026-10-30, with
   the lockfile committed and `npm ci` the only install: lit 3.3.3 (the frontend's), esbuild
-  0.28.2, typescript 6.0.3 (the frontend's), vitest 5.0.5, happy-dom 21.0.3, @playwright/test
+  0.28.2, typescript 6.0.3 (the frontend's), vitest 5.0.5, happy-dom 21.0.4, @playwright/test
   1.64.1 and @types/node 26.6.5, on Node 26.** The same rule holds for every package, checked
-  with `npm view`. Cost if wrong: a bump is a reviewed change of the lockfile; happy-dom 21.0.4,
-  which fixes an advisory in a package that only runs the tests, becomes two weeks old on
-  2026-11-03 and is pinned then (issue #28).
+  with `npm view`. Cost if wrong: a bump is a reviewed change of the lockfile. happy-dom was
+  21.0.3 until 2026-11-03, when 21.0.4 (published 2026-10-20), which fixes advisory
+  GHSA-834v-8h66-3h79 in a package that only runs the tests, was pinned (issue #28).
 
 ### Finding the timer
 

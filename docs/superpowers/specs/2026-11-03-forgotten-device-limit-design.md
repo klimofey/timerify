@@ -52,12 +52,18 @@ countdown. The examples below use 120 minutes.
   "Countdown ended" (the triggers and the `timerify_countdown_started` and
   `timerify_countdown_ended` events) fire for a limit too. Their data says it is a limit, so
   an automation can tell "turned off because it was left on" from an ordinary end.
-- **The setting is on the timer's first form**, next to the default duration, in minutes,
-  from 1 to 1440, and empty by default. It is on the form in both modes, and its help says
-  it applies in Loose mode only, because the form cannot change with the mode chosen on it.
-  Proposed name: "Turn off if left on for", with a Russian translation in the same sense ("turn off, if forgotten, after").
-- **Changing the setting applies from the next turn-on.** A limit already running keeps its
-  time.
+- **The setting is a step of its own for a Loose timer**, as the default duration is a step
+  of its own for a Strict one. A new timer in Loose mode, and the settings of one, show a step
+  with one box: minutes from 1 to 1440, empty by default. A Strict timer never sees it.
+  (Changed while planning: the default duration is not on the first form, so "next to it"
+  means a step in the same place.) Proposed name: "Turn off if left on for", with a Russian
+  translation in the same sense ("turn off, if forgotten, after").
+- **Changing the setting reloads the timer, and a reload is a start-up.** A limit that is
+  already running keeps its time. A device that is on with no limit and no countdown gets a
+  limit from that moment, as at start-up. A limit is dropped at start-up when the setting is
+  empty or the mode is Strict. The device keeps running in both cases. In Strict mode the
+  default duration then applies, as it does today. (Changed while planning: every change of
+  the settings reloads the timer, so "from the next turn-on" could not hold.)
 - **No new entity.** The mark is an attribute of "Ends at". Its name is the builder's call,
   documented in services.md.
 - **"Run for" shows 0 while a limit runs.** Run for shows the countdown someone chose, and
@@ -65,6 +71,8 @@ countdown. The examples below use 120 minutes.
   dashboard or an automation reading Run for does not see it. Setting Run for starts an
   ordinary countdown, as above. In the engine, the limit is a deadline of its own, kept
   next to the countdown's end and never both at once, not a marked end.
+- **A limit that a chosen countdown replaces is not announced as ended.** The device keeps
+  running, and the new countdown is announced as started, with `limit: false`.
 - **A bare turn-on while a limit runs keeps the limit.** The device is already on, and a
   bare turn-on of a device that runs keeps how it stands today. No new "Countdown started"
   fires.

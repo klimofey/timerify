@@ -4070,3 +4070,59 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   `test_russian_says_a_limit_as_a_time_at_the_latest` (`tests/voice/test_time_left.py`),
   `test_time_left_tool_reports_a_limit` (`tests/voice/test_llm.py`) and
   `limit_answers.yaml` (`tests/fixtures/ru/`).
+
+### Card
+
+- **A limit is a state of its own on the card, read from the `limit` attribute alone.** The
+  view (`timerView`) makes the state `limit` when "Ends at" holds a time and its attribute
+  `limit` is `true`. It checks that before it reads `started_at`, so a limit can never be shown
+  as a countdown, whatever `started_at` holds; the sensor writes it as `None` for a limit, and
+  the test stand-in `limited()` does the same. The state has `endsAt` set, `progress` 1 (a full
+  fill and a full ring, as for a run with no countdown at all) and `remaining` 0, since
+  nobody chose a time and a bound is no time left. `isRunning` includes it, so the Turn off
+  button, Stop and "Start or stop" treat a limit as something that runs. Why: the spec asks
+  for "by 13:30 at the latest" in place of "until 13:30", and a limit has no beginning to
+  count a share from. A limit whose time has passed, and that Timerify has not yet turned
+  off, stays "by 13:30 at the latest" until "Ends at" goes unknown; it is not clamped to
+  0:00, as a countdown is. Cost if wrong: a card that ignored the attribute would count down
+  to a bound that is no promise. Tests: `timer.test.ts` ("is a limit while Ends at holds the
+  time a device left on is turned off at the latest" and the three after it).
+- **The words are "by 13:30 at the latest" and, in Russian, "ne pozzhe 13:30".** The pill and
+  the pop-up say only that, with no time left beside it; the key is `card_until_latest`.
+  The Russian is the word of the voice answers («vyklyuchitsya ne pozzhe 11:00»), transliterated
+  here because this file is in English. The pages call the thing "predel" (a limit), and the
+  card, like the answers, does not name it with a noun. Tests: "a device left on shows the
+  time it turns off at the latest" and "says the limit in the user's language"
+  (`pill.test.ts`, `popup.test.ts`).
+- **The round tile shows the icon and a full ring for a limit.** It is the same picture as
+  for a run with no countdown, so on screen the two cannot be told apart; the moment of the
+  limit is in the pop-up and in the accessible label. The round tile shows no words for a
+  countdown either (its status line is for screen readers), so a limit does not make it
+  poorer than it was. Test: "the limit on the round tile" (`round.test.ts`, and the E2E
+  `limit.spec.ts`).
+- **A limit does not tick.** The one-second redraw follows `endsAt` only while the state is
+  `counting`, since a time of day does not change as the seconds pass. The rule is in the
+  callback that the card gives the countdown controller, which stays ignorant of limits.
+  The cost is that a card that said "by Tue 00:30 at the latest" before midnight keeps the
+  weekday after it, until the next state change. The words stay true, and the times of
+  pending commands go stale in the same way; it is not fixed here. Tests: "does not count
+  down" (`pill.test.ts`, `round.test.ts`, `popup.test.ts`).
+- **The pop-up's minus is on under a limit, and takes time off it.** The spec speaks only of
+  adding; the engine takes a negative delta through the same line as a positive one
+  (`add` moves the limit by the delta and starts a countdown that someone chose), and a
+  delta that empties the limit stops the timer. The three buttons are shown as for a
+  countdown. Tests: "adds time to a limit and takes time off it with Timerify's own action"
+  (`popup.test.ts`); in the engine, `test_adding_time_to_a_limit_gives_an_ordinary_countdown`
+  and `test_taking_more_than_a_limit_off_it_stops_the_timer` (`tests/test_core.py`).
+- **The press choice `run` is named "Run" (#59).** "Run for the default duration" was no
+  longer true with a schedule window open. The stored value does not change, so no saved card
+  breaks. In Russian the label is the word the Run action has in `ru.json` («Zapustit'»), and
+  a test compares the two, so they cannot drift apart. Tests: the two "names the run choice"
+  tests in `editor.test.ts`.
+- **The end-to-end fixture has a loose timer with a limit of its own, on `switch.ac`.** The
+  `loose` fixture stays without a limit, because specs rely on a bare run having no countdown
+  (`pill.spec.ts`, `round.spec.ts`). `switch.ac` is the demo integration's second switch,
+  which no other fixture and no smoke step uses. Its number sorts first by entity id, so the
+  editor specs' `firstTimer` is now this timer; they read only its names and ids. The test
+  that measures the limit takes both moments from the server (the end of the limit and the
+  `last_changed` of the switch), so a Docker clock that is seconds off cannot fail it.

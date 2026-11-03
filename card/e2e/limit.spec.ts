@@ -14,7 +14,8 @@ import type { HassState, HassWs } from "./ws";
 
 const english = await stringsIn("en");
 
-const MINUTE = 60_000;
+const SECOND = 1000;
+const MINUTE = 60 * SECOND;
 /** The limit of the fixture's timer, `LIMIT_MINUTES` of `scripts.e2e.hass`. */
 const LIMIT_MINUTES = 120;
 
@@ -72,9 +73,11 @@ test.describe("a device left on under a limit", () => {
 
     const limit = await leaveOn(ws, limited);
 
-    // The limit is the whole limit from the moment the device was seen on.
-    expect(limit - Date.now()).toBeGreaterThan((LIMIT_MINUTES - 1) * MINUTE);
-    expect(limit - Date.now()).toBeLessThanOrEqual(LIMIT_MINUTES * MINUTE);
+    // The limit is the whole limit from the moment the device was seen on. Both moments are
+    // the server's, so the clock of the host, which may be seconds apart, is not in it; the
+    // margin is the time Timerify takes to hear of the device.
+    const seenOn = Date.parse(String((await ws.state(limited.target))?.last_changed));
+    expect(Math.abs(limit - seenOn - LIMIT_MINUTES * MINUTE)).toBeLessThan(2 * SECOND);
     await expect(pill.getByText(latestText(limit), { exact: true })).toBeVisible();
     // Nobody chose a time, so there is none left to show or to count, and Run for says 0.
     await expect(pill.getByText(/^\d+:\d\d$/)).toHaveCount(0);

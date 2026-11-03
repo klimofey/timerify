@@ -5087,14 +5087,38 @@ def test_a_bare_run_and_a_bare_command_get_a_limit() -> None:
     ]
 
 
-def test_a_late_bare_command_counts_its_limit_from_its_time() -> None:
-    """A command that Home Assistant found overdue at start-up began its run when it
-    was due, so the limit counts from then and not from the moment it was noticed."""
-    c = loose_with_limit("off", commands=(cmd(-30),))
+@pytest.mark.parametrize("late", [30, 180])
+def test_a_bare_command_that_runs_late_gets_its_limit_from_when_it_runs(
+    late: int,
+) -> None:
+    """A command that Home Assistant found overdue at start-up turns the target on when
+    it runs, and the limit counts from then: even a command that is later than the
+    limit gets a whole one, and no limit is announced that began in the past or ended
+    at once."""
+    on = cmd(-late)
+    c = loose_with_limit("off", commands=(on,))
 
     c.observe(NOW, "off", by_us=False)
 
-    assert c.snapshot.limit_at == NOW + minutes(90)
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(120), limit=True),
+    ]
+
+
+def test_a_bare_command_noticed_late_by_a_tick_gets_its_limit_from_the_tick() -> None:
+    """The same when the alarm of the command is handled late, not at start-up."""
+    on = cmd(10)
+    c = loose_with_limit("off", commands=(on,))
+
+    c.tick(NOW + minutes(190))
+
+    assert c.snapshot.limit_at == NOW + minutes(310)
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(310), limit=True),
+    ]
 
 
 def test_a_chosen_countdown_is_never_limited() -> None:

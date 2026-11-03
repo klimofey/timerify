@@ -862,8 +862,11 @@ class TimerCore:
         (P1), and is the same as setting the timer by hand (P3): one without minutes is
         a bare turn-on, which leaves the countdown, or the limit, of a target that was
         wanted running at its time as it is, and ends the run of one that was not where
-        `_open_run_end` says (`run_open`), counting a limit from its time. One with
-        minutes is a countdown that someone chose, which replaces a limit.
+        `_open_run_end` says (`run_open`). A limit counts from `now`, the moment the
+        command turns the target on: a command that is late, even by more than the
+        limit, still turns it on and gives it a whole limit, and never announces a
+        limit that began in the past. One with minutes is a countdown that someone
+        chose, which replaces a limit.
         """
         if command.action == "off":
             self._announce(CommandCameDue(command))
@@ -886,7 +889,7 @@ class TimerCore:
             ended_by="expired",
         )
         if end is None:
-            self._start_limit(command.at)
+            self._start_limit(now)
         self._owe(command.settings)
         return "on"
 
@@ -1042,6 +1045,7 @@ class TimerCore:
         added to it, a countdown chosen and a window that opens write an end, which
         replaces it (`_set_end`). Only where nothing counts down is a limit written.
         """
+        assert limit_at is None or self._snapshot.end is None  # Never both.
         before = self._snapshot.limit_at
         if before is None and limit_at is not None:
             self._announce(CountdownStarted(limit_at, limit=True))

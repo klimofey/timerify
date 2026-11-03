@@ -594,6 +594,11 @@ NO_OFFSET = "2026-01-05T07:00:00"
             id="started_at",
         ),
         pytest.param(
+            payload(limit_at=NO_OFFSET),
+            "the limit of the run must be timezone-aware",
+            id="limit_at",
+        ),
+        pytest.param(
             payload(commands=[command_json(NO_OFFSET, minutes=30)]),
             "the command's time must be timezone-aware",
             id="command",

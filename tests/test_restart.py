@@ -532,6 +532,11 @@ async def test_a_turn_on_inside_a_window_keeps_its_end_across_a_restart(
             "the window of a must start before it ends and last at most a day",
             id="window-longer-than-a-day",
         ),
+        pytest.param(
+            payload(end=at(30), limit_at=at(60)),
+            "the timer has both an end and a limit",
+            id="end-and-limit",
+        ),
     ],
 )
 async def test_file_that_contradicts_itself_is_refused(
@@ -555,20 +560,6 @@ async def test_file_that_contradicts_itself_is_refused(
     assert complaint in entry.reason
     assert complaint in caplog.text
     assert "ValueError" not in caplog.text
-    assert fake_target.calls == []
-
-
-async def test_a_file_with_an_end_and_a_limit_is_refused(
-    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
-) -> None:
-    """A countdown and a limit are never there together, so a file that holds both is
-    refused with a reason, as any other file that no timer could have written is."""
-    entry = await setup_target(stored=payload(end=at(30), limit_at=at(60)))
-
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert entry.error_reason_translation_key == "stored_timer_invalid"
-    assert entry.reason is not None
-    assert "has both an end and a limit" in entry.reason
     assert fake_target.calls == []
 
 

@@ -1656,13 +1656,16 @@ def test_every_russian_clock_phrase_is_of_one_kind() -> None:
     cases = yaml.safe_load(CLOCK_PHRASES.read_text("utf-8"))
     names = [case["name"] for case in cases]
     assert len(set(names)) == len(names)
-    assert len(cases) > 25
     for case in cases:
         assert {"name", "said", "now"} <= set(case), case["name"]
         kind = set(case) - {"name", "said", "now"}
         assert kind in ({"days", "clock"}, {"refused"}, {"understood"}), case["name"]
         if "understood" in case:
             assert case["understood"] is False, case["name"]
+    # Each kind has a test that runs its cases: a kind with none would run nothing.
+    assert phrases_of("clock")
+    assert phrases_of("refused")
+    assert phrases_of("understood")
 
 
 @pytest.mark.parametrize("name", phrases_of("clock"))

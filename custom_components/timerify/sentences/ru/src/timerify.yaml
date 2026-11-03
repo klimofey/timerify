@@ -151,8 +151,10 @@ expansion_rules:
 # counted to (timerify_clock_hour_ordinals) and fills clock_ordinal, which the handler
 # turns into the hour before it. "Без" counts the minutes short of an hour, in
 # clock_before, and the hour after it is a cardinal ("без четверти восемь", "без пяти
-# час"). A word for the part of the day goes with the hour counted to, as it does with "в
-# 7:30": "в половине первого ночи" is 00:30 and "без четверти двенадцать ночи" is 23:45.
+# час"). A word for the part of the day goes with the hour that the minutes are counted
+# from: with an ordinal that is the hour before it, so "в половине первого ночи" is 00:30
+# (the 12 of the night) and "в половине двенадцатого утра" is 11:30; after "без" it is the
+# hour named, so "без четверти двенадцать ночи" is 23:45.
   timerify_clock_into: "({timerify_minutes_of_hour:clock_minute} минут[а|у|ы] <timerify_clock_ordinal>|{timerify_clock_fractions:clock_minute}[ ]<timerify_clock_ordinal>)"
   timerify_clock_ordinal: "{timerify_clock_hour_ordinals:clock_ordinal}"
   timerify_clock_before: "без ({timerify_minutes_of_hour:clock_before} [минут[ы]]|{timerify_clock_fractions_before:clock_before}) ({timerify_half_day_hours:clock_hour}|{timerify_clock_hour_one:clock_hour})"
@@ -364,8 +366,8 @@ lists:
       digits: false
   # The words for a part of an hour, in minutes: "в половине восьмого" and "в четверть
   # восьмого". Before an hour only a quarter is said, in the genitive: "без четверти
-  # восемь". The half is said in four ways, and "пол" is the short one that joins the hour
-  # ("в полвосьмого").
+  # восемь". The half is said in four ways, and "пол" is the short one, which is often
+  # written together with the hour ("в полвосьмого").
   timerify_clock_fractions:
     values:
       - in: "(половина|половине|половину|пол)"

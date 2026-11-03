@@ -20,10 +20,12 @@
 #
 # An hour of 1 to 12 with no word for the part of the day is the nearer of its two times
 # that is ahead, as in "в 7:30". A word for the part of the day goes with the hour that
-# the minutes are counted to, so "в половине первого ночи" is 00:30 (the first hour of the
-# night runs from 00:00 to 01:00) and "без четверти двенадцать ночи" is 23:45. With a day
-# word, a bare 12 is the earlier of its two times, as "завтра в 12:30" is 00:30 (see
-# RULINGS.md), so "завтра в половине первого" is 00:30 tomorrow.
+# the minutes are counted from. With an ordinal that is the hour before it: "в половине
+# первого ночи" is 00:30 (the first hour of the night runs from 00:00 to 01:00), "в
+# половине двенадцатого утра" is 11:30 and "в половине двенадцатого ночи" is 23:30. After
+# "без" it is the hour named: "без четверти двенадцать ночи" is 23:45. With a day word, a
+# bare 12 is the earlier of its two times, as "завтра в 12:30" is 00:30 (see RULINGS.md),
+# so "завтра в половине первого" is 00:30 tomorrow.
 #
 # A date is no time of the day: "двадцать восьмого" is the twenty-eighth, with no word
 # for minutes, and "без двадцати" counts to no hour.
@@ -160,6 +162,18 @@
   days: 1
   clock: "07:30"
 
+- name: half of the twelfth in the morning
+  said: "в половине двенадцатого утра"
+  now: "06:00"
+  days: 0
+  clock: "11:30"
+
+- name: half of the twelfth at night
+  said: "в половине двенадцатого ночи"
+  now: "06:00"
+  days: 0
+  clock: "23:30"
+
 - name: tomorrow a quarter short of eight
   said: "завтра без четверти восемь"
   now: "06:00"
@@ -182,7 +196,7 @@
   now: "06:00"
   understood: false
 
-- name: a quarter short with no hour
+- name: twenty short with no hour
   said: "без двадцати"
   now: "06:00"
   understood: false

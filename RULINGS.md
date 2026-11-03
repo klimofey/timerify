@@ -4716,14 +4716,17 @@ now.
   `clock_day` of `test_minutes_before_come_with_an_hour_or_noon_or_midnight`.
 - **The rule of a bare hour holds for minutes past and to an hour.** With no part of the day
   and no leading zero, the time that minutes past or to an hour make is the nearer of its two
-  times ahead, as "7:30" is: "half past 7" at 08:00 is 19:30, "quarter to 8" at 19:50 is 07:45
-  tomorrow, and "quarter to 12" is 11:45 or 23:45. "Am", "pm" and a part of the day go with
-  the hour that is named, before the minutes are counted: "quarter to 8 in the evening" is
-  19:45, and the Russian "v polovine vos'mogo vechera" is 19:30. Why: the speaker who says
-  "half past 7" has the clock of "7:30" in mind, and a second reading for the same time
-  would have to be learned. Cost if wrong: someone who means the evening one by "half past 7"
-  at 06:00 hears 07:30 in the answer and says "in the evening" or "pm". Tests
-  (`tests/voice/test_clock_commands.py`): `test_minutes_around_an_hour_mean_their_time`,
+  times ahead, as "7:30" is: "half past 7" at 08:00 is 19:30, "quarter to 8" at 19:50 is
+  07:45 tomorrow, and "quarter to 12" is 11:45 or 23:45. "Am", "pm" and a part of the day go
+  with the hour that the minutes are counted from, before they are added or taken off. For
+  "past", "to" and the Russian "bez" that is the hour named: "quarter to 8 in the evening" is
+  19:45. For a Russian ordinal it is the hour before the ordinal: "v polovine vos'mogo
+  vechera" is 19:30, "v polovine dvenadtsatogo utra" is 11:30 and "v polovine dvenadtsatogo
+  nochi" is 23:30. Why: the speaker who says "half past 7" has the clock of "7:30" in mind,
+  and a second reading for the same time would have to be learned. Cost if wrong: someone who
+  means the evening one by "half past 7" at 06:00 hears 07:30 in the answer and says "in the
+  evening" or "pm". Tests (`tests/voice/test_clock_commands.py`):
+  `test_minutes_around_an_hour_mean_their_time`,
   `test_minutes_before_an_hour_are_the_nearer_time_ahead`,
   `test_minutes_before_twelve_noon_and_midnight` and
   `test_russian_clock_phrases_mean_their_time` (the fixture `clock_phrases.yaml`).
@@ -4741,15 +4744,15 @@ now.
   `clock_hour` 12 and `clock_day` of
   `test_minutes_before_come_with_an_hour_or_noon_or_midnight`.
 - **The bounds of minutes past and to an hour.** The minutes are 1 to 59 (the list
-  `timerify_minutes_of_hour`), the hour counted to is 1 to 12 (`timerify_half_day_hours`),
-  and noon and midnight take minutes to them only. So "at 0 past 7" and "at 60 to 8" are not
-  times, since 0 minutes is the hour ("at 7") and 60 is the next one; "at 15 to 13" is not,
-  because the hours counted to are those of the dial, 1 to 12, and "12:45" says that time;
-  and "at half past noon" is not, because noon is a part of the day with no hour to count
-  from, and "12:30" says that time.
-  Why: each of them already has a way to be said, and a loose bound would read a slip of the
-  tongue as a time. Cost if wrong: a speaker who says one of them hears "not understood" and
-  nothing is planned. Test: `test_minutes_around_an_hour_out_of_bounds_are_not_understood`.
+  `timerify_minutes_of_hour`), the hour is 1 to 12 (`timerify_half_day_hours`), and noon and
+  midnight take minutes to them only. So "at 0 past 7" and "at 60 to 8" are not times, since
+  0 minutes is the hour ("at 7") and 60 is the next one; "at 15 to 13" is not, because the
+  hours are those of the dial, 1 to 12, and "12:45" says that time; and "at half past noon"
+  is not, because noon is a part of the day with no hour to count from, and "12:30" says that
+  time. Why: each of them already has a way to be said, and a loose bound would read a slip
+  of the tongue as a time. Cost if wrong: a speaker who says one of them hears "not
+  understood" and nothing is planned. Test:
+  `test_minutes_around_an_hour_out_of_bounds_are_not_understood`.
 - **"Half to 8" is not understood, through a list of its own for before the hour.**
   `timerify_clock_fractions` holds "half" and "quarter", and `timerify_clock_fractions_before`
   only "quarter", so "half past 7" and "quarter to 8" are times and "half to 8" is not. Why:
@@ -4767,11 +4770,14 @@ now.
   `test_russian_clock_phrases_mean_their_time` ("five short of one").
 - **Left out, to add on request.** Digits as the ordinal ("v polovine 8"), "pol" joined with
   a hyphen ("pol-vos'mogo") and a bare "v chas" are not understood. "Pol vos'mogo" with a
-  space is understood, and so is "polvos'mogo"; "v" before an ordinal is optional. Why: the
-  recognisers write the ordinal in words, and each added form is one more to test in a
-  language that has no gazetteer to fall back on. Cost if wrong: a speaker hears "not
-  understood" and says the long form. Tests: `test_russian_clock_phrases_mean_their_time`
-  ("half of the eighth in one word", "half of the eighth with the half apart").
+  space is understood, and so is "polvos'mogo"; "v" before an ordinal is optional. hassil
+  lets a list value run straight into the next chunk, so "polovinavos'mogo" is understood
+  too, as "zavtrav 7" and "halfpast 7" were before this task; the rule is not narrowed for
+  it. Why: the recognisers write the ordinal in words, and each added form is one more to
+  test in a language that has no gazetteer to fall back on. Cost if wrong: a speaker hears
+  "not understood" and says the long form. Tests:
+  `test_russian_clock_phrases_mean_their_time` ("half of the eighth in one word", "half of
+  the eighth with the half apart").
 - **The twelve Russian ordinals are a list in `src/`, checked against the library.**
   `timerify_clock_hour_ordinals` holds the genitive masculine ordinals "pervogo" to
   "dvenadtsatogo", each with its hour as the value, and the fourth with and without the

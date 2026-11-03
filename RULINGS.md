@@ -4811,15 +4811,15 @@ now.
   said: "tonight at 7" is 19:00 today, "tonight at 2" is the 02:00 that follows today and
   "tonight at 12" the 00:00 that follows it. Said in the small hours, "tonight at 2" is the
   night in progress while its 02:00 is ahead (at 01:00 it is 02:00 today), as "today at 2 at
-  night" is, and said at 23:30 it is the next 02:00. "This" is the list `timerify_clock_this`
-  (the value 0 of `clock_day`) and stands in `timerify_clock_when` next to a word for a part
+  night" is, and said at 23:30 it is the next 02:00. "This" is the list
+  `timerify_clock_this` (the value 0 of `clock_day`) and stands in `timerify_clock_when` next to a word for a part
   of the day only: "this morning at 7", "this afternoon at 3", "this evening at half past
   7". "This at 7" and "at 7 this" are no time. Every rule that fills `clock_part` with
   "tonight" takes its hour from `timerify_half_day_hours` (1 to 12), never from the 24-hour
   list: `hour_of_day` tests the raw hour of the night, so "tonight" with the hour 19 would
   be read as 07:00 and not as the evening. So "tonight at 19" is not understood. A
-  "tonight" that is repeated by a "pm" is another reading, in the next entry. Why: "tonight" is how a
-  speaker says today's night, and a part of the day with "this" is the form that goes with
+  "tonight" that is repeated by a "pm" is another reading, in the next entry. Why: "tonight"
+  is how a speaker says today's night, and a part of the day with "this" is the form that goes with
   it; a list of its own for "this" keeps it out of the days, so no sentence takes it for a
   day word before "at". Cost if wrong: a speaker who says "tonight at 19" hears "not
   understood" and says "tonight at 7". Tests (`tests/voice/test_clock_commands.py`):
@@ -4853,9 +4853,9 @@ now.
   day word, "this" or "tonight" fills `clock_day`; "tonight" there is
   `timerify_clock_tonight_day` with the value 0, and it is not in `timerify_clock_days`,
   which would let in "tonight at 7 am" and give "tonight at 7:30" the nearer-of-two reading.
-  The hours are those of the dial (`timerify_half_day_hours`), as a bare hour or with
-  minutes after a colon, a space or a dot. The minutes past and to an hour take no mark in
-  these forms, so "this evening at half past 7 pm" is not understood: its part of the day is
+  The hours are those of the dial (1 to 12, and 1 to 11 for the evening and "tonight"), as a
+  bare hour or with minutes after a colon, a space or a dot. The minutes past and to an hour
+  take no mark in these forms, so "this evening at half past 7 pm" is not understood: its part of the day is
   said twice already, and with them the clock would have 1080 forms and not 612, each of
   which the test of every form sends to the agent (52 s, where it is 19 s without them).
   "This evening at half past 7" and "at half past 7 pm" are understood. The "pm" decides, so

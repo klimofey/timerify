@@ -243,25 +243,27 @@ async def test_run_aimed_at_the_relay_runs_both_channels(
     assert state_of(hass, run_for_of(hass, two)) == "20"
 
 
-async def test_the_run_for_of_two_channels_differ_only_by_entity_id(
+async def test_the_run_for_of_two_channels_name_their_channels(
     hass: HomeAssistant,
     fake_relay: tuple[FakeTarget, FakeTarget],
     setup_target: SetupTarget,
 ) -> None:
-    """What the target picker offers for a relay with two timers: both numbers are
-    named after the device, so the user tells the channels apart by the entity id (or
-    by renaming one of the entities)."""
+    """What the target picker offers for a relay with two timers: each number names its
+    channel, "Relay Run for (Channel 1)" and "Relay Run for (Channel 2)", so the user
+    tells the two apart by name, and the entity id of the second says it too."""
     one = await setup_target(target="switch.relay_1")
     two = await setup_target(target="switch.relay_2")
 
     assert [run_for_of(hass, entry) for entry in (one, two)] == [
         "number.relay_run_for",
-        "number.relay_run_for_2",
+        "number.relay_run_for_channel_2",
     ]
+    names = []
     for entry in (one, two):
         state = hass.states.get(run_for_of(hass, entry))
         assert state is not None
-        assert state.attributes["friendly_name"] == "Relay Run for"
+        names.append(state.attributes["friendly_name"])
+    assert names == ["Relay Run for (Channel 1)", "Relay Run for (Channel 2)"]
 
 
 async def test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on(

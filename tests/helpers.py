@@ -5,12 +5,14 @@ import logging
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 from zoneinfo import ZoneInfo
 
 import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant import config_entries
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
@@ -24,10 +26,14 @@ from homeassistant.helpers.event import (
     async_track_state_report_event,
 )
 from homeassistant.setup import async_setup_component
+from homeassistant.util.json import json_loads_object
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
 from custom_components.timerify.const import (
+    CONF_DEFAULT_DURATION,
+    CONF_MODE,
+    CONF_TARGET,
     DOMAIN,
     EVENT_COMMAND_DUE,
     EVENT_COUNTDOWN_ENDED,
@@ -35,11 +41,17 @@ from custom_components.timerify.const import (
     KEY_RUN_FOR,
     SUBENTRY_INTERVAL,
     DaysMode,
+    Mode,
     timer_unique_id,
 )
 
 if TYPE_CHECKING:
     from .conftest import FakeTarget
+
+INTEGRATION_DIR: Final = Path(__file__).parent.parent / "custom_components" / DOMAIN
+"""The folder of the integration."""
+TRANSLATIONS_DIR: Final = INTEGRATION_DIR / "translations"
+"""The folder of its translations: a file for each language."""
 
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
@@ -140,10 +152,14 @@ def start_set_number(
     )
 
 
+def translations_of(language: str) -> dict[str, Any]:
+    """The translations of `language`, as the integration ships them."""
+    return json_loads_object((TRANSLATIONS_DIR / f"{language}.json").read_text("utf-8"))
+
+
 def run_for_of(hass: HomeAssistant, entry: ConfigEntry) -> str:
     """The entity id of the "Run for" number of the timer of `entry`, from the registry:
-    a device with two timers gives their numbers ids that tell the timers apart only by
-    a suffix."""
+    a second timer on a device has an id that names its target."""
     entity_id = er.async_get(hass).async_get_entity_id(
         "number", DOMAIN, timer_unique_id(entry.entry_id, KEY_RUN_FOR)
     )
@@ -240,6 +256,44 @@ def prefilled(schema: probatio.Schema) -> dict[str, Any]:
             if inside or isinstance(marker, probatio.Required):
                 values[marker.schema] = inside
     return values
+
+
+async def start_flow(hass: HomeAssistant) -> FlowResult:
+    """Press "Add entry" on the integration page and "Add a timer" in the menu it
+    shows; return the form that asks for the target."""
+    menu = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert menu["type"] is FlowResultType.MENU
+    return await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "target"}
+    )
+
+
+async def submit(
+    hass: HomeAssistant, result: FlowResult, user_input: dict[str, Any]
+) -> FlowResult:
+    """Fill in the form `result` shows and submit it."""
+    return await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+
+
+async def add_target(
+    hass: HomeAssistant,
+    target: str = TARGET_ID,
+    mode: Mode = "strict",
+    default_duration: int = 45,
+) -> ConfigEntry:
+    """Add a timer through the whole flow, with no limit; return its config entry."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: target, CONF_MODE: mode}
+    )
+    if mode == "strict":
+        result = await submit(hass, result, {CONF_DEFAULT_DURATION: default_duration})
+    else:
+        result = await submit(hass, result, {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    return result["result"]
 
 
 async def submit_interval(

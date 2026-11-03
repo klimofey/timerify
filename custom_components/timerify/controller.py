@@ -109,7 +109,7 @@ from .schedule import (
     workday_window,
 )
 from .store import TimerStore
-from .target import target_name
+from .target import shares_its_device, target_label, target_name, timers_by_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -277,6 +277,15 @@ class TargetController:
                 translation_domain=DOMAIN, translation_key="target_not_found"
             )
         self.target_entity_id = target
+        self.target_label = (
+            target_label(hass, target)
+            if shares_its_device(hass, target, timers_by_device(hass))
+            else None
+        )
+        """The name that tells the target from the other targets of its device, when
+        the device holds more than one timer, and None when it does not. Fixed for this
+        load: the entities take their names from it when they are made, and it is only
+        a reload that makes them again."""
         self._behaviour = behaviour_for(target)
         # The store keeps no `last_actual`: nothing is known about the target after
         # a restart, so its first report counts as the target coming back.

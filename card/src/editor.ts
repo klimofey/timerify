@@ -242,9 +242,14 @@ export function getStubConfig(
   entitiesFallback: string[],
 ): StubConfig {
   void loadStrings(hass);
+  // A Run for on a device with more than one timer is named after its target, and has the
+  // translation key of that name.
   const isRunForNumber = (entityId: string) => {
     const entry = hass.entities[entityId];
-    return entry?.platform === "timerify" && entry.translation_key === "run_for";
+    return (
+      entry?.platform === "timerify" &&
+      (entry.translation_key === "run_for" || entry.translation_key === "run_for_with_target")
+    );
   };
   const firstTimer = (entityIds: string[]) => entityIds.filter(isRunForNumber).sort()[0];
   return {

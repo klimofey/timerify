@@ -349,7 +349,8 @@ async def test_two_timers_on_one_device_are_told_apart(
 ) -> None:
     """Two targets of one device have a timer each, and their entities are on that one
     device: each number answers with its own timer, its own target and its own
-    sensors and intervals, never those of the other."""
+    sensors and intervals, never those of the other. The ids of the pump's entities
+    and of the intervals' switches name their target, as their names do."""
     pump = provide_target("switch.pump", SWITCH_SERVICES, name="Pump")
     er.async_get(hass).async_update_entity(
         pump.entity_id, device_id=fake_target.device_id
@@ -361,15 +362,18 @@ async def test_two_timers_on_one_device_are_told_apart(
     await retitle_interval(hass, boiler_entry, evening, "Evening")
     await retitle_interval(hass, pump_entry, night, "Night")
 
+    boiler_evening_switch = f"{EVENING_SWITCH}_boiler"
+    pump_night_switch = f"{NIGHT_SWITCH}_pump"
     assert await found(client, NUMBER) == told_about(
-        boiler_entry, intervals=[{"entity_id": EVENING_SWITCH, "title": "Evening"}]
+        boiler_entry,
+        intervals=[{"entity_id": boiler_evening_switch, "title": "Evening"}],
     )
-    assert await found(client, "number.boiler_run_for_2") == told_about(
+    assert await found(client, "number.boiler_run_for_pump") == told_about(
         pump_entry,
         target="switch.pump",
-        ends_at="sensor.boiler_ends_at_2",
-        next_command="sensor.boiler_next_command_2",
-        intervals=[{"entity_id": NIGHT_SWITCH, "title": "Night"}],
+        ends_at="sensor.boiler_ends_at_pump",
+        next_command="sensor.boiler_next_command_pump",
+        intervals=[{"entity_id": pump_night_switch, "title": "Night"}],
     )
 
 

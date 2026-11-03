@@ -54,9 +54,9 @@ class IntervalSwitch(TimerifyEntity, SwitchEntity):
             hass,
             entry,
             unique_id=interval_unique_id(entry.entry_id, subentry.subentry_id),
+            placeholders={"interval": subentry.title},
         )
         self._interval_id = subentry.subentry_id
-        self._attr_translation_placeholders = {"interval": subentry.title}
 
     def _is_enabled(self) -> bool:
         return self._interval_id not in self._controller.snapshot.disabled_intervals

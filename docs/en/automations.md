@@ -97,6 +97,10 @@ Say a relay has two channels, each with its own timer. An action aimed at the de
 
 A trigger aimed at the device fires for each timer, and `trigger.entity_id` says which one. A timer you add to the device later is covered without editing the automation.
 
-Both **Run for** entities have the same name. They differ by their entity id, for example `number.relay_run_for` and `number.relay_run_for_2`. To see the entity ids in the lists, turn on **Display entity IDs in picker** in your profile.
+Each timer names its channel in brackets in the names of its entities. The lists show **Relay Run for (Channel 1)** and **Relay Run for (Channel 2)**, so you can tell the two apart. A device with one timer keeps the plain names, such as **Relay Run for**.
 
-You can also rename an entity, so that the lists show two different names. Open **Settings > Devices & services > Entities**, choose the entity, open its settings and change its **Name**.
+Adding a second timer to a device renames the first one at once. Its entities are unavailable for a moment, and its countdown goes on. Deleting one of the two timers gives the other its plain names back.
+
+An entity keeps the id it was made with. One made while its device holds more than one timer gets an id after its name, such as `number.relay_run_for_channel_2`. One made earlier keeps its id, such as `number.relay_run_for_2`. An entity id never changes by itself.
+
+To choose a name of your own, rename the entity. Open **Settings > Devices & services > Entities**, choose the entity, open its settings and change its **Name**. Timerify never changes a name you gave.

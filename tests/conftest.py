@@ -148,6 +148,13 @@ CLIMATE_SERVICES: Final[dict[str, Obey]] = {
 """The services of an air conditioner; a plain turn-on starts it heating."""
 
 
+def registered_names(name: str, entity_name: str | None) -> tuple[bool, str]:
+    """The `has_entity_name` and the `original_name` an integration registers an entity
+    with: with an `entity_name` the entity names itself after its device `name`, and
+    without one `name` is the entity's whole name."""
+    return entity_name is not None, name if entity_name is None else entity_name
+
+
 @dataclass
 class FakeTarget:
     """An entity the way another integration provides it: a registry entry on a
@@ -167,6 +174,11 @@ class FakeTarget:
     as an entity of YAML without a unique id is."""
     name: str
     """The name of the entity, and of its device."""
+    entity_name: str | None = None
+    """The name of the entity of its own, as an integration that names its entities
+    after their device registers it: the full name is then `name` and `entity_name`.
+    None for an entity that is registered with `name` as a whole, as older integrations
+    do."""
     entity_id: str = TARGET_ID
     translation_key: str | None = None
     """The key the integration translates the entity by; None for an entity it does not
@@ -254,13 +266,17 @@ class FakeTarget:
                     name=self.name,
                 )
             domain, object_id = split_entity_id(self.entity_id)
+            has_entity_name, original_name = registered_names(
+                self.name, self.entity_name
+            )
             er.async_get(self.hass).async_get_or_create(
                 domain,
                 self.platform,
                 self.unique_id,
                 config_entry=self.provider,
                 device_id=self.device_id,
-                original_name=self.name,
+                has_entity_name=has_entity_name,
+                original_name=original_name,
                 suggested_object_id=object_id,
                 translation_key=self.translation_key,
             )
@@ -684,6 +700,7 @@ def provide_fake(
     obeys: Mapping[str, Obey],
     *,
     name: str,
+    entity_name: str | None = None,
     on_device: bool = True,
     device_id: str | None = None,
     registered: bool = True,
@@ -699,6 +716,11 @@ def provide_fake(
     With a `device_id` the registry entry goes on that device, one that another entity
     made, and no device is made: the channels of a relay share one.
 
+    With an `entity_name` the entity is registered as an integration that names its
+    entities after their device registers it, with `has_entity_name` and the name of its
+    own: its full name is `name` and `entity_name`, "Relay Channel 1". Without one the
+    entity is registered with `name` as a whole.
+
     The entity is provided by `platform`, an integration of its own called after the
     entity unless one is given, and translated by `translation_key`, if one is given:
     the words of an integration's translations are found by both.
@@ -708,6 +730,7 @@ def provide_fake(
     """
     domain, object_id = split_entity_id(entity_id)
     platform = platform or f"{object_id}_maker"
+    has_entity_name, original_name = registered_names(name, entity_name)
     provider = None
     if registered:
         provider = MockConfigEntry(domain=platform)
@@ -728,7 +751,8 @@ def provide_fake(
             object_id,
             config_entry=provider,
             device_id=device_id,
-            original_name=name,
+            has_entity_name=has_entity_name,
+            original_name=original_name,
             suggested_object_id=object_id,
             translation_key=translation_key,
         )
@@ -739,6 +763,7 @@ def provide_fake(
         object_id,
         provider,
         name,
+        entity_name,
         entity_id,
         translation_key=translation_key,
         capability_attributes=copy.deepcopy(dict(capability_attributes or {})),
@@ -771,6 +796,7 @@ async def provide_target(
         services: Mapping[str, Obey],
         *,
         name: str,
+        entity_name: str | None = None,
         on_device: bool = True,
         device_id: str | None = None,
         registered: bool = True,
@@ -785,6 +811,7 @@ async def provide_target(
             entity_id,
             services,
             name=name,
+            entity_name=entity_name,
             on_device=on_device,
             device_id=device_id,
             registered=registered,
@@ -820,10 +847,17 @@ def fake_target(
 @pytest.fixture
 def fake_relay(provide_target: ProvideTarget) -> tuple[FakeTarget, FakeTarget]:
     """`switch.relay_1` and `switch.relay_2` on one device called Relay, both switched
-    off, at `START`: a relay with two channels."""
-    one = provide_target("switch.relay_1", SWITCH_SERVICES, name="Relay")
+    off, at `START`: a relay with two channels, "Relay Channel 1" and "Relay Channel 2",
+    named as an integration that names its entities after their device names them."""
+    one = provide_target(
+        "switch.relay_1", SWITCH_SERVICES, name="Relay", entity_name="Channel 1"
+    )
     two = provide_target(
-        "switch.relay_2", SWITCH_SERVICES, name="Relay", device_id=one.device_id
+        "switch.relay_2",
+        SWITCH_SERVICES,
+        name="Relay",
+        entity_name="Channel 2",
+        device_id=one.device_id,
     )
     return one, two
 
@@ -873,8 +907,10 @@ async def setup_target(
     `run_for_max` is the end of the Run for slider in minutes; without it the timer has
     no such option, like one of an earlier release. `off_button` gives the timer a Turn
     off button. `limit` is the minutes a loose timer lets its target run with no
-    countdown; without it the timer has no limit, like one of an earlier release. A test
-    that sets up a target provides it first, through one of the `fake_*` fixtures.
+    countdown; without it the timer has no limit, like one of an earlier release.
+    `before_setup` is called with the entry once it is added and before it is set up, to
+    leave the entity registry as an earlier release left it. A test that sets up a
+    target provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -890,6 +926,7 @@ async def setup_target(
         run_for_max: int | None = None,
         off_button: bool = False,
         limit: int | None = None,
+        before_setup: Callable[[MockConfigEntry], None] | None = None,
     ) -> MockConfigEntry:
         options: dict[str, Any] = {
             CONF_TARGET: target,
@@ -926,6 +963,8 @@ async def setup_target(
                 "key": key,
                 "data": stored_runtime,
             }
+        if before_setup is not None:
+            before_setup(entry)
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         return entry

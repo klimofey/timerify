@@ -1,26 +1,20 @@
 """The translations: each language says what English says, with the same blanks."""
 
 import re
-from pathlib import Path
 from typing import Any
 
 import probatio
 import pytest
 from homeassistant.helpers import config_validation as cv
-from homeassistant.util.json import json_loads_object
 from homeassistant.util.yaml import load_yaml
 
-from custom_components.timerify.const import DOMAIN, TRANSLATION_LANGUAGES
+from custom_components.timerify.const import TRANSLATION_LANGUAGES, WITH_TARGET_SUFFIX
 
-INTEGRATION_DIR = Path(__file__).parent.parent / "custom_components" / DOMAIN
-TRANSLATIONS_DIR = INTEGRATION_DIR / "translations"
+from .helpers import INTEGRATION_DIR, TRANSLATIONS_DIR, translations_of
+
 LANGUAGES = sorted(path.stem for path in TRANSLATIONS_DIR.glob("*.json"))
 """Every language the integration ships, so a new one is checked without an edit."""
 TEXTS = ("name", "description")
-
-
-def translations_of(language: str) -> dict[str, Any]:
-    return json_loads_object((TRANSLATIONS_DIR / f"{language}.json").read_text("utf-8"))
 
 
 def texts_in(tree: Any, path: str = "") -> dict[str, str]:
@@ -126,3 +120,31 @@ def test_card_strings_name_their_own_language(language: str) -> None:
     the file, as Intl reads it. A new language that forgets it would have its helper
     text written in English."""
     assert translations_of(language)["common"]["card_language"] == language
+
+
+def without_name(translation: dict[str, Any]) -> dict[str, Any]:
+    """What an entity's translation says besides its name: its attributes and states."""
+    return {key: text for key, text in translation.items() if key != "name"}
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_a_name_with_its_target_says_what_the_plain_name_says(language: str) -> None:
+    """The entity of a timer on a device with more than one timer is translated by its
+    key and `_with_target`. That key has the plain name, a space and the target in
+    brackets, and the rest of its translation is the plain key's, so that the
+    attributes of the state read the same."""
+    entities = translations_of(language)["entity"]
+
+    for platform, keys in entities.items():
+        for key, translation in keys.items():
+            path = f"{platform}.{key}"
+            if key.endswith(WITH_TARGET_SUFFIX):
+                plain = key.removesuffix(WITH_TARGET_SUFFIX)
+                assert plain in keys, f"{path} has no plain key"
+                continue
+            assert f"{key}{WITH_TARGET_SUFFIX}" in keys, (
+                f"{path} has no key with target"
+            )
+            with_target = keys[f"{key}{WITH_TARGET_SUFFIX}"]
+            assert with_target["name"] == f"{translation['name']} ({{target}})", path
+            assert without_name(with_target) == without_name(translation), path

@@ -5,13 +5,12 @@ from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant import config_entries
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.components.fan.const import FanEntityFeature
 from homeassistant.components.media_player.const import MediaPlayerEntityFeature
 from homeassistant.components.siren.const import SirenEntityFeature
 from homeassistant.components.water_heater.const import WaterHeaterEntityFeature
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, InvalidData
 from homeassistant.helpers import entity_registry as er
@@ -30,7 +29,6 @@ from custom_components.timerify.const import (
     DEFAULT_DURATION_MINUTES,
     DOMAIN,
     MAX_MINUTES,
-    Mode,
 )
 from custom_components.timerify.domains import SUPPORTED_DOMAINS
 
@@ -50,53 +48,18 @@ from .helpers import (
     TURN_OFF,
     TURN_ON,
     add_interval,
+    add_target,
     advance,
     change_options,
     prefilled,
     set_number,
+    start_flow,
     state_of,
     storage_key,
+    submit,
 )
 
 pytestmark = pytest.mark.usefixtures("hass_storage")
-
-
-async def start_flow(hass: HomeAssistant) -> FlowResult:
-    """Press "Add entry" on the integration page and "Add a timer" in the menu it
-    shows; return the form that asks for the target."""
-    menu = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    assert menu["type"] is FlowResultType.MENU
-    return await hass.config_entries.flow.async_configure(
-        menu["flow_id"], {"next_step_id": "target"}
-    )
-
-
-async def submit(
-    hass: HomeAssistant, result: FlowResult, user_input: dict[str, Any]
-) -> FlowResult:
-    """Fill in the form `result` shows and submit it."""
-    return await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
-
-
-async def add_target(
-    hass: HomeAssistant,
-    target: str = TARGET_ID,
-    mode: Mode = "strict",
-    default_duration: int = 45,
-) -> ConfigEntry:
-    """Add a timer through the whole flow, with no limit; return its config entry."""
-    result = await submit(
-        hass, await start_flow(hass), {CONF_TARGET: target, CONF_MODE: mode}
-    )
-    if mode == "strict":
-        result = await submit(hass, result, {CONF_DEFAULT_DURATION: default_duration})
-    else:
-        result = await submit(hass, result, {})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done()
-    return result["result"]
 
 
 def suggested_value(result: FlowResult, key: str) -> Any:

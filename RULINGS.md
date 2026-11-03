@@ -2827,8 +2827,8 @@ in `docs/followups.md`.
   its siblings; simulating the change by passing no result to the fallback fails them in
   English and leaves Russian green). These do switch:
   - turn on, the dangerous direction, since in Loose mode the device then runs without a
-    countdown: "tomorrow", "tonight", "next week", "next month", "this evening", "later"
-    (alone), "in the morning", "on monday", "2 days ahead" and "by 7";
+    countdown: "tomorrow", "tomorrow morning", "tonight", "next week", "next month", "this
+    evening", "later" (alone), "in the morning", "on monday", "2 days ahead" and "by 7";
   - turn off: "tonight", "tomorrow", "tomorrow morning", "this evening" and "by 7".
   The clock times "at 7", "tomorrow at 7", "at noon", "at 7 in the morning", "at 7 in
   the evening", "tomorrow morning at 7", "tomorrow at 7 in the morning" and "in the
@@ -4809,23 +4809,62 @@ now.
   day.** "Tonight" is a value of `clock_part` (the list `timerify_clock_tonight`), which
   `ClockCommandHandler.when` reads as the night with the day word "today" when no day is
   said: "tonight at 7" is 19:00 today, "tonight at 2" is the 02:00 that follows today and
-  "tonight at 12" the 00:00 that follows it. "This" is the list `timerify_clock_this` (the
-  value 0 of `clock_day`) and stands in `timerify_clock_when` next to a word for a part of
-  the day only: "this morning at 7", "this afternoon at 3", "this evening at half past 7".
-  "This at 7" and "at 7 this" are no time. Every rule that fills `clock_part` with "tonight"
-  takes its hour from `timerify_half_day_hours` (1 to 12), never from the 24-hour list:
-  `hour_of_day` tests the raw hour of the night, so "tonight" with the hour 19 would be read
-  as 07:00 and not as the evening. Since the hour is of the dial, a "pm" is not said with
-  "tonight" either: "tonight at 7:30pm" is not understood, as "in the evening at 7:30 pm"
-  is not. Why: "tonight" is how a speaker says today's night, and a part of the day with
-  "this" is the form that goes with it; a list of its own for "this" keeps it out of the
-  days, so no sentence takes it for a day word before "at". Cost if wrong: a speaker who
-  adds "pm" to "tonight at 7:30" hears "not understood" and drops it. Tests
-  (`tests/voice/test_clock_commands.py`):
+  "tonight at 12" the 00:00 that follows it. Said in the small hours, "tonight at 2" is the
+  night in progress while its 02:00 is ahead (at 01:00 it is 02:00 today), as "today at 2 at
+  night" is, and said at 23:30 it is the next 02:00. "This" is the list `timerify_clock_this`
+  (the value 0 of `clock_day`) and stands in `timerify_clock_when` next to a word for a part
+  of the day only: "this morning at 7", "this afternoon at 3", "this evening at half past
+  7". "This at 7" and "at 7 this" are no time. Every rule that fills `clock_part` with
+  "tonight" takes its hour from `timerify_half_day_hours` (1 to 12), never from the 24-hour
+  list: `hour_of_day` tests the raw hour of the night, so "tonight" with the hour 19 would
+  be read as 07:00 and not as the evening. So "tonight at 19" is not understood. A
+  "tonight" that is repeated by a "pm" is another reading, in the next entry. Why: "tonight" is how a
+  speaker says today's night, and a part of the day with "this" is the form that goes with
+  it; a list of its own for "this" keeps it out of the days, so no sentence takes it for a
+  day word before "at". Cost if wrong: a speaker who says "tonight at 19" hears "not
+  understood" and says "tonight at 7". Tests (`tests/voice/test_clock_commands.py`):
   `test_a_part_of_the_day_before_the_time_means_its_time`,
   `test_a_part_of_the_day_before_the_time_ends_a_countdown_then`,
   `test_tonight_is_the_night_of_today`,
-  `test_the_forms_left_out_of_a_part_of_the_day_are_not_understood` and
+  `test_tonight_at_a_small_hour_is_the_night_in_progress_or_the_next` and
+  `test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time`.
+- **A part of the day said as a word may be repeated by the mark of its own half after the
+  time (review of Task 3, English only).** "This evening at 7 pm", "tonight at 7:30pm",
+  "tomorrow morning at 7am", "in the evening at 7 pm" and "at 7 pm tonight" are times; the
+  morning goes with "am", the afternoon, the evening and "tonight" with "pm", and "night"
+  has no mark. The rule `timerify_clock_part_marked` (with `timerify_clock_morning`,
+  `timerify_clock_evening`, `timerify_morning_hour` and `timerify_evening_hour`) says the
+  part as plain text and lets the mark fill `clock_part`, so the mark decides the half and a
+  mark of the other half cannot be said: "tonight at 7 am", "tonight at 7:30am", "this
+  morning at 7 pm" and "this evening at 7am" are not understood, since no rule has the word
+  with the other mark. The marks are lists of one half each: `timerify_clock_am` and
+  `timerify_clock_pm` ("am" or "a.m.", "pm" or "p.m.", after a space) and
+  `timerify_clock_am_glued` and `timerify_clock_pm_glued` (glued to the minutes, "am" and
+  "pm" only, as `timerify_clock_day_marks` has them). The day word, "this" or "tonight"
+  fills `clock_day`; "tonight" there is `timerify_clock_tonight_day` with the value 0, and
+  it is not in `timerify_clock_days`, which would let in "tonight at 7 am" and give "tonight
+  at 7:30" the nearer-of-two reading. The hours are those of `timerify_half_day_hours`, as a
+  bare hour or with minutes after a colon, a space or a dot. The minutes past and to an hour
+  take no mark in these forms, so "this evening at half past 7 pm" is not understood: its
+  part of the day is said twice already, and with them the clock would have 1080 forms and
+  not 612, each of which the test of every form sends to the agent (52 s, where it is 19 s
+  without them). "This evening at half past 7" and "at half past 7 pm" are understood. The
+  "pm" decides, so a bare hour counts: "tonight at 7 pm" is 19:00, "tonight at 5 pm" is
+  17:00, and "tonight at 12 pm" is noon. These are exact times, so a thermostat takes them
+  after its settings. Each form has one reading, which was probed with hassil for a run
+  length before or after the time ("for 2 hours tonight at 7 pm"), for a temperature ("for
+  an hour at 22 tonight at 7:30pm") and with the device first or last. The Russian sentences
+  are unchanged: their adverb ("vecherom v 9") is not repeated by the genitive after the
+  time ("vecherom v 9 vechera"). Why: a speaker who says the part of the day often says "am"
+  or "pm" as well, and to answer "not understood" to a correct request is the worse error.
+  Cost if wrong: a speaker who means the night by "tonight at 12 pm" hears 12:00 in the
+  answer and says "tonight at 12", and one who says "this evening at half past 7 pm" hears
+  "not understood" and drops the "pm". Tests (`tests/voice/test_clock_commands.py`):
+  `test_a_part_of_the_day_before_the_time_means_its_time` (the rows with "pm", "am" and a
+  part of the day), `test_how_long_it_runs_is_read_with_a_part_of_the_day_and_its_mark`,
+  `test_a_temperature_is_read_beside_a_part_of_the_day_with_its_mark`,
+  `test_the_forms_left_out_of_a_part_of_the_day_are_not_understood` (the marks of the
+  other half) and
   `test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time`.
 - **A past "tonight", "this morning" or "segodnya vecherom" is refused, not moved to
   tomorrow (the owner's decision, 2026-11-03).** These name today as "today" does, so a time
@@ -4851,9 +4890,8 @@ now.
   is how it is typed and how some recognisers write it. The list of the parts of the day
   also holds "in the morning" and the dotted forms, which are not written glued to the
   minutes, so the glued forms have a list of their own with the two words only. Cost if
-  wrong: a speaker who says "7:30a.m."
-  hears "not understood" and says "7:30 a.m." or "7:30am". Tests
-  (`tests/voice/test_clock_commands.py`):
+  wrong: a speaker who says "7:30a.m." hears "not understood" and says "7:30 a.m." or
+  "7:30am". Tests (`tests/voice/test_clock_commands.py`):
   `test_a_part_of_the_day_before_the_time_means_its_time` (the rows "at 7:30am", "at
   7:30pm" and "at 7.30pm"), `test_a_part_of_the_day_before_the_time_ends_a_countdown_then`,
   `test_a_thermostat_takes_a_part_of_the_day_after_its_settings` ("at 7:30pm" after the
@@ -4866,6 +4904,6 @@ now.
   the user page says so under "When Home Assistant answers instead". Only the forms with an
   hour are Timerify's. Why: the policy of the plan (Decision 4) takes over a found phrasing
   that means a time Timerify can plan; a part of the day with no hour means none, and #21
-  stays open for the rest. Cost if wrong: unchanged from before this release,
-  the device is switched at once in English. Test:
+  stays open for the rest. Cost if wrong: unchanged from before this release, the device is
+  switched at once in English. Test:
   `test_a_part_of_the_day_with_no_hour_is_left_to_the_gazetteer`.

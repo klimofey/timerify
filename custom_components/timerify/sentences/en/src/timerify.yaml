@@ -163,7 +163,9 @@ expansion_rules:
 # handler works that out from the text of the slot. A part of the day is said after the
 # time ("at 7 in the morning", "at 7:30am") or before it, with a day, "this" or "in the"
 # ("tomorrow morning at 7", "this morning at 7", "in the morning at 7"), or as "tonight"
-# ("tonight at 7", "at 7 tonight"). "This" and "tonight" name today.
+# ("tonight at 7", "at 7 tonight"). "This" and "tonight" name today. A part of the day
+# said as a word may be repeated after the time by its own "am" or "pm": "this evening at
+# 7 pm", "tomorrow morning at 7:30am", "at 7 pm tonight" (timerify_clock_part_marked).
 # After the settings of a thermostat or a water heater the time must not be a bare hour or
 # hour and minutes with a dot, which the temperature is said as ("for an hour at 21"):
 # those blocks of TimerifyRun say that rule their own way, and the delayed commands take
@@ -176,8 +178,20 @@ expansion_rules:
   timerify_clock: "(<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)"
   timerify_exact_clock: "(<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)"
   timerify_clock_day: "{timerify_clock_days:clock_day}"
-  timerify_clock_part_of_day: "(<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>)"
+  timerify_clock_part_of_day: "(<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>|<timerify_clock_part_marked>)"
   timerify_clock_when: "(<timerify_clock_day> {timerify_clock_part_words:clock_part}|[<timerify_clock_day>] in the {timerify_clock_part_words:clock_part}|{timerify_clock_this:clock_day} {timerify_clock_part_words:clock_part}|{timerify_clock_tonight:clock_part})"
+# The part of the day said as a word and repeated by its mark after the time. The word is
+# plain text here and the mark fills clock_part, so that the two cannot disagree: the
+# morning goes with "am", the afternoon, the evening and "tonight" with "pm". "Tonight"
+# fills the day, 0, through a list of its own and the "pm" decides the half, so "tonight at
+# 7 pm" is 19:00 and "tonight at 5 pm" is 17:00. The hours are those of the dial, bare or
+# with minutes: minutes past and to an hour take no mark here ("this evening at half past
+# 7" is said without it), which would double the forms of the clock.
+  timerify_clock_part_marked: "(<timerify_clock_morning> at <timerify_morning_hour>|at <timerify_morning_hour> <timerify_clock_morning>|<timerify_clock_evening> at <timerify_evening_hour>|at <timerify_evening_hour> <timerify_clock_evening>)"
+  timerify_clock_morning: "(<timerify_clock_day> morning|[<timerify_clock_day>] in the morning|{timerify_clock_this:clock_day} morning)"
+  timerify_clock_evening: "(<timerify_clock_day> (afternoon|evening)|[<timerify_clock_day>] in the (afternoon|evening)|{timerify_clock_this:clock_day} (afternoon|evening)|{timerify_clock_tonight_day:clock_day})"
+  timerify_morning_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_am:clock_part})"
+  timerify_evening_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_pm:clock_part})"
   timerify_part_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour}|<timerify_clock_relative_hour>)"
   timerify_clock_minute: "({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})"
   timerify_clock_time: "(<timerify_exact_time>|<timerify_loose_time>)"
@@ -426,6 +440,26 @@ lists:
         out: am
       - in: "pm"
         out: pm
+  # The marks of one half of the day alone, for a part said as a word and repeated after
+  # the time ("this evening at 7 pm"): the one with a space and the one glued to the
+  # minutes, as the lists above are, and no other half, so "this evening at 7 am" is no
+  # time.
+  timerify_clock_am:
+    values:
+      - in: "(am|a.m.)"
+        out: am
+  timerify_clock_am_glued:
+    values:
+      - in: "am"
+        out: am
+  timerify_clock_pm:
+    values:
+      - in: "(pm|p.m.)"
+        out: pm
+  timerify_clock_pm_glued:
+    values:
+      - in: "pm"
+        out: pm
   # The same parts as words that go with a day, before the time: "tomorrow morning at 7".
   timerify_clock_part_words:
     values:
@@ -465,6 +499,11 @@ lists:
     values:
       - in: "tonight"
         out: tonight
+  # "Tonight" as a day, today, for the time that its own "pm" completes: "tonight at 7 pm".
+  timerify_clock_tonight_day:
+    values:
+      - in: "tonight"
+        out: 0
   # A temperature goes up to what a water heater is set at in Fahrenheit (110 to 140
   # degrees is usual, and water boils at 212), the bound the service form's selector has
   # too; the device refuses what it cannot take. The numbers may be said as words: the

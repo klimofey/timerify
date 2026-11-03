@@ -35,7 +35,9 @@
 # evening for 6 to 11. The adverb with "сегодня" names today, so "сегодня вечером в 9" said
 # after 21:00 is refused and not moved to tomorrow. With no day word the time is the next
 # one ahead: "вечером в 9" said after 21:00 is tomorrow's. The night after a day word is
-# the night that follows that day: "завтра ночью в 2" is the 02:00 after tomorrow.
+# the night that follows that day: "завтра ночью в 2" is the 02:00 after tomorrow, and
+# "сегодня ночью в 2" is the coming 02:00, the night in progress when it is said in the
+# small hours.
 #
 # A date is no time of the day: "двадцать восьмого" is the twenty-eighth, with no word
 # for minutes, and "без двадцати" counts to no hour.
@@ -250,6 +252,18 @@
 - name: night at two with no day word
   said: "ночью в 2"
   now: "06:00"
+  days: 1
+  clock: "02:00"
+
+- name: today night at two, said in the small hours, is the night in progress
+  said: "сегодня ночью в 2"
+  now: "01:00"
+  days: 0
+  clock: "02:00"
+
+- name: today night at two, said late in the evening, is the next night
+  said: "сегодня ночью в 2"
+  now: "23:30"
   days: 1
   clock: "02:00"
 

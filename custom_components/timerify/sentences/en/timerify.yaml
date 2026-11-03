@@ -111,8 +111,13 @@ expansion_rules:
   timerify_clock: (<timerify_clock_day> at <timerify_clock_time>|at <timerify_clock_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)
   timerify_exact_clock: (<timerify_clock_day> at <timerify_exact_time>|at <timerify_exact_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)
   timerify_clock_day: '{timerify_clock_days:clock_day}'
-  timerify_clock_part_of_day: (<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>)
+  timerify_clock_part_of_day: (<timerify_clock_when> at <timerify_part_hour>|at <timerify_part_hour> <timerify_clock_when>|<timerify_clock_part_marked>)
   timerify_clock_when: (<timerify_clock_day> {timerify_clock_part_words:clock_part}|[<timerify_clock_day>] in the {timerify_clock_part_words:clock_part}|{timerify_clock_this:clock_day} {timerify_clock_part_words:clock_part}|{timerify_clock_tonight:clock_part})
+  timerify_clock_part_marked: (<timerify_clock_morning> at <timerify_morning_hour>|at <timerify_morning_hour> <timerify_clock_morning>|<timerify_clock_evening> at <timerify_evening_hour>|at <timerify_evening_hour> <timerify_clock_evening>)
+  timerify_clock_morning: (<timerify_clock_day> morning|[<timerify_clock_day>] in the morning|{timerify_clock_this:clock_day} morning)
+  timerify_clock_evening: (<timerify_clock_day> (afternoon|evening)|[<timerify_clock_day>] in the (afternoon|evening)|{timerify_clock_this:clock_day} (afternoon|evening)|{timerify_clock_tonight_day:clock_day})
+  timerify_morning_hour: ({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_am:clock_part})
+  timerify_evening_hour: ({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_pm:clock_part})
   timerify_part_hour: ({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour}|<timerify_clock_relative_hour>)
   timerify_clock_minute: ({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})
   timerify_clock_time: (<timerify_exact_time>|<timerify_loose_time>)
@@ -321,6 +326,22 @@ lists:
       out: am
     - in: pm
       out: pm
+  timerify_clock_am:
+    values:
+    - in: (am|a.m.)
+      out: am
+  timerify_clock_am_glued:
+    values:
+    - in: am
+      out: am
+  timerify_clock_pm:
+    values:
+    - in: (pm|p.m.)
+      out: pm
+  timerify_clock_pm_glued:
+    values:
+    - in: pm
+      out: pm
   timerify_clock_part_words:
     values:
     - in: morning
@@ -351,6 +372,10 @@ lists:
     values:
     - in: tonight
       out: tonight
+  timerify_clock_tonight_day:
+    values:
+    - in: tonight
+      out: 0
   timerify_temperature:
     range:
       from: 1

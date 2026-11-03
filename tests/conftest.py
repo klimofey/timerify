@@ -41,6 +41,7 @@ from pytest_homeassistant_custom_component.typing import (
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
+    CONF_LIMIT,
     CONF_MODE,
     CONF_OFF_BUTTON,
     CONF_RUN_FOR_MAX,
@@ -871,8 +872,9 @@ async def setup_target(
     run left in the file of that count, in the form of `stored_runtime_version`.
     `run_for_max` is the end of the Run for slider in minutes; without it the timer has
     no such option, like one of an earlier release. `off_button` gives the timer a Turn
-    off button. A test that sets up a target provides it first, through one of the
-    `fake_*` fixtures.
+    off button. `limit` is the minutes a loose timer lets its target run with no
+    countdown; without it the timer has no limit, like one of an earlier release. A test
+    that sets up a target provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -887,6 +889,7 @@ async def setup_target(
         stored_runtime_version: int = RUNTIME_STORAGE_VERSION,
         run_for_max: int | None = None,
         off_button: bool = False,
+        limit: int | None = None,
     ) -> MockConfigEntry:
         options: dict[str, Any] = {
             CONF_TARGET: target,
@@ -901,6 +904,8 @@ async def setup_target(
             options[CONF_RUN_FOR_MAX] = run_for_max
         if off_button:
             options[CONF_OFF_BUTTON] = True
+        if limit is not None:
+            options[CONF_LIMIT] = limit
         entry = MockConfigEntry(
             domain=DOMAIN, version=1, title="Boiler", options=options
         )

@@ -111,7 +111,8 @@ export class TimerifyCard extends LitElement {
     this._lookup = { status: "pending" };
     new CountdownController(
       this,
-      () => this.#view?.endsAt,
+      // A limit shows a time of day alone, which a tick would not change.
+      () => (this.#view?.state === "counting" ? this.#view.endsAt : undefined),
       () => serverNow(this._lookup),
     );
     // The card is marked while its config asks for the Mushroom style and Mushroom is there.
@@ -315,9 +316,9 @@ export class TimerifyCard extends LitElement {
   }
 
   /**
-   * What "Start or stop" does: stops the timer when it runs, with a countdown or without;
-   * starts it, with no duration, when it is idle. A timer that is unavailable has nothing to
-   * act on.
+   * What "Start or stop" does: stops the timer when it runs, with a countdown, under a limit or
+   * without either; starts it, with no duration, when it is idle. A timer that is unavailable
+   * has nothing to act on.
    */
   #runOrStop(hass: HomeAssistant, config: CardConfig): void {
     const view = this.#view;

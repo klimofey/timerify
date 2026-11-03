@@ -27,6 +27,10 @@ SWITCH = "input_boolean.smoke_boiler"
 """A switch that configuration.yaml declares, on no device."""
 DEMO_SWITCH = "switch.decorative_lights"
 """A switch of the demo integration, which sits on a device of its own."""
+LIMIT_SWITCH = "switch.ac"
+"""The other switch of the demo integration, on a device of its own. It starts off. Both
+the smoke test and the end-to-end tests give it a loose timer with a limit, each in a
+container of its own."""
 STARTUP_TIMEOUT = 240.0
 CALL_TIMEOUT = 30.0
 DEFAULT_DURATION_MINUTES = 30
@@ -550,15 +554,17 @@ async def add_timer(
     mode: Literal["strict", "loose"] = "strict",
     on_target_device: bool = False,
     runtime: bool = False,
+    limit: int | None = None,
 ) -> Timer:
     """Add a timer for `target` in Timerify the way the integrations page does.
 
     A strict timer gets the default duration of `DEFAULT_DURATION_MINUTES`; a loose one
-    has none. With `on_target_device` the target must sit on a device, and the timer's
-    entities must sit on that same device. With `runtime` the box "Count runtime" of the
-    first form is ticked; without it the form is submitted as before the counter
-    existed, which leaves the box at its default, and the timer must have no Runtime
-    sensor.
+    has none. Its limit box, "Turn off if left on for", holds `limit` minutes, or is
+    left empty, so that the timer has no limit; a strict timer has no such box. With
+    `on_target_device` the target must sit on a device, and the timer's entities must
+    sit on that same device. With `runtime` the box "Count runtime" of the first form is
+    ticked; without it the form is submitted as before the counter existed, which
+    leaves the box at its default, and the timer must have no Runtime sensor.
     """
     flow_path = "/api/config/config_entries/flow"
     flow = await request_json(
@@ -585,6 +591,8 @@ async def add_timer(
     steps: list[tuple[str, dict[str, Any]]] = [("target", first_form)]
     if mode == "strict":
         steps.append(("duration", {"default_duration": DEFAULT_DURATION_MINUTES}))
+    else:
+        steps.append(("limit", {} if limit is None else {"limit": limit}))
     for step_id, user_input in steps:
         if flow["type"] != "form" or flow["step_id"] != step_id:
             raise HarnessFailure(

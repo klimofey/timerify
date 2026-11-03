@@ -22,6 +22,10 @@ or False: no counter, and no Runtime sensor; an entry of an earlier release has 
 CONF_RUN_FOR_MAX: Final = "run_for_max"
 """Option holding the end of the Run for slider in whole minutes. An entry of an earlier
 release has none."""
+CONF_LIMIT: Final = "limit"
+"""Option holding how long, in whole minutes, a loose timer lets its target run with no
+countdown before it turns the target off. Absent: no limit; an entry of an earlier
+release has none, and a strict timer never has one."""
 CONF_OFF_BUTTON: Final = "off_button"
 """Option holding whether the timer has a Turn off button, a `bool`. Absent or False: no
 button; an entry of an earlier release has none."""
@@ -131,11 +135,14 @@ SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
 """Sent when a timer is set up or unloaded, so that the names of the targets are listed
 again."""
 EVENT_COUNTDOWN_STARTED: Final = "timerify_countdown_started"
-"""Fired when a timer with no countdown begins one. Data: `entity_id`, the timer's Run
-for, and `ends_at`, the end as the Ends at sensor states it (ISO 8601 in UTC)."""
+"""Fired when a timer with no countdown begins one, or sets the limit of a run that has
+none. Data: `entity_id`, the timer's Run for, `ends_at`, the end as the Ends at sensor
+states it (ISO 8601 in UTC), and `limit`: true when `ends_at` is the time of a limit,
+false when it is the end of a countdown that someone chose."""
 EVENT_COUNTDOWN_ENDED: Final = "timerify_countdown_ended"
-"""Fired when the countdown of a timer is over. Data: `entity_id`, the timer's Run for,
-and `reason`: `expired`, `stopped` or `turned_off` (`EndReason`)."""
+"""Fired when the countdown of a timer, or its limit, is over. Data: `entity_id`, the
+timer's Run for, and `reason`: `expired`, `stopped`, `turned_off` or `limit`
+(`EndReason`)."""
 EVENT_COMMAND_DUE: Final = "timerify_command_due"
 """Fired when a pending command is carried out at its time. Data: `entity_id`, the
 timer's Run for, `command_id`, as `add_command` answered it, and `action`: `on` or
@@ -194,6 +201,13 @@ def run_for_max_minutes(options: Mapping[str, Any]) -> int:
     has none. It bounds the slider only; a countdown that something else starts may be
     longer, up to `MAX_MINUTES`."""
     minutes: int = options.get(CONF_RUN_FOR_MAX, MAX_MINUTES)
+    return minutes
+
+
+def limit_minutes(options: Mapping[str, Any]) -> int | None:
+    """The minutes a loose timer lets its target run with no countdown: its option, or
+    None for an entry that has none."""
+    minutes: int | None = options.get(CONF_LIMIT)
     return minutes
 
 

@@ -11,13 +11,14 @@ Home Assistant to restart runs `restart`.
 the pages' own APIs: an administrator and a user who is not one, each with a long-lived
 access token; a strict timer on a switch that sits on no device and a loose one on a
 switch that sits on a device; an interval on the strict timer that is never open while a
-test runs; a pending command on the loose timer that never comes due; a third timer
-whose "Ends at" sensor is disabled, which stays so, since enabling an entity makes Home
-Assistant reload its entry some time later; and a dashboard of the card with a view for
-each file of tests that needs one. It writes what the tests
-need to find all of it to the state file, which the Playwright side reads: see
-`E2EState` in card/e2e/constants.ts. The state file holds the dashboard as it was saved,
-for the reset that every test starts with to save it again.
+test runs; a pending command on the loose timer that never comes due; a loose timer with
+a limit on another demo switch, for the tests of a device left on; a timer whose "Ends
+at" sensor is disabled, which stays so, since enabling an entity makes Home Assistant
+reload its entry some time later; and a dashboard of the card with a view for each file
+of tests that needs one. It writes what the tests need to find all of it to the state
+file, which the Playwright side reads: see `E2EState` in card/e2e/constants.ts. The
+state file holds the dashboard as it was saved, for the reset that every test starts
+with to save it again.
 """
 
 import argparse
@@ -36,6 +37,7 @@ from scripts.harness.hass import (
     CALL_TIMEOUT,
     DEMO_SWITCH,
     DOMAIN,
+    LIMIT_SWITCH,
     STARTUP_TIMEOUT,
     SWITCH,
     WEEKDAYS,
@@ -95,6 +97,10 @@ switched off, and no E2E test touches it."""
 QUICK_CHIP_MINUTES = 15
 """The minutes of the chip on the pill of the strict timer."""
 
+LIMIT_MINUTES = 120
+"""The limit of the fixture's loose timer with a limit, on `LIMIT_SWITCH`: how long its
+switch may stay on with no countdown."""
+
 
 def timerify_card(timer: Timer, **options: Any) -> dict[str, Any]:
     """A card of the timer, as a user writes it into a dashboard."""
@@ -132,7 +138,9 @@ def wide_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, An
     ]
 
 
-def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, Any]:
+def dashboard_config(
+    strict: Timer, loose: Timer, limited: Timer, disabled: Timer
+) -> dict[str, Any]:
     """The views of the dashboard, one for each file of tests. Each task that adds a
     file of tests adds its view here."""
     return {
@@ -246,6 +254,16 @@ def dashboard_config(strict: Timer, loose: Timer, disabled: Timer) -> dict[str, 
                 "type": "sections",
                 "sections": [
                     {"type": "grid", "cards": wide_cards(strict, loose, mushroom=True)}
+                ],
+            },
+            {
+                # A device left on under a limit: the pill and the round tile of the
+                # loose timer that has one.
+                "title": "Limit",
+                "path": "limit",
+                "cards": [
+                    timerify_card(limited, layout="pill"),
+                    timerify_card(limited, layout="round"),
                 ],
             },
             {
@@ -409,6 +427,22 @@ async def build_fixture(
             on_target_device=True,
         )
 
+        say("Adding the loose timer with a limit")
+        await socket.wait_for_state(
+            LIMIT_SWITCH, is_known, "the demo air conditioner", STARTUP_TIMEOUT
+        )
+        await socket.wait_for_state(LIMIT_SWITCH, has_state("off"), "off", CALL_TIMEOUT)
+        limited = await add_timer(
+            session,
+            socket,
+            instance,
+            access_token,
+            LIMIT_SWITCH,
+            mode="loose",
+            on_target_device=True,
+            limit=LIMIT_MINUTES,
+        )
+
         say("Adding the timer whose Ends at sensor is disabled")
         disabled = await add_timer(
             session, socket, instance, access_token, DISABLED_TARGET
@@ -432,7 +466,7 @@ async def build_fixture(
         )
 
         say("Making the dashboard")
-        dashboard = dashboard_config(strict, loose, disabled)
+        dashboard = dashboard_config(strict, loose, limited, disabled)
         await socket.call(
             "lovelace/dashboards/create",
             url_path=DASHBOARD,
@@ -452,6 +486,7 @@ async def build_fixture(
         "timers": {
             "strict": asdict(strict),
             "loose": asdict(loose),
+            "limited": asdict(limited),
             "disabled": asdict(disabled),
         },
         "interval": interval,

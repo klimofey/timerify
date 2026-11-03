@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -16,6 +16,7 @@ from custom_components.timerify.const import (
     freeze_settings,
 )
 from custom_components.timerify.core import (
+    Announcement,
     ApplySettings,
     Arm,
     Changed,
@@ -5010,3 +5011,517 @@ def test_announcements_are_not_effects() -> None:
 
     assert fx == [Arm(NOW + minutes(30)), TurnOn(), Changed()]
     assert c.take_announcements() == [CountdownStarted(NOW + minutes(30))]
+
+
+# --- The limit of a run with no countdown -------------------------------------------
+
+
+def loose_with_limit(
+    actual: Actual | None, minutes: int = 120, **snapshot: Any
+) -> TimerCore:
+    """A loose core whose target was last seen in the given state, with a limit of
+    `minutes` and the rest of the snapshot as given."""
+    return TimerCore(
+        "loose",
+        timedelta(minutes=45),
+        Snapshot(last_actual=actual, **snapshot),
+        limit=timedelta(minutes=minutes),
+    )
+
+
+def limited() -> TimerCore:
+    """A loose core whose target was switched on by hand at `NOW`, so that a limit of
+    120 minutes runs; what it announced is taken."""
+    c = loose_with_limit("off")
+    c.observe(NOW, "on", by_us=False)
+    c.take_announcements()
+    return c
+
+
+def test_a_manual_on_in_loose_mode_gets_a_limit() -> None:
+    """A target switched on by hand, with no countdown and no window, is left on for at
+    most the limit: it is announced as a limit, the alarm is set for it, and when it
+    comes the target is turned off and the end is said to be the limit's."""
+    c = loose_with_limit("off")
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(120)), Changed()]
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.snapshot.end is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(120), limit=True)]
+    assert c.tick(NOW + minutes(119)) == []
+
+    fx = c.tick(NOW + minutes(120))
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot.limit_at is None
+    assert c.snapshot.pending == "off"
+    assert c.take_announcements() == [CountdownEnded("limit")]
+
+
+def test_a_bare_run_and_a_bare_command_get_a_limit() -> None:
+    """The other ways to run without a countdown start the limit too: a run that names
+    no time, and a command without minutes, which counts from its own time."""
+    run = loose_with_limit("off")
+
+    fx = run.run_open(NOW)
+
+    assert fx == [Arm(NOW + minutes(120)), TurnOn(), Changed()]
+    assert run.snapshot.limit_at == NOW + minutes(120)
+    assert run.take_announcements() == [
+        CountdownStarted(NOW + minutes(120), limit=True)
+    ]
+
+    on = cmd(10)
+    commanded = loose_with_limit("off", commands=(on,))
+
+    fx = commanded.tick(NOW + minutes(10))
+
+    assert fx == [Arm(NOW + minutes(130)), TurnOn(), Changed()]
+    assert commanded.snapshot.limit_at == NOW + minutes(130)
+    assert commanded.snapshot.end is None
+    assert commanded.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(130), limit=True),
+    ]
+
+
+@pytest.mark.parametrize("late", [30, 180])
+def test_a_bare_command_that_runs_late_gets_its_limit_from_when_it_runs(
+    late: int,
+) -> None:
+    """A command that Home Assistant found overdue at start-up turns the target on when
+    it runs, and the limit counts from then: even a command that is later than the
+    limit gets a whole one, and no limit is announced that began in the past or ended
+    at once."""
+    on = cmd(-late)
+    c = loose_with_limit("off", commands=(on,))
+
+    c.observe(NOW, "off", by_us=False)
+
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(120), limit=True),
+    ]
+
+
+def test_a_bare_command_noticed_late_by_a_tick_gets_its_limit_from_the_tick() -> None:
+    """The same when the alarm of the command is handled late, not at start-up."""
+    on = cmd(10)
+    c = loose_with_limit("off", commands=(on,))
+
+    c.tick(NOW + minutes(190))
+
+    assert c.snapshot.limit_at == NOW + minutes(310)
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(310), limit=True),
+    ]
+
+
+def test_a_chosen_countdown_is_never_limited() -> None:
+    """A countdown that someone chose is not cut: the target is still wanted running
+    when the limit would have come, and there is no limit to come."""
+    c = loose_with_limit("off")
+
+    c.set_duration(NOW, minutes(180))
+    c.observe(NOW, "on", by_us=True)
+    c.tick(NOW + minutes(120))
+
+    assert c.wanted_running(NOW + minutes(120))
+    assert c.snapshot.end == NOW + minutes(180)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(180))]
+
+
+def test_turning_off_ends_a_limit_and_the_next_on_starts_a_new_one() -> None:
+    """The target switched off by anyone ends the limit, whose end is that; the next
+    turn-on with no countdown starts a limit of its own, from its own time."""
+    c = limited()
+
+    fx = c.observe(NOW + minutes(30), "off", by_us=False)
+
+    assert fx == [Disarm(), Changed()]
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownEnded("turned_off")]
+
+    fx = c.observe(NOW + minutes(40), "on", by_us=False)
+
+    assert fx == [Arm(NOW + minutes(160)), Changed()]
+    assert c.snapshot.limit_at == NOW + minutes(160)
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(160), limit=True)]
+
+
+def stopped_by_command(c: TimerCore) -> list[Effect]:
+    """A command that switches off, added at `NOW`, comes due at ten past."""
+    c.add_command(NOW, cmd(10, "off"))
+    return c.tick(NOW + minutes(10))
+
+
+@pytest.mark.parametrize(
+    ("stop", "told"),
+    [
+        pytest.param(
+            lambda c: c.stop(NOW + minutes(10)), [CountdownEnded("stopped")], id="stop"
+        ),
+        pytest.param(
+            lambda c: c.set_duration(NOW + minutes(10), timedelta(0)),
+            [CountdownEnded("stopped")],
+            id="run-for-0",
+        ),
+        pytest.param(
+            stopped_by_command,
+            [CommandCameDue(cmd(10, "off")), CountdownEnded("stopped")],
+            id="command-off",
+        ),
+    ],
+)
+def test_every_way_to_stop_ends_a_limit_as_stopped(
+    stop: Callable[[TimerCore], list[Effect]], told: list[Announcement]
+) -> None:
+    """Whatever stops the timer ends a limit that runs, as stopped, and switches the
+    target off."""
+    c = limited()
+
+    fx = stop(c)
+
+    assert TurnOff() in fx
+    assert c.snapshot.limit_at is None
+    assert c.snapshot.pending == "off"
+    assert c.take_announcements() == told
+
+
+def test_adding_time_to_a_limit_gives_an_ordinary_countdown() -> None:
+    """Time added at 07:10 to a limit of 09:00 is added to the limit: the countdown
+    that someone chose runs to 09:15, and the limit is gone with no end of its own."""
+    c = limited()
+
+    fx = c.add(NOW + minutes(10), minutes(15))
+
+    assert fx == [Arm(NOW + minutes(135)), Changed()]
+    assert c.snapshot.end == NOW + minutes(135)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(135))]
+
+
+def test_taking_a_little_off_a_limit_gives_an_ordinary_countdown() -> None:
+    """Five minutes taken off at 07:10 from a limit of 09:00 move it to 08:55: the
+    countdown that someone chose runs to then, and the limit is gone with no end of its
+    own. The device keeps running."""
+    c = limited()
+
+    fx = c.add(NOW + minutes(10), minutes(-5))
+
+    assert fx == [Arm(NOW + minutes(115)), Changed()]
+    assert c.snapshot.end == NOW + minutes(115)
+    assert c.snapshot.started_at == NOW + minutes(10)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(115))]
+
+
+def test_taking_more_than_a_limit_off_it_stops_the_timer() -> None:
+    """A result that is not ahead is no countdown: the timer stops, and the limit ends
+    as stopped."""
+    c = limited()
+
+    fx = c.add(NOW + minutes(10), minutes(-200))
+
+    assert fx == [Disarm(), TurnOff(), Changed()]
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownEnded("stopped")]
+
+
+def test_a_bare_run_while_a_limit_runs_keeps_it() -> None:
+    """The target already runs: a run that names no time leaves the limit as it is, and
+    nothing is announced."""
+    c = limited()
+
+    fx = c.run_open(NOW + minutes(10))
+
+    assert fx == []
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == []
+
+
+def test_a_bare_command_while_a_limit_runs_keeps_it() -> None:
+    """The same for a command without minutes: only that it came due is announced."""
+    on = cmd(10)
+    c = loose_with_limit("on", limit_at=NOW + minutes(120), commands=(on,))
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == [CommandCameDue(on)]
+
+
+@pytest.mark.parametrize(
+    "replace_it",
+    [
+        pytest.param(
+            lambda c: c.set_duration(NOW + minutes(10), minutes(30)), id="run-for"
+        ),
+        pytest.param(
+            lambda c: (
+                c.add_command(NOW, cmd(10, minutes=30)),
+                c.tick(NOW + minutes(10)),
+            ),
+            id="command-with-minutes",
+        ),
+    ],
+)
+def test_a_chosen_countdown_replaces_a_limit_without_ending_it(
+    replace_it: Callable[[TimerCore], object],
+) -> None:
+    """The target goes on running under a countdown that someone chose, so the limit it
+    replaces is not announced as ended: the countdown is announced as started, and is
+    no limit."""
+    c = limited()
+
+    replace_it(c)
+
+    assert c.snapshot.limit_at is None
+    assert c.snapshot.end == NOW + minutes(40)
+    assert c.wanted_running(NOW + minutes(30))
+    announced = c.take_announcements()
+    assert CountdownStarted(NOW + minutes(40)) in announced
+    assert not any(isinstance(a, CountdownEnded) for a in announced)
+
+
+def test_a_window_that_opens_replaces_a_limit() -> None:
+    """A window that opens while a limit runs gives the run the window's end, a
+    countdown that the schedule chose."""
+    c = limited()
+    c.set_windows(NOW, [window("a", 30, 90)], configured={"a"})
+
+    fx = c.tick(NOW + minutes(30))
+
+    assert fx == [Arm(NOW + minutes(90)), Changed()]
+    assert c.snapshot.end == NOW + minutes(90)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(90))]
+
+
+def test_a_turn_on_inside_a_window_gets_its_end_not_a_limit() -> None:
+    """With a window open the run lasts to its end, which is a countdown (#58), so
+    there is no limit."""
+    c = loose_with_limit("off", windows=(window("a", -10, 90, started=True),))
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(90)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(90))]
+
+
+@pytest.mark.parametrize(
+    ("mode", "limit"),
+    [
+        pytest.param("strict", minutes(120), id="strict-with-a-limit"),
+        pytest.param("loose", None, id="loose-without-one"),
+    ],
+)
+def test_strict_mode_and_no_setting_never_set_a_limit(
+    mode: Mode, limit: timedelta | None
+) -> None:
+    """Strict mode gives every turn-on a countdown, and a timer with no setting has no
+    limit to give: by hand, by a run and by a command, none starts."""
+
+    def idle(*commands: Command) -> TimerCore:
+        snapshot = Snapshot(commands=commands, last_actual="off")
+        return TimerCore(mode, minutes(45), snapshot, limit=limit)
+
+    by_hand = idle()
+    by_hand.observe(NOW, "on", by_us=False)
+    run = idle()
+    run.run_open(NOW)
+    commanded = idle(cmd(10))
+    commanded.tick(NOW + minutes(10))
+
+    for c in (by_hand, run, commanded):
+        assert c.snapshot.limit_at is None
+        assert not any(
+            isinstance(a, CountdownStarted) and a.limit for a in c.take_announcements()
+        )
+
+
+@pytest.mark.parametrize(
+    ("mode", "limit", "kept"),
+    [
+        pytest.param("loose", minutes(120), True, id="loose-with-a-limit"),
+        pytest.param("loose", None, False, id="loose-without-one"),
+        pytest.param("strict", minutes(120), False, id="strict"),
+    ],
+)
+def test_a_stored_limit_is_kept_in_loose_and_dropped_otherwise(
+    mode: Mode, limit: timedelta | None, kept: bool
+) -> None:
+    """A limit that a file holds goes on as it is where the timer has a limit to give;
+    where the setting was emptied or the mode changed, it is dropped, and nothing is
+    announced for it."""
+    stored = Snapshot(limit_at=NOW + minutes(60), last_actual="on")
+
+    c = TimerCore(mode, minutes(45), stored, limit=limit)
+
+    assert c.snapshot.limit_at == (NOW + minutes(60) if kept else None)
+    assert c.take_announcements() == []
+
+
+def test_the_alarm_is_set_for_the_limit() -> None:
+    """The timer is looked at when the limit comes, or earlier if something else is
+    due sooner."""
+    assert next_wakeup(Snapshot(limit_at=NOW + minutes(120))) == NOW + minutes(120)
+    soon = Snapshot(limit_at=NOW + minutes(120), commands=(cmd(30),))
+    assert next_wakeup(soon) == NOW + minutes(30)
+
+
+def test_run_for_stays_zero_while_a_limit_runs() -> None:
+    """A limit is no countdown that anyone chose, so what Run for shows is unchanged."""
+    c = limited()
+
+    assert remaining_minutes(c.snapshot, NOW + minutes(10)) == 0
+
+
+def test_a_limit_is_over_when_it_is_reached_though_nothing_folded_it() -> None:
+    """As for a countdown (#42), a limit whose time is not ahead no longer wants the
+    target running, whether or not the alarm was handled yet."""
+    c = limited()
+
+    assert c.wanted_running(NOW + minutes(119))
+    assert not c.wanted_running(NOW + minutes(120))
+
+
+def test_a_countdown_chosen_as_the_limit_comes_ends_the_limit_first() -> None:
+    """Run for set after the limit's time and before the alarm is handled: the limit ran
+    out, and is said to have, before the countdown starts."""
+    c = limited()
+
+    c.set_duration(NOW + minutes(121), minutes(30))
+
+    assert c.snapshot.limit_at is None
+    assert c.snapshot.end == NOW + minutes(151)
+    assert c.take_announcements() == [
+        CountdownEnded("limit"),
+        CountdownStarted(NOW + minutes(151)),
+    ]
+
+
+def test_time_added_after_the_limit_came_starts_a_countdown_from_now() -> None:
+    """A limit that is not ahead is no limit: adding time to it starts a countdown from
+    now, as adding to an end that passed does."""
+    c = limited()
+
+    c.add(NOW + minutes(121), minutes(15))
+
+    assert c.snapshot.end == NOW + minutes(136)
+    assert c.take_announcements() == [
+        CountdownEnded("limit"),
+        CountdownStarted(NOW + minutes(136)),
+    ]
+
+
+def test_a_bare_command_due_as_the_limit_comes_starts_a_new_limit() -> None:
+    """The command meets a target that is about to be off, as one due as a countdown
+    ends does: the limit that ran out is ended, and the run it asks for has a limit
+    of its own."""
+    on = cmd(10)
+    c = loose_with_limit("on", limit_at=NOW + minutes(10), commands=(on,))
+
+    c.tick(NOW + minutes(10))
+
+    assert c.snapshot.limit_at == NOW + minutes(130)
+    assert c.snapshot.pending is None
+    assert c.take_announcements() == [
+        CommandCameDue(on),
+        CountdownEnded("limit"),
+        CountdownStarted(NOW + minutes(130), limit=True),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        pytest.param(None, NOW + minutes(120), id="none-stored"),
+        pytest.param(NOW + minutes(60), NOW + minutes(60), id="a-limit-stored"),
+    ],
+)
+def test_start_up_with_the_target_on_starts_a_limit_or_keeps_the_stored_one(
+    stored: datetime | None, expected: datetime
+) -> None:
+    """A target found on at start-up has been on for a time nobody knows: the limit
+    counts from now, unless a limit that runs was stored, which keeps its time."""
+    c = loose_with_limit(None, limit_at=stored)
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.snapshot.limit_at == expected
+    assert c.take_announcements() == (
+        [CountdownStarted(expected, limit=True)] if stored is None else []
+    )
+
+
+def test_a_limit_that_came_due_while_down_turns_the_target_off() -> None:
+    """The fuse works across a restart: the target found on after the limit is turned
+    off, and the limit is ended as the limit."""
+    c = loose_with_limit(None, limit_at=NOW - minutes(5))
+
+    fx = c.observe(NOW, "on", by_us=False)
+
+    assert TurnOff() in fx
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownEnded("limit")]
+
+
+def test_a_stored_limit_ends_when_the_target_is_found_off() -> None:
+    """A target found off ended the limit, as it ends a countdown: it was turned off."""
+    c = loose_with_limit(None, limit_at=NOW + minutes(60))
+
+    c.observe(NOW, "off", by_us=False)
+
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownEnded("turned_off")]
+
+
+def test_back_from_unavailable_as_on_starts_a_limit() -> None:
+    """A target that comes back on has been on for a time nobody knows, as at start-up
+    (the limit counts from now)."""
+    c = loose_with_limit("unavailable")
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(120), limit=True)]
+
+
+def test_a_run_asked_while_the_target_is_away_counts_its_limit_from_the_call() -> None:
+    """The run began when it was asked for, and the target that comes back on settles
+    the wish instead of being found on by someone: the limit keeps the time it had."""
+    c = loose_with_limit("unavailable")
+
+    fx = c.run_open(NOW)
+
+    assert fx == [Arm(NOW + minutes(120)), Changed()]
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(120), limit=True)]
+
+    c.observe(NOW + minutes(30), "on", by_us=False)
+
+    assert c.snapshot.limit_at == NOW + minutes(120)
+    assert c.take_announcements() == []
+
+
+def test_a_window_found_open_at_a_turn_on_replaces_a_limit_that_runs() -> None:
+    """The run of a target found on while a window is open lasts to the window's end,
+    which is a countdown, so it replaces a limit that was running."""
+    c = loose_with_limit(
+        "unavailable",
+        limit_at=NOW + minutes(60),
+        windows=(window("a", -10, 90, started=True),),
+    )
+
+    c.observe(NOW, "on", by_us=False)
+
+    assert c.snapshot.end == NOW + minutes(90)
+    assert c.snapshot.limit_at is None
+    assert c.take_announcements() == [CountdownStarted(NOW + minutes(90))]

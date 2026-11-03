@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
-import { common as russian } from "../../custom_components/timerify/translations/ru.json";
+import {
+  common as russian,
+  services as russianServices,
+} from "../../custom_components/timerify/translations/ru.json";
 import * as registered from "../src/editor";
 import type { RegistryEntry } from "../src/hass";
 import { TimerifyCard } from "../src/timerify-card";
@@ -196,6 +199,27 @@ describe("the form of the visual editor", () => {
     );
     // Not a word of the English file is glued to a number.
     expect(form.computeHelper({ name: "presets" }, localizeFor("ru"))).not.toMatch(/\b(min|hr)\b/);
+  });
+
+  it("names the run choice Run, which is true whether or not a schedule window is open", async () => {
+    const { getConfigForm } = await freshEditor();
+
+    const { schema } = await getConfigForm();
+
+    expect(schema.at(-1)).toStrictEqual(
+      interactions({ ...english, card_editor_press_run: "Run" }),
+    );
+  });
+
+  it("names the run choice in Russian by the word the Run action has", async () => {
+    const { getConfigForm, loadStrings } = await freshEditor();
+    await loadStrings(fakeHass({ language: "ru" }));
+
+    const { schema } = await getConfigForm();
+
+    expect(schema.at(-1)).toStrictEqual(
+      interactions({ ...russian, card_editor_press_run: russianServices.run.name }),
+    );
   });
 
   it("words the presses as Home Assistant's own editor does", async () => {

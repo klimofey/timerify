@@ -36,9 +36,12 @@ export function addMinutes(hass: HomeAssistant, runFor: string, minutes: number)
 }
 
 /**
- * Runs the timer with no duration, which Timerify answers as it does a bare `timerify.run`:
- * a strict timer runs for its default duration, a loose one turns its target on with no
- * countdown, and a target that already runs keeps the countdown it has.
+ * Runs the timer with no duration, which Timerify answers as it does a bare `timerify.run`.
+ * While a schedule window is open the target runs to the window's end, and a strict timer
+ * keeps its default duration if that ends later. With no window open a strict timer runs for
+ * its default duration, and a loose one turns its target on with no countdown, which its
+ * limit, if it has one, bounds. A target that already runs keeps the countdown or the limit
+ * it has.
  */
 export function runWithoutDuration(hass: HomeAssistant, runFor: string): Promise<void> {
   return callOnEntity(hass, "timerify", "run", {}, runFor);

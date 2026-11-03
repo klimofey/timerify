@@ -78,6 +78,21 @@ async def boiler(
 
 
 @pytest.fixture
+async def limited_boiler(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    assist: None,
+    setup_target: SetupTarget,
+) -> MockConfigEntry:
+    """A timer on the Boiler in loose mode with a limit of two hours, which Assist knows
+    by the sentences of the manual installation. The boiler is off: a test switches it
+    on, as a person leaves it on."""
+    entry = await setup_target(mode="loose", limit=120)
+    await copy_sentences(hass, ["Boiler"])
+    return entry
+
+
+@pytest.fixture
 def fake_lamp(provide_target: ProvideTarget) -> FakeTarget:
     """`light.lamp` on a device called Lamp, switched off: a light with a brightness."""
     return provide_target(

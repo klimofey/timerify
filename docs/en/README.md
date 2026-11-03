@@ -14,5 +14,5 @@ These pages tell you how to use Timerify. The [README](../../README.md) shows ho
 
 ## Look things up
 
-- [Actions](services.md): the five actions that Timerify adds to Home Assistant, with their fields and limits, and the three events that it fires.
+- [Actions](services.md): the five actions that Timerify adds to Home Assistant, with their fields and ranges, and the three events that it fires.
 - [Limits](limits.md): what Timerify does not do yet, and where to report a problem.

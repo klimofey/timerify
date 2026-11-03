@@ -19,7 +19,11 @@ from homeassistant.core import HomeAssistant
 from custom_components.timerify.const import SENTENCES_DIR
 from custom_components.timerify.voice.sentences import read_back
 
-from .helpers import render_response, russian_schedule_answers
+from .helpers import (
+    render_response,
+    russian_limit_answers,
+    russian_schedule_answers,
+)
 
 FIXTURE: Final = Path(__file__).parents[1] / "fixtures" / "ru" / "answers.yaml"
 """The one file of the tests that holds the Russian answers."""
@@ -109,6 +113,33 @@ async def test_each_russian_schedule_answer_reads_as_the_fixture_says(
     template = answers["TimerifySetSchedule"]["default"]
 
     assert render_response(hass, template, case["slots"]) == case["answer"]
+
+
+@pytest.mark.parametrize("name", russian_limit_answers())
+async def test_each_russian_limit_answer_reads_as_the_fixture_says(
+    hass: HomeAssistant, name: str
+) -> None:
+    """The answer about a limit says a time of day and no count, so it has its own
+    fixture, `limit_answers.yaml`, which pins it for each answer that can give it, today
+    and on another date."""
+    case = russian_limit_answers()[name]
+    answers = await hass.async_add_executor_job(shipped_answers, "ru")
+    template = answers[case["intent"]][case["response"]]
+
+    assert render_response(hass, template, case["slots"]) == case["answer"]
+
+
+def test_the_limit_fixture_pins_every_answer_that_can_give_a_limit() -> None:
+    """Only a question about the time left and a run answer with a limit: adding time
+    makes a countdown, and a stop makes none."""
+    cases = russian_limit_answers().values()
+
+    assert {case["intent"] for case in cases} == {"TimerifyTimeLeft", "TimerifyRun"}
+    for intent in ("TimerifyTimeLeft", "TimerifyRun"):
+        days = {
+            case["slots"]["ends_in_days"] for case in cases if case["intent"] == intent
+        }
+        assert days == {0, 1, 2}
 
 
 def test_the_fixture_has_every_count_class_of_every_counted_answer() -> None:

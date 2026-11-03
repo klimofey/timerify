@@ -1,6 +1,6 @@
 # Actions
 
-Timerify adds five actions to Home Assistant. This page lists them with their fields and limits. It also lists the three events that Timerify fires.
+Timerify adds five actions to Home Assistant. This page lists them with their fields and ranges. It also lists the three events that Timerify fires.
 
 | Action | Name in the form | What it does |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ A call can wait its turn behind a slow device. If the timer is unloaded meanwhil
 
 ## Add time
 
-`timerify.add_time` moves the end of the countdown by a number of minutes. A negative number takes time off. The limit is a day either way. Adding to a timer that is not running starts it. Taking off all the time that is left turns the device off.
+`timerify.add_time` moves the end of the countdown by a number of minutes. A negative number takes time off. One call moves the end by a day at most, either way. Adding to a timer that is not running starts it. Taking off all the time that is left turns the device off. If the device runs under a [limit](timers.md#turn-off-a-device-that-was-left-on), the minutes are added to the limit. The result is an ordinary countdown that you chose, and the limit is gone.
 
 | Field | Type | What it is |
 | --- | --- | --- |
@@ -39,7 +39,7 @@ data:
 `timerify.run` turns the device on.
 
 - With `minutes` (1 to 1440), the countdown is that long.
-- Without it, a device that is off runs to the end of the schedule window, if one is open. In **Strict** mode the default duration is kept when it ends later. With no window open, a **Strict** device runs for the default duration. A **Loose** device runs without a countdown. A device that is running already keeps its countdown. The [Modes](timers.md#modes) section explains both modes.
+- Without it, a device that is off runs to the end of the schedule window, if one is open. In **Strict** mode the default duration is kept when it ends later. With no window open, a **Strict** device runs for the default duration. A **Loose** device runs without a countdown, and the timer's limit, if it has one, turns it off in the end. A device that is running already keeps its countdown or its limit. The [Modes](timers.md#modes) section explains both modes.
 
 Settings go along, also to a device that keeps its countdown. A setting that the device does not support is refused before anything happens.
 
@@ -162,13 +162,13 @@ Timerify fires three events. The [triggers](automations.md#triggers) are built o
 
 | Event | Data | When it fires |
 | --- | --- | --- |
-| `timerify_countdown_started` | `entity_id`, `ends_at` | A timer that was not counting down starts a countdown. |
-| `timerify_countdown_ended` | `entity_id`, `reason` | A countdown is over. |
+| `timerify_countdown_started` | `entity_id`, `ends_at`, `limit` | A timer that was not counting down starts a countdown, or sets a limit on a device left on. |
+| `timerify_countdown_ended` | `entity_id`, `reason` | A countdown or a limit is over. |
 | `timerify_command_due` | `entity_id`, `command_id`, `action` | A pending command is carried out at its time. |
 
-`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
+`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `limit` is `true` when `ends_at` is the moment of a limit. It is `false` when `ends_at` is the end of a countdown that someone chose. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
 
-A countdown ends for one of three reasons. The event names it in `reason`.
+A countdown or a limit ends for one of four reasons. The event names it in `reason`.
 
 - `expired`: the countdown ran out.
 - `stopped`: Timerify stopped it. The cause is one of these:
@@ -180,6 +180,7 @@ A countdown ends for one of three reasons. The event names it in `reason`.
   - A schedule interval that you edited, so that its window no longer runs.
   - The Workday sensor changed its answer, so that the window of a working day or day off interval no longer runs.
 - `turned_off`: the device was switched off outside Timerify, for example by hand or in its own app. Another automation, or the device itself, counts too.
+- `limit`: the limit of a device left on came, and Timerify turned the device off. A limit that ends because the device is switched off has the reason `turned_off`.
 
 An automation about the end of a countdown should check `reason`. Say it starts something when the boiler runs out of time. Without the check, it would also start after **Stop**.
 
@@ -198,7 +199,9 @@ actions:
 
 Changing a countdown that runs fires nothing. That covers a new **Run for**, **Run** with minutes, **Add time** and a schedule window that ends later. A pending command that comes due in the middle still fires its event.
 
-A countdown that ended while Home Assistant was down fires its event once Home Assistant has started. A countdown that still runs after a restart fires nothing.
+A limit is not a countdown. Choosing a time while a limit runs ends no countdown: the device keeps running, and `timerify_countdown_started` fires with `limit` set to `false`. So does **Add time** to a limit. No `timerify_countdown_ended` event fires for the limit then.
+
+A countdown that ended while Home Assistant was down fires its event once Home Assistant has started. So does a limit that came meanwhile, with the reason `limit`. A countdown or a limit that still runs after a restart fires nothing.
 
 One exception: if you give an action while Home Assistant is still starting, the events that follow can reach no automation. Home Assistant does not run automations during start-up.
 
@@ -206,7 +209,7 @@ One exception: if you give an action while Home Assistant is still starting, the
 
 Two sensors of a timer carry attributes for dashboards and templates.
 
-- The sensor **Ends at** has the attribute `started_at`. It holds the moment the countdown began, and it is empty while no countdown runs. The [dashboard card](card.md) uses it to draw its fill.
+- The sensor **Ends at** has the attributes `started_at` and `limit`. `started_at` holds the moment the countdown began. It is empty while no countdown runs, and while a limit runs. `limit` is `true` while the time of the sensor is the [limit](timers.md#turn-off-a-device-that-was-left-on) of a device left on, and `false` otherwise. The [dashboard card](card.md) draws its fill from `started_at`.
 - The sensor **Next command** has the attribute `commands`. It lists all the pending commands, the earliest first. The list is not kept in the history database. [The Next command sensor](pending-commands.md#the-next-command-sensor) shows what it looks like.
 
 ## The command of the dashboard card

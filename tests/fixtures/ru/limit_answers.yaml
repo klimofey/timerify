@@ -1,0 +1,49 @@
+# The Russian answers about a limit, written by hand.
+#
+# They are not produced by the templates: a fixture rendered from the templates would only
+# repeat them. A change to a Russian answer changes this file in the same commit.
+#
+# A limit is the latest time a device that was left on turns off. Nobody chose it, so the
+# answer does not count a time left: it says the time, "не позже" (no later than). It has no
+# count, so its nouns have no plural form and `answers.yaml`, which is by unit and count,
+# is not the place for it. A case is the answer a speaker expects (`answer`) for the answer
+# of an intent (`intent` and `response`) and the slots a handler gives it (`slots`).
+# A limit is at most a day long, which a day of 23 hours at a change of the clock turns
+# into the day after tomorrow, so the days are 0, 1 and 2: nothing, "завтра" and
+# "послезавтра", before "не позже".
+
+- name: time left, a limit today
+  intent: TimerifyTimeLeft
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 0}
+  answer: "Boiler: выключится не позже 11:00."
+
+- name: time left, a limit tomorrow
+  intent: TimerifyTimeLeft
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 1}
+  answer: "Boiler: выключится завтра не позже 11:00."
+
+- name: time left, a limit the day after tomorrow
+  intent: TimerifyTimeLeft
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 2}
+  answer: "Boiler: выключится послезавтра не позже 11:00."
+
+- name: run, a limit today
+  intent: TimerifyRun
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 0}
+  answer: "Boiler: включено, выключится не позже 11:00."
+
+- name: run, a limit tomorrow
+  intent: TimerifyRun
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 1}
+  answer: "Boiler: включено, выключится завтра не позже 11:00."
+
+- name: run, a limit the day after tomorrow
+  intent: TimerifyRun
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 2}
+  answer: "Boiler: включено, выключится послезавтра не позже 11:00."

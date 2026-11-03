@@ -29,7 +29,8 @@ RENAMED_BUTTON = "button.boiler_stop"
 
 
 def settings(*, off_button: bool) -> dict[str, str | bool | int]:
-    """What the first form of the settings of a loose timer submits."""
+    """What the first form of the settings of a loose timer submits. The form of the
+    limit follows it, and is submitted empty."""
     return {
         CONF_MODE: "loose",
         CONF_RUNTIME: False,
@@ -123,12 +124,12 @@ async def test_unticking_the_box_removes_the_button(
     await hass.async_block_till_done()
     assert state_of(hass, RENAMED_BUTTON) == "unknown"
 
-    await change_options(hass, entry, settings(off_button=False))
+    await change_options(hass, entry, settings(off_button=False), {})
 
     assert hass.states.get(RENAMED_BUTTON) is None
     assert registry.async_get(RENAMED_BUTTON) is None
 
-    await change_options(hass, entry, settings(off_button=True))
+    await change_options(hass, entry, settings(off_button=True), {})
 
     assert state_of(hass, RENAMED_BUTTON) == "unknown"
     assert hass.states.get(BUTTON) is None

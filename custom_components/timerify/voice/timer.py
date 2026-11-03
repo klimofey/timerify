@@ -23,15 +23,19 @@ from .base import (
 
 
 class TimeLeftHandler(TimerifyIntentHandler):
-    """How long is left on the boiler: the time left, and when the target turns off."""
+    """How long is left on the boiler: the time left, and when the target turns off, or
+    the latest time it does when it was left on and the timer has set a limit."""
 
     intent_type = "TimerifyTimeLeft"
     tool_name = "timerify__time_left"
     title = "Time left on a timer"
     description = (
         "Tells how long a device's Timerify timer has left and when the device turns"
-        " off, or that the device is off or unavailable, or on without a timer. 'name'"
-        " is the name of the device, as the prompt lists it."
+        " off, or that the device is off or unavailable, or on without a timer. A"
+        " device that was left on can have a limit instead of a timer: the 'state' of"
+        " the result is then 'limit', and 'ends_at' is the latest time the device turns"
+        " off, with no time left because nobody chose a time, so say it as 'by 13:30 at"
+        " the latest'. 'name' is the name of the device, as the prompt lists it."
     )
     read_only = True
     slot_schema: ClassVar[dict[Any, Any]] = {probatio.Required("name"): cv.string}
@@ -54,8 +58,9 @@ class RunHandler(TimerifyIntentHandler):
     there, so it is destructive. Without one it is the bare turn-on of R9: a target
     that is off runs to the end of the schedule window that is open, if one is (#58;
     strict mode keeps the default duration when it ends later), otherwise for the
-    default duration (strict mode) or without a countdown (loose mode). One that is
-    wanted running keeps its countdown; either way the answer says how it stands."""
+    default duration (strict mode) or without a countdown (loose mode, where the timer's
+    limit, if it has one, bounds the run). One that is wanted running keeps its
+    countdown or its limit; either way the answer says how it stands."""
 
     intent_type = "TimerifyRun"
     tool_name = "timerify__run"
@@ -66,7 +71,9 @@ class RunHandler(TimerifyIntentHandler):
         " to 24 hours; give neither to turn a device that is off on for its usual"
         " time, or without a timer, or to the end of a schedule window that is open,"
         " while a device that is already running keeps its timer and the result says"
-        " how long is left. Settings are optional, and a"
+        " how long is left. A device turned on without a timer can have a limit, and"
+        " the result then gives the latest time it turns off and no time left, so say"
+        " it as 'by 13:30 at the latest'. Settings are optional, and a"
         " device takes only its own: 'hvac_mode' and 'temperature' of a thermostat,"
         " 'fan_mode' of a thermostat, 'preset_mode' of a fan, 'operation_mode' and"
         " 'temperature' of a water heater, 'brightness_pct' of a light, 'percentage'"
@@ -108,9 +115,10 @@ class AddTimeHandler(TimerifyIntentHandler):
     description = (
         "Adds time to a device's Timerify timer: 'hours' and 'minutes' add up to the"
         " time to add, at least 1 minute. A running timer ends later; a device that is"
-        " not running is turned on for that time. A timer never runs for more than 24"
-        " hours from now, however much is added. 'name' is the name of the device, as"
-        " the prompt lists it."
+        " not running is turned on for that time. Time added to a limit (the latest"
+        " time a device that was left on turns off) counts from the limit's time, not"
+        " from now. A timer never runs for more than 24 hours from now, however much"
+        " is added. 'name' is the name of the device, as the prompt lists it."
     )
     destructive = False
     slot_schema: ClassVar[dict[Any, Any]] = {

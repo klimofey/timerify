@@ -23,7 +23,7 @@ never be bypassed.
 
 ## Verification
 
-What 1.0.0 was checked with before release:
+What a release is checked with before it is published:
 
 - The test suite (`uv run pytest`): every rule of the user pages is a scenario, with time
   moved explicitly, among them the days the clock changes, Home Assistant down overnight, a
@@ -56,15 +56,18 @@ What 1.0.0 was checked with before release:
   and a 3 minute countdown survives a restart of the container and still ends on time. A
   pending command turns a switch that sits on a device on at its time and off a minute
   later, a thermostat run for a minute with a mode and a temperature is set to both and
-  switched off at the end, and a schedule interval added through the interval form turns
-  a switch on at its start and off at its end, with the interval's own switch on. The
-  Voice settings are added through the config flow and the built-in agent is talked to
-  over the REST API: it refuses a device that is not exposed to Assist, and once the
-  device is exposed, "turn on ... for 2 minutes", "how much time is left", "turn off in 1
-  minute", a bare "turn on" and a bare "turn off" each give the answer the sentence is
-  meant to and leave the switch in the state the REST API reports. The first timer is
-  added with the runtime counter ticked, and after its 2 minute run its Runtime sensor
-  reads 2 minutes, in minutes, as a total that only goes up.
+  switched off at the end, a loose timer with a limit of 1 minute, added through the
+  config flow with its limit step, turns a switch off a minute after someone turned it on
+  by hand, while its "Ends at" sensor names that moment and says it is a limit, and a
+  schedule interval added through the interval form turns a switch on at its start and
+  off at its end, with the interval's own switch on. The Voice settings are added through
+  the config flow and the built-in agent is talked to over the REST API: it refuses a
+  device that is not exposed to Assist, and once the device is exposed, "turn on ... for 2
+  minutes", "how much time is left", "turn off in 1 minute", a bare "turn on" and a bare
+  "turn off" each give the answer the sentence is meant to and leave the switch in the
+  state the REST API reports. The first timer is added with the runtime counter ticked,
+  and after its 2 minute run its Runtime sensor reads 2 minutes, in minutes, as a total
+  that only goes up.
 - A manual walk-through in a real Home Assistant 2026.10.4 container, through the browser;
   its screenshots are in `docs/screenshots/smoke-*.png`. It covered the
   integration page at 1.0.0 with its icon, adding a timer with the runtime counter, a
@@ -140,8 +143,8 @@ The image exists for `linux/amd64` only; on Apple silicon add `--platform linux/
 
 Needs Docker with Compose. It starts a throwaway Home Assistant 2026.10.4 with this
 checkout mounted, onboards it through its HTTP API, and adds timers for the entities that
-`scripts/harness/configuration.yaml` declares: a switch that sits on no device, the switch of
-Home Assistant's demo integration (which sits on a device), and a generic thermostat. It
+`scripts/harness/configuration.yaml` declares: a switch that sits on no device, two switches
+of Home Assistant's demo integration (which sit on devices), and a generic thermostat. It
 checks that the page Home Assistant serves loads the card's module and serves its bundle
 unchanged, that the card's websocket command knows the first timer, that a 2 minute
 countdown turns the first switch on and off, that a schedule
@@ -151,8 +154,11 @@ timer's device), that the built-in agent, given the Voice settings through the c
 and talked to over the REST API, runs, shortens and stops the first switch by sentences,
 that a 3 minute countdown survives a restart of the container, that a pending command
 turns the demo switch on at its time and off a minute later, that the thermostat takes
-the mode and the temperature of a run, and that the first timer, added with the runtime
-counter ticked, shows its 2 minute run on its Runtime sensor. It takes about fifteen minutes.
+the mode and the temperature of a run, that a loose timer with a limit of 1 minute, added
+through the config flow, turns the second demo switch off a minute after someone turned it
+on by hand (its "Ends at" sensor names that moment and says it is a limit), and that the
+first timer, added with the runtime counter ticked, shows its 2 minute run on its Runtime
+sensor. It takes about fifteen minutes.
 
 ```sh
 uv run python -m scripts.smoke.run

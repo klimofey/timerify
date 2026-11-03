@@ -71,7 +71,10 @@ export interface TimerInfo {
   entry_id: string;
   target: string;
   mode: "strict" | "loose";
-  /** The minutes a bare run lasts in strict mode; null in loose mode. */
+  /**
+   * The default duration: the minutes a run with no minutes lasts in strict mode, with no
+   * schedule window open. Null in loose mode, where such a run has no countdown.
+   */
   default_duration: number | null;
   /** The entity ids of the two sensors of the timer. */
   ends_at: string;

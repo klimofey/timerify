@@ -21,16 +21,20 @@ user would see:
    turns the switch off one minute later.
 4. "Run for" 1 minute with a mode and a temperature on a generic thermostat: it is set
    to heat and 23 degrees, and turned off when the countdown ends.
-5. A schedule interval for today's weekday, added to the first timer through the
+5. A loose timer with a limit of 1 minute on the second switch of the demo integration,
+   added through the config flow with its limit step: the switch is turned on by hand,
+   "Ends at" names the moment of the limit and carries the attribute `limit`, and the
+   switch turns off at that moment.
+6. A schedule interval for today's weekday, added to the first timer through the
    interval flow to begin in a minute or two and run for two minutes: its switch is on,
    and the first switch turns on at the start and off at the end.
-6. Voice: the Voice settings are added through the menu of the config flow, and the
+7. Voice: the Voice settings are added through the menu of the config flow, and the
    built-in agent is talked to over the REST API about the first switch. Asked how long
    is left on it, the agent refuses (an input boolean is not exposed to Assist by
    default); once it is exposed, "turn on ... for 2 minutes" runs it and the agent
    says how long is left, "turn off ... in 1 minute" ends it a minute later, a bare
    "turn on ..." runs it for the default 30 minutes and a bare "turn off ..." stops it.
-7. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
+8. "Run for" 3 minutes on the first switch, then the container restarts: the countdown
    carries on and the switch turns off at the end it had before the restart.
 
 Everything is observed over the WebSocket API by subscribing to state changes.
@@ -56,6 +60,7 @@ from scripts.harness.hass import (
     DEFAULT_DURATION_MINUTES,
     DEMO_SWITCH,
     DOMAIN,
+    LIMIT_SWITCH,
     STARTUP_TIMEOUT,
     SWITCH,
     WEEKDAYS,
@@ -104,6 +109,8 @@ CARD_URL = "/timerify_frontend/timerify-card.js"
 CARD_VERSION_LENGTH = 16
 """The hexadecimal digits of the bundle's SHA-256 that the address carries."""
 
+LIMIT_MINUTES = 1
+"""The limit of the loose timer of the limit scenario."""
 TURN_ON_TIMEOUT = 15.0
 COMMAND_DELAY = timedelta(minutes=1)
 """How far ahead the pending command of the demo switch is set."""
@@ -150,6 +157,16 @@ def at_least(minimum: float) -> Matcher:
             return False
 
     return matches
+
+
+def is_limit(state: State | None) -> bool:
+    """Match the "Ends at" sensor when it names the moment a limit turns the device
+    off."""
+    return (
+        state is not None
+        and is_known(state)
+        and state["attributes"].get("limit") is True
+    )
 
 
 def ends_near(moment: datetime) -> Matcher:
@@ -391,6 +408,47 @@ async def scenario_settings(session: aiohttp.ClientSession, refresh_token: str) 
             is_on=heating_to(THERMOSTAT_TEMPERATURE),
             expected=f"heat at {THERMOSTAT_TEMPERATURE}",
         )
+        await expect_off_at(socket, timer, end)
+
+
+async def scenario_limit(session: aiohttp.ClientSession, refresh_token: str) -> None:
+    say(f"Leave {LIMIT_SWITCH} on, with a limit of {LIMIT_MINUTES} minute")
+    async with open_socket(session, INSTANCE, refresh_token) as socket:
+        await socket.wait_for_state(
+            LIMIT_SWITCH, has_state("off"), "off", STARTUP_TIMEOUT
+        )
+        timer = await add_timer(
+            session,
+            socket,
+            INSTANCE,
+            await new_access_token(session, INSTANCE, refresh_token),
+            LIMIT_SWITCH,
+            mode="loose",
+            limit=LIMIT_MINUTES,
+            on_target_device=True,
+        )
+        say(f"  loose timer on the device of {LIMIT_SWITCH}")
+
+        # Turned on by hand, at the device or in an app: no countdown is chosen.
+        await socket.call(
+            "call_service",
+            domain="switch",
+            service="turn_on",
+            target={"entity_id": LIMIT_SWITCH},
+        )
+        on = await socket.wait_for_state(
+            LIMIT_SWITCH, has_state("on"), "on", TURN_ON_TIMEOUT
+        )
+        shown = await socket.wait_for_state(
+            timer.ends_at, is_limit, "the moment of a limit", TURN_ON_TIMEOUT
+        )
+        end = timestamp(shown["state"])
+        away = end - timestamp(on["last_changed"])
+        if abs(away - timedelta(minutes=LIMIT_MINUTES)) > START_SLACK:
+            raise SmokeFailure(f"The limit is {away} after {LIMIT_SWITCH} turned on")
+        if shown["attributes"].get("started_at") is not None:
+            raise SmokeFailure(f"A limit has no beginning, but {timer.ends_at} has one")
+        say(f"  {LIMIT_SWITCH} on, limit at {end:%H:%M:%S}")
         await expect_off_at(socket, timer, end)
 
 
@@ -685,6 +743,7 @@ async def run(session: aiohttp.ClientSession, keep: bool) -> None:
     await scenario_expiry(session, refresh_token, timer)
     await scenario_command(session, refresh_token)
     await scenario_settings(session, refresh_token)
+    await scenario_limit(session, refresh_token)
     await scenario_schedule(session, refresh_token, timer)
     await scenario_voice(session, refresh_token, timer)
     await scenario_restart(session, refresh_token, timer)

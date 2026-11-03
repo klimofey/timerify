@@ -24,11 +24,11 @@ The dashboard then shows "Configuration error" and "Custom element doesn't exist
 
 The **pill** is a card one row high. Its fill grows from the left. It shows the share of the countdown that is left: full when the countdown starts, empty when it ends.
 
-On the pill are the icon of the device, its name, and the time left with the moment the countdown ends. When nothing counts, the state of the device stands in their place. An optional chip, "+15 min" in the picture, adds time without opening the pop-up. An optional **Turn off** button stands before the chip. See [The Turn off button](#the-turn-off-button).
+On the pill are the icon of the device, its name, and the time left with the moment the countdown ends. When nothing counts, the state of the device stands in their place. A device left on under a [limit](timers.md#turn-off-a-device-that-was-left-on) has no time left to show. The pill then says when the device turns off at the latest, such as "by 1:30 PM at the latest". An optional chip, "+15 min" in the picture, adds time without opening the pop-up. An optional **Turn off** button stands before the chip. See [The Turn off button](#the-turn-off-button).
 
 ![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](../screenshots/card-pill.png)
 
-The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. The name is below.
+The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. The name is below.
 
 The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses). Its optional **Turn off** button is below the name.
 
@@ -36,6 +36,7 @@ The round tile has no chip. A long press on it starts or stops the timer. See [P
 
 - The name and the icon are the device's. The icon follows the device's state, as it does on any card. You can set both in the card's configuration.
 - A device that is on with no countdown shows a full fill and a full ring. **Loose** mode allows this. The [Modes](timers.md#modes) section explains it. The pill says the state of the device in words. The round tile has the words for screen readers only. An idle timer shows an empty fill and an empty ring.
+- A limit is a bound, not a promise, so nothing counts down under it. The fill and the ring are full, as for a device with no countdown. Adding time with the chip, or adding or taking off time in the pop-up, turns the limit into a countdown that you chose. The card then shows "until 1:45 PM" and counts down.
 - A timer whose number is unavailable shows that. Its chip, presets, plus, minus, Stop and cancel buttons are off, and the **Turn off** button is not shown. See [The pop-up](#the-pop-up).
 - Suppose the entity of the card does not exist, or is not the **Run for** number of a Timerify timer. The card says so and names it. It finds its timer again by itself when the entity is back. After you rename the number, point the card at its new entity id.
 - Sometimes the number is a timer's, but the timer cannot be shown. That happens when the device or one of the two sensors is missing from the registry. The card says that and sends you to the timer's page to see why. It does so whatever the state of the number. Right after you add a timer, the line can show for a moment. It goes away by itself.
@@ -105,9 +106,9 @@ By default a tap anywhere on the card opens it, the border included. The chip an
 
 The pop-up is a modal dialog. Escape, the **Close** button and a click on the dimmed page behind it close it. From top to bottom it holds:
 
-- **The time left**, and when it ends, while a countdown runs.
+- **The time left**, and when it ends, while a countdown runs. Under a limit it says only when the device turns off at the latest, such as "by 1:30 PM at the latest".
 - **The presets.** Pressing one runs the timer for that long, as setting **Run for** does. It restarts a countdown that runs. A preset that is longer than the timer's **Maximum of Run for** is not shown. If none is left, the row is left out.
-- **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown runs. Adding time to a timer that is idle starts it, as the [**Add time** action](services.md#add-time) does. Stop is offered while the timer runs, with a countdown or without. It turns the device off and ends the countdown.
+- **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown or a limit runs. Adding or taking off time turns a limit into a countdown that you chose. Adding time to a timer that is idle starts it, as the [**Add time** action](services.md#add-time) does. Stop is offered while the timer runs, with a countdown, under a limit or without either. It turns the device off and ends the countdown or the limit.
 - **Schedule**, when the timer has intervals. It shows a switch for each interval, named by its title. Each one turns the [switch of the interval](schedules.md#switch-an-interval-on-or-off) on and off. You do not create or edit intervals here. Use the timer's page. An interval whose switch is unavailable is shown as that and cannot be pressed.
 - **Pending commands**, when there are some. Each shows like "On at 7:30 AM for 1 hr" or "Off at Tue 7:00 AM". It also shows its settings ("Cool, 24 °C") and a × button that cancels it. If the **Next command** sensor is disabled, one line stands here instead. It says that the commands are hidden because of it.
 - **Settings**, a link to the timer's page in the settings of the integration. Only administrators see it. It opens in the same tab and closes the pop-up. Ctrl, Cmd or Shift with the click open it in a new tab or window, and the pop-up stays.
@@ -146,9 +147,9 @@ Each press can be set to one of six choices. The visual editor names them as the
 | Choice | Value | What it does |
 | --- | --- | --- |
 | Open the pop-up | `popup` | Opens [the pop-up](#the-pop-up). |
-| Run for the default duration | `run` | Runs the timer, as the [**Run** action](services.md#run) does with no duration. While a schedule window is open, the device runs to the end of the window. In **Strict** mode the default duration is kept when it ends later. With no window open, in **Strict** mode it runs for the default duration, and in **Loose** mode it turns on with no countdown. The [Modes](timers.md#modes) section explains both. A timer that already runs keeps its countdown. |
+| Run | `run` | Runs the timer, as the [**Run** action](services.md#run) does with no duration. While a schedule window is open, the device runs to the end of the window. In **Strict** mode the default duration is kept when it ends later. With no window open, in **Strict** mode it runs for the default duration. In **Loose** mode it turns on with no countdown, and the timer's [limit](timers.md#turn-off-a-device-that-was-left-on), if it has one, turns it off in the end. The [Modes](timers.md#modes) section explains both. A timer that already runs keeps its countdown or its limit. |
 | Stop | `stop` | Stops the timer, as the [**Stop** action](services.md#stop) does. It ends the countdown and turns the device off. |
-| Start or stop | `run_or_stop` | Runs a timer that is idle, as **Run for the default duration** does. Stops a timer that runs, with or without a countdown. A timer that is unavailable does nothing. |
+| Start or stop | `run_or_stop` | Runs a timer that is idle, as **Run** does. Stops a timer that runs, with a countdown, under a limit or without either. A timer that is unavailable does nothing. |
 | Home Assistant action | `action` | Does a [Home Assistant action](#home-assistant-actions) that you choose. |
 | Nothing | `none` | Does nothing. |
 
@@ -226,7 +227,7 @@ The card keeps no timer of its own. Everything it shows is read from the states 
 | --- | --- |
 | Runs for a preset | Setting **Run for** |
 | Adds or takes off time, and the chip | The [**Add time** action](services.md#add-time) |
-| A press set to **Run for the default duration**, or to **Start or stop** while the timer is idle | The [**Run** action](services.md#run) with no duration |
+| A press set to **Run**, or to **Start or stop** while the timer is idle | The [**Run** action](services.md#run) with no duration |
 | Stops: the pop-up's **Stop** button, the **Turn off** button, a press set to **Stop**, and a press set to **Start or stop** while the timer runs | The [**Stop** action](services.md#stop) |
 | A press set to **Home Assistant action** | Home Assistant's own handler of actions, on the device the timer runs |
 | Cancels a command | The [**Cancel command** action](services.md#cancel-command) |
@@ -236,7 +237,7 @@ To tell which entities belong to its timer, the card asks Timerify through [a co
 
 Nothing counts down on the server for the card. The card counts once a second. It does so only while a countdown runs and the card is on the page.
 
-The card counts by Home Assistant's clock, not by the browser's. Timerify's answer says what time it is on the server. The card keeps the difference from the browser's clock. So a browser clock that is off by minutes does not change the time left. A wall tablet whose clock drifts shows the right countdown. The end time shown, such as "until 4:42 PM", follows the server's clock too. So does the day shown beside a time that is not today.
+The card counts by Home Assistant's clock, not by the browser's. Timerify's answer says what time it is on the server. The card keeps the difference from the browser's clock. So a browser clock that is off by minutes does not change the time left. A wall tablet whose clock drifts shows the right countdown. The end time shown, such as "until 4:42 PM" or "by 4:42 PM at the latest", follows the server's clock too. So does the day shown beside a time that is not today.
 
 The card measures the difference again whenever it asks again, for example when the connection returns. If the browser's clock jumps in between, the countdown is off until then. Even then, the time left never goes below 0:00. The fill stays between empty and full. What you press always goes to the server.
 

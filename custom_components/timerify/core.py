@@ -75,6 +75,11 @@ class Snapshot:
     """When the current countdown began (timezone-aware UTC); None while idle, while
     running without a countdown, and for a countdown stored before 0.5.0. Always before
     `end` while both are set."""
+    limit_at: datetime | None = None
+    """When the target is turned off if it still runs (timezone-aware UTC): the limit
+    of a run with no countdown, that the setting of the same name gives in loose mode.
+    A deadline of its own, never set together with `end`, and never in strict mode or
+    with no setting. None while there is none."""
     pending: Literal["on", "off"] | None = None
     """The switch the core asked for and has not yet seen the target confirm."""
     owed_settings: Settings = NO_SETTINGS
@@ -159,22 +164,26 @@ type Effect = (
     TurnOn | ApplySettings | TurnOff | Arm | Disarm | Changed | GaveUp | CommandDropped
 )
 
-type EndReason = Literal["expired", "stopped", "turned_off"]
+type EndReason = Literal["expired", "stopped", "turned_off", "limit"]
 """Why a countdown ended: its end was reached, Timerify stopped it (Run for 0, Stop, a
 pending "off", Add time down to zero, a schedule interval switched off or edited so that
-its window no longer runs), or the target was switched off outside Timerify."""
+its window no longer runs), the target was switched off outside Timerify, or the limit
+of a run with no countdown was reached and Timerify turned the target off. A limit that
+is stopped or switched off ends as `stopped` or `turned_off`, like a countdown."""
 
 
 @dataclass(frozen=True)
 class CountdownStarted:
-    """A countdown began where none ran, to end at `end`."""
+    """A countdown began where none ran, to end at `end`, or the limit of a run with no
+    countdown began: `end` is then the time of the limit and `limit` is true."""
 
     end: datetime
+    limit: bool = False
 
 
 @dataclass(frozen=True)
 class CountdownEnded:
-    """The countdown that ran is over, for `reason`."""
+    """The countdown, or the limit, that ran is over, for `reason`."""
 
     reason: EndReason
 
@@ -193,10 +202,10 @@ type Announcement = CountdownStarted | CountdownEnded | CommandCameDue
 
 
 def next_wakeup(snapshot: Snapshot) -> datetime | None:
-    """When the timer must next be looked at: the earliest of the end, the first
-    command, the start of every window not yet started and the end of every window;
-    None when there is none."""
-    times = [snapshot.end] if snapshot.end is not None else []
+    """When the timer must next be looked at: the earliest of the end, the limit, the
+    first command, the start of every window not yet started and the end of every
+    window; None when there is none."""
+    times = [t for t in (snapshot.end, snapshot.limit_at) if t is not None]
     if snapshot.commands:
         times.append(snapshot.commands[0].at)
     for window in snapshot.windows:
@@ -265,8 +274,8 @@ def _reports_change[**P](
 class _Rank(IntEnum):
     """Which of the items that fall due at one instant goes first. A command goes after
     a window that starts, as P3 makes it the same as setting the timer by hand, and
-    before the end of the timer, as it may move it; a window that starts as the timer
-    ends extends it, so the end of the timer goes last."""
+    before the end of the timer or its limit, as it may move it; a window that starts as
+    the timer ends extends it, so the end of the timer or its limit goes last."""
 
     WINDOW_END = 0
     WINDOW_START = 1
@@ -284,9 +293,9 @@ class _WindowStarts:
     window: Window
 
 
-type _Item = _WindowEnds | _WindowStarts | Command | Literal["end"]
+type _Item = _WindowEnds | _WindowStarts | Command | Literal["end", "limit"]
 """Something that fell due and is folded into the timer: the end of a window, the
-start of one, a pending command or the end of the timer."""
+start of one, a pending command, the end of the timer or its limit."""
 
 
 class _Allowance:
@@ -341,11 +350,21 @@ class TimerCore:
         snapshot: Snapshot,
         *,
         automatic_resends: int = MAX_AUTOMATIC_RESENDS,
+        limit: timedelta | None = None,
     ) -> None:
         """`automatic_resends` is how often reports send a wish, or the owed settings,
-        again after the first delivery, before the core gives up."""
+        again after the first delivery, before the core gives up.
+
+        `limit` is how long a run with no countdown may last: in loose mode, a target
+        that is on with no countdown is turned off that long after the core came to
+        know it. None, and strict mode, which gives every run a countdown, have no
+        limit. A stored limit is kept only where the core has one to give, and
+        dropped, with nothing announced, where the setting was emptied or the mode
+        changed since it was stored.
+        """
         self._mode = mode
         self._default_duration = default_duration
+        self._limit = limit if mode == "loose" else None
         # Only the first command is ever looked at, so a snapshot that comes from
         # elsewhere is put in order: by time, equal times as they came. Windows are
         # folded by their start, so they are put in order too.
@@ -353,6 +372,7 @@ class TimerCore:
             snapshot,
             commands=tuple(sorted(snapshot.commands, key=lambda c: c.at)),
             windows=tuple(sorted(snapshot.windows, key=lambda w: w.start)),
+            limit_at=snapshot.limit_at if self._limit is not None else None,
         )
         self._unsent = False
         """The pending wish has not reached the target (its call failed or changed
@@ -380,8 +400,9 @@ class TimerCore:
         owed, and a new wish to turn on while they are owed start a new one."""
         self._announcements: list[Announcement] = []
         """What has happened since the caller last took it (`take_announcements`). Only
-        `_set_end` records a start or an end. Never persisted: a core starts with
-        nothing to say, so a countdown restored from the file is not announced again."""
+        `_set_end` and `_set_limit` record a start or an end. Never persisted: a core
+        starts with nothing to say, so a countdown or a limit restored from the file is
+        not announced again."""
 
     @property
     def snapshot(self) -> Snapshot:
@@ -397,8 +418,8 @@ class TimerCore:
 
     def wanted_running(self, now: datetime) -> bool:
         """Whether the target is wanted running as of `now`: a countdown is under way,
-        or else the wish that the target has not confirmed yet says so, or else the
-        target was last seen on.
+        or a limit is ahead, or else the wish that the target has not confirmed yet
+        says so, or else the target was last seen on.
 
         This is the desired state, as `_runs_as_of` judges it, not what has reached the
         target: a target that is away while its timer counts, and a turn-on that is in
@@ -429,16 +450,23 @@ class TimerCore:
         An end that is not ahead is no countdown, as `wanted_running` judges it, though
         nothing folded it yet (a command that waited for its turn until after the end,
         #42): the timer is idle.
+
+        Time added to a limit that runs is added to the limit: the result is a
+        countdown that someone chose, which the limit never cuts. A limit that is not
+        ahead is over, like an end.
         """
         now = _utc(now)
         end = self._snapshot.end
         if end is not None and end <= now:
             end = None
-        if end is None:
-            if delta <= timedelta(0):
-                return []
-            return self._run_until(now, now + delta, began=now)
-        return self._run_until(now, end + delta, began=self._kept_beginning(now))
+        if end is not None:
+            return self._run_until(now, end + delta, began=self._kept_beginning(now))
+        limit_at = self._snapshot.limit_at
+        if limit_at is not None and limit_at > now:
+            return self._run_until(now, limit_at + delta, began=now)
+        if delta <= timedelta(0):
+            return []
+        return self._run_until(now, now + delta, began=now)
 
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
@@ -454,12 +482,12 @@ class TimerCore:
 
         R9 is for a target that is off, and ends the run where `_open_run_end` says:
         with a window open, at its end; otherwise strict mode applies the default
-        duration, and loose mode runs with the timer at zero. The run is the user's
-        (S3), not the interval's. A target that is wanted running already
-        (`wanted_running`) keeps what it has, in either mode: its countdown, or its run
-        without one, is not touched, and the timer still belongs to whoever set it (S2,
-        S3). The turn-on is asked for again if it has not reached the target, and
-        `settings` are set.
+        duration, and loose mode runs with the timer at zero, bounded by the limit if
+        there is one. The run is the user's (S3), not the interval's. A target that is
+        wanted running already (`wanted_running`) keeps what it has, in either mode: its
+        countdown, or its run without one, with its limit, is not touched, and the timer
+        still belongs to whoever set it (S2, S3). The turn-on is asked for again if it
+        has not reached the target, and `settings` are set.
         """
         now = _utc(now)
         if self._wants_running(now, None):
@@ -467,6 +495,7 @@ class TimerCore:
         if (end := self._open_run_end(now)) is not None:
             return self._run_until(now, end, settings, began=now)
         self._expire_stale_end(now)
+        self._start_limit(now)
         return [self._wakeup(), *self._want("on", settings)]
 
     @_reports_change
@@ -695,10 +724,12 @@ class TimerCore:
         that opens just then extends it without an off. The last step, as of `now`, may
         stop the timer.
 
-        Returns the effects, and whether the timer was moved: by the end, an executed
-        command, a window that set it or the realignment. A window that left it alone,
-        one that was over before it was noticed, a window end and a command dropped
-        for coming too late leave it as it was.
+        The limit is folded like the end of the timer: the target is turned off.
+
+        Returns the effects, and whether the timer was moved: by the end or the limit,
+        an executed command, a window that set it or the realignment. A window that left
+        it alone, one that was over before it was noticed, a window end and a command
+        dropped for coming too late leave it as it was.
         """
         effects: list[Effect] = []
         wish: Literal["on", "off"] | None = None
@@ -723,6 +754,9 @@ class TimerCore:
                         wish = command_wish
                 case "end":
                     self._end_timer(ended_by="expired")
+                    wish = "off"
+                case "limit":
+                    self._end_timer(ended_by="limit")
                     wish = "off"
                 case unreachable:
                     assert_never(unreachable)
@@ -749,6 +783,8 @@ class TimerCore:
             items.append((state.commands[0].at, _Rank.COMMAND, state.commands[0]))
         if state.end is not None and state.end <= now:
             items.append((state.end, _Rank.TIMER_END, "end"))
+        if state.limit_at is not None and state.limit_at <= now:
+            items.append((state.limit_at, _Rank.TIMER_END, "limit"))
         if not items:
             return None
         return min(items, key=lambda entry: entry[:2])[2]
@@ -824,9 +860,13 @@ class TimerCore:
 
         A command that turns on sets its settings even when the target is running
         (P1), and is the same as setting the timer by hand (P3): one without minutes is
-        a bare turn-on, which leaves the countdown of a target that was wanted running
-        at its time as it is, and ends the run of one that was not where `_open_run_end`
-        says (`run_open`).
+        a bare turn-on, which leaves the countdown, or the limit, of a target that was
+        wanted running at its time as it is, and ends the run of one that was not where
+        `_open_run_end` says (`run_open`). A limit counts from `now`, the moment the
+        command turns the target on: a command that is late, even by more than the
+        limit, still turns it on and gives it a whole limit, and never announces a
+        limit that began in the past. One with minutes is a countdown that someone
+        chose, which replaces a limit.
         """
         if command.action == "off":
             self._announce(CommandCameDue(command))
@@ -848,6 +888,8 @@ class TimerCore:
             began=command.at,
             ended_by="expired",
         )
+        if end is None:
+            self._start_limit(now)
         self._owe(command.settings)
         return "on"
 
@@ -868,7 +910,7 @@ class TimerCore:
         (S4), it does not close the window for the next turn-on. Strict mode keeps the
         default duration where it ends later. Loose mode has a countdown only to the
         end of a window, so None, a run without a countdown, is what it gets with no
-        window open.
+        window open: the limit, if there is one, bounds it (`_start_limit`).
         """
         latest = max(
             (w.end for w in self._snapshot.windows if w.started and _active(w, at)),
@@ -885,20 +927,26 @@ class TimerCore:
         """Someone else switched the target: the timer follows (R3 to R5). A target
         switched on with no countdown gets the run that `_open_run_end` ends: the
         default duration in strict mode, the end of the open window in either mode, and
-        none in loose mode with no window open. It is the user's run (S3)."""
+        none in loose mode with no window open, where the limit bounds it from now,
+        unless one runs already (a target found on at start-up, or back from
+        unavailable, has been on for a time nobody knows). It is the user's run (S3).
+        A target switched off ends the countdown or the limit that ran."""
         self._settle()
         # What our own calls said no longer decides: manual wins.
         self._correction = None
         if actual == "off":
             self._clear_settings()  # a target that is off runs with nothing
             self._suppress_windows()
-            if self._snapshot.end is None:
+            if self._snapshot.end is None and self._snapshot.limit_at is None:
                 return []
             self._clear_end(ended_by="turned_off")
+            self._clear_limit(ended_by="turned_off")
             return [self._wakeup()]
-        if self._snapshot.end is None and (end := self._open_run_end(now)) is not None:
+        if self._snapshot.end is not None:
+            return []
+        if (end := self._open_run_end(now)) is not None:
             return self._run_until(now, end, began=now)
-        return []
+        return [self._wakeup()] if self._start_limit(now) else []
 
     def _run_until(
         self,
@@ -926,9 +974,10 @@ class TimerCore:
         return [self._wakeup(), *self._want("off")]
 
     def _end_timer(self, *, ended_by: EndReason = "stopped") -> None:
-        """The countdown is over, for `ended_by`: there is no end, and nothing to run
-        with."""
+        """The countdown, or the limit, is over, for `ended_by`: there is no end and no
+        limit, and nothing to run with."""
         self._clear_end(ended_by=ended_by)
+        self._clear_limit(ended_by=ended_by)
         self._clear_settings()
         self._suppress_windows()
 
@@ -950,9 +999,10 @@ class TimerCore:
         ended_by: EndReason = "stopped",
     ) -> None:
         """The only writer of the end and of the beginning of the countdown it counts
-        down to, and so the only place that announces a start or an end. `by` names the
-        interval whose window end it is (S1, S2); every other write, whoever made it,
-        leaves the timer to nobody's schedule (S3), and a timer with no end is nobody's.
+        down to, and so, with `_set_limit` for the limit, the only place that announces
+        a start or an end. `by` names the interval whose window end it is (S1, S2);
+        every other write, whoever made it, leaves the timer to nobody's schedule (S3),
+        and a timer with no end is nobody's.
 
         `began` is when the countdown began: the caller works it out, a countdown that
         goes on with a new end through `_kept_beginning`. None where there is none to
@@ -962,6 +1012,10 @@ class TimerCore:
         announces an end, for `ended_by`. Moving the end announces nothing: it is the
         same countdown, but a start that has not been taken yet goes on with the new end
         (`_move_untold_start`).
+
+        An end replaces the limit that runs, as a countdown that someone chose: the
+        target goes on running, so the limit is not announced as ended, and the
+        countdown is announced as started.
         """
         before = self._snapshot.end
         if before is None and end is not None:
@@ -977,7 +1031,43 @@ class TimerCore:
             if end is None or began is None
             else _utc(began, "the beginning"),
             scheduled_by=None if end is None else by,
+            limit_at=self._snapshot.limit_at if end is None else None,
         )
+
+    def _set_limit(
+        self, limit_at: datetime | None, *, ended_by: EndReason = "stopped"
+    ) -> None:
+        """The only writer of the limit, and so, with `_set_end` for the end, the only
+        place that announces a start or an end.
+
+        Going from no limit to a limit announces a start, marked as a limit; going from
+        a limit to none announces an end, for `ended_by`. A limit never moves: time
+        added to it, a countdown chosen and a window that opens write an end, which
+        replaces it (`_set_end`). Only where nothing counts down is a limit written.
+        """
+        assert limit_at is None or self._snapshot.end is None  # Never both.
+        before = self._snapshot.limit_at
+        if before is None and limit_at is not None:
+            self._announce(CountdownStarted(limit_at, limit=True))
+        elif before is not None and limit_at is None:
+            self._announce(CountdownEnded(ended_by))
+        self._snapshot = replace(self._snapshot, limit_at=limit_at)
+
+    def _start_limit(self, at: datetime) -> bool:
+        """A run with no countdown began at `at`: bound it by the limit, if the core has
+        one to give. Returns whether a limit was started.
+
+        A limit that runs is kept, with its time: the target is on already, and found
+        on again. One that is not ahead of `at` ran out, and is ended before the new one
+        starts.
+        """
+        if self._limit is None:
+            return False
+        self._expire_stale_end(at)
+        if self._snapshot.limit_at is not None:
+            return False
+        self._set_limit(at + self._limit)
+        return True
 
     def _kept_beginning(self, at: datetime) -> datetime | None:
         """The beginning of the running countdown for a write of its end as of `at`:
@@ -991,12 +1081,20 @@ class TimerCore:
         """There is no countdown: no end, no beginning, nobody's schedule."""
         self._set_end(None, began=None, ended_by=ended_by)
 
+    def _clear_limit(self, *, ended_by: EndReason = "stopped") -> None:
+        """There is no limit."""
+        self._set_limit(None, ended_by=ended_by)
+
     def _expire_stale_end(self, now: datetime) -> None:
-        """Clear an end that is not ahead of `now`, announcing it as expired: it is no
-        countdown, as `wanted_running` judges it, though nothing folded it yet."""
+        """Clear an end that is not ahead of `now`, announcing it as expired, and a
+        limit that is not ahead, announcing it as the limit: neither is a countdown, as
+        `wanted_running` judges it, though nothing folded it yet."""
         end = self._snapshot.end
         if end is not None and end <= now:
             self._clear_end(ended_by="expired")
+        limit_at = self._snapshot.limit_at
+        if limit_at is not None and limit_at <= now:
+            self._clear_limit(ended_by="limit")
 
     def _announce(self, announcement: Announcement) -> None:
         self._announcements.append(announcement)
@@ -1146,16 +1244,16 @@ class TimerCore:
 
     def _wants_running(self, at: datetime, wish: Literal["on", "off"] | None) -> bool:
         """Whether the target is wanted running at `at`, the instant an item falls due
-        or a command gets its turn: a countdown that ends after `at`, or, with none
-        under way, what `_runs_as_of` says of `wish`.
+        or a command gets its turn: a countdown that ends after `at`, or a limit that
+        comes after it, or, with none under way, what `_runs_as_of` says of `wish`.
 
         A countdown that ends at `at` or before is over, whether or not it was folded
-        yet, so a command that falls due as it ends meets a target that is about to be
-        off, and so does one that gets its turn after a slow call.
+        yet, and so is a limit, so a command that falls due as one ends meets a target
+        that is about to be off, and so does one that gets its turn after a slow call.
         """
-        end = self._snapshot.end
-        if end is not None:
-            return end > at
+        deadline = self._snapshot.end or self._snapshot.limit_at
+        if deadline is not None:
+            return deadline > at
         return self._runs_as_of(wish)
 
     def _runs_as_of(self, wish: Literal["on", "off"] | None) -> bool:

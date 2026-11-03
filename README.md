@@ -53,7 +53,7 @@ The dashboard card comes with Timerify. Refresh your browser once after you inst
 
 ## What it can do
 
-- [Timers](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md): run a switch, a light, a fan or an air conditioner for a set time, and it turns itself off.
+- [Timers](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md): run a switch, a light, a fan or an air conditioner for a set time, and it turns itself off. A device that is left on can be turned off after a limit you choose.
 - [Pending commands](https://github.com/klimofey/timerify/blob/main/docs/en/pending-commands.md): tell a timer to turn its device on or off at a time you choose, up to 7 days ahead.
 - [Schedules](https://github.com/klimofey/timerify/blob/main/docs/en/schedules.md): run a device at set times of the week, on the weekdays you pick, or by your Workday sensor.
 - [Automations](https://github.com/klimofey/timerify/blob/main/docs/en/automations.md): run, extend and stop a timer from an automation, and react when a countdown starts or ends, or a pending command comes due.

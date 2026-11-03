@@ -58,7 +58,7 @@ async def test_running_the_boiler_fires_countdown_started_with_its_end(
     await set_number(hass, NUMBER, 30)
 
     assert [e.data for e in started] == [
-        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00"}
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00", "limit": False}
     ]
 
 
@@ -91,7 +91,7 @@ async def test_switching_the_boiler_on_by_hand_fires_countdown_started(
     await fake_target.set_state("on")
 
     assert [e.data for e in started] == [
-        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:45:00+00:00"}
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:45:00+00:00", "limit": False}
     ]
 
 
@@ -104,6 +104,41 @@ async def test_switching_the_boiler_on_by_hand_in_loose_mode_fires_nothing(
     await fake_target.set_state("on")
 
     assert fired == []
+
+
+async def test_a_limit_is_announced_with_its_mark(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A loose boiler with a limit that is switched on by hand starts a limit, and the
+    event says so: it is the same event as a countdown's start, with `limit` true, so
+    that an automation can tell "left on" from a time somebody chose."""
+    await setup_target(mode="loose", limit=120)
+    started = async_capture_events(hass, EVENT_COUNTDOWN_STARTED)
+
+    await fake_target.set_state("on")
+
+    assert [e.data for e in started] == [
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T09:00:00+00:00", "limit": True}
+    ]
+    assert started[0].data["ends_at"] == state_of(hass, SENSOR)
+
+
+async def test_a_limit_ends_with_its_own_reason(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The limit turns the boiler off and says `limit`, not `expired`, so that an
+    automation that waits for `expired` hears only of countdowns somebody chose."""
+    await setup_target(mode="loose", limit=120)
+    await fake_target.set_state("on")
+    ended = async_capture_events(hass, EVENT_COUNTDOWN_ENDED)
+
+    await advance(hass, freezer, minutes=120)
+
+    assert [e.data for e in ended] == [{"entity_id": NUMBER, "reason": "limit"}]
+    assert fake_target.calls == [TURN_OFF]
 
 
 async def test_a_loose_turn_on_inside_a_window_starts_a_countdown(
@@ -127,7 +162,7 @@ async def test_a_loose_turn_on_inside_a_window_starts_a_countdown(
     await fake_target.set_state("on")
 
     assert [e.data for e in started] == [
-        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15")}
+        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15"), "limit": False}
     ]
 
     await advance_to(hass, freezer, local(SUNDAY, "07:15"))
@@ -220,7 +255,7 @@ async def test_a_pending_command_fires_command_due_with_its_id(
         }
     ]
     assert [e.data for e in started] == [
-        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00"}
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00", "limit": False}
     ]
 
 
@@ -244,7 +279,11 @@ async def test_a_pending_on_fires_the_command_before_the_start_it_causes(
         ),
         (
             EVENT_COUNTDOWN_STARTED,
-            {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00"},
+            {
+                "entity_id": NUMBER,
+                "ends_at": "2026-01-05T07:30:00+00:00",
+                "limit": False,
+            },
         ),
     ]
 
@@ -445,7 +484,7 @@ async def test_the_end_of_a_schedule_window_fires_start_and_expired(
     assert fired == [
         (
             EVENT_COUNTDOWN_STARTED,
-            {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15")},
+            {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:15"), "limit": False},
         ),
         (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "expired"}),
     ]
@@ -519,7 +558,7 @@ async def test_two_intervals_that_open_together_fire_the_end_the_boiler_shows(
     await advance_to(hass, freezer, local(SUNDAY, "06:30"))
 
     assert [e.data for e in started] == [
-        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:45")}
+        {"entity_id": NUMBER, "ends_at": iso(SUNDAY, "07:45"), "limit": False}
     ]
     assert started[0].data["ends_at"] == state_of(hass, SENSOR)
 

@@ -483,11 +483,13 @@ def payload(
     windows: Sequence[dict[str, Any]] = (),
     disabled_intervals: Sequence[str] = (),
     started_at: str | None = None,
+    limit_at: str | None = None,
 ) -> dict[str, Any]:
     """What the storage file of a timer holds: the stored form of its snapshot."""
     return {
         "end": end,
         "started_at": started_at,
+        "limit_at": limit_at,
         "pending": pending,
         "owed_settings": owed_settings or {},
         "commands": list(commands),

@@ -284,13 +284,13 @@ describe("a long press", () => {
 });
 
 describe("what a press can be set to", () => {
-  it("run runs the timer for its default duration, as a bare run does", async () => {
+  it("run runs the timer, as a bare run does", async () => {
     const hass = fakeHass();
     const card = await mountCard(hass, { ...PILL, tap: "run" });
 
     await click(card);
 
-    // Nothing in the data: Timerify chooses the duration.
+    // Nothing in the data: Timerify chooses how long, and whether the run has a countdown.
     expect(hass.calls).toEqual([ran]);
     expect(Object.keys(hass.calls[0]?.data ?? { none: true })).toEqual([]);
   });

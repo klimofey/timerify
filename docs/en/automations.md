@@ -31,8 +31,8 @@ For example, to run the boiler for 20 minutes, pick **Run** and set **Minutes** 
 
 | Trigger | When it fires |
 | --- | --- |
-| **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. A **Loose** device switched on inside a schedule window does get a countdown, so it fires it. |
-| **Countdown ended** | The countdown runs out, Timerify stops it, or the device is switched off outside Timerify. |
+| **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. A **Loose** device switched on inside a schedule window does get a countdown, so it fires it. So does a **Loose** device left on with a [limit](timers.md#turn-off-a-device-that-was-left-on): the limit fires it when it starts. |
+| **Countdown ended** | The countdown runs out, Timerify stops it, or the device is switched off outside Timerify. A limit that turns off a device left on fires it too. |
 | **Pending command came due** | A pending command is carried out at its time. A command to turn on whose run is already over does not fire it. |
 
 The [Modes](timers.md#modes) section explains **Loose** mode.
@@ -45,15 +45,19 @@ Every trigger gives the automation some variables. You can use them in condition
 
 - `trigger.entity_id`: the **Run for** entity of the timer that fired the trigger.
 - `trigger.ends_at`: the end of the countdown, for **Countdown started**. It is a time in UTC, the same as the state of the **Ends at** sensor.
+- `trigger.limit`: `true` when that time is a limit, not a countdown that someone chose, for **Countdown started**. Adding time to a limit starts a countdown, so it fires the trigger with `false`.
 - `trigger.reason`: why the countdown ended, for **Countdown ended**.
 - `trigger.command_id`: the id of the command, for **Pending command came due**.
 - `trigger.action`: `on` or `off`, for **Pending command came due**.
 
-The reason is one of three words:
+The reason is one of four words:
 
 - `expired`: the countdown ran out.
 - `stopped`: Timerify stopped it. For example, you set **Run for** to 0, used **Stop**, or pressed **Turn off**. A voice request, a pending command to turn off, or a schedule interval that stops running can stop it too.
 - `turned_off`: the device was switched off outside Timerify. That is you by hand or in its own app, another automation, or the device itself.
+- `limit`: the limit of a device left on came, and Timerify turned the device off.
+
+A time you chose can replace a limit. **Countdown ended** does not fire then. The device keeps running, and **Countdown started** fires with `trigger.limit` set to `false`. A limit that ends because someone switches the device off has the reason `turned_off`.
 
 The [Events](services.md#events) section lists every cause of `stopped`.
 
@@ -75,9 +79,13 @@ actions:
 
 An automation that turns the device on again when its countdown ends should check the reason. Otherwise a stop would start the device again.
 
+The reason `expired` is only for countdowns that someone chose. To hear of a device that was left on, check for `limit`.
+
 ### After a restart
 
 A countdown that ended while Home Assistant was down triggers **Countdown ended** once, when Home Assistant has started. The reason is `expired`. The device is turned off then, if it is still on. A countdown that still runs does not trigger again.
+
+A limit that came while Home Assistant was down does the same, with the reason `limit`. A limit that still runs does not trigger **Countdown started** again.
 
 A pending command that came due while Home Assistant was down triggers **Pending command came due** at that time too. The exception is a command to turn on whose run is already over. [Restarts and outages](pending-commands.md#restarts-and-outages) explains it.
 

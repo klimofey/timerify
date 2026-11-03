@@ -10,6 +10,7 @@ import {
   acTimer,
   counting,
   fakeHass,
+  limited,
 } from "./fake-hass";
 import { bodyOf, mountCard, nameOf, popupOf, textOf, turnOffOf } from "./mount";
 
@@ -27,6 +28,7 @@ afterEach(() => {
 });
 
 const until = (time: string) => english.card_until.replace("{time}", time);
+const untilLatest = (time: string) => english.card_until_latest.replace("{time}", time);
 const stopped = (entity = NUMBER) => ({
   domain: "timerify",
   service: "stop",
@@ -192,6 +194,54 @@ describe("the ring and its centre", () => {
     );
 
     expect(label?.textContent?.replace(/\s+/g, " ").trim()).toBe("Boiler off");
+  });
+});
+
+describe("the limit on the round tile", () => {
+  it("a device left on shows its icon and a full ring, and says the time it turns off at the latest", async () => {
+    const card = await mountCard(limited(90), ROUND);
+
+    // No time left to show: the centre is the icon, as for a device that runs with no countdown.
+    expect(part(card, ".centre .icon")).not.toBeNull();
+    expect(part(card, ".time")).toBeNull();
+    expect(undrawnShare(card)).toBeCloseTo(0, 6);
+    const label = card.shadowRoot?.getElementById(
+      bodyOf(card).getAttribute("aria-labelledby") ?? "",
+    );
+    expect(label?.textContent?.replace(/\s+/g, " ").trim()).toBe(`Boiler ${untilLatest("10:30")}`);
+    expect(textOf(card)).toBe("Boiler by 10:30 at the latest");
+  });
+
+  it("does not count down", async () => {
+    const card = await mountCard(limited(90), ROUND);
+
+    expect(vi.getTimerCount()).toBe(0);
+    await passSeconds(card, 60);
+    expect(part(card, ".time")).toBeNull();
+    expect(undrawnShare(card)).toBeCloseTo(0, 6);
+  });
+
+  it("adding time to a limit shows an ordinary countdown", async () => {
+    const card = await mountCard(limited(90), ROUND);
+
+    card.hass = counting(105);
+    await card.updateComplete;
+
+    expect(centreOf(card)).toBe("1:45:00");
+    expect(part(card, ".status")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      `1:45:00 ${until("10:45")}`,
+    );
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("holding stops a device left on under a limit", async () => {
+    const hass = limited(90);
+    const card = await mountCard(hass, ROUND);
+
+    await press(card, 500);
+
+    expect(hass.calls).toEqual([stopped()]);
+    expect(isOpen(card)).toBe(false);
   });
 });
 

@@ -224,6 +224,21 @@ def counting(
     }
 
 
+def limited(*, days: int = 0, target: str = "Boiler") -> dict[str, Any]:
+    """The slots a handler gives to the answer about a timer whose target was left on
+    and has a limit: the time it turns off at the latest, `days` dates from today, and
+    no time left, since nobody chose a countdown."""
+    return {
+        "state": "limit",
+        "target": target,
+        "left_total": 0,
+        "left_hours": 0,
+        "left_minutes": 0,
+        "ends_at": "11:00",
+        "ends_in_days": days,
+    }
+
+
 TIMER_CASES: Final[Sequence[Mapping[str, Any]]] = (
     counting(minutes=1),
     counting(minutes=2),
@@ -235,13 +250,16 @@ TIMER_CASES: Final[Sequence[Mapping[str, Any]]] = (
     counting(hours=5, days=2),
     counting(hours=2, days=5),
     counting(hours=2, days=21),
+    limited(),
+    limited(days=1),
+    limited(days=2),
     {"state": "open", "target": "Boiler"},
     {"state": "off", "target": "Boiler"},
     {"state": "unavailable", "target": "Boiler"},
 )
 """The slots a handler gives to an answer about a timer, in the cases it tells apart:
-every counting form of the language's plural rules, a day, and the states without a
-countdown."""
+every counting form of the language's plural rules, a day, a limit (today, tomorrow and
+the day after, which a day of 23 hours reaches), and the states without a countdown."""
 
 LATER_CASES: Final[Sequence[Mapping[str, Any]]] = (
     {"outcome": "command_added", "target": "Boiler", "at": "10:15", "in_days": 0},
@@ -374,13 +392,29 @@ SCHEDULE_ANSWERS: Final = (
     Path(__file__).parents[1] / "fixtures" / "ru" / "schedule_answers.yaml"
 )
 """The file of the tests that holds the Russian answers about switching a schedule."""
+LIMIT_ANSWERS: Final = (
+    Path(__file__).parents[1] / "fixtures" / "ru" / "limit_answers.yaml"
+)
+"""The file of the tests that holds the Russian answers about a limit."""
+
+
+def named_cases(path: Path) -> dict[str, dict[str, Any]]:
+    """The cases of a fixture that is a list of named cases, by name."""
+    cases: list[dict[str, Any]] = yaml.safe_load(path.read_text("utf-8"))
+    return {case["name"]: case for case in cases}
 
 
 def russian_schedule_answers() -> dict[str, dict[str, Any]]:
     """The cases of the hand-written Russian answers about switching a schedule, by
     name: the slots a handler gives and the answer a speaker expects."""
-    cases: list[dict[str, Any]] = yaml.safe_load(SCHEDULE_ANSWERS.read_text("utf-8"))
-    return {case["name"]: case for case in cases}
+    return named_cases(SCHEDULE_ANSWERS)
+
+
+def russian_limit_answers() -> dict[str, dict[str, Any]]:
+    """The cases of the hand-written Russian answers about a limit, by name: the answer
+    (`intent` and `response`), the slots a handler gives it and what a speaker
+    expects."""
+    return named_cases(LIMIT_ANSWERS)
 
 
 def translated(language: str, *path: str) -> str:

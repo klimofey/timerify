@@ -18,6 +18,7 @@ import { formatClock, formatMinutes, formatRemaining, settingText } from "./form
 import type { HassEntity, HomeAssistant, IntervalInfo } from "./hass";
 import { t } from "./strings";
 import {
+  hasEnd,
   isDisabled,
   isRunning,
   mattersToRender,
@@ -32,7 +33,7 @@ interface PendingCommand {
   id: string;
   at: Date;
   action: "on" | "off";
-  /** How long a command to turn on runs; none when it turns on with no countdown. */
+  /** How long a command to turn on runs; none when it turns on without minutes. */
   minutes: number | null;
   settings: [key: string, value: unknown][];
 }
@@ -426,13 +427,23 @@ export class TimerifyCardPopup extends LitElement {
     `;
   }
 
-  /** The time left and when it ends, while there is a countdown. */
+  /**
+   * The time left and when it ends, while there is a countdown; while a limit runs, only when
+   * it turns the target off at the latest, as a limit is a bound and no time is promised.
+   */
   #countdown(now: number) {
     const { hass, view } = this;
-    if (view.state !== "counting" || view.endsAt === undefined) {
+    if (!hasEnd(view) || view.endsAt === undefined) {
       return nothing;
     }
     const time = formatClock(hass, view.endsAt, now);
+    if (view.state === "limit") {
+      return html`
+        <p class="countdown">
+          <span class="until">${t(hass, "card_until_latest", { time })}</span>
+        </p>
+      `;
+    }
     return html`
       <p class="countdown">
         <span class="remaining">${formatRemaining(view.remaining)}</span>
@@ -445,7 +456,8 @@ export class TimerifyCardPopup extends LitElement {
   #controls() {
     const { hass, config, view } = this;
     const step = formatMinutes(hass, STEP_MINUTES);
-    const counting = view.state === "counting";
+    // Time is taken off a countdown, and off a limit, which then becomes a countdown.
+    const ends = hasEnd(view);
     const running = isRunning(view);
     // A timer that is unavailable has nothing to act on: Home Assistant would leave it out of
     // the call without a word, and a press would seem to do nothing.
@@ -475,7 +487,7 @@ export class TimerifyCardPopup extends LitElement {
         <button
           class="action step"
           aria-label=${t(hass, "card_subtract_time", { duration: step })}
-          ?disabled=${!counting}
+          ?disabled=${!ends}
           @click=${() => void addMinutes(hass, config.entity, -STEP_MINUTES)}
         >
           −${step}

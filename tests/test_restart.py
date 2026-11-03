@@ -17,7 +17,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import freeze_settings
-from custom_components.timerify.core import Command
+from custom_components.timerify.core import Command, Snapshot
 from custom_components.timerify.store import TimerStore, command_to_json
 
 from .conftest import FakeTarget, SetupTarget
@@ -27,6 +27,7 @@ from .helpers import (
     AC_NUMBER,
     NUMBER,
     SENSOR,
+    START,
     SUNDAY,
     TARGET_ID,
     TURN_OFF,
@@ -59,6 +60,10 @@ MONDAY = SUNDAY + timedelta(days=1)
 OFF_AT_MINUS_10: Final = command_json(at(-10), "off")
 TIMER_ENDED_WHILE_UNAVAILABLE: Final = (
     "The timer of switch.boiler ended while it is unavailable;"
+    " it is turned off when it is back"
+)
+LIMIT_REACHED_WHILE_UNAVAILABLE: Final = (
+    "The limit of switch.boiler was reached while it is unavailable;"
     " it is turned off when it is back"
 )
 CAME_DUE_WHILE_UNAVAILABLE: Final = (
@@ -138,6 +143,71 @@ async def test_stored_end_in_the_future_expires_at_that_end(
     await advance(hass, freezer, minutes=1)
     assert fake_target.calls == [TURN_OFF]
     assert state_of(hass, TARGET_ID) == "off"
+
+
+async def test_a_limit_restored_at_start_up_keeps_its_time(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A loose boiler left on keeps the limit it had across a restart: "Ends at" shows
+    the same moment, marked as a limit, whether the file was written by an earlier run
+    or the entry restarts after some time. The limit is counted from when the boiler was
+    switched on, not from the start-up, and nothing is switched."""
+    await fake_target.set_state("on")
+
+    entry = await setup_target(mode="loose", limit=120, stored=payload(limit_at=at(60)))
+
+    state = hass.states.get(SENSOR)
+    assert state is not None
+    assert state.state == at(60)
+    assert state.attributes["limit"] is True
+    assert saved(hass_storage, entry) == payload(limit_at=at(60))
+    assert fake_target.calls == []
+
+    await restart_after(hass, freezer, entry, minutes=10)
+
+    state = hass.states.get(SENSOR)
+    assert state is not None
+    assert state.state == at(60)
+    assert state.attributes["limit"] is True
+    await advance(hass, freezer, minutes=49)
+    assert fake_target.calls == []
+    await advance(hass, freezer, minutes=1)
+    assert fake_target.calls == [TURN_OFF]
+
+
+@pytest.mark.parametrize(
+    ("mode", "limit", "ends_at", "limited"),
+    [("loose", None, "unknown", False), ("strict", 120, at(45), False)],
+    ids=["no-setting", "strict"],
+)
+async def test_a_stored_limit_the_timer_has_no_use_for_is_dropped(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    mode: Literal["strict", "loose"],
+    limit: int | None,
+    ends_at: str,
+    limited: bool,
+) -> None:
+    """The setting was emptied, or the timer turned strict, while Home Assistant was
+    down: the limit the file holds is gone once it starts, and the boiler goes on
+    running. A strict timer gives the boiler the default duration, as for any boiler
+    it finds on."""
+    await fake_target.set_state("on")
+
+    entry = await setup_target(mode=mode, limit=limit, stored=payload(limit_at=at(60)))
+
+    state = hass.states.get(SENSOR)
+    assert state is not None
+    assert state.state == ends_at
+    assert state.attributes["limit"] is limited
+    assert saved(hass_storage, entry)["limit_at"] is None
+    assert fake_target.calls == []
 
 
 async def test_target_off_at_start_clears_stored_timer(
@@ -531,6 +601,11 @@ async def test_a_turn_on_inside_a_window_keeps_its_end_across_a_restart(
             "the window of a must start before it ends and last at most a day",
             id="window-longer-than-a-day",
         ),
+        pytest.param(
+            payload(end=at(30), limit_at=at(60)),
+            "the timer has both an end and a limit",
+            id="end-and-limit",
+        ),
     ],
 )
 async def test_file_that_contradicts_itself_is_refused(
@@ -555,6 +630,29 @@ async def test_file_that_contradicts_itself_is_refused(
     assert complaint in caplog.text
     assert "ValueError" not in caplog.text
     assert fake_target.calls == []
+
+
+async def test_a_limit_survives_a_restart(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    """The file holds a limit as a time in UTC, the timer read from it has the limit
+    again, and a timer written back carries the new time."""
+    key = "timerify.limit-entry"
+    hass_storage[key] = {
+        "version": TimerStore.STORAGE_VERSION,
+        "minor_version": 1,
+        "key": key,
+        "data": payload(limit_at=at(60)),
+    }
+    store = TimerStore(hass, "limit-entry")
+
+    snapshot = await store.async_load()
+
+    assert snapshot == Snapshot(limit_at=START + timedelta(minutes=60))
+
+    await store.async_save(Snapshot(limit_at=START + timedelta(minutes=90)))
+
+    assert hass_storage[key]["data"] == payload(limit_at=at(90))
 
 
 def test_command_is_stored_as_plain_data_in_utc() -> None:
@@ -818,6 +916,63 @@ async def test_a_countdown_ended_while_down_is_logged_at_start_up_if_the_target_
 
     assert fake_target.calls == [TURN_ON, TURN_OFF]
     assert timerify_info(caplog) == [TIMER_ENDED_WHILE_UNAVAILABLE]
+
+
+async def test_a_limit_reached_while_the_target_is_away_is_logged_and_carried_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The limit of a boiler left on comes while it is unavailable. The log says so, as
+    it does for a countdown, and the boiler is turned off once when it is back."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await setup_target(mode="loose", limit=120)
+    await fake_target.set_state("on")
+    await advance(hass, freezer, minutes=60)
+    await fake_target.set_state("unavailable")
+
+    await advance(hass, freezer, minutes=60)
+
+    assert timerify_info(caplog) == [LIMIT_REACHED_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
+
+    await fake_target.set_state("on")
+
+    assert fake_target.calls == [TURN_OFF]
+    assert state_of(hass, TARGET_ID) == "off"
+    assert timerify_info(caplog) == [LIMIT_REACHED_WHILE_UNAVAILABLE]
+
+
+async def test_a_limit_reached_while_down_is_logged_at_start_up_if_the_target_is_away(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The limit came while Home Assistant was down, and the boiler is away when it
+    starts again. The log says it is turned off when it is back, and it is."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    entry = await setup_target(mode="loose", limit=120)
+    await fake_target.set_state("on")
+
+    await restart_after(
+        hass,
+        freezer,
+        entry,
+        minutes=180,
+        while_down=lambda: fake_target.write("unavailable"),
+    )
+
+    assert timerify_info(caplog) == [LIMIT_REACHED_WHILE_UNAVAILABLE]
+    assert fake_target.calls == []
+
+    await fake_target.set_state("on")
+
+    assert fake_target.calls == [TURN_OFF]
+    assert timerify_info(caplog) == [LIMIT_REACHED_WHILE_UNAVAILABLE]
 
 
 async def test_a_command_due_while_down_is_logged_at_start_up_if_the_target_is_away(

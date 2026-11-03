@@ -42,14 +42,16 @@
 {%- endmacro -%}
 
 {#- Where a timer stands after it was run, extended or stopped, from the slots a handler
-    gives: counting, on without a timer, or off. A command's answer gives the wish it
-    set, whatever the target shows, so a target that is unavailable after a stop (state
-    "unavailable") is answered off on purpose; the answer to a question about the timer
-    is the one that says unavailable. The name goes first, since it cannot be
-    declined. -#}
+    gives: counting, on with a limit (the latest time it turns off, since nobody chose a
+    time), on without a timer, or off. A command's answer gives the wish it set, whatever
+    the target shows, so a target that is unavailable after a stop (state "unavailable")
+    is answered off on purpose; the answer to a question about the timer is the one that
+    says unavailable. The name goes first, since it cannot be declined. -#}
 {%- macro timer_now(slots) -%}
   {%- if slots.state == "counting" -%}
     {{ slots.target }}: включено на {{ duration_for(slots.left_hours, slots.left_minutes) }}, выключится {{ day(slots.ends_in_days) }}в {{ slots.ends_at }}.
+  {%- elif slots.state == "limit" -%}
+    {{ slots.target }}: включено, выключится {{ day(slots.ends_in_days) }}не позже {{ slots.ends_at }}.
   {%- elif slots.state == "open" -%}
     {{ slots.target }}: включено.
   {%- else -%}

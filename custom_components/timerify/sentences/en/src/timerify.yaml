@@ -467,6 +467,8 @@ responses:
       default: |-
         {%- if slots.state == "counting" -%}
           {{ duration(slots.left_hours, slots.left_minutes) }} left on {{ slots.target }}, it turns off at {{ slots.ends_at }}{{ day(slots.ends_in_days) }}.
+        {%- elif slots.state == "limit" -%}
+          {{ slots.target }} turns off by {{ slots.ends_at }}{{ day(slots.ends_in_days) }} at the latest.
         {%- elif slots.state == "open" -%}
           {{ slots.target }} is on without a timer.
         {%- elif slots.state == "unavailable" -%}

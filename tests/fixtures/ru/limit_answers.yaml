@@ -41,3 +41,9 @@
   response: default
   slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 1}
   answer: "Boiler: включено, выключится завтра не позже 11:00."
+
+- name: run, a limit the day after tomorrow
+  intent: TimerifyRun
+  response: default
+  slots: {state: limit, target: Boiler, left_total: 0, left_hours: 0, left_minutes: 0, ends_at: "11:00", ends_in_days: 2}
+  answer: "Boiler: включено, выключится послезавтра не позже 11:00."

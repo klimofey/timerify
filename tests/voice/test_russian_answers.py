@@ -139,7 +139,7 @@ def test_the_limit_fixture_pins_every_answer_that_can_give_a_limit() -> None:
         days = {
             case["slots"]["ends_in_days"] for case in cases if case["intent"] == intent
         }
-        assert {0, 1} <= days
+        assert days == {0, 1, 2}
 
 
 def test_the_fixture_has_every_count_class_of_every_counted_answer() -> None:

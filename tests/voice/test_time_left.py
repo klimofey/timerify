@@ -285,6 +285,8 @@ async def test_time_left_on_a_limit_that_ends_tomorrow_says_the_day(
     assist: None,
     setup_target: SetupTarget,
 ) -> None:
+    """A limit that is a day long ends at this time tomorrow, and the answer says the
+    day, as it does for a countdown."""
     await left_on_for_a_day(hass, freezer, fake_target, setup_target)
 
     response = await converse(hass, "how much time is left on the boiler")
@@ -363,6 +365,8 @@ async def test_russian_says_the_day_of_a_limit_that_ends_tomorrow(
     assist: None,
     setup_target: SetupTarget,
 ) -> None:
+    """In Russian too the day goes before the time, as the fixture of the hand-written
+    answers has it."""
     answers = russian_limit_answers()
     await left_on_for_a_day(hass, freezer, fake_target, setup_target)
     ask = samples("ru", TIME_LEFT, numbers={})[0]

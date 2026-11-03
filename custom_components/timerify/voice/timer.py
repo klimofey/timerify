@@ -32,10 +32,10 @@ class TimeLeftHandler(TimerifyIntentHandler):
     description = (
         "Tells how long a device's Timerify timer has left and when the device turns"
         " off, or that the device is off or unavailable, or on without a timer. A"
-        " device that was left on can have a limit instead of a timer: the result then"
-        " gives the latest time the device turns off and no time left, because nobody"
-        " chose a time, so say it as 'by 13:30 at the latest'. 'name' is the name of"
-        " the device, as the prompt lists it."
+        " device that was left on can have a limit instead of a timer: the 'state' of"
+        " the result is then 'limit', and 'ends_at' is the latest time the device turns"
+        " off, with no time left because nobody chose a time, so say it as 'by 13:30 at"
+        " the latest'. 'name' is the name of the device, as the prompt lists it."
     )
     read_only = True
     slot_schema: ClassVar[dict[Any, Any]] = {probatio.Required("name"): cv.string}
@@ -115,9 +115,10 @@ class AddTimeHandler(TimerifyIntentHandler):
     description = (
         "Adds time to a device's Timerify timer: 'hours' and 'minutes' add up to the"
         " time to add, at least 1 minute. A running timer ends later; a device that is"
-        " not running is turned on for that time. A timer never runs for more than 24"
-        " hours from now, however much is added. 'name' is the name of the device, as"
-        " the prompt lists it."
+        " not running is turned on for that time. Time added to a limit (the latest"
+        " time a device that was left on turns off) counts from the limit's time, not"
+        " from now. A timer never runs for more than 24 hours from now, however much"
+        " is added. 'name' is the name of the device, as the prompt lists it."
     )
     destructive = False
     slot_schema: ClassVar[dict[Any, Any]] = {

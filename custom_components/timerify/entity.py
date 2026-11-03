@@ -8,7 +8,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device import async_entity_id_to_device
 from homeassistant.helpers.entity import Entity
 
-from .const import DOMAIN, timer_unique_id
+from .const import DOMAIN, WITH_TARGET_SUFFIX, timer_unique_id
 from .controller import TimerifyConfigEntry
 
 
@@ -132,7 +132,7 @@ class TimerifyEntity(Entity):
         if (label := self._controller.target_label) is not None:
             key = self.entity_description.translation_key
             assert key is not None  # Every entity of a timer is translated.
-            self._attr_translation_key = f"{key}_with_target"
+            self._attr_translation_key = f"{key}{WITH_TARGET_SUFFIX}"
             self._attr_translation_placeholders = {
                 **(placeholders or {}),
                 "target": label,

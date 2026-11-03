@@ -162,6 +162,11 @@ KEY_TURN_OFF: Final = "turn_off"
 """The keys of the entities a timer has one of, the last two only if it counts its
 runtime and if it has a Turn off button, in that order: with the entry's id they make
 an entity's unique id (see `timer_unique_id`)."""
+WITH_TARGET_SUFFIX: Final = "_with_target"
+"""The suffix that makes the translation key of an entity the key of its name on a
+device that holds more than one timer, which names the target in brackets: `run_for`
+becomes `run_for_with_target`. The translations and the icons have such a key for every
+entity."""
 
 RUNTIME_TICK_SECOND: Final = 59
 """The second of every minute at which the Runtime sensor publishes its total: the last

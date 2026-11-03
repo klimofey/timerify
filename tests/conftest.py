@@ -148,6 +148,13 @@ CLIMATE_SERVICES: Final[dict[str, Obey]] = {
 """The services of an air conditioner; a plain turn-on starts it heating."""
 
 
+def registered_names(name: str, entity_name: str | None) -> tuple[bool, str]:
+    """The `has_entity_name` and the `original_name` an integration registers an entity
+    with: with an `entity_name` the entity names itself after its device `name`, and
+    without one `name` is the entity's whole name."""
+    return entity_name is not None, name if entity_name is None else entity_name
+
+
 @dataclass
 class FakeTarget:
     """An entity the way another integration provides it: a registry entry on a
@@ -259,14 +266,16 @@ class FakeTarget:
                     name=self.name,
                 )
             domain, object_id = split_entity_id(self.entity_id)
-            original_name = self.name if self.entity_name is None else self.entity_name
+            has_entity_name, original_name = registered_names(
+                self.name, self.entity_name
+            )
             er.async_get(self.hass).async_get_or_create(
                 domain,
                 self.platform,
                 self.unique_id,
                 config_entry=self.provider,
                 device_id=self.device_id,
-                has_entity_name=self.entity_name is not None,
+                has_entity_name=has_entity_name,
                 original_name=original_name,
                 suggested_object_id=object_id,
                 translation_key=self.translation_key,
@@ -721,6 +730,7 @@ def provide_fake(
     """
     domain, object_id = split_entity_id(entity_id)
     platform = platform or f"{object_id}_maker"
+    has_entity_name, original_name = registered_names(name, entity_name)
     provider = None
     if registered:
         provider = MockConfigEntry(domain=platform)
@@ -741,8 +751,8 @@ def provide_fake(
             object_id,
             config_entry=provider,
             device_id=device_id,
-            has_entity_name=entity_name is not None,
-            original_name=name if entity_name is None else entity_name,
+            has_entity_name=has_entity_name,
+            original_name=original_name,
             suggested_object_id=object_id,
             translation_key=translation_key,
         )

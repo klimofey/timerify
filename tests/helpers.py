@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 from zoneinfo import ZoneInfo
 
@@ -24,6 +25,7 @@ from homeassistant.helpers.event import (
     async_track_state_report_event,
 )
 from homeassistant.setup import async_setup_component
+from homeassistant.util.json import json_loads_object
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
@@ -40,6 +42,11 @@ from custom_components.timerify.const import (
 
 if TYPE_CHECKING:
     from .conftest import FakeTarget
+
+INTEGRATION_DIR: Final = Path(__file__).parent.parent / "custom_components" / DOMAIN
+"""The folder of the integration."""
+TRANSLATIONS_DIR: Final = INTEGRATION_DIR / "translations"
+"""The folder of its translations: a file for each language."""
 
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
@@ -138,6 +145,11 @@ def start_set_number(
             context=context,
         )
     )
+
+
+def translations_of(language: str) -> dict[str, Any]:
+    """The translations of `language`, as the integration ships them."""
+    return json_loads_object((TRANSLATIONS_DIR / f"{language}.json").read_text("utf-8"))
 
 
 def run_for_of(hass: HomeAssistant, entry: ConfigEntry) -> str:

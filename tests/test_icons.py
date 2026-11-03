@@ -4,7 +4,9 @@ from typing import Any
 
 from homeassistant.util.json import json_loads_object
 
-from .test_translations import INTEGRATION_DIR, WITH_TARGET, translations_of
+from custom_components.timerify.const import WITH_TARGET_SUFFIX
+
+from .helpers import INTEGRATION_DIR, translations_of
 
 
 def keys_of(entities: dict[str, Any]) -> set[tuple[str, str]]:
@@ -24,5 +26,6 @@ def test_every_entity_key_has_its_icon() -> None:
     assert keys_of(icons) == keys_of(translations_of("en")["entity"])
     for platform, keys in icons.items():
         for key, icon in keys.items():
-            if key.endswith(WITH_TARGET):
-                assert icon == keys[key.removesuffix(WITH_TARGET)], f"{platform}.{key}"
+            if key.endswith(WITH_TARGET_SUFFIX):
+                plain = key.removesuffix(WITH_TARGET_SUFFIX)
+                assert icon == keys[plain], f"{platform}.{key}"

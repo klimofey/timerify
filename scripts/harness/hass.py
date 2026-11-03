@@ -27,6 +27,10 @@ SWITCH = "input_boolean.smoke_boiler"
 """A switch that configuration.yaml declares, on no device."""
 DEMO_SWITCH = "switch.decorative_lights"
 """A switch of the demo integration, which sits on a device of its own."""
+LIMIT_SWITCH = "switch.ac"
+"""The other switch of the demo integration, on a device of its own. It starts off. Both
+the smoke test and the end-to-end tests give it a loose timer with a limit, each in a
+container of its own."""
 STARTUP_TIMEOUT = 240.0
 CALL_TIMEOUT = 30.0
 DEFAULT_DURATION_MINUTES = 30

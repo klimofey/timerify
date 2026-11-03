@@ -37,6 +37,7 @@ from scripts.harness.hass import (
     CALL_TIMEOUT,
     DEMO_SWITCH,
     DOMAIN,
+    LIMIT_SWITCH,
     STARTUP_TIMEOUT,
     SWITCH,
     WEEKDAYS,
@@ -96,12 +97,9 @@ switched off, and no E2E test touches it."""
 QUICK_CHIP_MINUTES = 15
 """The minutes of the chip on the pill of the strict timer."""
 
-LIMIT_SWITCH = "switch.ac"
-"""What the loose timer with a limit runs: the other switch of the demo integration,
-on a device of its own, which no other timer of the fixture and no test of the smoke
-run touches. It starts off."""
 LIMIT_MINUTES = 120
-"""The limit of that timer: how long its switch may stay on with no countdown."""
+"""The limit of the fixture's loose timer with a limit, on `LIMIT_SWITCH`: how long its
+switch may stay on with no countdown."""
 
 
 def timerify_card(timer: Timer, **options: Any) -> dict[str, Any]:

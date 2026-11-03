@@ -4122,7 +4122,21 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 - **The end-to-end fixture has a loose timer with a limit of its own, on `switch.ac`.** The
   `loose` fixture stays without a limit, because specs rely on a bare run having no countdown
   (`pill.spec.ts`, `round.spec.ts`). `switch.ac` is the demo integration's second switch,
-  which no other fixture and no smoke step uses. Its number sorts first by entity id, so the
-  editor specs' `firstTimer` is now this timer; they read only its names and ids. The test
-  that measures the limit takes both moments from the server (the end of the limit and the
-  `last_changed` of the switch), so a Docker clock that is seconds off cannot fail it.
+  which no other fixture uses (the smoke test gives it a timer too, in a container of its
+  own). Its number sorts first by entity id, so the editor specs' `firstTimer` is now this
+  timer; they read only its names and ids. The test that measures the limit takes both
+  moments from the server (the end of the limit and the `last_changed` of the switch), so a
+  Docker clock that is seconds off cannot fail it.
+
+### Verification
+
+- **The smoke test checks the limit on the second demo switch, not on the smoke boiler.**
+  A switch has one timer (a second one for the same target is refused by the config flow), and
+  the boiler's timer is the strict one that most of the scenarios use. The limit scenario adds
+  a loose timer with a limit of 1 minute through the config flow, with its limit step, on
+  `switch.ac` (`LIMIT_SWITCH` in `scripts/harness/hass.py`, shared with the end-to-end
+  fixture), turns the switch on by hand, and checks that "Ends at" names the moment of the
+  limit with `limit` true and no `started_at`, one minute after the switch turned on, and that
+  the switch turns off at that moment and the timer is idle after it. It runs after the
+  thermostat scenario and costs about a minute and a half. Cost if wrong: the container proves
+  the limit only for a switch that sits on a device.

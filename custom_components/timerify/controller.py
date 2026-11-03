@@ -1066,12 +1066,13 @@ class TargetController:
             if new_state is not None:
                 self._set_target_deleted(False)
             before = self.snapshot
-            effects = self._core.observe(
-                raised,
-                actual_state(new_state),
-                by_us=event.context.id in self._own_contexts,
+            by_us = event.context.id in self._own_contexts
+            effects = self._core.observe(raised, actual_state(new_state), by_us=by_us)
+            # The answer to one of our own calls is no person's doing, and all that its
+            # fold announces came from time, so it has no context to give.
+            await self._execute_fold(
+                before, raised, effects, context=None if by_us else event.context
             )
-            await self._execute_fold(before, raised, effects, context=event.context)
             await self._async_check_interval_settings()
 
     def _target_exists(self) -> bool:
@@ -1293,14 +1294,15 @@ class TargetController:
 
         `context` is the cause of the fold, None where time is: the alarm, a refresh
         of the windows and the catch-up at start-up. A report of the target gives the
-        context of the change that made it, and the switch of an interval its own. The
-        events of the fold carry it, except those that time caused (`_announce`). It
-        goes to this fold only, not to the refresh that follows a window that ended:
-        that is time's doing.
+        context of the change that made it, unless that is the answer to one of our own
+        calls, which is no person's doing and gives none. The switch of an interval
+        gives its own. The events of the fold carry it, except those that time caused
+        (`_announce`). It goes to this fold only, not to the refresh that follows a
+        window that ended: that is time's doing.
 
-        It is imprecise in one known way: a report or a switch whose fold also starts
-        a window or a pending command that fell due gives that start its own context,
-        though the person did not cause it.
+        It is imprecise in one known way: a report of a change by hand, or a switch,
+        whose fold also starts a window or a pending command that fell due gives that
+        start its own context, though the person did not cause it.
 
         A window the fold found over is replaced by the next one of its interval. That
         goes for whichever event folds it: a report of the target may get the lock

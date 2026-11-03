@@ -4357,6 +4357,7 @@ klimofey/timerify, listed in `docs/followups.md`.
   called with no context). Cost if wrong: a countdown that ran out is credited to the person
   who happened to add time to it later. Tests:
   `test_add_time_on_an_end_that_has_passed_gives_the_expiry_a_fresh_context`,
+  `test_a_limit_that_passed_before_a_call_is_fresh_while_the_call_keeps_its_own`,
   `test_a_call_while_starting_gives_its_context_to_its_own_start_only` and, for an event
   that time caused with no call in the batch, `test_an_event_caused_by_time_has_a_fresh_context`
   (an expiry, a limit, a pending "on" and the start it makes, a window that starts, a window
@@ -4391,15 +4392,26 @@ klimofey/timerify, listed in `docs/followups.md`.
   `_handle_state_change`, which gives `event.context` to `_execute_fold`; so does the switch
   of an interval, through `_fold_due`. The catch-up of such a fold may also start a window or
   a pending command that fell due and has waited behind a slow call, and that start gets the
-  report's or the switch's context, though the person did not cause it. A report that
-  answers Timerify's own call (`_own_contexts`) carries the context of that call, which has
-  no user and no parent. `CommandCameDue` and `expired` of such a fold stay fresh. The
-  imprecision is written in the docstring of `_execute_fold`. Why it is accepted: telling
-  which item of a fold a person caused needs a context per item in the core, for a case
-  where a report or a switch gets the lock before the alarm of something that is already
-  due. Cost if wrong: a start with the wrong person in the logbook, and nothing else. Tests:
-  `test_a_device_switched_by_hand_gives_its_context_to_the_event` (the case it serves);
-  none for the imprecision.
+  report's or the switch's context, though the person did not cause it. So does the `stopped`
+  of a countdown that such a pending command ends. `CommandCameDue` and `expired` of such a
+  fold stay fresh. The imprecision is written in the docstring of `_execute_fold`. Why it is
+  accepted: telling which item of a fold a person caused needs a context per item in the
+  core, for a case where a report or a switch gets the lock before the alarm of something that
+  is already due. Cost if wrong: a start with the wrong person in the logbook, and nothing
+  else. Tests: `test_a_device_switched_by_hand_gives_its_context_to_the_event` (the case it
+  serves) and `test_a_command_folded_by_a_switch_is_announced_with_a_fresh_context`, which
+  pins that the `stopped` of the fold carries the switch, so that a change of it is a visible
+  decision.
+- **A report that answers Timerify's own call gives its fold no context.**
+  `_handle_state_change` passes `None` when the context of the report is one of
+  `_own_contexts`, that is, when it answers one of Timerify's own calls (`by_us`). Why: everything that such a fold announces comes from time (a window, a pending command, an
+  end or a limit that fell due and waited behind the slow call), since `observe` announces
+  nothing else for our own answer, and the person's own start was announced in the person's
+  batch, before the call to the device. Left alone, such a start would carry the context of
+  Timerify's own `switch.turn_on` call, and the trace of an automation it runs would link to
+  that call instead of being fresh. Unlike a report by hand, this one is never ambiguous.
+  Cost if wrong: a countdown that time started names Timerify's call to the device as its
+  cause. Test: `test_a_report_of_timerifys_own_call_gives_what_it_folds_a_fresh_context`.
 - **A pending command is not linked to the call that made it.** The "Pending command came
   due" event, and the countdown it starts, have a fresh context. Why: linking them to the
   call that added the command would store the context id in the timer's file, a schema

@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.automation import EVENT_AUTOMATION_TRIGGERED
+from homeassistant.const import EVENT_CALL_SERVICE
 from homeassistant.core import Context, CoreState, Event, HomeAssistant, callback
 from pytest_homeassistant_custom_component.common import (
     MockUser,
@@ -589,8 +590,10 @@ async def test_a_command_folded_by_a_switch_is_announced_with_a_fresh_context(
 ) -> None:
     """A slow boiler holds the timer. A pending "off" falls due at 07:00:10, and at
     07:00:20 the user flips the switch of a schedule interval behind the same call. The
-    switch is the cause of what its fold does, but the command coming due is time's
-    doing: the event that announces it has a new context."""
+    command coming due is time's doing: the event that announces it has a new context.
+    The countdown it ends is announced in the same fold, under the user's switch. That
+    is the known imprecision: telling the two apart needs a context for each item of a
+    fold, and this pins that it is what happens."""
     entry = await setup_target()
     await add_interval(hass, entry, start="06:30", end="07:15")
     ctx = Context(user_id=hass_admin_user.id)
@@ -614,9 +617,79 @@ async def test_a_command_folded_by_a_switch_is_announced_with_a_fresh_context(
     await asyncio.gather(slow, keeping, flipping)
     await hass.async_block_till_done()
 
-    assert EVENT_COMMAND_DUE in types_of(events)
-    (due,) = (event for event in events if event.event_type == EVENT_COMMAND_DUE)
-    assert_fresh(due, [ctx])
+    assert types_of(events) == [EVENT_COMMAND_DUE, EVENT_COUNTDOWN_ENDED]
+    assert_fresh(events[0], [ctx])
+    assert events[1].data["reason"] == "stopped"
+    assert_carries(events[1], ctx)
+
+
+async def test_a_limit_that_passed_before_a_call_is_fresh_while_the_call_keeps_its_own(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+    hass_admin_user: MockUser,
+) -> None:
+    """An air conditioner that was left on has a limit of a minute, from 07:00:00. At
+    07:00:45 a slow call holds the timer, and at 07:01:02, after the limit, the user
+    runs the air conditioner for ten minutes. The alarm of the limit has not gone off,
+    so the call finds the limit over and announces it first: the limit coming is time's
+    doing, and has a new context. The countdown that the call starts carries its own."""
+    await setup_target(target=AC_ID, mode="loose", limit=1)
+    await call_service(hass, "run", {"entity_id": AC_NUMBER})
+    freezer.move_to(moment(45))
+    ctx = Context(user_id=hass_admin_user.id)
+    held = fake_climate.hold_next_call()
+    slow = start_call_service(hass, "run", {"entity_id": AC_NUMBER}, temperature=24)
+    await held.reached.wait()
+    events = capture(hass)
+    freezer.move_to(moment(62))
+    running = start_call_service(
+        hass, "run", {"entity_id": AC_NUMBER}, minutes=10, context=ctx
+    )
+    freezer.move_to(moment(65))
+
+    held.release.set()
+    await asyncio.gather(slow, running)
+    await hass.async_block_till_done()
+
+    assert types_of(events) == [EVENT_COUNTDOWN_ENDED, EVENT_COUNTDOWN_STARTED]
+    assert events[0].data["reason"] == "limit"
+    assert_fresh(events[0], [ctx])
+    assert_carries(events[1], ctx)
+
+
+async def test_a_report_of_timerifys_own_call_gives_what_it_folds_a_fresh_context(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The boiler runs, and is to be turned on again at 07:00:10. At 07:00:00 the user
+    stops it, and the boiler is slow to answer the turn-off: its report comes at
+    07:00:20 and gets the timer before the alarm of the pending command, which has not
+    gone off. The report folds the command, and the countdown it starts is time's doing.
+    It has a new context, not that of Timerify's own call to the boiler, which the
+    report carries."""
+    await setup_target()
+    await call_service(hass, "run", {"entity_id": NUMBER}, minutes=10)
+    await add_command(hass, NUMBER, action="on", at=stamp(10), minutes=5)
+    device_calls = async_capture_events(hass, EVENT_CALL_SERVICE)
+    held = fake_target.hold_next_call()
+    stopping = start_call_service(hass, "stop", {"entity_id": NUMBER})
+    await held.reached.wait()
+    events = capture(hass)
+    freezer.move_to(moment(20))
+
+    held.release.set()
+    await stopping
+    await hass.async_block_till_done()
+
+    own = [call.context for call in device_calls if call.data["domain"] == "switch"]
+    assert own, "Timerify called the boiler"
+    assert types_of(events) == [EVENT_COMMAND_DUE, EVENT_COUNTDOWN_STARTED]
+    for event in events:
+        assert_fresh(event, own)
 
 
 async def test_two_calls_queued_behind_a_slow_call_each_carry_their_own_context(

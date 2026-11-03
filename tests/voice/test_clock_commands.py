@@ -73,6 +73,7 @@ NUMBERS = {
     "timerify_clock_hours": 7,
     "timerify_clock_minutes": 30,
     "timerify_half_day_hours": 7,
+    "timerify_evening_hours": 7,
     "timerify_minutes_of_hour": 20,
 }
 """The numbers with which a clock time is said: 7:30, or 7 with a part of the day. The
@@ -1337,6 +1338,7 @@ async def test_minutes_around_an_hour_out_of_bounds_are_not_understood(
         ("this morning at 7am", "07:00", 0),
         ("tomorrow evening at 7:30 pm", "19:30", 1),
         ("in the evening at 7 pm", "19:00", 0),
+        ("this afternoon at 12:30 pm", "12:30", 0),
     ],
 )
 async def test_a_part_of_the_day_before_the_time_means_its_time(
@@ -2032,6 +2034,10 @@ async def test_a_time_that_is_none_is_not_understood(
         "turn on the boiler at 7 am tonight",
         "turn on the boiler tomorrow night at 7 pm",
         "turn on the boiler this evening at half past 7 pm",
+        "turn on the boiler tonight at 12 pm",
+        "turn on the boiler tonight at 12:30pm",
+        "turn on the boiler this evening at 12 pm",
+        "turn on the boiler at 12 pm tonight",
     ],
 )
 async def test_the_forms_left_out_of_a_part_of_the_day_are_not_understood(
@@ -2044,8 +2050,9 @@ async def test_the_forms_left_out_of_a_part_of_the_day_are_not_understood(
     are not. A part of the day said as a word is repeated only by the mark of its own
     half, so "tonight at 7 am" and "this morning at 7 pm" say two halves of the day,
     "night" has no mark to repeat it, and minutes past or to an hour take none after a
-    part of the day. What is not a time reaches no handler, and nothing is kept or
-    switched."""
+    part of the day. The evening and "tonight" take no 12 with a mark, since "tonight
+    at 12 pm" is meant for midnight and "pm" would plan noon. What is not a time reaches
+    no handler, and nothing is kept or switched."""
     response = await converse(hass, said)
 
     assert reached(response) is None, speech(response)

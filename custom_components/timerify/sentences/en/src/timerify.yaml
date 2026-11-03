@@ -186,12 +186,17 @@ expansion_rules:
 # fills the day, 0, through a list of its own and the "pm" decides the half, so "tonight at
 # 7 pm" is 19:00 and "tonight at 5 pm" is 17:00. The hours are those of the dial, bare or
 # with minutes: minutes past and to an hour take no mark here ("this evening at half past
-# 7" is said without it), which would double the forms of the clock.
-  timerify_clock_part_marked: "(<timerify_clock_morning> at <timerify_morning_hour>|at <timerify_morning_hour> <timerify_clock_morning>|<timerify_clock_evening> at <timerify_evening_hour>|at <timerify_evening_hour> <timerify_clock_evening>)"
+# 7" is said without it), which would double the forms of the clock. The evening and
+# "tonight" leave out the hour 12 (timerify_evening_hours): "tonight at 12 pm" is most
+# often meant for midnight, and "pm" would plan noon, so it is no time. The afternoon
+# keeps 12 ("this afternoon at 12:30 pm"), and "tonight at 12" with no mark is midnight.
+  timerify_clock_part_marked: "(<timerify_clock_morning> at <timerify_morning_hour>|at <timerify_morning_hour> <timerify_clock_morning>|<timerify_clock_afternoon> at <timerify_afternoon_hour>|at <timerify_afternoon_hour> <timerify_clock_afternoon>|<timerify_clock_evening> at <timerify_evening_hour>|at <timerify_evening_hour> <timerify_clock_evening>)"
   timerify_clock_morning: "(<timerify_clock_day> morning|[<timerify_clock_day>] in the morning|{timerify_clock_this:clock_day} morning)"
-  timerify_clock_evening: "(<timerify_clock_day> (afternoon|evening)|[<timerify_clock_day>] in the (afternoon|evening)|{timerify_clock_this:clock_day} (afternoon|evening)|{timerify_clock_tonight_day:clock_day})"
+  timerify_clock_afternoon: "(<timerify_clock_day> afternoon|[<timerify_clock_day>] in the afternoon|{timerify_clock_this:clock_day} afternoon)"
+  timerify_clock_evening: "(<timerify_clock_day> evening|[<timerify_clock_day>] in the evening|{timerify_clock_this:clock_day} evening|{timerify_clock_tonight_day:clock_day})"
   timerify_morning_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_am:clock_part}|{timerify_clock_am_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_am:clock_part})"
-  timerify_evening_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_pm:clock_part})"
+  timerify_afternoon_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_half_day_hours:clock_hour} {timerify_clock_pm:clock_part})"
+  timerify_evening_hour: "({timerify_evening_hours:clock_hour}(:| )<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_evening_hours:clock_hour}.<timerify_clock_minute>( {timerify_clock_pm:clock_part}|{timerify_clock_pm_glued:clock_part})|{timerify_evening_hours:clock_hour} {timerify_clock_pm:clock_part})"
   timerify_part_hour: "({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} o'clock|{timerify_half_day_hours:clock_hour}|<timerify_clock_relative_hour>)"
   timerify_clock_minute: "({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})"
   timerify_clock_time: "(<timerify_exact_time>|<timerify_loose_time>)"
@@ -280,6 +285,12 @@ lists:
     range:
       from: 1
       to: 12
+  # The hours of the evening and of "tonight" said with "pm": 12 is left out, since a
+  # speaker who says "tonight at 12 pm" means midnight and "pm" would make it noon.
+  timerify_evening_hours:
+    range:
+      from: 1
+      to: 11
   # The minutes of a clock time said after a separator are two digits ("7:05", "7.05",
   # "7 05"), or number words ("seven thirty"); both fill the same slot. One digit is no
   # minute: "7.5" is not 7:05 and "22.5" is not 22:05.

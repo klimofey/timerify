@@ -505,6 +505,32 @@ describe("the card in the card picker", () => {
     expect(stub.entity).toBe("number.relay_run_for");
   });
 
+  it("takes the plain and the named Run for numbers as one list for a new card", async () => {
+    const { getStubConfig } = await freshEditor();
+    // A home with a timer alone on its device and a timer on a device with two: the names
+    // differ, and the new card takes the first of all of them.
+    const entities: Record<string, RegistryEntry> = {
+      ...LOOK_ALIKES,
+      "number.alpha_run_for": timerifyEntry("number.alpha_run_for", "run_for"),
+      "number.relay_run_for": timerifyEntry("number.relay_run_for", "run_for_with_target"),
+      "number.zebra_run_for": timerifyEntry("number.zebra_run_for", "run_for"),
+    };
+    const hass = fakeHass({ timers: [] }).with({ entities });
+
+    const plainFirst = getStubConfig(
+      hass,
+      ["number.zebra_run_for", "number.relay_run_for", "number.alpha_run_for"],
+      [],
+    );
+    const namedFirst = getStubConfig(hass, ["number.zebra_run_for", "number.relay_run_for"], []);
+    const plainLast = getStubConfig(hass, ["number.zebra_run_for"], ["number.relay_run_for"]);
+
+    expect(plainFirst.entity).toBe("number.alpha_run_for");
+    expect(namedFirst.entity).toBe("number.relay_run_for");
+    // What the dashboard does not use yet comes before what it does.
+    expect(plainLast.entity).toBe("number.zebra_run_for");
+  });
+
   it("asks for a timer when there is none", async () => {
     const { getStubConfig } = await freshEditor();
     const hass = pageWithTimers();

@@ -907,8 +907,10 @@ async def setup_target(
     `run_for_max` is the end of the Run for slider in minutes; without it the timer has
     no such option, like one of an earlier release. `off_button` gives the timer a Turn
     off button. `limit` is the minutes a loose timer lets its target run with no
-    countdown; without it the timer has no limit, like one of an earlier release. A test
-    that sets up a target provides it first, through one of the `fake_*` fixtures.
+    countdown; without it the timer has no limit, like one of an earlier release.
+    `before_setup` is called with the entry once it is added and before it is set up, to
+    leave the entity registry as an earlier release left it. A test that sets up a
+    target provides it first, through one of the `fake_*` fixtures.
     """
 
     async def setup(
@@ -924,6 +926,7 @@ async def setup_target(
         run_for_max: int | None = None,
         off_button: bool = False,
         limit: int | None = None,
+        before_setup: Callable[[MockConfigEntry], None] | None = None,
     ) -> MockConfigEntry:
         options: dict[str, Any] = {
             CONF_TARGET: target,
@@ -960,6 +963,8 @@ async def setup_target(
                 "key": key,
                 "data": stored_runtime,
             }
+        if before_setup is not None:
+            before_setup(entry)
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
         return entry

@@ -1,6 +1,7 @@
 """The names of a timer's entities: a device that holds more than one timer names the
 target of each, so that the user tells them apart wherever the names are listed."""
 
+from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
@@ -12,8 +13,16 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.timerify.const import EVENT_COUNTDOWN_ENDED
+from custom_components.timerify.const import (
+    DOMAIN,
+    EVENT_COUNTDOWN_ENDED,
+    KEY_ENDS_AT,
+    KEY_NEXT_COMMAND,
+    KEY_RUN_FOR,
+    timer_unique_id,
+)
 from custom_components.timerify.store import TimerStore
 
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
@@ -77,6 +86,52 @@ def relay_names(channel: str | None, interval: str | None = None) -> list[str]:
     if interval is not None:
         names.append(f"Relay Schedule {interval}{after}")
     return sorted(names)
+
+
+def left_by_release_1_2_0(
+    hass: HomeAssistant, suffix: str, *, run_for_named: str | None = None
+) -> Callable[[MockConfigEntry], None]:
+    """What the entity registry held once release 1.2.0 had made the entities of a timer
+    on a relay: plain names, and the ids Home Assistant gave them, which end in `suffix`
+    for the second timer, since both were called "Relay Run for". `run_for_named` is a
+    name the user gave the Run for."""
+
+    def register(entry: MockConfigEntry) -> None:
+        registry = er.async_get(hass)
+        for domain, key, name in (
+            ("number", KEY_RUN_FOR, "Run for"),
+            ("sensor", KEY_ENDS_AT, "Ends at"),
+            ("sensor", KEY_NEXT_COMMAND, "Next command"),
+        ):
+            registered = registry.async_get_or_create(
+                domain,
+                DOMAIN,
+                timer_unique_id(entry.entry_id, key),
+                config_entry=entry,
+                has_entity_name=True,
+                original_name=name,
+                suggested_object_id=f"relay_{key}{suffix}",
+                translation_key=key,
+            )
+            if key == KEY_RUN_FOR and run_for_named is not None:
+                registry.async_update_entity(registered.entity_id, name=run_for_named)
+
+    return register
+
+
+async def upgraded_relay(
+    hass: HomeAssistant, setup_target: SetupTarget
+) -> tuple[ConfigEntry, ConfigEntry]:
+    """The two timers of a relay, set up on the registry release 1.2.0 left: the second
+    one has the ids that end in `_2`, and the user named its Run for "Heater timer"."""
+    one = await setup_target(
+        target="switch.relay_1", before_setup=left_by_release_1_2_0(hass, "")
+    )
+    two = await setup_target(
+        target="switch.relay_2",
+        before_setup=left_by_release_1_2_0(hass, "_2", run_for_named="Heater timer"),
+    )
+    return one, two
 
 
 async def test_one_timer_on_a_relay_keeps_its_plain_names(
@@ -463,3 +518,81 @@ async def test_a_renamed_target_is_named_in_the_brackets_at_the_next_load(
     await restart(hass, one)
 
     assert "Relay Run for (Heater)" in names_of(hass, one)
+
+
+async def test_an_update_from_1_2_0_keeps_every_id_and_names_the_channels(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """A house that has two timers on a relay updates from 1.2.0. The entities keep the
+    ids they have, `number.relay_run_for` and `number.relay_run_for_2` among them, and
+    the lists name the channels. The name the user gave a Run for stays."""
+    one, two = await upgraded_relay(hass, setup_target)
+
+    assert ids_of(hass, one) == {
+        "number.relay_run_for",
+        "sensor.relay_ends_at",
+        "sensor.relay_next_command",
+    }
+    assert ids_of(hass, two) == {
+        "number.relay_run_for_2",
+        "sensor.relay_ends_at_2",
+        "sensor.relay_next_command_2",
+    }
+    assert names_of(hass, one) == [
+        "Relay Ends at (Channel 1)",
+        "Relay Next command (Channel 1)",
+        "Relay Run for (Channel 1)",
+    ]
+    assert names_of(hass, two) == [
+        "Heater timer",
+        "Relay Ends at (Channel 2)",
+        "Relay Next command (Channel 2)",
+    ]
+
+
+async def test_an_entity_added_after_the_update_takes_its_id_from_its_name(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """Ids are set one entity at a time. The user adds an interval to each timer of the
+    updated relay: the new switches have ids that name their channels, beside the older
+    entities of the same timers, whose ids stay."""
+    one, two = await upgraded_relay(hass, setup_target)
+    older = ids_of(hass, one) | ids_of(hass, two)
+
+    await add_interval(hass, one, start="20:00", end="21:00")
+    await add_interval(hass, two, start="18:00", end="19:00")
+
+    assert (ids_of(hass, one) | ids_of(hass, two)) - older == {
+        "switch.relay_schedule_20_00_21_00_mon_sun_channel_1",
+        "switch.relay_schedule_18_00_19_00_mon_sun_channel_2",
+    }
+    assert older <= ids_of(hass, one) | ids_of(hass, two)
+
+
+async def test_a_target_on_no_device_linked_to_a_device_with_a_timer_renames_both(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    provide_target: ProvideTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The user links a helper switch that is on no device to the relay, in the settings
+    of the switch. Its timer moves to the relay with the entity ids it had, and it and
+    the relay's timer name their entities after their targets."""
+    pump = provide_target("switch.pump", SWITCH_SERVICES, name="Pump", on_device=False)
+    relay_entry = await setup_target(target="switch.relay_1")
+    pump_entry = await setup_target(target="switch.pump")
+    assert "Pump Run for" in names_of(hass, pump_entry)
+    assert "Relay Run for" in names_of(hass, relay_entry)
+
+    er.async_get(hass).async_update_entity(
+        pump.entity_id, device_id=fake_relay[0].device_id
+    )
+    await hass.async_block_till_done()
+
+    assert "Relay Run for (Pump)" in names_of(hass, pump_entry)
+    assert "Relay Run for (Channel 1)" in names_of(hass, relay_entry)
+    assert run_for_of(hass, pump_entry) == "number.pump_run_for"

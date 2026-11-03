@@ -4531,7 +4531,11 @@ now.
   repeats and the countdown ends on time),
   `test_deleting_one_of_two_timers_makes_the_other_plain_again`,
   `test_a_name_the_user_gave_survives_both_renames` and
-  `test_a_third_timer_on_the_device_reloads_nobody`.
+  `test_a_third_timer_on_the_device_reloads_nobody`. Ids are set one entity at a time, so
+  an update from 1.2.0 keeps the `_2` ids of a second timer, and an entity that timer gets
+  later has an id after its name. Tests:
+  `test_an_update_from_1_2_0_keeps_every_id_and_names_the_channels` and
+  `test_an_entity_added_after_the_update_takes_its_id_from_its_name`.
 - **A renamed target does not reload the timer.** The bracket follows at the next load, as
   the title of the entry does. Why: the bracket is a label and not a state, and a reload for
   it would make a rename of the target a short outage of its timer. Cost if wrong: the
@@ -4543,8 +4547,10 @@ now.
   device's count. Why: a target that moves from one device to another changes the count of
   two devices, and the timer set up after the move is on only one of them; the timer it left
   behind is on the other. Cost if wrong: when the pump leaves the relay, the relay's timer
-  stays named after a sibling it no longer has. Test:
-  `test_a_target_that_moves_between_devices_renames_both_sides`.
+  stays named after a sibling it no longer has. Tests:
+  `test_a_target_that_moves_between_devices_renames_both_sides` and, for a target that is on
+  no device and is linked to one,
+  `test_a_target_on_no_device_linked_to_a_device_with_a_timer_renames_both`.
 - **The check also runs after a set-up that failed.** `async_setup_entry` calls it in a
   `finally`. Why: a timer that fails to load, for example because its stored file
   contradicts itself, still has its target on the device and counts, so its sibling must be
@@ -4582,6 +4588,18 @@ now.
   reloads the siblings would be one more rule to keep in step with the first. Cost if
   wrong: a sibling reads a bracket it no longer needs, or lacks one, until its next load.
   Tests: none; it is the absence of a listener.
+- **The harness finds the switch of an interval by its friendly name.**
+  `_is_schedule_switch_of` in `scripts/harness/hass.py` matches a state whose friendly name
+  ends in "Schedule {title}", and then checks the registry row of the interval's unique id.
+  On a device with more than one timer the name ends in " ({target})", and the match would
+  time out. No smoke or E2E fixture puts two timers on one device, so it is not reached.
+  Why it is not changed here: a state carries no unique id, so a registry lookup has to wait
+  for the entity to be registered, and the reload that registers it is still running when
+  the interval is created. The harness follows `state_changed` only, so it has no event
+  that says a registry row appeared; the other way is a polling loop on
+  `config/entity_registry/list`, which no fixture justifies yet. A fixture that shares a
+  device between two timers must change the matcher first. Tests: none; the harness runs
+  against Docker and no fixture reaches this.
 - **The device of a target is read from the registry, not with
   `async_entity_id_to_device_id`.** `timers_by_device` and `shares_its_device` use
   `er.async_get(hass).async_get(...)`, which takes an entity id or a registry id and returns

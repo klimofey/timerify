@@ -4535,8 +4535,9 @@ now.
 - **A renamed target does not reload the timer.** The bracket follows at the next load, as
   the title of the entry does. Why: the bracket is a label and not a state, and a reload for
   it would make a rename of the target a short outage of its timer. Cost if wrong: the
-  bracket names the target as it was called until the next load. Tests: none; it is the
-  absence of a listener.
+  bracket names the target as it was called until the next load. Test:
+  `test_a_renamed_target_is_named_in_the_brackets_at_the_next_load` (no write while the
+  target is renamed, the old bracket stays, and the new one comes with the next load).
 - **The check covers every loaded timer, not only those on one device.** One pass counts the
   timers of every device, and a timer is reloaded when its own naming differs from its
   device's count. Why: a target that moves from one device to another changes the count of
@@ -4556,16 +4557,31 @@ now.
   2026.10 already takes the entry out of the list before it calls `async_remove_entry`
   (`config_entries.py:2379`); the exclusion keeps the count right if that order changes, and
   costs one comparison. Cost if wrong: the removed timer would still count, and the other
-  timer of the relay would stay named after a sibling that is gone. Test:
+  timer of the relay would stay named after a sibling that is gone. The call is in a
+  `finally` around the removal of the two stored files, as in `async_setup_entry`: a file
+  that cannot be removed is logged by Home Assistant, the timer is gone all the same, and
+  the sibling is named for the count without it. Tests:
   `test_deleting_one_of_two_timers_makes_the_other_plain_again`, which passes with either
-  order.
+  order, and `test_a_timer_whose_file_cannot_be_removed_still_makes_its_sibling_plain`.
 - **A deleted target counts on no device.** The registry entry is what says which device a
   target is on, and a deleted target has none, so its timer counts on no device. Nothing is
   reloaded when the target is deleted: its siblings follow at their next load, and a
   restored target reloads its timer (`_follow_target_restored`), which runs the check and
-  renames them at once. Cost if wrong: a delete that reloaded the siblings would turn the
-  deletion of one entity into a short outage of its neighbour's timer. Test:
+  renames them at once. When a sibling does load again, the check finds the timer of the
+  deleted target loaded and named while it counts on no device, and reloads it too: one
+  harmless reload, which is no loop, since the timer then loads plain. Cost if wrong: a
+  delete that reloaded the siblings would turn the deletion of one entity into a short
+  outage of its neighbour's timer. Test:
   `test_a_deleted_target_leaves_its_sibling_named_until_it_is_loaded_again`.
+- **A timer that is not loaded does not follow its target's device.** A disabled timer, or
+  one that failed to load, has no listener on its target, since the listeners are made at
+  set-up and go with an unload. If its target moves to another device, the count of two
+  devices changes, and the loaded timers on them keep their names until their next load, or
+  until that timer is loaded again, which runs the check. Why: a timer that is switched off
+  or broken is left as it is, and the move of its target is rare; a second place that
+  reloads the siblings would be one more rule to keep in step with the first. Cost if
+  wrong: a sibling reads a bracket it no longer needs, or lacks one, until its next load.
+  Tests: none; it is the absence of a listener.
 - **The device of a target is read from the registry, not with
   `async_entity_id_to_device_id`.** `timers_by_device` and `shares_its_device` use
   `er.async_get(hass).async_get(...)`, which takes an entity id or a registry id and returns

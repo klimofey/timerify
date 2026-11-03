@@ -1,6 +1,8 @@
 """The names of a timer's entities: a device that holds more than one timer names the
 target of each, so that the user tells them apart wherever the names are listed."""
 
+from unittest.mock import patch
+
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.config_entries import (
@@ -12,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.timerify.const import EVENT_COUNTDOWN_ENDED
+from custom_components.timerify.store import TimerStore
 
 from .conftest import SWITCH_SERVICES, FakeTarget, ProvideTarget, SetupTarget
 from .helpers import (
@@ -252,6 +255,25 @@ async def test_deleting_one_of_two_timers_makes_the_other_plain_again(
     assert ids_of(hass, one) == ids
 
 
+async def test_a_timer_whose_file_cannot_be_removed_still_makes_its_sibling_plain(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """The user deletes the timer of the second channel, and its stored file cannot be
+    removed. The timer is gone all the same, and the first one reads "Relay Run for"
+    again."""
+    one = await setup_target(target="switch.relay_1")
+    two = await setup_target(target="switch.relay_2")
+
+    with patch.object(TimerStore, "async_remove", side_effect=OSError("disk error")):
+        await hass.config_entries.async_remove(two.entry_id)
+        await hass.async_block_till_done()
+
+    assert hass.config_entries.async_get_entry(two.entry_id) is None
+    assert "Relay Run for" in names_of(hass, one)
+
+
 async def test_a_name_the_user_gave_survives_both_renames(
     hass: HomeAssistant,
     fake_relay: tuple[FakeTarget, FakeTarget],
@@ -391,10 +413,11 @@ async def test_a_deleted_target_leaves_its_sibling_named_until_it_is_loaded_agai
     fake_relay: tuple[FakeTarget, FakeTarget],
     setup_target: SetupTarget,
 ) -> None:
-    """The user deletes the second channel's entity. Nothing is reloaded, so the first
-    timer goes on reading "(Channel 1)". Once it loads again it counts no other timer on
-    the relay, and reads plain. When the second channel is registered again, its timer
-    reloads, and the first one is renamed at once."""
+    """The user deletes the second channel's entity. Nothing is reloaded, so both
+    timers go on reading their channels. Once the first one loads again it counts no
+    other timer on the relay, and reads plain. The second timer, whose target is gone,
+    is loaded again with it and loses its bracket too. When the second channel is
+    registered again, its timer reloads, and both are named at once."""
     _, relay_2 = fake_relay
     one = await setup_target(target="switch.relay_1")
     two = await setup_target(target="switch.relay_2")
@@ -404,12 +427,39 @@ async def test_a_deleted_target_leaves_its_sibling_named_until_it_is_loaded_agai
 
     assert writes == []
     assert "Relay Run for (Channel 1)" in names_of(hass, one)
+    assert "Relay Run for (Channel 2)" in names_of(hass, two)
 
     await restart(hass, one)
 
     assert "Relay Run for" in names_of(hass, one)
+    assert two.state is ConfigEntryState.LOADED
+    assert not [name for name in names_of(hass, two) if "(Channel 2)" in name]
 
     await relay_2.restore()
 
     assert "Relay Run for (Channel 1)" in names_of(hass, one)
     assert "Relay Run for (Channel 2)" in names_of(hass, two)
+
+
+async def test_a_renamed_target_is_named_in_the_brackets_at_the_next_load(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """The user renames the first channel of the relay to "Heater" in its settings.
+    Its timer is not reloaded for a label, so it goes on reading "(Channel 1)" and
+    never goes unavailable. Once it loads again for any other reason, it reads
+    "(Heater)"."""
+    one = await setup_target(target="switch.relay_1")
+    await setup_target(target="switch.relay_2")
+    writes = record_writes(hass, run_for_of(hass, one))
+
+    er.async_get(hass).async_update_entity("switch.relay_1", name="Heater")
+    await hass.async_block_till_done()
+
+    assert writes == []
+    assert "Relay Run for (Channel 1)" in names_of(hass, one)
+
+    await restart(hass, one)
+
+    assert "Relay Run for (Heater)" in names_of(hass, one)

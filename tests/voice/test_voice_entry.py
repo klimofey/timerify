@@ -555,11 +555,15 @@ async def test_a_second_timer_on_a_device_leaves_the_voice_settings_alone(
     adds the timers of both channels of a relay. The first one is renamed at once, and
     the settings are neither reloaded nor failed by it."""
     voice = await add_voice_entry(hass, languages=("en",))
+    files = voice.runtime_data
+    reloads = conversation_reloads(hass)
 
     one = await setup_target(target="switch.relay_1")
     await setup_target(target="switch.relay_2")
 
     assert voice.state is ConfigEntryState.LOADED
+    assert voice.runtime_data is files
+    assert reloads == []
     state = hass.states.get(run_for_of(hass, one))
     assert state is not None
     assert state.attributes["friendly_name"] == "Relay Run for (Channel 1)"

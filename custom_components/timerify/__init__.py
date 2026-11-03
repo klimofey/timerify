@@ -209,9 +209,13 @@ async def async_remove_entry(
     async_clear(hass, TARGET_DELETED, entry.entry_id)
     async_clear(hass, STORED_TIMER_INVALID, entry.entry_id)
     async_clear_settings_warnings(hass, entry.entry_id)
-    await TimerStore(hass, entry.entry_id).async_remove()
-    await RuntimeStore(hass, entry.entry_id).async_remove()
-    _async_reload_timers_named_otherwise(hass, entry.entry_id, removed=True)
+    try:
+        await TimerStore(hass, entry.entry_id).async_remove()
+        await RuntimeStore(hass, entry.entry_id).async_remove()
+    finally:
+        # Also when a file cannot be removed: the timer is gone either way, and its
+        # siblings are named for the count without it.
+        _async_reload_timers_named_otherwise(hass, entry.entry_id, removed=True)
 
 
 def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_TYPE:

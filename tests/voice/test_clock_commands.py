@@ -18,6 +18,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
@@ -1704,9 +1705,22 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
         ({"clock_hour": 8, "clock_before": 15}, 0, "07:45"),
         ({"clock_part": "pm", "clock_before": 15}, 0, "11:45"),
         ({"clock_part": "am", "clock_before": 15}, 0, "23:45"),
+        ({"clock_part": "am", "clock_before": 15, "clock_day": 0}, 0, "23:45"),
         ({"clock_part": "am", "clock_before": 15, "clock_day": 1}, 1, "23:45"),
+        ({"clock_hour": 12, "clock_before": 15, "clock_day": 0}, 0, "11:45"),
+        ({"clock_hour": 12, "clock_before": 15, "clock_day": 1}, 1, "11:45"),
+        ({"clock_hour": 1, "clock_before": 15, "clock_day": 1}, 1, "00:45"),
     ],
-    ids=["an hour", "noon", "midnight", "midnight tomorrow"],
+    ids=[
+        "an hour",
+        "noon",
+        "midnight",
+        "midnight today",
+        "midnight tomorrow",
+        "12 today",
+        "12 tomorrow",
+        "1 tomorrow",
+    ],
 )
 async def test_minutes_before_come_with_an_hour_or_noon_or_midnight(
     hass: HomeAssistant,
@@ -1717,7 +1731,8 @@ async def test_minutes_before_come_with_an_hour_or_noon_or_midnight(
 ) -> None:
     """Minutes before an hour are said of a named hour, and of noon and midnight, which
     have no hour: "quarter to midnight" is 23:45, and "tomorrow at quarter to midnight"
-    is the 23:45 that ends tomorrow."""
+    is the 23:45 that ends tomorrow. A day word names the day of the time, so "tomorrow
+    at quarter to 12" is 11:45 tomorrow and not the 23:45 of today."""
     await say_slots(hass, slots)
 
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
@@ -1753,6 +1768,7 @@ async def test_tonight_is_the_night_of_today(
         {"clock_hour": 8, "clock_before": 15, "clock_minute": 10},
         {"clock_hour": 8, "clock_before": 0},
         {"clock_hour": 8, "clock_before": 60},
+        {"clock_hour": 12, "clock_part": "am", "clock_before": 15, "clock_day": 1},
         {"clock_ordinal": 0, "clock_minute": 30},
         {"clock_ordinal": 13, "clock_minute": 30},
     ],
@@ -1762,6 +1778,7 @@ async def test_tonight_is_the_night_of_today(
         "minutes before and minutes after",
         "no minutes before",
         "an hour of minutes before",
+        "a quarter to the start of tomorrow",
         "the zeroth hour",
         "the thirteenth hour",
     ],
@@ -1773,9 +1790,9 @@ async def test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood
     slots: dict[str, object],
 ) -> None:
     """No sentence names two hours, or minutes both before and after one, or minutes
-    outside 1 to 59 or an hour outside 1 to 12 in the ordinal. Slots that say it, from a
-    caller that is not a sentence, are refused as invalid, and nothing is kept or
-    switched."""
+    outside 1 to 59 or an hour outside 1 to 12 in the ordinal, or minutes before the
+    start of the day said. Slots that say it, from a caller that is not a sentence, are
+    refused as invalid, and nothing is kept or switched."""
     with pytest.raises(intent.InvalidSlotInfo):
         await say_slots(hass, slots)
 
@@ -1961,6 +1978,81 @@ def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
     )
 
     assert moment == datetime(2026, 3, 27, 0, 45, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("now", "hour", "part", "day", "night_after", "before", "days", "clock"),
+    [
+        ("06:00", 12, None, 1, False, 15, 1, "11:45"),
+        ("06:00", 12, None, 0, False, 15, 0, "11:45"),
+        ("06:00", 1, None, 1, False, 15, 1, "00:45"),
+        ("06:00", 12, "am", 1, True, 15, 1, "23:45"),
+        ("06:00", 12, "am", 0, True, 15, 0, "23:45"),
+        ("06:00", 12, "night", 1, True, 15, 1, "23:45"),
+        ("06:00", 1, "night", 1, True, 10, 2, "00:50"),
+        ("00:20", 1, "night", 0, True, 10, 0, "00:50"),
+        ("01:00", 1, "night", 0, True, 10, 1, "00:50"),
+    ],
+    ids=[
+        "tomorrow at quarter to 12",
+        "today at quarter to 12",
+        "tomorrow at quarter to 1",
+        "tomorrow at quarter to midnight",
+        "today at quarter to midnight",
+        "tomorrow at quarter to 12 at night",
+        "tomorrow at ten to 1 at night",
+        "today at ten to 1 at night, said before it",
+        "today at ten to 1 at night, said after it",
+    ],
+)
+def test_minutes_before_an_hour_stay_on_the_day_said(
+    now: str,
+    hour: int,
+    part: DayPart | None,
+    day: int,
+    night_after: bool,
+    before: int,
+    days: int,
+    clock: str,
+) -> None:
+    """A day word names the day of the time said, so the minutes before an hour do not
+    take it to the day before: "tomorrow at quarter to 12" is 11:45 tomorrow and not the
+    23:45 before tomorrow's start. The midnight that ends the day is the exception only
+    because it is on the day it ends: "tomorrow at quarter to midnight" is 23:45
+    tomorrow, and the night after the day is read as it is without the minutes."""
+    moment = clock_moment(
+        local(SUNDAY, now),
+        ZoneInfo(JERUSALEM),
+        hour,
+        0,
+        part,
+        day,
+        before=before,
+        night_after=night_after,
+    )
+
+    assert moment == local(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("hour", "part"), [(12, "am"), (0, None)], ids=["12 am", "the hour 0"]
+)
+def test_minutes_before_the_start_of_the_day_said_leave_no_time_on_it(
+    hour: int, part: DayPart | None
+) -> None:
+    """The only hour of "tomorrow at quarter to 12 am" is the start of tomorrow, and a
+    quarter of an hour before it is not tomorrow. No sentence says that time, so it is
+    invalid, as slots no sentence makes are, and not read as another day."""
+    with pytest.raises(probatio.Invalid):
+        clock_moment(
+            local(SUNDAY, "06:00"),
+            ZoneInfo(JERUSALEM),
+            hour,
+            0,
+            part,
+            1,
+            before=15,
+        )
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:

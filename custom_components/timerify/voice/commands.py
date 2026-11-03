@@ -225,11 +225,16 @@ def clock_moment(
     *,
     zero: bool = False,
     before: int = 0,
+    night_after: bool = False,
 ) -> datetime:
     """The moment, in UTC, that a clock time said at `now` means on the wall clock of
     `zone`; `day` is the day word said with it, in days from today, or None; `zero` is
     whether the hour was written with a leading zero ("07"); `before` is the minutes
-    said to be before it ("quarter to 8" is the hour 8 and 15 before).
+    said to be before it ("quarter to 8" is the hour 8 and 15 before); `night_after` is
+    whether the hour is of the small hours of the night that follows the day word
+    (midnight, and 12 or 1 to 5 said with "night"), which is on the date after it.
+
+    Raises `probatio.Invalid` when no time is left on the day named (see below).
 
     An hour from 1 to 12 said with no part and no zero is the nearer of its morning and
     evening times that is ahead; any other hour is that of the 24-hour clock, and a
@@ -240,11 +245,22 @@ def clock_moment(
     hour can mean is taken unless it has passed today and the other has not. A time
     that has passed is returned as it is: the controller refuses it.
 
-    The minutes before are taken off the wall time of the hour on its day, after the
+    The night after the day word is on the date after it, and for "today", which can be
+    said in the small hours, on the date of the night in progress too: its time is taken
+    if it is still ahead, else the next night's.
+
+    The minutes before are taken off the wall time of the hour on its date, after the
     day and the part are read, so the hour keeps the rules of its part of the day and
     "quarter to midnight" is 23:45 of the day before the midnight. That can be a day
     earlier than the hour, so with no day word today, tomorrow and the day after are
     searched: "quarter to midnight" said at 23:50 is tomorrow's 23:45.
+
+    With a day word the time is on that day, and the minutes before are not taken to an
+    earlier one: "tomorrow at quarter to 12" is 11:45 tomorrow, not the 23:45 that
+    comes before tomorrow's midnight, while "tomorrow at quarter to midnight" is 23:45
+    tomorrow, the midnight being the one that ends it. A candidate on an earlier day is
+    left out, and the time is invalid when none is left ("tomorrow at quarter to 12
+    am", whose only hour is the start of tomorrow).
 
     The wall time, once the minutes are off, follows `schedule.wall_moment`: a time the
     clock skips happens later by the gap, so "quarter to 3" on the night the clock
@@ -257,17 +273,28 @@ def clock_moment(
     else:
         hours = [hour_of_day(hour, part)]
     today = now.astimezone(zone).date()
+    dates_ahead: tuple[int, ...]
+    if day is None:
+        dates_ahead = (0, 1, 2)
+    elif night_after:
+        dates_ahead = (0, 1) if day == 0 else (day + 1,)
+    else:
+        dates_ahead = (day,)
     wall_times = (
         datetime.combine(today + timedelta(days=ahead), time(h, minute))
         - timedelta(minutes=before)
-        for ahead in ((0, 1, 2) if day is None else (day,))
+        for ahead in dates_ahead
         for h in hours
     )
+    named = None if day is None else today + timedelta(days=day)
     moments = sorted(
         moment
         for wall in wall_times
+        if named is None or wall.date() >= named
         for moment in wall_moments(wall.date(), wall.time(), zone)
     )
+    if not moments:
+        raise probatio.Invalid("the minutes before take the time off the day named")
     return min((moment for moment in moments if moment > now), default=moments[0])
 
 
@@ -370,8 +397,8 @@ class ClockCommandHandler(DelayedCommandHandler):
 
         Raises `probatio.Invalid` for slots that no sentence makes, which the agents
         answer as not understood: a time with no hour that is not noon or midnight, an
-        ordinal hour with an hour or with minutes before, and minutes before with
-        minutes after.
+        ordinal hour with an hour or with minutes before, minutes before with minutes
+        after, and minutes before that take a day word's time off its day.
         """
         part = slots.get("clock_part", {}).get("value")
         day = slots.get("clock_day", {}).get("value")
@@ -403,17 +430,16 @@ class ClockCommandHandler(DelayedCommandHandler):
         now = dt_util.utcnow()
         zone = dt_util.get_default_time_zone()
         minute = 0 if minute is None else minute
-        if in_the_night_after and day is not None:
-            if day == 0:
-                # Said in the small hours, "today" names the night in progress.
-                moment = clock_moment(
-                    now, zone, hour, minute, part, 0, zero=zero, before=before
-                )
-                if moment > now:
-                    return moment
-            day += 1
         return clock_moment(
-            now, zone, hour, minute, part, day, zero=zero, before=before
+            now,
+            zone,
+            hour,
+            minute,
+            part,
+            day,
+            zero=zero,
+            before=before,
+            night_after=in_the_night_after,
         )
 
 

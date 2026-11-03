@@ -3016,6 +3016,26 @@ in `docs/followups.md`.
     time before it; `_timed_blocks` writes the blocks of either intent, and `render` adds
     `TimerifyCommandAt` with `slots.action` and the answer `delayed`, and raises when the
     sources lack one of the three clock rules. The answer is `timer_later`, as a delay's.
+  - **Minutes around an hour (owner's rule, 2026-11-03, issue #49).** Any number of minutes
+    from 1 to 59 is counted past an hour or to the next ("ten past 7", "twenty minutes to
+    8"), and "quarter" (15) and "half" (30) are only words for such a number: "half past 7"
+    is 07:30 and "quarter to 8" is 07:45. Russian counts to the next hour, with the ordinal
+    of that hour in the genitive ("v polovine vos'mogo" is 07:30, "desyat' minut vos'mogo"
+    is 07:10), and to an hour with "bez" ("bez chetverti vosem'" is 07:45). The design: the
+    words are in the `src/` files of both languages, and the slot a form fills is the
+    direction of its minutes (`clock_minute` past an hour, `clock_before` to one,
+    `clock_ordinal` the hour counted to), so that Python knows no word; one function does
+    the sums (`clock_moment` with `before`); and `scripts/` does not change, since the
+    generator reads only the three rules `timerify_clock_after_command`,
+    `timerify_clock_after_extras` and `timerify_clock_before_command`, and the new forms
+    are alternatives inside the time they say. The calls the spec left open are under
+    "Release 1.3.0, Part C". The English forms are exact times, so a thermostat takes them
+    after its settings (none is a temperature). A Russian time is no longer always said with
+    "v", as the entry on thermostats above says: "desyat' minut vos'mogo" has none, and
+    "bez" starts the other forms. Russian still needs no override of
+    `timerify_clock_after_extras`, for a new reason: a Russian time is never a bare number,
+    since it has "v" or "bez" or the ordinal of the hour that its minutes are counted to,
+    and a temperature is a bare number.
   Tests: `test_turn_on_at_a_clock_time_keeps_a_command_for_then`,
   `test_every_english_clock_form_means_its_time`,
   `test_the_time_may_come_before_the_command`,
@@ -4646,13 +4666,13 @@ now.
   03:00 is 03:45, the same moment as "quarter to 4". "Tonight" is a new `clock_part` value
   that `when` reads as the night with the day word "today" when no day is said, so "tonight
   at 7" is 19:00 today, "tonight at 2" is the 02:00 that follows today, and an evening
-  one that has passed is refused as "today at 7" is; `hour_of_day` gives it the hours of the night, so its
-  `match` stays total. The slot combinations that no sentence makes are refused as invalid,
-  like a time with no hour: an ordinal with an hour or with minutes before, minutes before
-  with minutes after, and minutes before with no hour that is not noon or midnight. The
-  schema refuses a `clock_before` outside 1 to 59 and a `clock_ordinal` outside 1 to 12.
-  Noon and midnight with minutes before stay valid: no hour, the part `pm` or `am`, no
-  minutes after. Why: one place for the sums, so that a language adds only words; a signed
+  one that has passed is refused as "today at 7" is; `hour_of_day` gives it the hours of the
+  night, so its `match` stays total. The slot combinations that no sentence makes are refused
+  as invalid, like a time with no hour: an ordinal with an hour or with minutes before,
+  minutes before with minutes after, and minutes before with no hour that is not noon or
+  midnight. The schema refuses a `clock_before` outside 1 to 59 and a `clock_ordinal` outside
+  1 to 12. Noon and midnight with minutes before stay valid: no hour, the part `pm` or `am`,
+  no minutes after. Why: one place for the sums, so that a language adds only words; a signed
   offset in a list would put a sum in the data ("chetvert' vos'mogo" as -45). Cost if wrong:
   a wrong sum is wrong in every language at once, which the tables of the tests catch before
   any sentence is involved. Tests (`tests/voice/test_clock_commands.py`):
@@ -4678,18 +4698,98 @@ now.
   the minutes before (1 to 59) put exactly one on the named day, so a candidate is always
   left and the function has no refusal. It must not get one: a `probatio.Invalid` from a
   sentence's slots is turned by `intent.async_handle` into an `InvalidSlotInfo`, which the
-  agent speaks as an English string whatever the language. For the night after a day word the dates are those of the night, and a result on the named day or on the day
-  after it is kept. They are now worked out in `clock_moment`, which takes `night_after`:
-  the handler used to add a day for the night, which left `clock_moment` nothing to tell the
-  named day from the day of the hour. They are the date after the day word, and for "today"
-  also the night in progress, whose time is taken if it is still ahead. The handler no longer
-  changes `day`. Every result without minutes before is as it was: with none, a candidate of
-  the date after is never on the named day. Why: the day word is the first thing the speaker
-  says about the time, and a command planned on the day before it would show only in the
-  answer ("turns on at 23:45 today"). Cost if wrong: a rule that kept too much would plan the
-  command a day early; one that kept too little would refuse a time someone says. Tests
+  agent speaks as an English string whatever the language. For the night after a day word the
+  dates are those of the night, and a result on the named day or on the day after it is kept.
+  They are now worked out in `clock_moment`, which takes `night_after`: the handler used to
+  add a day for the night, which left `clock_moment` nothing to tell the named day from the
+  day of the hour. They are the date after the day word, and for "today" also the night in
+  progress, whose time is taken if it is still ahead. The handler no longer changes `day`.
+  Every result without minutes before is as it was: with none, a candidate of the date after
+  is never on the named day. Why: the day word is the first thing the speaker says about the
+  time, and a command planned on the day before it would show only in the answer ("turns on
+  at 23:45 today"). Cost if wrong: a rule that kept too much would plan the command a day
+  early; one that kept too little would refuse a time someone says. Tests
   (`tests/voice/test_clock_commands.py`): `test_minutes_before_an_hour_stay_on_the_day_said`,
   `test_a_time_with_a_day_word_and_minutes_before_is_always_on_the_day_named` (every hour,
   day and number of minutes leaves a moment on the named day),
   `test_today_at_quarter_to_12_is_the_next_of_its_two_times_today`, and the rows with
   `clock_day` of `test_minutes_before_come_with_an_hour_or_noon_or_midnight`.
+- **The rule of a bare hour holds for minutes past and to an hour.** With no part of the day
+  and no leading zero, the time that minutes past or to an hour make is the nearer of its two
+  times ahead, as "7:30" is: "half past 7" at 08:00 is 19:30, "quarter to 8" at 19:50 is 07:45
+  tomorrow, and "quarter to 12" is 11:45 or 23:45. "Am", "pm" and a part of the day go with
+  the hour that is named, before the minutes are counted: "quarter to 8 in the evening" is
+  19:45, and the Russian "v polovine vos'mogo vechera" is 19:30. Why: the speaker who says
+  "half past 7" has the clock of "7:30" in mind, and a second reading for the same time
+  would have to be learned. Cost if wrong: someone who means the evening one by "half past 7"
+  at 06:00 hears 07:30 in the answer and says "in the evening" or "pm". Tests
+  (`tests/voice/test_clock_commands.py`): `test_minutes_around_an_hour_mean_their_time`,
+  `test_minutes_before_an_hour_are_the_nearer_time_ahead`,
+  `test_minutes_before_twelve_noon_and_midnight` and
+  `test_russian_clock_phrases_mean_their_time` (the fixture `clock_phrases.yaml`).
+- **A bare 12 with a day word is the earlier of its two times (provisional, the owner will
+  confirm).** The new forms keep the rule that a bare hour has with a day word: the earlier of
+  its two times on that day. So "tomorrow at 12:30" and the Russian "zavtra v polovine
+  pervogo" are 00:30 tomorrow, as "tomorrow at 7" is 07:00. Without a day word a bare 12 is
+  the nearer of its two times ahead, and "at noon" and "at midnight" are the times they
+  name. The user pages say so in one sentence each. Why: it is the rule of every other bare
+  hour, and a rule for 12 alone would be a second one; the owner has not ruled on 12 in
+  particular. Cost if wrong: a speaker who means 12:30 by day gets 00:30 in the answer, and
+  the fix is a change of one rule, in `clock_moment`, for the hour 12. Tests: the English row
+  "tomorrow at 12:30" of `test_every_english_clock_form_means_its_time`, the case "tomorrow
+  half of the first is the earlier of the two" of `clock_phrases.yaml`, and the rows with
+  `clock_hour` 12 and `clock_day` of
+  `test_minutes_before_come_with_an_hour_or_noon_or_midnight`.
+- **The bounds of minutes past and to an hour.** The minutes are 1 to 59 (the list
+  `timerify_minutes_of_hour`), the hour counted to is 1 to 12 (`timerify_half_day_hours`),
+  and noon and midnight take minutes to them only. So "at 0 past 7" and "at 60 to 8" are not
+  times, since 0 minutes is the hour ("at 7") and 60 is the next one; "at 15 to 13" is not,
+  because the hours counted to are those of the dial, 1 to 12, and "12:45" says that time;
+  and "at half past noon" is not, because noon is a part of the day with no hour to count
+  from, and "12:30" says that time.
+  Why: each of them already has a way to be said, and a loose bound would read a slip of the
+  tongue as a time. Cost if wrong: a speaker who says one of them hears "not understood" and
+  nothing is planned. Test: `test_minutes_around_an_hour_out_of_bounds_are_not_understood`.
+- **"Half to 8" is not understood, through a list of its own for before the hour.**
+  `timerify_clock_fractions` holds "half" and "quarter", and `timerify_clock_fractions_before`
+  only "quarter", so "half past 7" and "quarter to 8" are times and "half to 8" is not. Why:
+  "half to 8" is no English phrase, and it is likelier to be a slip for "half past 7" or for
+  "half 8" (8:30 in some English) than a request for 07:30, so a guess would plan a command at
+  the wrong time without a word. Cost if wrong: a speaker who says it hears "not understood"
+  and says "half past 7". Test:
+  `test_minutes_around_an_hour_out_of_bounds_are_not_understood`.
+- **The Russian hour one after "bez" is "chas".** "Bez pyati chas" is said, not "bez pyati
+  odin", so `timerify_clock_before` takes the hour from `timerify_half_day_hours` and from
+  the list `timerify_clock_hour_one` ("chas", 1). The cardinal "odin" and the digit are
+  matched too, by the range, which is no harm. Why: it is how Russian says the hour one after
+  "bez"; the range holds the cardinals only. Cost if wrong: none for a speaker; a recogniser
+  that writes "chas" works, and so does one that writes "1". Test:
+  `test_russian_clock_phrases_mean_their_time` ("five short of one").
+- **Left out, to add on request.** Digits as the ordinal ("v polovine 8"), "pol" joined with
+  a hyphen ("pol-vos'mogo") and a bare "v chas" are not understood. "Pol vos'mogo" with a
+  space is understood, and so is "polvos'mogo"; "v" before an ordinal is optional. Why: the
+  recognisers write the ordinal in words, and each added form is one more to test in a
+  language that has no gazetteer to fall back on. Cost if wrong: a speaker hears "not
+  understood" and says the long form. Tests: `test_russian_clock_phrases_mean_their_time`
+  ("half of the eighth in one word", "half of the eighth with the half apart").
+- **The twelve Russian ordinals are a list in `src/`, checked against the library.**
+  `timerify_clock_hour_ordinals` holds the genitive masculine ordinals "pervogo" to
+  "dvenadtsatogo", each with its hour as the value, and the fourth with and without the
+  letter yo. A range cannot say them: hassil's ranges build cardinals. Why: a list in the
+  source is read by the owner and by a translator, and the test keeps it honest by comparing
+  it with `unicode_rbnf`, the library that builds the number words of the other lists
+  (ruleset `spellout-ordinal-masculine-genitive`). Cost if wrong: a typo makes one hour
+  unsayable, which the test catches. Test:
+  `test_the_russian_hours_counted_to_are_the_ordinals_of_the_library`.
+- **No new number words are built.** The minutes are the list that "1 hour 30" already uses
+  and the hours the half-day list that the clock already uses; the new lists are lists of
+  words. A range with words builds a table of its number words on the first request in a
+  language (the duration entry), so a new range would have added to that cost. Why: the
+  first request of a language is the one that waits. Cost if wrong: none. Tests: the two
+  `..._clock_forms_reach_the_clock_handler` tests, which say every form of the new rules
+  with `timerify_minutes_of_hour` at 20.
+- **LLM agents are unaffected.** `ClockCommandHandler` is not offered as a tool
+  (`offered_as_tool = False`), so `clock_before` and `clock_ordinal` reach no model, which
+  plans a time of day with `at` through the delayed command. Why: the slots are the shape
+  of a sentence, not of a request. Cost if wrong: a model sees two tools that do the same.
+  Test: `test_the_clock_sentences_add_no_llm_tool`.

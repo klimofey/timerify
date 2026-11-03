@@ -1,0 +1,188 @@
+# The Russian clock times that count minutes around an hour, written by hand.
+#
+# They are not produced by the grammar: a fixture sampled from the sentences would only
+# repeat them. Each case is a phrase a speaker of Russian says after "включи Boiler"
+# (`said`), the time of the day it is said at on a Sunday (`now`, "HH:MM"), and what the
+# speaker means, which is of exactly one of three kinds:
+#
+# - the time (`clock`, "HH:MM", on the day that is `days` after Sunday);
+# - a time that has passed, which the day word makes a refusal (`refused`, the "HH:MM"
+#   that the refusal names);
+# - no clock time at all (`understood: false`).
+#
+# Russian counts minutes to the next hour. The half or the quarter or N minutes are said
+# with the genitive of the ordinal of the hour counted to: "в половине восьмого" is half
+# of the eighth hour, the one that runs from 07:00 to 08:00, so it is 07:30, and "в
+# четверть восьмого" is 07:15. The half is also "в полвосьмого", "в пол восьмого" and "в
+# половину восьмого". "Без четверти восемь" is a quarter short of eight: 07:45, and "без
+# пяти минут восемь" is 07:55. After "без" the hour is a cardinal in the nominative, and
+# the hour one is "час". "Без одной минуты восемь" is 07:59.
+#
+# An hour of 1 to 12 with no word for the part of the day is the nearer of its two times
+# that is ahead, as in "в 7:30". A word for the part of the day goes with the hour that
+# the minutes are counted to, so "в половине первого ночи" is 00:30 (the first hour of the
+# night runs from 00:00 to 01:00) and "без четверти двенадцать ночи" is 23:45. With a day
+# word, a bare 12 is the earlier of its two times, as "завтра в 12:30" is 00:30 (see
+# RULINGS.md), so "завтра в половине первого" is 00:30 tomorrow.
+#
+# A date is no time of the day: "двадцать восьмого" is the twenty-eighth, with no word
+# for minutes, and "без двадцати" counts to no hour.
+
+- name: half of the eighth
+  said: "в половине восьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:30"
+
+- name: half of the eighth, said at eight in the morning
+  said: "в половине восьмого"
+  now: "08:00"
+  days: 0
+  clock: "19:30"
+
+- name: half of the eighth in one word
+  said: "в полвосьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:30"
+
+- name: half of the eighth with the half apart
+  said: "в пол восьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:30"
+
+- name: half of the eighth with the half in the accusative
+  said: "в половину восьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:30"
+
+- name: a quarter of the eighth
+  said: "в четверть восьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:15"
+
+- name: ten minutes of the eighth
+  said: "десять минут восьмого"
+  now: "06:00"
+  days: 0
+  clock: "07:10"
+
+- name: twenty minutes of the eighth in the evening
+  said: "в двадцать минут восьмого вечера"
+  now: "06:00"
+  days: 0
+  clock: "19:20"
+
+- name: a quarter short of eight
+  said: "без четверти восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:45"
+
+- name: a quarter short of eight, said at ten to eight in the evening
+  said: "без четверти восемь"
+  now: "19:50"
+  days: 1
+  clock: "07:45"
+
+- name: five short of eight
+  said: "без пяти восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:55"
+
+- name: twenty short of eight
+  said: "без двадцати восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:40"
+
+- name: twenty-five short of eight
+  said: "без двадцати пяти восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:35"
+
+- name: five minutes short of eight
+  said: "без пяти минут восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:55"
+
+- name: one minute short of eight
+  said: "без одной минуты восемь"
+  now: "06:00"
+  days: 0
+  clock: "07:59"
+
+- name: five short of one
+  said: "без пяти час"
+  now: "06:00"
+  days: 0
+  clock: "12:55"
+
+- name: half of the first at night
+  said: "в половине первого ночи"
+  now: "06:00"
+  days: 1
+  clock: "00:30"
+
+- name: half of the sixth at night
+  said: "в половине шестого ночи"
+  now: "06:00"
+  days: 1
+  clock: "05:30"
+
+- name: a quarter short of twelve at night
+  said: "без четверти двенадцать ночи"
+  now: "06:00"
+  days: 0
+  clock: "23:45"
+
+- name: half of the fourth, with the letter yo
+  said: "в половине четвёртого"
+  now: "06:00"
+  days: 0
+  clock: "15:30"
+
+- name: half of the fourth, with the letter ye
+  said: "в половине четвертого"
+  now: "06:00"
+  days: 0
+  clock: "15:30"
+
+- name: tomorrow half of the eighth
+  said: "завтра в половине восьмого"
+  now: "06:00"
+  days: 1
+  clock: "07:30"
+
+- name: tomorrow a quarter short of eight
+  said: "завтра без четверти восемь"
+  now: "06:00"
+  days: 1
+  clock: "07:45"
+
+- name: tomorrow half of the first is the earlier of the two
+  said: "завтра в половине первого"
+  now: "06:00"
+  days: 1
+  clock: "00:30"
+
+- name: today half of the eighth in the morning, when it has passed
+  said: "сегодня в половине восьмого утра"
+  now: "08:00"
+  refused: "07:30"
+
+- name: a date is no time
+  said: "двадцать восьмого"
+  now: "06:00"
+  understood: false
+
+- name: a quarter short with no hour
+  said: "без двадцати"
+  now: "06:00"
+  understood: false

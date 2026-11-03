@@ -19,10 +19,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
+from unicode_rbnf import RbnfEngine
 
 from custom_components.timerify.voice.commands import (
     DayPart,
@@ -48,11 +50,13 @@ from ..helpers import (
     state_of,
 )
 from .helpers import (
+    CLOCK_PHRASES,
     SETTING_LISTS,
     converse,
     copy_sentences,
     reached,
     refusal_of,
+    russian_clock_phrases,
     samples,
     speech,
     spoken_number,
@@ -69,10 +73,13 @@ NUMBERS = {
     "timerify_clock_hours": 7,
     "timerify_clock_minutes": 30,
     "timerify_half_day_hours": 7,
+    "timerify_minutes_of_hour": 20,
 }
 """The numbers with which a clock time is said: 7:30, or 7 with a part of the day. The
 minutes are said as digits after a separator (`MINUTES`), and as this number only with
-their word in Russian: "7 hours 30 minutes"."""
+their word in Russian: "7 hours 30 minutes". The minutes of an hour are 20, so that the
+sampler says the minutes past and to an hour ("20 past 7", "20 to 8"), which a list
+without a number is left out of."""
 MINUTES = {"timerify_clock_minute_digits": "30"}
 """The minutes said after a separator, which are two digits: the 30 of 7:30."""
 
@@ -253,6 +260,7 @@ async def test_turn_on_at_a_clock_time_keeps_a_command_for_then(
         ("tomorrow at 7", "07:00", 1),
         ("at 7 tomorrow", "07:00", 1),
         ("the day after tomorrow at 7", "07:00", 2),
+        ("tomorrow at 12:30", "00:30", 1),
         ("at seven thirty", "07:30", 0),
         ("at seven thirty pm", "19:30", 0),
     ],
@@ -1114,6 +1122,193 @@ async def test_a_time_the_clock_repeats_is_the_earliest_of_its_moments_ahead(
     assert state_of(hass, NEXT) == moment
 
 
+# --- Minutes around an hour (the owner's rule, issue 49) ---------------------------
+
+
+@pytest.mark.parametrize(
+    ("said", "clock", "days"),
+    [
+        ("at half past 7", "07:30", 0),
+        ("at quarter past 7", "07:15", 0),
+        ("at a quarter past 7", "07:15", 0),
+        ("at ten past 7", "07:10", 0),
+        ("at twenty-five past 7", "07:25", 0),
+        ("at quarter to 8", "07:45", 0),
+        ("at twenty to 8", "07:40", 0),
+        ("at twenty-five to 8", "07:35", 0),
+        ("at 5 to 8", "07:55", 0),
+        ("at ten minutes to eight", "07:50", 0),
+        ("at quarter to 8 in the evening", "19:45", 0),
+        ("at quarter to 8 pm", "19:45", 0),
+        ("tomorrow morning at quarter to 8", "07:45", 1),
+        ("in the evening at half past 7", "19:30", 0),
+        ("tomorrow at half past 7", "07:30", 1),
+        ("at half past 7 tomorrow", "07:30", 1),
+        ("at quarter to noon", "11:45", 0),
+        ("at quarter to midnight", "23:45", 0),
+    ],
+)
+async def test_minutes_around_an_hour_mean_their_time(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    clock: str,
+    days: int,
+) -> None:
+    """Any number of minutes from 1 to 59 is counted past an hour or to the next, and
+    "quarter" and "half" are only words for 15 and 30."""
+    response = await converse(hass, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    ("said", "clock", "minutes"),
+    [
+        ("at quarter to 8", "07:45", "105"),
+        ("at half past 7", "07:30", "90"),
+        ("at ten to 8", "07:50", "110"),
+    ],
+)
+async def test_minutes_around_an_hour_end_a_countdown_then(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    clock: str,
+    minutes: str,
+) -> None:
+    """A running boiler is told when to stop, as "turn off at 7:30" does."""
+    await set_number(hass, NUMBER, 240)
+
+    response = await converse(hass, f"turn off the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, SENSOR) == at(SUNDAY, clock)
+    assert state_of(hass, NUMBER) == minutes
+    assert pending(hass) == []
+
+
+@pytest.mark.parametrize(
+    ("now", "said", "days", "clock"),
+    [
+        ("06:00", "at quarter to 8", 0, "07:45"),
+        ("08:00", "at quarter to 8", 0, "19:45"),
+        ("19:50", "at quarter to 8", 1, "07:45"),
+        ("20:00", "at half past 7", 1, "07:30"),
+        ("08:00", "at half past 7", 0, "19:30"),
+    ],
+)
+async def test_minutes_before_an_hour_are_the_nearer_time_ahead(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    said: str,
+    days: int,
+    clock: str,
+) -> None:
+    """The rule of "7:30" holds for these forms: with no part of the day, the time is
+    the nearer of its morning and evening ones that is still ahead."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("now", "said", "days", "clock"),
+    [
+        ("06:00", "at quarter to 12", 0, "11:45"),
+        ("12:00", "at quarter to 12", 0, "23:45"),
+        ("12:00", "at quarter to noon", 1, "11:45"),
+        ("23:50", "at quarter to midnight", 1, "23:45"),
+        ("06:00", "today at quarter to midnight", 0, "23:45"),
+        ("06:00", "tomorrow at quarter to midnight", 1, "23:45"),
+        ("06:00", "at ten to 1 at night", 1, "00:50"),
+        ("20:00", "today at ten to 1 at night", 1, "00:50"),
+    ],
+)
+async def test_minutes_before_twelve_noon_and_midnight(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    said: str,
+    days: int,
+    clock: str,
+) -> None:
+    """Noon and midnight, and the 12 and the small hours of the night, count minutes to
+    them as any hour does: "quarter to midnight" is 23:45, and the night is the one
+    that follows the day word."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(
+    ("said", "day", "clock"),
+    [
+        ("turn on the AC for an hour at quarter to 8", SUNDAY, "07:45"),
+        ("turn on the AC for an hour at half past 7 in the evening", SUNDAY, "19:30"),
+    ],
+)
+async def test_a_thermostat_takes_minutes_around_an_hour_after_its_settings(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_full_ac: FakeTarget,
+    setup_target: SetupTarget,
+    said: str,
+    day: date,
+    clock: str,
+) -> None:
+    """Minutes past or to an hour are no temperature, so a thermostat takes them after
+    its settings as it takes "7:30"."""
+    await open_sunday(hass, freezer)
+    await with_voice_settings(hass, setup_target, fake_full_ac)
+
+    response = await converse(hass, said)
+
+    assert reached(response) == CLOCK, speech(response)
+    assert fake_full_ac.call_data == []
+    command = pending(hass, AC_NEXT)[0]
+    assert command["minutes"] == 60
+    assert state_of(hass, AC_NEXT) == at(day, clock)
+
+
+@pytest.mark.parametrize(
+    "said",
+    [
+        "turn on the boiler at 0 past 7",
+        "turn on the boiler at 60 to 8",
+        "turn on the boiler at 15 to 13",
+        "turn on the boiler at half past noon",
+        "turn on the boiler at half to 8",
+        "turn on the boiler at twenty to",
+    ],
+)
+async def test_minutes_around_an_hour_out_of_bounds_are_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+) -> None:
+    """The minutes are 1 to 59 and the hour 1 to 12; "half" is past an hour only, and
+    noon has no minutes past it. What is not a time reaches no handler, and nothing is
+    kept or switched."""
+    response = await converse(hass, said)
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
 # --- Russian -----------------------------------------------------------------------
 
 
@@ -1439,6 +1634,121 @@ async def test_the_russian_start_of_a_day_is_said_with_the_hour_0(
     assert state_of(hass, NEXT) == at(MONDAY, "00:00")
 
 
+# --- Russian minutes around an hour (the fixture is written by hand) -----------------
+
+
+YO = "\N{CYRILLIC SMALL LETTER IO}"
+YE = "\N{CYRILLIC SMALL LETTER IE}"
+"""The Russian letters "yo" and "ye", which the library of number words does not tell
+apart in the fourth hour; a test source has no Russian letter of its own."""
+
+
+def phrases_of(field: str) -> list[str]:
+    """The names of the hand-written Russian clock phrases that have `field`, the field
+    that tells their kind: the time they mean (`clock`), a refusal (`refused`) or no
+    time (`understood`)."""
+    return [name for name, case in russian_clock_phrases().items() if field in case]
+
+
+def test_every_russian_clock_phrase_is_of_one_kind() -> None:
+    """A case with no kind, or two, would be run by no test or by two, and a repeated
+    name would drop a case from the file's index: none is skipped in silence."""
+    cases = yaml.safe_load(CLOCK_PHRASES.read_text("utf-8"))
+    names = [case["name"] for case in cases]
+    assert len(set(names)) == len(names)
+    assert len(cases) > 25
+    for case in cases:
+        assert {"name", "said", "now"} <= set(case), case["name"]
+        kind = set(case) - {"name", "said", "now"}
+        assert kind in ({"days", "clock"}, {"refused"}, {"understood"}), case["name"]
+        if "understood" in case:
+            assert case["understood"] is False, case["name"]
+
+
+@pytest.mark.parametrize("name", phrases_of("clock"))
+async def test_russian_clock_phrases_mean_their_time(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    name: str,
+) -> None:
+    """What a speaker of Russian means by counting minutes to an hour, or to the next:
+    the time in the file, kept as a command and not carried out."""
+    case = russian_clock_phrases()[name]
+
+    response = await say_at(
+        hass, freezer, SUNDAY, case["now"], turn_on_at("ru", case["said"]), "ru"
+    )
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(
+        SUNDAY + timedelta(days=case["days"]), case["clock"]
+    )
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("name", phrases_of("refused"))
+async def test_russian_clock_phrases_that_have_passed_today_are_refused(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    name: str,
+) -> None:
+    """A time named "today" that has passed is refused with the time the speaker said,
+    and is not moved to tomorrow."""
+    case = russian_clock_phrases()[name]
+
+    response = await say_at(
+        hass, freezer, SUNDAY, case["now"], turn_on_at("ru", case["said"]), "ru"
+    )
+
+    assert reached(response) == CLOCK, speech(response)
+    assert refusal_of(response) == translated(
+        "ru", "exceptions", "command_in_past", "message"
+    ).format(at=case["refused"])
+    assert state_of(hass, NEXT) == "unknown"
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize("name", phrases_of("understood"))
+async def test_russian_phrases_that_are_no_clock_time_are_not_understood(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    name: str,
+) -> None:
+    """A date, or minutes counted to no hour, are no time: no handler is reached,
+    nothing is kept and the boiler is left alone."""
+    case = russian_clock_phrases()[name]
+
+    response = await say_at(
+        hass, freezer, SUNDAY, case["now"], turn_on_at("ru", case["said"]), "ru"
+    )
+
+    assert reached(response) is None, speech(response)
+    assert response.response_type is intent.IntentResponseType.ERROR
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+def test_the_russian_hours_counted_to_are_the_ordinals_of_the_library() -> None:
+    """The twelve hours the sentences count minutes to are the genitive ordinals that
+    the library of number words gives, so that the list is checked against a source
+    other than the file that holds it. The fourth is also said with the letter "ye"."""
+    listed = spoken_values("ru", "timerify_clock_hour_ordinals")
+    engine = RbnfEngine.for_language("ru")
+
+    assert sorted(listed, key=int) == [str(n) for n in range(1, 13)]
+    for hour in range(1, 13):
+        ordinal = engine.format_number(
+            hour, ruleset_names=["spellout-ordinal-masculine-genitive"]
+        ).text
+        assert {word.replace(YO, YE) for word in listed[str(hour)]} == {ordinal}, hour
+
+
 # --- What the sentences do not say, and what core's gazetteer took -----------------
 
 
@@ -1502,8 +1812,6 @@ async def test_a_time_that_is_none_is_not_understood(
 @pytest.mark.parametrize(
     "said",
     [
-        "turn on the boiler at half past 7",
-        "turn on the boiler at quarter to 8",
         "turn on the boiler at 7:30am",
         "turn on the boiler tonight at 7",
         "turn on the boiler this morning at 7",
@@ -2192,13 +2500,17 @@ def test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time(
         "tomorrow morning at 7",
         "in the morning at 7",
         "at 7.30 tomorrow morning",
+        "at half past 7",
+        "at 20 to 7",
     } <= exact
     assert not {"at 7", "at 7.30", "tomorrow at 7"} & exact
 
 
 def test_russian_needs_no_narrower_clock_after_the_settings() -> None:
-    """A time is said with "v" and a temperature with "na", so the time that follows the
-    settings is the same as the one that follows the command (`RULINGS.md`)."""
+    """A Russian time is never a bare number, since it has "v" or "bez" or the ordinal
+    of the hour that minutes are counted to, and a temperature is a number with "na":
+    the time that follows the settings is the same as the one that follows the command
+    (`RULINGS.md`)."""
     sources = spoken("ru", "timerify_clock_after_extras")
 
     assert sources == spoken("ru", "timerify_clock_after_command")

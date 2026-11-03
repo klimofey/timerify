@@ -256,11 +256,11 @@ def clock_moment(
     With a day word the time is on that day, or in the night after it. The named date
     and the one after it are searched, and a candidate is kept when, with the minutes
     before taken off, it is on the named day (or, for the night after, the day after
-    that): "tomorrow at quarter to 12" is 11:45 tomorrow, or 23:45 tomorrow once that
-    has passed, and never the 23:45 of today that comes before tomorrow's 00:00. The
-    00:00 of the date after is the midnight that ends the named day, so a candidate is
-    always left: of the two dates an hour is read on, the minutes before put exactly
-    one of them on the named day.
+    that): "today at quarter to 12" is 11:45 today, or 23:45 today once 11:45 has
+    passed, and "tomorrow at quarter to 12" is tomorrow's 11:45, never the 23:45 of
+    today that comes before tomorrow's 00:00. The 00:00 of the date after is the
+    midnight that ends the named day, so a candidate is always left: of the two dates
+    an hour is read on, the minutes before put exactly one of them on the named day.
 
     The wall time, once the minutes are off, follows `schedule.wall_moment`: a time the
     clock skips happens later by the gap, so "quarter to 3" on the night the clock
@@ -393,10 +393,10 @@ class ClockCommandHandler(DelayedCommandHandler):
     def when(self, slots: Mapping[str, Any]) -> datetime | timedelta:
         """The moment the clock slots say, on the clock of the house.
 
-        Raises `probatio.Invalid` for slots that no sentence makes, which the agents
-        answer as not understood: a time with no hour that is not noon or midnight, an
-        ordinal hour with an hour or with minutes before, and minutes before with
-        minutes after.
+        Raises `probatio.Invalid` for slots that no sentence makes, which only a caller
+        that is not a sentence can send: a time with no hour that is not noon or
+        midnight, an ordinal hour with an hour or with minutes before, and minutes
+        before with minutes after.
         """
         part = slots.get("clock_part", {}).get("value")
         day = slots.get("clock_day", {}).get("value")

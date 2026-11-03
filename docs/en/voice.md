@@ -102,22 +102,26 @@ The Russian column is transliterated because this page is in English. The real s
 - You can add a day: "today", "tomorrow" or "the day after tomorrow". Say it before the time or after it: "tomorrow at 7" or "at 7 tomorrow".
 - You can say the time as "7:30", "7.30" or "7 30", or in words, such as "seven thirty". "7 o'clock", "noon" and "midnight" work too.
 - After the colon, the dot or the space, the minutes are two digits: "7:05", not "7:5". "At 7.5" is not understood.
+- You can count minutes past an hour: "ten past 7", "quarter past 7", "half past 7" or "twenty-five past 7". Any number from 1 to 59 works.
+- You can count minutes to an hour: "five to 8", "quarter to 8" or "twenty minutes to 8". "Quarter to noon" is 11:45, and "quarter to midnight" is 23:45.
+- These forms follow the rules of "7:30". "Half past 7" is the nearer of 07:30 and 19:30 ahead. "Quarter to 8" said at 19:50 is 07:45 tomorrow. "Am", "pm" or a part of the day go with the hour you name: "quarter to 8 in the evening" is 19:45.
 - "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
 - You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
 - In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
+- Russian counts to the next hour. "V polovine vos'mogo" and "v polvos'mogo" are 07:30, "v chetvert' vos'mogo" is 07:15, and "desyat' minut vos'mogo" is 07:10. "Bez chetverti vosem'" is 07:45, and "bez pyati vosem'" is 07:55.
 - Without any of these, an hour from 1 to 12 is the nearer of its two times ahead. That holds for "7", "7:30" and "seven thirty", which have no leading zero. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
 - With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
 - The hour 0 and the hours 13 to 23 are on the 24-hour clock. "At 19" is 19:00, and "at 0:30" is 00:30.
 - An hour written with a leading zero is on the 24-hour clock too. "At 07:30" and "at 07" are the next 07:30 and 07:00, whichever comes first, today or tomorrow. Said at 08:00, "at 07:30" means 07:30 tomorrow, but "at 7:30" means 19:30 today. When you speak, your speech recognition decides whether the hour is written with a zero. When you type "07", the zero counts. A part of the day can still decide, as the next point says.
 - If you say "am", "pm" or a part of the day, it decides, and the zero does not matter. "At 07:30 pm" is 19:30, and "at 07 in the evening" is 19:00.
-- "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two.
+- "At noon" and "at 12 pm" are 12:00. "At midnight" and "at 12 am" are 00:00. A bare "at 12" is the nearer of the two. With a day word, 12 is the earlier of the two times: "tomorrow at 12:30" is 00:30.
 - With a day word, "midnight" is the one that ends that day. "Today at midnight" is tonight's 00:00, and "tomorrow at midnight" is the one after tomorrow. "Tomorrow at 12 am" and "tomorrow at 0:00" are the start of tomorrow.
 - With a day word, the small hours said with "night" belong to the night that follows that day. That means "at night" or "night" with the hours 12 and 1 to 5. "Tomorrow night at 2" and "tomorrow at 2 at night" are 02:00 the day after tomorrow. "Tomorrow night at 12" is the same as "tomorrow at midnight". "Today at 2 at night" is the coming 02:00. Said before 06:00, it is the night in progress while that time is ahead: at 00:30 it is 02:00 today. "Tomorrow at 2 am" is 02:00 tomorrow, and "tomorrow night at 11" is 23:00 tomorrow.
 - Without a day, a time is the next one: today if it is still ahead, tomorrow if it has passed. With the word "today", a time that has passed is refused, and the answer names it.
 - A time that the change of the clock skips happens later by the length of the gap, as in [the schedules](schedules.md#clock-changes-and-time-zones). A time that it repeats happens twice. Timerify takes the first of the two that is still ahead.
 - A command to turn on is kept as a [pending command](pending-commands.md), as it is for a delay. It can say how long the device then runs, and its settings: "turn on the AC at 7:30 for an hour, cooling, 24 degrees".
 - A command to turn off sets the countdown of a running device to end then, as it does for a delay. The time is at most a day ahead. A later time is refused, and the answer says what is allowed.
-- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight" or a part of the day, such as "at 7 in the evening". A bare hour ("at 7" or "at 07") and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time starts with "v".
+- A thermostat or a water heater reads a bare number after its settings as a temperature. An example is "turn on the AC for an hour at 21". So after the settings, say the time with a colon or a space between hour and minutes: "at 7:30" or "at 7 30". Or use "o'clock", "am", "pm", "noon", "midnight", minutes past or to an hour ("at half past 7") or a part of the day, such as "at 7 in the evening". A bare hour ("at 7" or "at 07") and a dotted time ("at 7.30") are not taken as a time there. Before the settings, every form works. Russian needs no such care, because its time words tell a time from a temperature.
 
 **What is planned**
 
@@ -262,7 +266,7 @@ If the interval is empty, the whole schedule is switched.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
 - **The days of a title that Timerify made.** The title has them, such as `Sun–Thu`, and they cannot be said. Say the start time, or give the interval a title of your own.
-- **Some ways of saying the time.** "Half past 7", "quarter to 8", "7:30am" written together, "tonight at 7" and "this morning at 7" are not understood yet ([issue #49](https://github.com/klimofey/timerify/issues/49)). Say "at 7:30", "at 7:45", "at 7:30 am", "at 7 in the evening" or "at 7 in the morning" instead.
+- **Some ways of saying the time.** "7:30am" written together, "tonight at 7" and "this morning at 7" are not understood yet ([issue #49](https://github.com/klimofey/timerify/issues/49)). Say "at 7:30", "at 7:30 am", "at 7 in the evening" or "at 7 in the morning" instead.
 
 ---
 

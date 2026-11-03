@@ -409,6 +409,11 @@ LIMIT_ANSWERS: Final = (
     Path(__file__).parents[1] / "fixtures" / "ru" / "limit_answers.yaml"
 )
 """The file of the tests that holds the Russian answers about a limit."""
+CLOCK_PHRASES: Final = (
+    Path(__file__).parents[1] / "fixtures" / "ru" / "clock_phrases.yaml"
+)
+"""The file of the tests that holds the Russian clock times that count minutes around an
+hour."""
 
 
 def named_cases(path: Path) -> dict[str, dict[str, Any]]:
@@ -428,6 +433,13 @@ def russian_limit_answers() -> dict[str, dict[str, Any]]:
     (`intent` and `response`), the slots a handler gives it and what a speaker
     expects."""
     return named_cases(LIMIT_ANSWERS)
+
+
+def russian_clock_phrases() -> dict[str, dict[str, Any]]:
+    """The cases of the hand-written Russian clock times, by name: what is said after
+    the command, when, and what a speaker means by it (the time, a refusal because it
+    has passed, or no time at all)."""
+    return named_cases(CLOCK_PHRASES)
 
 
 def translated(language: str, *path: str) -> str:

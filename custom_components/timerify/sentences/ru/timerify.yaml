@@ -92,7 +92,10 @@ expansion_rules:
   timerify_clock: (<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])
   timerify_clock_day: '{timerify_clock_days:clock_day}'
   timerify_clock_minute: ({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})
-  timerify_clock_time: в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})
+  timerify_clock_time: (в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})|[в] <timerify_clock_into> [{timerify_day_parts:clock_part}]|<timerify_clock_before> [{timerify_day_parts:clock_part}])
+  timerify_clock_into: ({timerify_minutes_of_hour:clock_minute} минут[а|у|ы] <timerify_clock_ordinal>|{timerify_clock_fractions:clock_minute}[ ]<timerify_clock_ordinal>)
+  timerify_clock_ordinal: '{timerify_clock_hour_ordinals:clock_ordinal}'
+  timerify_clock_before: без ({timerify_minutes_of_hour:clock_before} [минут[ы]]|{timerify_clock_fractions_before:clock_before}) ({timerify_half_day_hours:clock_hour}|{timerify_clock_hour_one:clock_hour})
   timerify_hvac_part: '[(в режиме|режим)] {timerify_hvac_mode:hvac_mode}'
   timerify_temperature_part: '[на] {timerify_temperature:temperature} [градус[а|ов]]'
   timerify_percent_part: '[на] {timerify_percent:percent} процент[а|ов]'
@@ -272,6 +275,46 @@ lists:
       from: 0
       to: 59
       digits: false
+  timerify_clock_fractions:
+    values:
+    - in: (половина|половине|половину|пол)
+      out: 30
+    - in: четверть
+      out: 15
+  timerify_clock_fractions_before:
+    values:
+    - in: четверти
+      out: 15
+  timerify_clock_hour_ordinals:
+    values:
+    - in: первого
+      out: 1
+    - in: второго
+      out: 2
+    - in: третьего
+      out: 3
+    - in: (четвёртого|четвертого)
+      out: 4
+    - in: пятого
+      out: 5
+    - in: шестого
+      out: 6
+    - in: седьмого
+      out: 7
+    - in: восьмого
+      out: 8
+    - in: девятого
+      out: 9
+    - in: десятого
+      out: 10
+    - in: одиннадцатого
+      out: 11
+    - in: двенадцатого
+      out: 12
+  timerify_clock_hour_one:
+    values:
+    - in: час
+      out: 1
   timerify_day_parts:
     values:
     - in: утра

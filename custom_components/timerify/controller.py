@@ -738,31 +738,30 @@ class TargetController:
         while it waited still extends the countdown, and a delay counts from it. The
         lock serves its waiters in the order they came, so the moments of commands do
         not go back. The pending commands that fell due before that moment are carried
-        out first (`TimerCore.fold_commands_due`): an alarm that is armed in the past is
-        raised only when it is armed, so it would queue behind a command given later.
-        What else falls due between that moment and the time the command gets its turn
-        stays armed, and its alarm folds it after the command.
+        out first, each batch on its own, as their alarm would
+        (`TimerCore.fold_commands_due`): an alarm that is armed in the past is raised
+        only when it is armed, so it would queue behind a command given later. What
+        else falls due between that moment and the time the command gets its turn stays
+        armed, and its alarm folds it after the command.
 
         Raises HomeAssistantError, having done nothing, if the timer was unloaded
         before its turn came: the call reached the timer, so returning as if the
-        change had been made would be a lie.
+        change had been made would be a lie. So does one that was unloaded while the
+        pending commands were carried out: the command is then not made.
         """
         given = dt_util.utcnow()
         async with self._lock:
             self._raise_if_unloaded()
             await self._async_catch_up_while_starting_locked(given)
             # A pending command that fell due before `given` comes before this one,
-            # though its alarm, armed in the past, queues behind it. They are carried
-            # out together, the folded ones first. A command that is refused leaves
-            # what it folded to be carried out all the same.
-            folded = self._core.fold_commands_due(given)
-            try:
-                effects = command(given)
-            except Exception:
-                if folded:
-                    await self._execute(folded)
-                raise
-            await self._execute([*folded, *effects])
+            # though its alarm, armed in the past, queues behind it. It is carried out
+            # as its alarm would, on its own, and the command after it: each has its
+            # own save, announcements and calls to the target, and each answers for its
+            # own failure. A command that is refused leaves what it folded carried out.
+            if folded := self._core.fold_commands_due(given):
+                await self._execute(folded)
+                self._raise_if_unloaded()
+            await self._execute(command(given))
 
     async def _async_catch_up_while_starting_locked(
         self, at: datetime | None = None

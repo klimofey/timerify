@@ -4209,14 +4209,17 @@ klimofey/timerify, listed in `docs/followups.md`.
 - **A command folds the pending commands that fell due before it.** After the catch-up and
   before it acts, `_command` calls `TimerCore.fold_commands_due(given)`: the pending commands
   that are due at or before the moment given are carried out first, in the order they fall due,
-  each announced as `command_due`, and their effects come before the command's own, in one
-  `_execute` batch (one hold of the lock, one save, the announcements in order). It folds
+  each announced as `command_due`. Their effects are carried out in an `_execute` of their own,
+  as their alarm would, and then the command's own in a second one, both under the one hold of
+  the lock: each batch has its own save, announcements, calls to the target and failure
+  accounting (`_carry_out`, `_not_delivered`), so a turn-off that the device does not confirm
+  is booked against the turn-off and not against the later wish. If the timer is unloaded
+  while the first batch is carried out, the command is not made (`timer_unloaded`). It folds
   pending commands only. The end and the limit keep their stale guards (`_expire_stale_end` and
   the guard in `add`), and the windows are left alone, because the alarm of a window is armed
   ahead and so queues in its own order. It is not the rejected `tick` (below). A command that is
-  refused leaves what it folded to be carried out all the same (`_execute(folded)`, then the
-  error). Only `_command` does this: the interval and schedule switches, the refreshes and
-  start-up do not call it. Why: with the delay and `at` rule flipped, a pending command can be
+  refused leaves what it folded carried out, since that ran first. Only `_command` does this:
+  the interval and schedule switches, the refreshes and start-up do not call it. Why: with the delay and `at` rule flipped, a pending command can be
   added behind a slow call and be due before a command that is given later. Its alarm is armed
   in the past when the call gets its turn, and an alarm is raised, and queued, only when it is
   armed, so it queues behind every command given in between. Those ran first, and the pending
@@ -4225,13 +4228,17 @@ klimofey/timerify, listed in `docs/followups.md`.
   as past, and so the air conditioner ran). Cost if wrong: folded first, the two words are an
   "off" and then a start, so the device is switched off and on again. A run with no wait does
   the same (the control test), so it is the outcome at the moment given and not a flap of the
-  engine; without the fold the later word loses to the earlier one. Tests
+  engine; without the fold the later word loses to the earlier one. No test shows the separate
+  booking of the two batches from the user's side: with a turn-off that the device confirms
+  late, or rejects, the calls and the final state are the same in one batch and in two
+  (measured), because the report of the turn-on that follows settles the wish first. Tests
   (`tests/test_moment_of_a_command.py`):
   `test_a_pending_off_that_fell_due_while_a_command_waited_comes_before_it`, its control
   `test_a_pending_off_and_a_later_command_with_no_wait_are_carried_out_alike`, its mirror
   `test_a_pending_off_due_while_a_command_waits_comes_after_it` (an "off" due after the
-  moment given comes after the command and wins) and
-  `test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out`; and in
+  moment given comes after the command and wins),
+  `test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out` and
+  `test_timer_unloaded_while_what_fell_due_before_a_command_is_carried_out`; and in
   `test_core.py`: `test_fold_commands_due_with_no_command_due_does_nothing`,
   `test_fold_commands_due_carries_out_the_commands_due_and_nothing_else` and
   `test_fold_commands_due_leaves_a_stale_end_to_its_guard`.

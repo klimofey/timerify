@@ -9,6 +9,7 @@ nothing but the time the answer takes.
 """
 
 import asyncio
+import copy
 from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta
 from typing import Any, Final
@@ -16,7 +17,7 @@ from typing import Any, Final
 import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant, ServiceResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from pytest_homeassistant_custom_component.common import (
     async_capture_events,
     async_fire_time_changed,
@@ -35,7 +36,10 @@ from .helpers import (
     AC_ID,
     AC_NEXT,
     AC_NUMBER,
+    NUMBER,
     START,
+    TURN_OFF,
+    TURN_ON,
     add_command,
     advance,
     call_service,
@@ -45,6 +49,7 @@ from .helpers import (
     start_call_service,
     start_set_number,
     state_of,
+    storage_key,
 )
 
 type Given = Mapping[float, Callable[[], asyncio.Task[Any] | None]]
@@ -445,6 +450,36 @@ async def test_a_pending_off_and_a_later_command_with_no_wait_are_carried_out_al
     ]
     assert [call[0] for call in fake_climate.calls][3:] == ["turn_off", "turn_on"]
     assert state_of(hass, AC_ENDS_AT) == stamp(620)
+
+
+async def test_timer_unloaded_while_what_fell_due_before_a_command_is_carried_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """The boiler runs for half an hour and is to be turned off at 07:00:10. At 07:00:20
+    the user moves "Run for" to ten minutes, and the call carries out the off first,
+    which is slow. The timer is replaced meanwhile: the call says it was not made, and
+    the file is left to the timer that replaces it."""
+    entry = await setup_target()
+    await set_number(hass, NUMBER, 30)
+    await add_command(hass, NUMBER, action="off", at=stamp(10))
+    freezer.move_to(moment(20))
+    slow = fake_target.hold_next_call()
+    setting = start_set_number(hass, NUMBER, 10)
+    await slow.reached.wait()
+    await hass.config_entries.async_unload(entry.entry_id)
+    stored = copy.deepcopy(hass_storage[storage_key(entry)])
+
+    slow.release.set()
+    with pytest.raises(HomeAssistantError) as raised:
+        await setting
+
+    assert raised.value.translation_key == "timer_unloaded"
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
+    assert hass_storage[storage_key(entry)] == stored
 
 
 async def test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out(

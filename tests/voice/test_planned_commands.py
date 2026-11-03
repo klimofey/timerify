@@ -516,13 +516,13 @@ async def test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_of
     fake_target: FakeTarget,
     boiler: MockConfigEntry,
 ) -> None:
-    """The boiler is slow to turn on. At 07:00:30 the user sets it to run for half an
+    """The boiler is slow to turn on. At 07:00:34 the user sets it to run for half an
     hour, and at 07:00:35, while it is still turning on, says "turn off the boiler in
-    20 seconds". The call gets its turn at 07:01:00, when that time has passed. The
+    20 seconds". The call gets its turn at 07:00:59, when that time has passed. The
     answer still names the end it set, 07:00:55 by the clock of the house, as the user
-    hears it, and not 07:01:20 as counted from the turn: not "turns off at ." either.
+    hears it, and not 07:01:19 as counted from the turn: not "turns off at ." either.
     The boiler is turned off at once."""
-    freezer.move_to(START + timedelta(seconds=30))
+    freezer.move_to(START + timedelta(seconds=34))
     slow = fake_target.hold_next_call()
     setting = start_set_number(hass, NUMBER, 30)
     await slow.reached.wait()
@@ -540,7 +540,7 @@ async def test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_of
         )
     )
 
-    freezer.move_to(START + timedelta(seconds=60))
+    freezer.move_to(START + timedelta(seconds=59))
     slow.release.set()
     response = await talking
     await setting

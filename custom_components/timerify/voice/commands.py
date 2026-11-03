@@ -94,7 +94,7 @@ class DelayedCommandHandler(TimerifyIntentHandler):
         settings = settings_of(hass, entry, slots)
         if slots["action"]["value"] == "on":
             command_id = await controller.async_add_command(
-                "on", when, duration, settings
+                "on", when, duration, settings, context=intent_obj.context
             )
             # Nothing has been awaited since the command was kept, so it is still there.
             due = next(
@@ -110,7 +110,9 @@ class DelayedCommandHandler(TimerifyIntentHandler):
                 }
             )
         elif (
-            end := await controller.async_turn_off_in(when, duration, settings)
+            end := await controller.async_turn_off_in(
+                when, duration, settings, context=intent_obj.context
+            )
         ) is not None:
             # The end the call set, not the timer's: a call that waited behind a slow
             # device may find it passed, and the answer must still name it.
@@ -444,12 +446,16 @@ class CancelCommandsHandler(TimerifyIntentHandler):
         if "command_id" in slots:
             said = "id"
             cancelled = (
-                await controller.async_cancel_command(slots["command_id"]["value"]),
+                await controller.async_cancel_command(
+                    slots["command_id"]["value"], context=intent_obj.context
+                ),
             )
         else:
             which: Literal["next", "all"] = slots.get("which", {}).get("value", "all")
             said = which
-            cancelled = await controller.async_cancel_commands(which)
+            cancelled = await controller.async_cancel_commands(
+                which, context=intent_obj.context
+            )
         now = dt_util.utcnow()
         response.async_set_speech_slots(
             {

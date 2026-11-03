@@ -18,10 +18,6 @@ One line per issue: its number and its title, under the area it belongs to.
 - [#53](https://github.com/klimofey/timerify/issues/53) Card: an action given without its press choice does nothing
 - [#63](https://github.com/klimofey/timerify/issues/63) Card: a weekday in a label that does not tick goes stale after midnight
 
-## Engine
-
-- [#47](https://github.com/klimofey/timerify/issues/47) Timerify's events carry no context of what caused them
-
 ## Forms
 
 - [#40](https://github.com/klimofey/timerify/issues/40) The integration page does not re-render after a timer or a schedule interval is added

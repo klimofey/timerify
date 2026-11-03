@@ -10,9 +10,8 @@ nothing but the time the answer takes.
 
 import asyncio
 import copy
-from collections.abc import Callable, Mapping
-from datetime import datetime, timedelta
-from typing import Any, Final
+from datetime import datetime
+from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
@@ -44,84 +43,16 @@ from .helpers import (
     advance,
     call_service,
     listed,
+    moment,
     record_events,
+    run_ac_slowly,
     set_number,
+    stamp,
     start_call_service,
     start_set_number,
     state_of,
     storage_key,
 )
-
-type Given = Mapping[float, Callable[[], asyncio.Task[Any] | None]]
-"""What a scenario does, and when: at each second after `START`, a call that starts and
-returns its task, or a report of the device, which returns nothing."""
-
-FIRST_TWO_LET_GO_AT: Final = (25, 50)
-"""The seconds after `START` at which the first and the second of the three slow calls
-are let go."""
-LAST_LET_GO_AT: Final = 75
-"""The second after `START` at which the third is let go: the end of the run."""
-
-
-def moment(seconds: float) -> datetime:
-    """The moment `seconds` after `START`."""
-    return START + timedelta(seconds=seconds)
-
-
-def stamp(seconds: float) -> str:
-    """What the "Ends at" sensor shows for `moment(seconds)`."""
-    return moment(seconds).isoformat()
-
-
-async def run_ac_slowly(
-    hass: HomeAssistant,
-    freezer: FrozenDateTimeFactory,
-    fake_climate: FakeTarget,
-    given: Given,
-    *,
-    slow: bool = True,
-) -> list[asyncio.Task[Any]]:
-    """Run the air conditioner for one minute from 07:00:00, cooling at 24 with the fan
-    high, and do what `given` says while it is under way.
-
-    That is three calls to the device, which are slow: the first is let go at 07:00:25,
-    the second at 07:00:50 and the third at 07:01:15, when the countdown has been over
-    for fifteen seconds. Each step of `given` moves the clock to its second and starts
-    its call or writes its report; ties with a call being let go come first. The
-    returned tasks are the calls that were started, which a scenario awaits when it
-    wants their answer. With `slow` off the device answers at once, and the clock
-    goes through the same seconds with everything settled at each.
-    """
-    held = fake_climate.hold_next_call() if slow else None
-    running = start_call_service(
-        hass,
-        "run",
-        {"entity_id": AC_NUMBER},
-        minutes=1,
-        hvac_mode="cool",
-        temperature=24,
-        fan_mode="high",
-    )
-    if held is not None:
-        await held.reached.wait()
-    tasks: list[asyncio.Task[Any]] = []
-    for second in sorted({*given, *(FIRST_TWO_LET_GO_AT if slow else ())}):
-        freezer.move_to(moment(second))
-        if second in given and (task := given[second]()) is not None:
-            tasks.append(task)
-        if held is None:
-            await hass.async_block_till_done()
-        elif second in FIRST_TWO_LET_GO_AT:
-            finished, held = held, fake_climate.hold_next_call()
-            finished.release.set()
-            await held.reached.wait()
-    freezer.move_to(moment(LAST_LET_GO_AT))
-    if held is not None:
-        held.release.set()
-    async_fire_time_changed(hass)
-    await running
-    await hass.async_block_till_done()
-    return tasks
 
 
 def start_add_command(

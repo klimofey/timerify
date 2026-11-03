@@ -82,20 +82,20 @@ class RunForNumber(TimerifyEntity, NumberEntity):
                 translation_key="not_whole_minutes",
                 translation_placeholders={"minutes": f"{value:g}"},
             )
-        await self._controller.async_set_minutes(int(value))
+        await self._controller.async_set_minutes(int(value), context=self._context)
 
     async def async_add_time(self, minutes: int) -> None:
         """Move the end of the countdown by `minutes`, which may be negative."""
-        await self._controller.async_add_minutes(minutes)
+        await self._controller.async_add_minutes(minutes, context=self._context)
 
     async def async_run(self, minutes: int | None = None, **settings: Any) -> None:
         """Switch the target on for `minutes`, or without a duration, with the settings
         the service was given."""
-        await self._controller.async_run(minutes, settings)
+        await self._controller.async_run(minutes, settings, context=self._context)
 
     async def async_stop(self) -> None:
         """End the countdown and turn the target off, as setting Run for to 0 does."""
-        await self._controller.async_set_minutes(0)
+        await self._controller.async_set_minutes(0, context=self._context)
 
     async def async_add_command(
         self,
@@ -113,10 +113,10 @@ class RunForNumber(TimerifyEntity, NumberEntity):
         """
         when = command_when(None if delay is None else timedelta(minutes=delay), at)
         command_id = await self._controller.async_add_command(
-            action, when, minutes, settings
+            action, when, minutes, settings, context=self._context
         )
         return {"command_id": command_id}
 
     async def async_cancel_command(self, command_id: str) -> None:
         """Forget the pending command with that id; it must be this timer's own."""
-        await self._controller.async_cancel_command(command_id)
+        await self._controller.async_cancel_command(command_id, context=self._context)

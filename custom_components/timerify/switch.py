@@ -74,8 +74,12 @@ class IntervalSwitch(TimerifyEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Let the interval run the timer; if its window is open, for the rest of it."""
-        await self._controller.async_set_interval_enabled(self._interval_id, True)
+        await self._controller.async_set_interval_enabled(
+            self._interval_id, True, context=self._context
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Skip the interval; if it runs the timer, the timer stops (S2)."""
-        await self._controller.async_set_interval_enabled(self._interval_id, False)
+        await self._controller.async_set_interval_enabled(
+            self._interval_id, False, context=self._context
+        )

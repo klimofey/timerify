@@ -50,6 +50,8 @@ Every trigger gives the automation some variables. You can use them in condition
 - `trigger.command_id`: the id of the command, for **Pending command came due**.
 - `trigger.action`: `on` or `off`, for **Pending command came due**.
 
+The trace and the logbook of the automation name what caused the event. That is the action, the button, the voice request or the switch of the device, with the user who did it. An event caused by time, such as a countdown that ran out, names no cause and no user.
+
 The reason is one of four words:
 
 - `expired`: the countdown ran out.

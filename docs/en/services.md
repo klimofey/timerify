@@ -166,6 +166,8 @@ Timerify fires three events. The [triggers](automations.md#triggers) are built o
 | `timerify_countdown_ended` | `entity_id`, `reason` | A countdown or a limit is over. |
 | `timerify_command_due` | `entity_id`, `command_id`, `action` | A pending command is carried out at its time. |
 
+Each event carries the context of its cause, so a trace links it to the call. An event caused by time has a new context, with no user.
+
 `entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `limit` is `true` when `ends_at` is the moment of a limit. It is `false` when `ends_at` is the end of a countdown that someone chose. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
 
 A countdown or a limit ends for one of four reasons. The event names it in `reason`.

@@ -38,7 +38,7 @@ class TurnOffButton(TimerifyEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Stop the timer."""
-        await self._controller.async_set_minutes(0)
+        await self._controller.async_set_minutes(0, context=self._context)
 
     @callback
     def _handle_controller_update(self) -> None:

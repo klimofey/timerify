@@ -4319,3 +4319,96 @@ klimofey/timerify, listed in `docs/followups.md`.
   asked for. Cost if wrong: an answer with a hole in it, for a call that waited behind a slow
   device. Test: `test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_off_now`
   (`tests/voice/test_planned_commands.py`).
+- **An event carries the same context as its cause, not a child of it (#47).** The cause's
+  `Context` object itself goes to `hass.bus.async_fire(..., context=)`. That is the cause of
+  a person or an automation: an action, the Run for number, the Turn off button, an interval
+  switch, the card (it calls the same actions), an Assist sentence, a `timerify__` tool, and
+  the target switched on or off by hand. Why: Home Assistant's convention is that a state or
+  an event caused by a call carries the call's context unchanged. The automation that the
+  event triggers makes its own child (`Context(parent_id=...)`), so its trace links to the
+  call and the logbook reads "triggered by action timerify.run", with the user. The logbook
+  looks only one parent up, so a child of the call's context would lose the user. Cost if
+  wrong: the logbook of an automation run by a Timerify trigger names no user, or no action.
+  Test: `test_an_automation_run_by_an_event_names_the_call_as_its_parent`; the other tests
+  of `tests/test_event_context.py` and `tests/voice/test_events_by_voice.py` pin the entry
+  points one by one.
+- **The context is carried per call and never read when the event fires.** The public
+  methods of the controller take `context: Context | None = None`, and it goes through
+  `_command`, `_execute` and `_announce` with the change; an entity passes `self._context`
+  when it calls the controller, and an intent handler passes `intent_obj.context`. The
+  controller never reads an entity's `_context` when it fires an event. `_command`,
+  `_execute` and `_announce` take it with no default, so that every caller says what the
+  cause is. Why: Home Assistant clears an entity's context only at a state write after
+  `CONTEXT_RECENT_TIME_SECONDS` (5), so an alarm that fires a hundred seconds after a button
+  press would borrow the press if it read the entity's. A call that waits behind a slow
+  device has its own context when it gets its turn, not that of the call under way. Cost if
+  wrong: an event that time caused names the last person who touched the entity. Tests:
+  `test_a_command_due_100_seconds_after_a_button_press_has_a_fresh_context` and
+  `test_two_calls_queued_behind_a_slow_call_each_carry_their_own_context`.
+- **What time caused has a context of its own, whatever the batch.** `_announce` fires
+  `CountdownEnded` with the reason `expired` or `limit`, and `CommandCameDue`, with no
+  context, so that Home Assistant makes a new one: no user, no parent. Everything else of
+  the batch carries the batch's context. Why: "Add time" given after the end has passed, as
+  it can when it waited behind a slow device, announces the run out and a new start in one
+  batch, and only the start is the user's doing. The same goes for a call that finds a
+  limit or a pending command due. A call that is given while Home Assistant starts folds a
+  countdown that ended while it was down before it acts: that `expired` is fresh too, and
+  the start the call makes carries the call (`_async_catch_up_while_starting_locked` is
+  called with no context). Cost if wrong: a countdown that ran out is credited to the person
+  who happened to add time to it later. Tests:
+  `test_add_time_on_an_end_that_has_passed_gives_the_expiry_a_fresh_context`,
+  `test_a_call_while_starting_gives_its_context_to_its_own_start_only` and, for an event
+  that time caused with no call in the batch, `test_an_event_caused_by_time_has_a_fresh_context`
+  (an expiry, a limit, a pending "on" and the start it makes, a window that starts, a window
+  that ends, a countdown that ended while Home Assistant was down).
+- **The pending commands that a call folds are time's doing.** `_command` carries out the
+  pending commands that fell due before the moment given in an `_execute` of their own, with
+  no context, and only the command's own `_execute` gets the call's. Why: a pending command
+  coming due is time, and its alarm would have fired it with a fresh context; folding it
+  first because the alarm is queued behind the call (the entry on `fold_commands_due`) does
+  not make the person who called the cause of it. Cost if wrong: a pending "on" that fell due
+  while a call waited is credited to that call. The same holds for `CommandCameDue` in a
+  batch that has a context (an interval switch whose fold finds a command due). Tests:
+  `test_a_pending_command_folded_by_a_call_is_fresh_while_the_call_keeps_its_own` (a pending
+  "on" folded by a stop, a pending "off" folded by a run) and
+  `test_a_command_folded_by_a_switch_is_announced_with_a_fresh_context`.
+- **Switching an interval on inside its open window carries the switch.** The countdown that
+  starts is the doing of the person who flipped the switch, though the end of the window sets
+  its length. Switching an interval off carries the switch on the `stopped` of the countdown
+  that the window had running. The window is folded in the same batch
+  (`_async_refresh_windows_locked`, then `_fold_due`), so the context is passed through those
+  two helpers and `_execute_fold`, which gives it to its own `_execute` and not to the
+  refresh that follows a window that ended: a window that opens later by itself gets a fresh
+  context. The alarm, the refresh of the windows for a Workday sensor or a time zone, and the
+  catch-up at start-up pass none. Cost if wrong: the start of a switched-on interval has no
+  user in the logbook, or a window that opens at its time is credited to the last person who
+  switched its interval. Tests: the `interval_switched_on_inside_its_window` and
+  `interval_switched_off` cases of `test_an_event_carries_the_context_of_the_call_that_caused_it`,
+  and the `window_start` and `window_end` cases of
+  `test_an_event_caused_by_time_has_a_fresh_context`.
+- **A fold that a report or a switch makes carries its context, with one known
+  imprecision.** The report of a target that someone switched by hand reaches
+  `_handle_state_change`, which gives `event.context` to `_execute_fold`; so does the switch
+  of an interval, through `_fold_due`. The catch-up of such a fold may also start a window or
+  a pending command that fell due and has waited behind a slow call, and that start gets the
+  report's or the switch's context, though the person did not cause it. A report that
+  answers Timerify's own call (`_own_contexts`) carries the context of that call, which has
+  no user and no parent. `CommandCameDue` and `expired` of such a fold stay fresh. The
+  imprecision is written in the docstring of `_execute_fold`. Why it is accepted: telling
+  which item of a fold a person caused needs a context per item in the core, for a case
+  where a report or a switch gets the lock before the alarm of something that is already
+  due. Cost if wrong: a start with the wrong person in the logbook, and nothing else. Tests:
+  `test_a_device_switched_by_hand_gives_its_context_to_the_event` (the case it serves);
+  none for the imprecision.
+- **A pending command is not linked to the call that made it.** The "Pending command came
+  due" event, and the countdown it starts, have a fresh context. Why: linking them to the
+  call that added the command would store the context id in the timer's file, a schema
+  change, for no clear gain: the person who added the command is not the cause of the moment
+  it falls due. Cost if wrong: the logbook does not say who planned a command. Test: the
+  `pending_on` case of `test_an_event_caused_by_time_has_a_fresh_context`, whose
+  `add_command` is made by a user.
+- **Out of scope: calling the device with a child context.** Timerify calls the target with
+  a context of its own (`_call`, recorded in `_own_contexts`), which names no user. A child
+  of the cause's context would let the logbook say that the device was switched by Timerify,
+  after the user. It is not part of this release, and gets a line in `docs/followups.md`
+  only if the owner opens an issue for it.

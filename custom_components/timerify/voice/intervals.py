@@ -53,7 +53,9 @@ class SetScheduleHandler(TimerifyIntentHandler):
         controller = entry.runtime_data
         enabled: bool = slots["enabled"]["value"]
         asked = slots.get("interval", {}).get("value")
-        titles = await controller.async_set_schedule_enabled(enabled, asked)
+        titles = await controller.async_set_schedule_enabled(
+            enabled, asked, context=intent_obj.context
+        )
         response.async_set_speech_slots(
             {
                 "target": target_name(intent_obj.hass, controller.target_entity_id),

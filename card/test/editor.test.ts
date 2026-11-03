@@ -84,6 +84,10 @@ const LOOK_ALIKES: Record<string, RegistryEntry> = {
     ...timerifyEntry("number.a_demo_run_for", "run_for"),
     platform: "demo",
   },
+  "number.a_demo_run_for_with_target": {
+    ...timerifyEntry("number.a_demo_run_for_with_target", "run_for_with_target"),
+    platform: "demo",
+  },
   "number.a_demo_volume": { entity_id: "number.a_demo_volume", platform: "demo" },
   "number.a_other_timerify": timerifyEntry("number.a_other_timerify", "other"),
   "sensor.a_ends_at": timerifyEntry("sensor.a_ends_at", "ends_at"),
@@ -476,6 +480,29 @@ describe("the card in the card picker", () => {
     // although the timers exist.
     expect(getStubConfig(hass, [], []).entity).toBe("number.b_run_for");
     expect(getStubConfig(hass, Object.keys(LOOK_ALIKES), []).entity).toBe("number.b_run_for");
+  });
+
+  it("picks a timer on a device with two timers for a new card", async () => {
+    const { getStubConfig } = await freshEditor();
+    // A device with two timers names each Run for after its target, which gives the entity
+    // the key `run_for_with_target`.
+    const entities: Record<string, RegistryEntry> = {
+      ...LOOK_ALIKES,
+      "number.relay_run_for": timerifyEntry("number.relay_run_for", "run_for_with_target"),
+      "number.relay_run_for_channel_2": timerifyEntry(
+        "number.relay_run_for_channel_2",
+        "run_for_with_target",
+      ),
+    };
+    const hass = fakeHass({ timers: [] }).with({ entities });
+
+    const stub = getStubConfig(
+      hass,
+      [...Object.keys(LOOK_ALIKES), "number.relay_run_for_channel_2", "number.relay_run_for"],
+      [],
+    );
+
+    expect(stub.entity).toBe("number.relay_run_for");
   });
 
   it("asks for a timer when there is none", async () => {

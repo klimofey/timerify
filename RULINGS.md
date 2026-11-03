@@ -4591,3 +4591,13 @@ now.
   wrong: a timer fails to load because of the deleted target of another. Tests: none; the
   form stores an entity id (`_validate_target`), so a registry id comes only from an entry
   that was written by hand.
+- **A new card finds a Run for by either key.** `getStubConfig` in `card/src/editor.ts`
+  takes a number of Timerify whose registry `translation_key` is `run_for` or
+  `run_for_with_target`. Why: on a device with more than one timer each Run for is named
+  after its target and has the second key, so a check for `run_for` alone would pass over
+  every timer of a relay, and the card picker would offer a new card with no entity for a
+  house whose timers all share devices. The form of the visual editor filters by integration
+  and domain, not by key, and needs no change. Cost if wrong: the new card of a house with
+  timers on shared devices asks the user for an entity that the picker could have chosen.
+  Test (`card/test/editor.test.ts`): "picks a timer on a device with two timers for a new
+  card", beside a number of another integration with the second key, which is left out.

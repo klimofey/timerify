@@ -89,10 +89,12 @@ expansion_rules:
   timerify_clock_after_command: <timerify_clock>
   timerify_clock_after_extras: <timerify_clock_after_command>
   timerify_clock_before_command: <timerify_clock>
-  timerify_clock: (<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>])
+  timerify_clock: (<timerify_clock_day> <timerify_clock_time>|<timerify_clock_time> [<timerify_clock_day>]|<timerify_clock_part_of_day>)
   timerify_clock_day: '{timerify_clock_days:clock_day}'
   timerify_clock_minute: ({timerify_clock_minute_digits:clock_minute}|{timerify_clock_minute_words:clock_minute})
   timerify_clock_time: (в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})|[в] <timerify_clock_into> [{timerify_day_parts:clock_part}]|<timerify_clock_before> [{timerify_day_parts:clock_part}])
+  timerify_clock_part_of_day: '[<timerify_clock_day>] {timerify_clock_part_words:clock_part} <timerify_clock_part_time>'
+  timerify_clock_part_time: (в ({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_half_day_hours:clock_hour})|[в] <timerify_clock_into>|<timerify_clock_before>)
   timerify_clock_into: ({timerify_minutes_of_hour:clock_minute} минут[а|у|ы] <timerify_clock_ordinal>|{timerify_clock_fractions:clock_minute}[ ]<timerify_clock_ordinal>)
   timerify_clock_ordinal: '{timerify_clock_hour_ordinals:clock_ordinal}'
   timerify_clock_before: без ({timerify_minutes_of_hour:clock_before} [минут[ы]]|{timerify_clock_fractions_before:clock_before}) ({timerify_half_day_hours:clock_hour}|{timerify_clock_hour_one:clock_hour})
@@ -322,6 +324,14 @@ lists:
     - in: (дня|вечера)
       out: pm
     - in: ночи
+      out: night
+  timerify_clock_part_words:
+    values:
+    - in: утром
+      out: am
+    - in: (днём|днем|вечером)
+      out: pm
+    - in: ночью
       out: night
   timerify_clock_words:
     values:

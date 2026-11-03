@@ -2946,18 +2946,23 @@ in `docs/followups.md`.
   - **Parts of the day in English words are Timerify's.** "In the morning" is `am`, "in the
     afternoon" and "in the evening" are `pm`, "at night" is `night` (the small hours for 1 to
     5, the evening for 6 to 11, as in Russian), said after the time ("at 7 in the
-    morning"); and the part as a word goes before it, after a day or after "in the"
-    ("tomorrow morning at 7", "in the evening at 7:30", "at 7.30 tomorrow evening"). Why:
-    they are what a speaker whose "at 7" was read as the evening says next, and core's
-    gazetteer switched the target at once for them; the plan's policy (Decision 4) takes a
-    found phrasing over. The forms before the hour are in `timerify_exact_clock` too, since
-    a part of the day before "at 7" cannot be a temperature. Russian has no gazetteer: its
-    "zavtra utrom v 7" (a day, a part of the day as an adverb, the hour) is taken by core's
-    sentences for an area or a floor called "7" and refused ("no zone 7"), and nothing is
-    switched, so it is not taken over here; it is a followup for the owner to decide.
-    Cost if wrong: a form of the part of the day that is not here ("this morning at 7",
-    "tonight at 7") is not understood, and nothing is switched; the voice pages list them
-    ("What you cannot say", `test_the_clock_forms_not_understood_yet_are_not_understood`).
+    morning"); and the part as a word goes before it, after a day, after "this" or after "in
+    the" ("tomorrow morning at 7", "this morning at 7", "in the evening at 7:30", "at 7.30
+    tomorrow evening"), or as "tonight" ("tonight at 7", "at 7 tonight"). Why: they are what
+    a speaker whose "at 7" was read as the evening says next, and core's gazetteer switched
+    the target at once for them; the plan's policy (Decision 4) takes a found phrasing over.
+    The forms before the hour are in `timerify_exact_clock` too, since a part of the day
+    before "at 7" cannot be a temperature. Russian has no gazetteer: its "zavtra utrom v 7"
+    (a day, a part of the day as an adverb, the hour) was left out when this was written, as
+    core's sentences for an area or a floor called "7" refused it ("no zone 7"). It is
+    Timerify's sentence since #49 (`timerify_clock_part_of_day`, with "segodnya vecherom v 9"
+    and "noch'yu v 2"), and no follow-up. The calls of #49 are under "Release 1.3.0, Part
+    C". Cost if wrong: a form of the part of the day that is not here ("7:30a.m." with its
+    dots glued) is not understood, and nothing is switched. Tests:
+    `test_a_part_of_the_day_said_in_words_names_the_half_it_means`,
+    `test_a_thermostat_takes_a_part_of_the_day_after_its_settings`,
+    `test_a_part_of_the_day_before_the_time_means_its_time` and
+    `test_russian_clock_phrases_mean_their_time`.
   - **Midnight with a day word is the one that ends that day.** Alone, "at midnight" is the
     next 00:00. "Today at midnight" is tonight's 00:00 (the 00:00 of tomorrow's date), and
     is never refused; "tomorrow at midnight" is the 00:00 after tomorrow; "the day after
@@ -4769,15 +4774,16 @@ now.
   that writes "chas" works, and so does one that writes "1". Test:
   `test_russian_clock_phrases_mean_their_time` ("five short of one").
 - **Left out, to add on request.** Digits as the ordinal ("v polovine 8"), "pol" joined with
-  a hyphen ("pol-vos'mogo") and a bare "v chas" are not understood. "Pol vos'mogo" with a
-  space is understood, and so is "polvos'mogo"; "v" before an ordinal is optional. hassil
-  lets a list value run straight into the next chunk, so "polovinavos'mogo" is understood
-  too, as "zavtrav 7" and "halfpast 7" were before this task; the rule is not narrowed for
-  it. Why: the recognisers write the ordinal in words, and each added form is one more to
-  test in a language that has no gazetteer to fall back on. Cost if wrong: a speaker hears
-  "not understood" and says the long form. Tests:
-  `test_russian_clock_phrases_mean_their_time` ("half of the eighth in one word", "half of
-  the eighth with the half apart").
+  a hyphen ("pol-vos'mogo"), a bare "v chas" and "am" or "pm" with dots glued to the
+  minutes ("7:30a.m.") are not understood. "Pol vos'mogo" with a space is understood, and
+  so is "polvos'mogo"; "v" before an ordinal is optional. hassil lets a list value run
+  straight into the next chunk, so "polovinavos'mogo" is understood too, as "zavtrav 7" and
+  "halfpast 7" were before this task; the rule is not narrowed for it. Why: the recognisers
+  write the ordinal in words, and each added form is one more to test in a language that
+  has no gazetteer to fall back on. Cost if wrong: a speaker hears "not understood" and
+  says the long form. Tests: `test_russian_clock_phrases_mean_their_time` ("half of the
+  eighth in one word", "half of the eighth with the half apart") and
+  `test_the_forms_left_out_of_a_part_of_the_day_are_not_understood` ("7:30a.m.").
 - **The twelve Russian ordinals are a list in `src/`, checked against the library.**
   `timerify_clock_hour_ordinals` holds the genitive masculine ordinals "pervogo" to
   "dvenadtsatogo", each with its hour as the value, and the fourth with and without the
@@ -4799,3 +4805,67 @@ now.
   plans a time of day with `at` through the delayed command. Why: the slots are the shape
   of a sentence, not of a request. Cost if wrong: a model sees two tools that do the same.
   Test: `test_the_clock_sentences_add_no_llm_tool`.
+- **"Tonight" is today and night, and "this" is a day word said only before a part of the
+  day.** "Tonight" is a value of `clock_part` (the list `timerify_clock_tonight`), which
+  `ClockCommandHandler.when` reads as the night with the day word "today" when no day is
+  said: "tonight at 7" is 19:00 today, "tonight at 2" is the 02:00 that follows today and
+  "tonight at 12" the 00:00 that follows it. "This" is the list `timerify_clock_this` (the
+  value 0 of `clock_day`) and stands in `timerify_clock_when` next to a word for a part of
+  the day only: "this morning at 7", "this afternoon at 3", "this evening at half past 7".
+  "This at 7" and "at 7 this" are no time. Every rule that fills `clock_part` with "tonight"
+  takes its hour from `timerify_half_day_hours` (1 to 12), never from the 24-hour list:
+  `hour_of_day` tests the raw hour of the night, so "tonight" with the hour 19 would be read
+  as 07:00 and not as the evening. Since the hour is of the dial, a "pm" is not said with
+  "tonight" either: "tonight at 7:30pm" is not understood, as "in the evening at 7:30 pm"
+  is not. Why: "tonight" is how a speaker says today's night, and a part of the day with
+  "this" is the form that goes with it; a list of its own for "this" keeps it out of the
+  days, so no sentence takes it for a day word before "at". Cost if wrong: a speaker who
+  adds "pm" to "tonight at 7:30" hears "not understood" and drops it. Tests
+  (`tests/voice/test_clock_commands.py`):
+  `test_a_part_of_the_day_before_the_time_means_its_time`,
+  `test_a_part_of_the_day_before_the_time_ends_a_countdown_then`,
+  `test_tonight_is_the_night_of_today`,
+  `test_the_forms_left_out_of_a_part_of_the_day_are_not_understood` and
+  `test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time`.
+- **A past "tonight", "this morning" or "segodnya vecherom" is refused, not moved to
+  tomorrow (the owner's decision, 2026-11-03).** These name today as "today" does, so a time
+  that has passed is refused by the controller (`command_in_past`) and the refusal names it:
+  "tonight at 7" said at 20:00 is refused with 19:00, "this morning at 7" said at 08:00 with
+  07:00, and the Russian "segodnya vecherom v 9" said at 21:30 with 21:00. Nothing is kept
+  for tomorrow. Why: the speaker named the day, and a command planned for another day would
+  be one that was not asked for; the speaker who means tomorrow says "tomorrow". Without a
+  day word the Russian adverbs, as "utra" and "vechera" after the time, are the next time
+  ahead: "vecherom v 9" said at 21:30 is tomorrow's. Cost if wrong: a speaker who says
+  "tonight at 7" at 20:00 hears the refusal and says "tomorrow at 7". Tests
+  (`tests/voice/test_clock_commands.py`):
+  `test_tonight_or_this_morning_that_has_passed_is_refused`,
+  `test_a_tonight_that_has_passed_is_refused_and_not_moved_to_tomorrow` and
+  `test_russian_clock_phrases_that_have_passed_today_are_refused` (the cases "this evening
+  at nine, when it has passed" and "this morning at seven, when it has passed").
+- **"7:30am" is glued for "am" and "pm" only.** The list `timerify_clock_day_marks` holds
+  "am" and "pm", and the rules `timerify_exact_time` and `timerify_loose_time` take them
+  right after the minutes of a 12-hour hour, beside the list of the parts of the day with a
+  space: "at 7:30am", "at 7:30pm" and, dotted, "at 7.30pm". The dotted one is a loose time,
+  as "at 7.30 pm" is, so a thermostat does not take it after its settings. "7:30a.m." with
+  its dots glued is left out (the Task 2 entry "Left out, to add on request"). Why: "7:30am"
+  is how it is typed and how some recognisers write it. The list of the parts of the day
+  also holds "in the morning" and the dotted forms, which are not written glued to the
+  minutes, so the glued forms have a list of their own with the two words only. Cost if
+  wrong: a speaker who says "7:30a.m."
+  hears "not understood" and says "7:30 a.m." or "7:30am". Tests
+  (`tests/voice/test_clock_commands.py`):
+  `test_a_part_of_the_day_before_the_time_means_its_time` (the rows "at 7:30am", "at
+  7:30pm" and "at 7.30pm"), `test_a_part_of_the_day_before_the_time_ends_a_countdown_then`,
+  `test_a_thermostat_takes_a_part_of_the_day_after_its_settings` ("at 7:30pm" after the
+  settings) and `test_the_forms_left_out_of_a_part_of_the_day_are_not_understood`.
+- **The gazetteer is left alone: a part of the day with no hour stays core's (#21).** A bare
+  "tonight", "this evening" or "tomorrow morning" after "turn on the boiler" or "turn off
+  the boiler" has no hour, so there is no time for Timerify to plan, and a guess ("morning"
+  as 07:00) would plan a command nobody asked for. Core's gazetteer still takes these in
+  English and switches the boiler at once, as the entry on the gazetteer above records, and
+  the user page says so under "When Home Assistant answers instead". Only the forms with an
+  hour are Timerify's. Why: the policy of the plan (Decision 4) takes over a found phrasing
+  that means a time Timerify can plan; a part of the day with no hour means none, and #21
+  stays open for the rest. Cost if wrong: unchanged from before this release,
+  the device is switched at once in English. Test:
+  `test_a_part_of_the_day_with_no_hour_is_left_to_the_gazetteer`.

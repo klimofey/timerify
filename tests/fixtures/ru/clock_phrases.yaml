@@ -27,6 +27,16 @@
 # bare 12 is the earlier of its two times, as "завтра в 12:30" is 00:30 (see RULINGS.md),
 # so "завтра в половине первого" is 00:30 tomorrow.
 #
+# A part of the day may be said before the time as an adverb, with or without a day word:
+# "завтра утром в 7", "вечером в 9", "ночью в 2". The hour is of the twelve-hour clock and
+# the adverb chooses its half, as "утра" and "вечера" do after it ("в 7:30 утра", "в 9
+# вечера"): "утром" is the morning, "днём" (also written "днем") and "вечером" are the
+# afternoon and the evening, and "ночью" is the night, the small hours for 1 to 5 and the
+# evening for 6 to 11. The adverb with "сегодня" names today, so "сегодня вечером в 9" said
+# after 21:00 is refused and not moved to tomorrow. With no day word the time is the next
+# one ahead: "вечером в 9" said after 21:00 is tomorrow's. The night after a day word is
+# the night that follows that day: "завтра ночью в 2" is the 02:00 after tomorrow.
+#
 # A date is no time of the day: "двадцать восьмого" is the twenty-eighth, with no word
 # for minutes, and "без двадцати" counts to no hour.
 
@@ -190,6 +200,88 @@
   said: "сегодня в половине восьмого утра"
   now: "08:00"
   refused: "07:30"
+
+- name: tomorrow morning at seven
+  said: "завтра утром в 7"
+  now: "06:00"
+  days: 1
+  clock: "07:00"
+
+- name: this evening at nine
+  said: "сегодня вечером в 9"
+  now: "06:00"
+  days: 0
+  clock: "21:00"
+
+- name: this evening at nine, when it has passed
+  said: "сегодня вечером в 9"
+  now: "21:30"
+  refused: "21:00"
+
+- name: this morning at seven, when it has passed
+  said: "сегодня утром в 7"
+  now: "08:00"
+  refused: "07:00"
+
+- name: evening at nine with no day word, when it has passed, is tomorrow
+  said: "вечером в 9"
+  now: "21:30"
+  days: 1
+  clock: "21:00"
+
+- name: morning at seven with no day word
+  said: "утром в 7"
+  now: "06:00"
+  days: 0
+  clock: "07:00"
+
+- name: tomorrow afternoon at two
+  said: "завтра днём в 2"
+  now: "06:00"
+  days: 1
+  clock: "14:00"
+
+- name: tomorrow afternoon at two, with the letter ye
+  said: "завтра днем в 2"
+  now: "06:00"
+  days: 1
+  clock: "14:00"
+
+- name: night at two with no day word
+  said: "ночью в 2"
+  now: "06:00"
+  days: 1
+  clock: "02:00"
+
+- name: tomorrow night at two is the night after tomorrow
+  said: "завтра ночью в 2"
+  now: "06:00"
+  days: 2
+  clock: "02:00"
+
+- name: tomorrow morning half of the eighth
+  said: "завтра утром в половине восьмого"
+  now: "06:00"
+  days: 1
+  clock: "07:30"
+
+- name: this evening a quarter short of nine
+  said: "сегодня вечером без четверти девять"
+  now: "06:00"
+  days: 0
+  clock: "20:45"
+
+- name: half past seven in the morning
+  said: "в 7:30 утра"
+  now: "06:00"
+  days: 0
+  clock: "07:30"
+
+- name: nine in the evening
+  said: "в 9 вечера"
+  now: "06:00"
+  days: 0
+  clock: "21:00"
 
 - name: a date is no time
   said: "двадцать восьмого"

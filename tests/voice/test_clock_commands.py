@@ -634,6 +634,8 @@ async def test_for_an_hour_at_50_stays_a_temperature_for_a_water_heater(
         ("turn on the AC for an hour at 7:30 in the morning", SUNDAY, "07:30"),
         ("turn on the AC for an hour tomorrow morning at 7", MONDAY, "07:00"),
         ("turn on the AC for an hour in the evening at 7", SUNDAY, "19:00"),
+        ("turn on the AC for an hour tonight at 7", SUNDAY, "19:00"),
+        ("turn on the AC for an hour at 7:30pm", SUNDAY, "19:30"),
     ],
 )
 async def test_a_thermostat_takes_a_part_of_the_day_after_its_settings(
@@ -1309,6 +1311,101 @@ async def test_minutes_around_an_hour_out_of_bounds_are_not_understood(
     assert fake_target.calls == []
 
 
+# --- A part of the day before the time, and am or pm after the minutes (issue 49) --
+
+
+@pytest.mark.parametrize(
+    ("said", "clock", "days"),
+    [
+        ("at 7:30am", "07:30", 0),
+        ("at 7:30pm", "19:30", 0),
+        ("at 7.30pm", "19:30", 0),
+        ("tonight at 7", "19:00", 0),
+        ("tonight at 11", "23:00", 0),
+        ("tonight at 2", "02:00", 1),
+        ("tonight at 12", "00:00", 1),
+        ("at 7 tonight", "19:00", 0),
+        ("tonight at quarter to 8", "19:45", 0),
+        ("this morning at 7", "07:00", 0),
+        ("this afternoon at 3", "15:00", 0),
+        ("this evening at half past 7", "19:30", 0),
+    ],
+)
+async def test_a_part_of_the_day_before_the_time_means_its_time(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    clock: str,
+    days: int,
+) -> None:
+    """ "Am" and "pm" may be written right after the minutes, and "tonight", "this
+    morning" and the like name today's part of the day: said on Sunday at six in the
+    morning they are the times of today, and the small hours of "tonight" are the night
+    that follows today."""
+    response = await converse(hass, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    ("said", "clock", "minutes"),
+    [
+        ("at 7:30am", "07:30", "90"),
+        ("this morning at 9", "09:00", "180"),
+        ("tonight at 7", "19:00", "780"),
+    ],
+)
+async def test_a_part_of_the_day_before_the_time_ends_a_countdown_then(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    clock: str,
+    minutes: str,
+) -> None:
+    """A running boiler is told when to stop, as "turn off at 7:30" does."""
+    await set_number(hass, NUMBER, 240)
+
+    response = await converse(hass, f"turn off the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, SENSOR) == at(SUNDAY, clock)
+    assert state_of(hass, NUMBER) == minutes
+    assert pending(hass) == []
+
+
+@pytest.mark.parametrize(
+    ("now", "said", "at_time"),
+    [
+        ("20:00", "tonight at 7", "19:00"),
+        ("08:00", "this morning at 7", "07:00"),
+        ("20:00", "this evening at half past 7", "19:30"),
+    ],
+)
+async def test_tonight_or_this_morning_that_has_passed_is_refused(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    said: str,
+    at_time: str,
+) -> None:
+    """ "Tonight", "this morning" and "this evening" name today, as "today" does: the
+    time that has passed is not moved to tomorrow, and nothing is kept."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert refusal_of(response) == translated(
+        "en", "exceptions", "command_in_past", "message"
+    ).format(at=at_time)
+    assert state_of(hass, NEXT) == "unknown"
+    assert fake_target.calls == []
+
+
 # --- Russian -----------------------------------------------------------------------
 
 
@@ -1787,6 +1884,29 @@ async def test_the_clock_phrasings_the_gazetteer_took_are_timerify_s_now(
 
 
 @pytest.mark.parametrize(
+    ("said", "reached_intent"),
+    [
+        ("turn on the boiler tonight", "HassTurnOn"),
+        ("turn on the boiler this evening", "HassTurnOn"),
+        ("turn on the boiler tomorrow morning", "HassTurnOn"),
+        ("turn off the boiler tonight", "HassTurnOff"),
+    ],
+)
+async def test_a_part_of_the_day_with_no_hour_is_left_to_the_gazetteer(
+    hass: HomeAssistant,
+    clock_boiler: MockConfigEntry,
+    said: str,
+    reached_intent: str,
+) -> None:
+    """A part of the day with no hour names no time to plan: these stay core's (issue
+    21), which switches the boiler at once in English, and no command is kept."""
+    response = await converse(hass, said)
+
+    assert reached(response) == reached_intent, speech(response)
+    assert pending(hass) == []
+
+
+@pytest.mark.parametrize(
     "said",
     [
         "turn on the boiler at 25:00",
@@ -1815,20 +1935,21 @@ async def test_a_time_that_is_none_is_not_understood(
 @pytest.mark.parametrize(
     "said",
     [
-        "turn on the boiler at 7:30am",
-        "turn on the boiler tonight at 7",
-        "turn on the boiler this morning at 7",
+        "turn on the boiler at 7:30a.m.",
+        "turn on the boiler at 7:30p.m.",
+        "turn on the boiler at 7.30a.m.",
+        "turn on the boiler tonight at 7:30pm",
     ],
 )
-async def test_the_clock_forms_not_understood_yet_are_not_understood(
+async def test_the_forms_left_out_of_a_part_of_the_day_are_not_understood(
     hass: HomeAssistant,
     fake_target: FakeTarget,
     clock_boiler: MockConfigEntry,
     said: str,
 ) -> None:
-    """The forms that the voice page lists as not understood yet (issue 49) reach no
-    handler: nothing is kept for a time that was not read, and the boiler is not turned
-    on at once. "At 7 am" and "at 7:30 am" are read."""
+    """Only "am" and "pm" are written right after the minutes: with their dots they
+    are not, and "tonight" takes an hour with no "pm" of its own. What is not a time
+    reaches no handler, and nothing is kept or switched."""
     response = await converse(hass, said)
 
     assert reached(response) is None, speech(response)
@@ -2465,8 +2586,8 @@ def time_of(form: str) -> str:
 
 def says_a_part_of_the_day(form: str) -> bool:
     """Whether a form of the English clock says the part of the day as a word before the
-    hour or after it: "tomorrow morning at 7", "at 7 in the evening"."""
-    return re.search(r"\b(morning|afternoon|evening|night)\b", form) is not None
+    hour or after it: "tomorrow morning at 7", "at 7 in the evening", "tonight at 7"."""
+    return re.search(r"\b(morning|afternoon|evening|night|tonight)\b", form) is not None
 
 
 def is_dotted(time: str) -> bool:
@@ -2505,6 +2626,9 @@ def test_an_exact_clock_is_every_english_form_but_a_bare_hour_and_a_dotted_time(
         "at 7.30 tomorrow morning",
         "at half past 7",
         "at 20 to 7",
+        "at 7:30am",
+        "tonight at 7",
+        "at 7 tonight",
     } <= exact
     assert not {"at 7", "at 7.30", "tomorrow at 7"} & exact
 

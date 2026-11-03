@@ -105,9 +105,12 @@ The Russian column is transliterated because this page is in English. The real s
 - You can count minutes past an hour: "ten past 7", "quarter past 7", "half past 7" or "twenty-five past 7". Any number from 1 to 59 works.
 - You can count minutes to an hour: "five to 8", "quarter to 8" or "twenty minutes to 8". "Quarter to noon" is 11:45, and "quarter to midnight" is 23:45.
 - These forms follow the rules of "7:30". "Half past 7" is the nearer of 07:30 and 19:30 ahead. "Quarter to 8" said at 19:50 is 07:45 tomorrow. "Am", "pm" or a part of the day go with the hour you name: "quarter to 8 in the evening" is 19:45.
-- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". So do "in the morning", "in the afternoon", "in the evening" and "at night", as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
-- You can also put the part of the day before the hour, after a day or after "in the". Examples are "tomorrow morning at 7" and "in the evening at 7:30".
+- "Am" and "pm" tell the morning from the evening: "at 7 am", "at 7:30 p.m.". You can write them right after the minutes: "7:30am", "7:30pm". Written like that, they have no dots. The phrases "in the morning", "in the afternoon", "in the evening" and "at night" do the same, as in "at 7 in the evening". "At 2 at night" is 02:00, and "at 11 at night" is 23:00.
+- You can also put the part of the day before the hour, after a day, after "this" or after "in the". Examples are "tomorrow morning at 7", "this morning at 7", "this evening at half past 7" and "in the evening at 7:30".
+- "Tonight" works too: "tonight at 7" and "at 7 tonight". "Tonight" is today at night. "Tonight at 7" is 19:00 today, and "tonight at 2" is 02:00 in the night after today.
+- "This morning", "this evening" and "tonight" name today. A time that has passed is refused, as with "today".
 - In Russian the words "utra" (morning), "dnya" and "vechera" (afternoon and evening) and "nochi" (night) do the same. "V 2 nochi" is 02:00, and "v 11 nochi" is 23:00.
+- In Russian you can also put "utrom", "dnyom", "vecherom" or "noch'yu" before the time, with a day or without one. Examples are "zavtra utrom v 7" and "segodnya vecherom v 9". With "segodnya", a time that has passed is refused.
 - Russian counts to the next hour. "V polovine vos'mogo" and "v polvos'mogo" are 07:30, "v chetvert' vos'mogo" is 07:15, and "desyat' minut vos'mogo" is 07:10. "Bez chetverti vosem'" is 07:45, and "bez pyati vosem'" is 07:55.
 - Without any of these, an hour from 1 to 12 is the nearer of its two times ahead. That holds for "7", "7:30" and "seven thirty", which have no leading zero. "At 7" said at 18:00 means 19:00 today. Said at 06:00, it means 07:00 today. Said at 20:00, it means 07:00 tomorrow. Say "am", "pm" or "in the morning" to choose the other one.
 - With a day word, the same rule works on that day. So "tomorrow at 7" is 07:00 tomorrow.
@@ -266,7 +269,6 @@ If the interval is empty, the whole schedule is switched.
 - **Planning a command to turn off.** "Turn off in 20 minutes" sets the countdown instead. A pending command to turn off is made with the **Add command** action.
 - **Cancelling one command by its id.** Only an LLM agent or the **Cancel command** action has the id.
 - **The days of a title that Timerify made.** The title has them, such as `Sun–Thu`, and they cannot be said. Say the start time, or give the interval a title of your own.
-- **Some ways of saying the time.** "7:30am" written together, "tonight at 7" and "this morning at 7" are not understood yet ([issue #49](https://github.com/klimofey/timerify/issues/49)). Say "at 7:30", "at 7:30 am", "at 7 in the evening" or "at 7 in the morning" instead.
 
 ---
 

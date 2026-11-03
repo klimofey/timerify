@@ -142,19 +142,46 @@ async def test_countdown_started_gives_the_automation_its_end(
         hass,
         "countdown_started",
         {"device_id": fake_target.device_id},
-        ["entity_id", "ends_at"],
+        ["entity_id", "ends_at", "limit"],
     )
 
     await set_number(hass, NUMBER, 30)
 
     assert [record.data for record in records] == [
-        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00"}
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00", "limit": False}
+    ]
+
+
+async def test_a_limit_gives_the_automation_its_mark(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The trigger fires for a limit too, and `trigger.limit` tells it from a time that
+    somebody chose."""
+    await setup_target(mode="loose", limit=120)
+    records = await watch(
+        hass,
+        "countdown_started",
+        {"device_id": fake_target.device_id},
+        ["entity_id", "ends_at", "limit"],
+    )
+
+    await fake_target.set_state("on")
+    await set_number(hass, NUMBER, 30)
+
+    assert [record.data for record in records] == [
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T09:00:00+00:00", "limit": True},
+        {"entity_id": NUMBER, "ends_at": "2026-01-05T07:30:00+00:00", "limit": False},
     ]
 
 
 @pytest.mark.parametrize(
     ("how", "reason"),
-    [("expiry", "expired"), ("stop", "stopped"), ("by_hand", "turned_off")],
+    [
+        ("expiry", "expired"),
+        ("stop", "stopped"),
+        ("by_hand", "turned_off"),
+        ("limit", "limit"),
+    ],
 )
 async def test_countdown_ended_tells_the_automation_how(
     how: str,
@@ -165,16 +192,19 @@ async def test_countdown_ended_tells_the_automation_how(
     setup_target: SetupTarget,
 ) -> None:
     """However the countdown ends, the automation hears of it once and is told which
-    way it ended: it ran out, Timerify stopped it, or someone switched the boiler
-    off."""
-    await setup_target()
+    way it ended: it ran out, Timerify stopped it, someone switched the boiler off, or
+    the boiler was left on and its limit turned it off."""
+    await setup_target(mode="loose", limit=120)
     records = await watch(
         hass,
         "countdown_ended",
         {"device_id": fake_target.device_id},
         ["entity_id", "reason"],
     )
-    await set_number(hass, NUMBER, 30)
+    if how == "limit":
+        await fake_target.set_state("on")
+    else:
+        await set_number(hass, NUMBER, 30)
     assert records == []
 
     match how:
@@ -184,6 +214,8 @@ async def test_countdown_ended_tells_the_automation_how(
             await call_service(hass, "stop", {"entity_id": NUMBER})
         case "by_hand":
             await fake_target.set_state("off")
+        case "limit":
+            await advance(hass, freezer, minutes=120)
 
     assert [record.data for record in records] == [
         {"entity_id": NUMBER, "reason": reason}

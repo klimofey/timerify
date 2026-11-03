@@ -3,9 +3,10 @@ the voice sentences.
 
 The flow starts with a menu: add a timer, or, while there is none, the voice settings.
 Adding a timer takes the entity, the binding mode, whether to count how long the
-target is on and where the Run for slider ends, in strict mode a default duration, and,
-in a house that has a Workday sensor, that sensor. The options flow changes the mode,
-the counting, the end of the slider, the duration and the sensor; the target stays.
+target is on and where the Run for slider ends, in strict mode a default duration, in
+loose mode how long the target may be left on with no countdown, and, in a house that
+has a Workday sensor, that sensor. The options flow changes the mode, the counting, the
+end of the slider, the duration, the limit and the sensor; the target stays.
 Schedule intervals are subentries of the timer's entry, added, edited and deleted one
 by one from its page.
 
@@ -63,6 +64,7 @@ from .const import (
     CONF_GENERATED_TITLE,
     CONF_KIND,
     CONF_LANGUAGES,
+    CONF_LIMIT,
     CONF_MODE,
     CONF_OFF_BUTTON,
     CONF_RUN_FOR_MAX,
@@ -333,12 +335,29 @@ async def _validate_workday(
     return user_input
 
 
+async def _limit_schema(_handler: SchemaCommonFlowHandler) -> probatio.Schema:
+    """The form of the limit, for a timer of loose mode: one box, empty unless the timer
+    has a limit, in which case it shows it."""
+    return probatio.Schema({probatio.Optional(CONF_LIMIT): _duration_selector()})
+
+
+async def _validate_limit(
+    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep the limit in whole minutes. An empty box leaves it out of the input, which
+    takes the option away (a timer without a limit has none)."""
+    if CONF_LIMIT not in user_input:
+        return user_input
+    return _whole_minutes(user_input, CONF_LIMIT)
+
+
 async def _after_mode(options: dict[str, Any]) -> str:
-    """Strict mode needs a default duration; loose mode has no use for one."""
-    return "duration" if options[CONF_MODE] == "strict" else "workday"
+    """Strict mode needs a default duration, which loose mode has no use for; loose
+    mode may have a limit, which strict mode never has."""
+    return "duration" if options[CONF_MODE] == "strict" else "limit"
 
 
-async def _after_duration(_options: dict[str, Any]) -> str:
+async def _before_workday(_options: dict[str, Any]) -> str:
     """The Workday sensor comes last. A function, not the step's name, so that the
     form does not announce a next step that a house without a Workday sensor never
     gets: it says "Submit" either way."""
@@ -348,7 +367,11 @@ async def _after_duration(_options: dict[str, Any]) -> str:
 _DURATION_STEP = SchemaFlowFormStep(
     _duration_schema,
     validate_user_input=_validate_duration,
-    next_step=_after_duration,
+    next_step=_before_workday,
+)
+
+_LIMIT_STEP = SchemaFlowFormStep(
+    _limit_schema, validate_user_input=_validate_limit, next_step=_before_workday
 )
 
 _WORKDAY_STEP = SchemaFlowFormStep(
@@ -475,11 +498,19 @@ async def _options_init_schema(
 
 
 async def _validate_timer_settings(
-    _handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
+    handler: SchemaCommonFlowHandler, user_input: dict[str, Any]
 ) -> dict[str, Any]:
     """Keep the end of the Run for slider in whole minutes. The default duration is
-    checked against it on the form that follows."""
-    return _whole_minutes(user_input, CONF_RUN_FOR_MAX)
+    checked against it on the form that follows.
+
+    A timer that turns strict loses its limit: the form of the limit is not shown to
+    it, so nothing else would take the option away, and it would come back, unseen,
+    the day the timer turns loose again.
+    """
+    accepted = _whole_minutes(user_input, CONF_RUN_FOR_MAX)
+    if accepted[CONF_MODE] == "strict":
+        handler.options.pop(CONF_LIMIT, None)
+    return accepted
 
 
 async def _after_options_init(options: dict[str, Any]) -> str:
@@ -497,6 +528,7 @@ CONFIG_FLOW: Final = {
     ),
     "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
+    "limit": _LIMIT_STEP,
     "workday": _WORKDAY_STEP,
 }
 
@@ -508,6 +540,7 @@ OPTIONS_FLOW: Final = {
     ),
     "voice_settings": _VOICE_STEP,
     "duration": _DURATION_STEP,
+    "limit": _LIMIT_STEP,
     "workday": _WORKDAY_STEP,
 }
 

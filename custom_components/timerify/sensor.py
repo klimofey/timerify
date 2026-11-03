@@ -61,12 +61,18 @@ async def async_setup_entry(
 class EndsAtSensor(TimerifyEntity, SensorEntity):
     """The moment the countdown ends; unknown while no countdown runs.
 
+    A device that runs with no countdown, in a loose timer that has a limit, shows the
+    moment the limit turns it off, and the attribute `limit` says so: true then, false
+    for a countdown that someone chose. It is a bound, not a promise, which a card or an
+    automation words differently.
+
     The attribute `started_at` is when that countdown began, for the card to show how
-    much of it is left; it is None while the state is unknown, and for a countdown
-    that was stored before the attribute existed.
+    much of it is left; it is None while the state is unknown, for a limit, which has
+    no beginning to count a share from, and for a countdown that was stored before the
+    attribute existed.
 
     The frontend counts down to it by itself, so the sensor is written only when
-    the end or the beginning moves, not as the minutes pass.
+    the end, the limit or the beginning moves, not as the minutes pass.
     """
 
     entity_description = SensorEntityDescription(
@@ -75,8 +81,12 @@ class EndsAtSensor(TimerifyEntity, SensorEntity):
         device_class=SensorDeviceClass.TIMESTAMP,
     )
 
-    _shown: tuple[datetime | None, datetime | None] = (None, None)
-    """The end and the beginning the state was last written with."""
+    _shown: tuple[datetime | None, datetime | None, datetime | None] = (
+        None,
+        None,
+        None,
+    )
+    """The end, the beginning and the limit the state was last written with."""
 
     async def async_added_to_hass(self) -> None:
         """Show the countdown as it is now, then follow it."""
@@ -84,14 +94,18 @@ class EndsAtSensor(TimerifyEntity, SensorEntity):
         await super().async_added_to_hass()
 
     def _show(self, snapshot: Snapshot) -> None:
-        self._shown = (snapshot.end, snapshot.started_at)
-        self._attr_native_value = snapshot.end
-        self._attr_extra_state_attributes = {"started_at": snapshot.started_at}
+        self._shown = (snapshot.end, snapshot.started_at, snapshot.limit_at)
+        # A countdown and a limit are never there together.
+        self._attr_native_value = snapshot.end or snapshot.limit_at
+        self._attr_extra_state_attributes = {
+            "started_at": snapshot.started_at,
+            "limit": snapshot.limit_at is not None,
+        }
 
     @callback
     def _handle_controller_update(self) -> None:
         snapshot = self._controller.snapshot
-        if (snapshot.end, snapshot.started_at) != self._shown:
+        if (snapshot.end, snapshot.started_at, snapshot.limit_at) != self._shown:
             self._show(snapshot)
             self.async_write_ha_state()
 

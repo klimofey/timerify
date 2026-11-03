@@ -22,6 +22,10 @@ or False: no counter, and no Runtime sensor; an entry of an earlier release has 
 CONF_RUN_FOR_MAX: Final = "run_for_max"
 """Option holding the end of the Run for slider in whole minutes. An entry of an earlier
 release has none."""
+CONF_LIMIT: Final = "limit"
+"""Option holding how long, in whole minutes, a loose timer lets its target run with no
+countdown before it turns the target off. Absent: no limit; an entry of an earlier
+release has none, and a strict timer never has one."""
 CONF_OFF_BUTTON: Final = "off_button"
 """Option holding whether the timer has a Turn off button, a `bool`. Absent or False: no
 button; an entry of an earlier release has none."""
@@ -194,6 +198,13 @@ def run_for_max_minutes(options: Mapping[str, Any]) -> int:
     has none. It bounds the slider only; a countdown that something else starts may be
     longer, up to `MAX_MINUTES`."""
     minutes: int = options.get(CONF_RUN_FOR_MAX, MAX_MINUTES)
+    return minutes
+
+
+def limit_minutes(options: Mapping[str, Any]) -> int | None:
+    """The minutes a loose timer lets its target run with no countdown: its option, or
+    None for an entry that has none."""
+    minutes: int | None = options.get(CONF_LIMIT)
     return minutes
 
 

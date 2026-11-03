@@ -42,6 +42,16 @@
           "default_duration": "Default duration"
         }
       },
+      "limit": {
+        "title": "Turn off if left on for",
+        "description": "A loose timer lets the entity run without a countdown. If it is left running like that, Timerify turns it off after this time. A run you ask for, such as for 3 hours, is never cut. Leave the box empty for no limit.",
+        "data": {
+          "limit": "Turn off if left on for"
+        },
+        "data_description": {
+          "limit": "In minutes, from 1 to 1440 (one day). It counts from the moment Timerify sees the entity on with no countdown."
+        }
+      },
       "workday": {
         "title": "Workday sensor",
         "description": "Schedule intervals can run on working days or on non-working days, as a Workday sensor tells them. Pick the sensor, or leave this empty if no interval of this timer needs one.",
@@ -96,6 +106,16 @@
         "description": "How long the entity runs when it is turned on without a duration.",
         "data": {
           "default_duration": "Default duration"
+        }
+      },
+      "limit": {
+        "title": "Turn off if left on for",
+        "description": "A loose timer lets the entity run without a countdown. If it is left running like that, Timerify turns it off after this time. A run you ask for, such as for 3 hours, is never cut. Leave the box empty for no limit.",
+        "data": {
+          "limit": "Turn off if left on for"
+        },
+        "data_description": {
+          "limit": "In minutes, from 1 to 1440 (one day). It counts from the moment Timerify sees the entity on with no countdown."
         }
       },
       "workday": {
@@ -286,6 +306,9 @@
         "state_attributes": {
           "started_at": {
             "name": "Started at"
+          },
+          "limit": {
+            "name": "Is a limit"
           }
         }
       },
@@ -320,11 +343,11 @@
     },
     "run": {
       "name": "Run",
-      "description": "Turns the entity on, for the minutes given. Without minutes, an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. One that is already running keeps its countdown. The settings given are applied if the entity supports them.",
+      "description": "Turns the entity on, for the minutes given. Without minutes, an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode, where the limit of the timer, if it has one, turns it off in the end. One that is already running keeps its countdown or its limit. The settings given are applied if the entity supports them.",
       "fields": {
         "minutes": {
           "name": "Minutes",
-          "description": "How long to run, in whole minutes, up to a day. Without it an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. One that is already running keeps its countdown."
+          "description": "How long to run, in whole minutes, up to a day. Without it an entity that is off runs to the end of the schedule window that is open, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode, where the limit of the timer, if it has one, turns it off in the end. One that is already running keeps its countdown or its limit."
         },
         "hvac_mode": {
           "name": "HVAC mode",
@@ -391,7 +414,7 @@
         },
         "minutes": {
           "name": "Minutes",
-          "description": "How long a command to turn on runs, in whole minutes, up to a day. Without it the entity runs to the end of the schedule window that is open then, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode. A command to turn off takes none."
+          "description": "How long a command to turn on runs, in whole minutes, up to a day. Without it the entity runs to the end of the schedule window that is open then, if there is one; strict mode keeps the default duration when it ends later. With no window open, it runs for the default duration in strict mode and without a countdown in loose mode, where the limit of the timer, if it has one, turns it off in the end. A command to turn off takes none."
         },
         "hvac_mode": {
           "name": "HVAC mode",
@@ -450,11 +473,11 @@
   "triggers": {
     "countdown_started": {
       "name": "Countdown started",
-      "description": "Triggers when a timer that was not counting down starts a countdown: by an action, by hand in strict mode, by a pending command or by a schedule window. A change of a countdown that is already running does not trigger it."
+      "description": "Triggers when a timer that was not counting down starts a countdown: by an action, by hand in strict mode, by a pending command or by a schedule window. It also triggers when a loose timer sets a limit on an entity that was left on with no countdown: the variable limit is then true. A change of a countdown that is already running does not trigger it."
     },
     "countdown_ended": {
       "name": "Countdown ended",
-      "description": "Triggers when the countdown of a timer ends. Its reason says how: expired when it ran out, stopped when Timerify stopped it, turned_off when the entity was switched off outside Timerify."
+      "description": "Triggers when the countdown of a timer ends. Its reason says how: expired when it ran out, stopped when Timerify stopped it, turned_off when the entity was switched off outside Timerify, limit when the limit of an entity left on turned it off."
     },
     "command_due": {
       "name": "Pending command came due",

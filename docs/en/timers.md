@@ -12,7 +12,7 @@ A timer attaches a countdown to an entity you already have. A plain switch, such
 4. Turn on **Count runtime** if you want the timer to add up how long the device is on. It is off to begin with. The [Runtime page](runtime.md) tells more.
 5. Set **Maximum of Run for**, the end of the slider. It is 1440 minutes (one day) to begin with. If you rarely run the device for more than two hours, set 120.
 6. Turn on **Turn off button** if you want a button that turns the device off. It is off to begin with.
-7. In Strict mode, set the default duration. It cannot be longer than the maximum.
+7. In Strict mode, set the default duration. It cannot be longer than the maximum. In Loose mode, you can set **Turn off if left on for** instead. Leave it empty for no limit. The [Modes](#modes) section explains it.
 8. If your house has a Workday sensor, pick the one this timer follows, or leave it empty. Schedules use it.
 
 ![The form that adds a timer: the entity, the mode, Count runtime, Maximum of Run for and Turn off button](../screenshots/smoke-2-add-timer.png)
@@ -21,7 +21,7 @@ The timer appears on the device page of the entity. The **Add integration** butt
 
 ### Change a timer later
 
-Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode, the runtime counter, **Maximum of Run for**, **Turn off button**, the default duration and the Workday sensor.
+Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode, the runtime counter, **Maximum of Run for**, **Turn off button**, the default duration, **Turn off if left on for** and the Workday sensor.
 
 You cannot change the entity. Add a timer for the other entity instead.
 
@@ -36,7 +36,7 @@ Set **Run for** to a number of minutes. The device turns on, and it turns off wh
 - Set **Run for** to a new number while a countdown runs. The countdown restarts from that number.
 - Set **Run for** to 0. The device turns off. This also turns off a device that runs without a countdown, in Loose mode.
 - While a countdown runs, **Run for** shows the minutes left, rounded up.
-- **Ends at** shows the moment the countdown ends. It is unknown while no countdown runs.
+- **Ends at** shows the moment the countdown ends. It is unknown while no countdown runs. In Loose mode it can also show a [limit](#turn-off-a-device-that-was-left-on).
 - A countdown is a whole number of minutes, from 1 minute up to one day.
 - The slider of **Run for** ends at the **Maximum of Run for** you chose.
 - Actions, voice, pending commands and schedules can still start a countdown of up to a day. **Run for** then shows more minutes than the slider's end, and the countdown runs in full.
@@ -49,9 +49,29 @@ You can also start, extend and stop a timer from a [dashboard card](card.md), [b
 Each timer has a mode. You choose it when you add the timer, and you can change it later.
 
 - **Strict** (the default): the device runs only while a countdown does. You also set a default duration. It is 30 minutes to begin with. If **Maximum of Run for** is smaller, it is that instead.
-- **Loose**: the device may also run without a countdown. A countdown then only means "turn off when it reaches zero".
+- **Loose**: the device may also run without a countdown. A countdown then only means "turn off when it reaches zero". You can also give it a limit, so that a device left on is turned off in the end.
 
 The default duration is how long a Strict device runs when it is turned on without a length of time. While a schedule window is open, the run lasts to the end of the window instead. If the default duration ends later, the run lasts to its end.
+
+### Turn off a device that was left on
+
+A Loose device that you switch on by hand has no countdown. If you forget it, it runs on. The setting **Turn off if left on for** is a fuse against that. It is a number of minutes, from 1 to 1440. It is empty to begin with, which means no limit. A Strict timer does not have it, because every run of a Strict device has a countdown already.
+
+- A Loose device is on, and Timerify has no countdown for it. Timerify then sets a limit: the moment now, plus the minutes you chose. When the limit comes, Timerify turns the device off.
+- A time you chose is never cut. **Run for**, **Add time**, a run or a voice command with minutes, a pending command with minutes and a schedule window each give the device a countdown. There is no limit while it runs.
+- Turning the device off ends the limit, whoever does it. The next turn-on without a time starts a new limit.
+- These start a limit:
+  - You switch the device on by hand.
+  - **Run** has no minutes, or a voice command or a pending command names no time.
+  - Home Assistant starts, or the device comes back from unavailable, and finds it on.
+- The limit counts from the moment Timerify sees the device on. A device switched on while Home Assistant was down gets its limit from the start-up.
+- **Ends at** shows the moment of the limit. The limit is a bound, not a promise: it is the latest the device stays on. **Run for** stays 0, because nobody chose a time.
+- Adding time to a limit gives a countdown that you chose. A limit of 13:30 with 15 minutes added is a countdown to 13:45, and nothing cuts it.
+- A limit survives a Home Assistant restart, like a countdown. One that came while Home Assistant was down turns the device off at start-up.
+- Changing the settings loads the timer again, and that counts as a start-up. A device that is on with no limit gets one from that moment. A limit that already runs keeps its time.
+- If you empty the box or switch to Strict mode, the limit goes away when the timer loads again. The device keeps running. In Strict mode the default duration then applies.
+
+The events and triggers tell an automation when a limit starts and ends. See [Automations](automations.md#what-a-trigger-tells-the-automation).
 
 ## What a timer adds to the device page
 
@@ -60,7 +80,7 @@ All the entities of a timer sit on the device's own page in Home Assistant. If t
 | Entity | What it shows |
 | --- | --- |
 | **Run for** (a number) | The minutes left, rounded up. Setting it starts, changes or stops the countdown. |
-| **Ends at** (a sensor) | The moment the countdown ends. It is unknown while no countdown runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began, which is empty while no countdown runs. The dashboard card uses it to draw its fill. |
+| **Ends at** (a sensor) | The moment the countdown ends. In Loose mode, while a device left on has a limit, it shows the moment of the limit instead: the time the device turns off at the latest. It is unknown while neither runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began, which is empty while no countdown runs, and whether the time is a limit. The dashboard card uses them to draw its fill. |
 | **Next command** (a sensor) | The moment the next pending command is due. It is unknown while there is none. See [Pending commands](pending-commands.md#the-next-command-sensor). |
 | `Schedule 06:30–07:15, Sun–Thu` (a switch) | One for each schedule interval. It is on while the interval is in use, and off to skip it. See [Schedules](schedules.md#switch-an-interval-on-or-off). |
 | **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The [Runtime page](runtime.md) tells more. |
@@ -72,7 +92,7 @@ You, the device's own app, a switch on the wall and an automation can all switch
 
 - Someone turns the device off: the countdown is cleared. This holds in both modes.
 - Someone turns the device on in Strict mode: a countdown starts for the default duration. So a boiler that you switch on at the wall still turns itself off.
-- Someone turns the device on in Loose mode: the device is left running without a countdown.
+- Someone turns the device on in Loose mode: the device is left running without a countdown. If the timer has a [limit](#turn-off-a-device-that-was-left-on), the device is turned off when it comes.
 - The exception is a [schedule](schedules.md#how-a-schedule-and-your-own-changes-meet) window that is open at that moment. The countdown then ends with the window, in either mode. In Strict mode it ends with the default duration if that is later.
 
 Starting, changing and stopping the countdown is the only way Timerify itself switches the device. So the rules never contradict each other. A pending command is a change of the countdown that happens later. So is the start of a schedule interval.
@@ -95,7 +115,7 @@ Starting, changing and stopping the countdown is the only way Timerify itself sw
 ## When Home Assistant restarts
 
 - A countdown survives a Home Assistant restart. Timerify stores it on every change. At start-up it checks the end time against the clock.
-- A countdown that ended while Home Assistant was down turns the device off.
+- A countdown that ended while Home Assistant was down turns the device off. So does a limit that came meanwhile.
 - A change you make while Home Assistant is still starting is kept and saved. This covers **Run for**, **Add time**, **Run** and pending commands. It also covers the switch of a schedule interval and of the whole schedule. Timerify switches the device once Home Assistant has started.
 - Your change counts from the moment you make it. Timerify first applies what came due before it while Home Assistant was down. That can be a countdown that ended, a pending command or a schedule window. Then your change wins, as it does with Home Assistant running.
 - A pending command still runs at its own time. A command that came due while Home Assistant was down or still starting is handled at start-up.

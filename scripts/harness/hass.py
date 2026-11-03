@@ -554,11 +554,11 @@ async def add_timer(
     """Add a timer for `target` in Timerify the way the integrations page does.
 
     A strict timer gets the default duration of `DEFAULT_DURATION_MINUTES`; a loose one
-    has none. With `on_target_device` the target must sit on a device, and the timer's
-    entities must sit on that same device. With `runtime` the box "Count runtime" of the
-    first form is ticked; without it the form is submitted as before the counter
-    existed, which leaves the box at its default, and the timer must have no Runtime
-    sensor.
+    has none, and its limit box is left empty, so it has no limit. With
+    `on_target_device` the target must sit on a device, and the timer's entities must
+    sit on that same device. With `runtime` the box "Count runtime" of the first form is
+    ticked; without it the form is submitted as before the counter existed, which
+    leaves the box at its default, and the timer must have no Runtime sensor.
     """
     flow_path = "/api/config/config_entries/flow"
     flow = await request_json(
@@ -585,6 +585,8 @@ async def add_timer(
     steps: list[tuple[str, dict[str, Any]]] = [("target", first_form)]
     if mode == "strict":
         steps.append(("duration", {"default_duration": DEFAULT_DURATION_MINUTES}))
+    else:
+        steps.append(("limit", {}))
     for step_id, user_input in steps:
         if flow["type"] != "form" or flow["step_id"] != step_id:
             raise HarnessFailure(

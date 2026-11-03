@@ -61,6 +61,7 @@ from .const import (
     SettingValue,
     default_duration_minutes,
     freeze_settings,
+    limit_minutes,
     timer_unique_id,
 )
 from .core import (
@@ -272,11 +273,13 @@ class TargetController:
         self._behaviour = behaviour_for(target)
         # The store keeps no `last_actual`: nothing is known about the target after
         # a restart, so its first report counts as the target coming back.
+        limit = limit_minutes(options)
         self._core = TimerCore(
             options[CONF_MODE],
             timedelta(minutes=default_duration_minutes(options)),
             snapshot,
             automatic_resends=self._behaviour.automatic_resends,
+            limit=None if limit is None else timedelta(minutes=limit),
         )
         self._intervals = {
             interval.id: interval
@@ -321,6 +324,7 @@ class TargetController:
         self._listeners: list[Callable[[], None]] = []
         self._notified_end = self.snapshot.end
         self._notified_started_at = self.snapshot.started_at
+        self._notified_limit_at = self.snapshot.limit_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         self._wakeup_alarm: CALLBACK_TYPE | None = None
@@ -1219,6 +1223,19 @@ class TargetController:
                 " it is turned off when it is back",
                 self.target_entity_id,
             )
+        # The same for the limit of a run that has no countdown: reached, it wants the
+        # target off.
+        if (
+            before.limit_at is not None
+            and before.limit_at <= now
+            and after.limit_at is None
+            and after.pending == "off"
+        ):
+            _LOGGER.info(
+                "The limit of %s was reached while it is unavailable;"
+                " it is turned off when it is back",
+                self.target_entity_id,
+            )
         dropped = {e.command.id for e in effects if isinstance(e, CommandDropped)}
         kept = {command.id for command in after.commands}
         if any(c.id not in kept and c.id not in dropped for c in before.commands):
@@ -1308,10 +1325,14 @@ class TargetController:
             return
         for announcement in announcements:
             match announcement:
-                case CountdownStarted(end):
+                case CountdownStarted(end, limit):
                     self._hass.bus.async_fire(
                         EVENT_COUNTDOWN_STARTED,
-                        {"entity_id": run_for, "ends_at": _ends_at(end)},
+                        {
+                            "entity_id": run_for,
+                            "ends_at": _ends_at(end),
+                            "limit": limit,
+                        },
                     )
                 case CountdownEnded(reason):
                     self._hass.bus.async_fire(
@@ -1360,12 +1381,13 @@ class TargetController:
 
     def _refresh_entities(self) -> None:
         self._schedule_refresh()
-        # The entities show the end of the countdown and when it began, the pending
-        # commands and which intervals are switched off; the rest of the snapshot is
-        # bookkeeping that needs no state write.
+        # The entities show the end of the countdown and when it began, the limit, the
+        # pending commands and which intervals are switched off; the rest of the
+        # snapshot is bookkeeping that needs no state write.
         if (
             self.snapshot.end != self._notified_end
             or self.snapshot.started_at != self._notified_started_at
+            or self.snapshot.limit_at != self._notified_limit_at
             or self.snapshot.commands != self._notified_commands
             or self.snapshot.disabled_intervals != self._notified_disabled
         ):
@@ -1555,6 +1577,7 @@ class TargetController:
     def _notify(self) -> None:
         self._notified_end = self.snapshot.end
         self._notified_started_at = self.snapshot.started_at
+        self._notified_limit_at = self.snapshot.limit_at
         self._notified_commands = self.snapshot.commands
         self._notified_disabled = self.snapshot.disabled_intervals
         for listener in list(self._listeners):

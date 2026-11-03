@@ -20,6 +20,7 @@ from homeassistant.setup import async_setup_component
 
 from custom_components.timerify.const import (
     CONF_DEFAULT_DURATION,
+    CONF_LIMIT,
     CONF_MODE,
     CONF_OFF_BUTTON,
     CONF_RUN_FOR_MAX,
@@ -85,12 +86,14 @@ async def add_target(
     mode: Mode = "strict",
     default_duration: int = 45,
 ) -> ConfigEntry:
-    """Add a timer through the whole flow and return its config entry."""
+    """Add a timer through the whole flow, with no limit; return its config entry."""
     result = await submit(
         hass, await start_flow(hass), {CONF_TARGET: target, CONF_MODE: mode}
     )
     if mode == "strict":
         result = await submit(hass, result, {CONF_DEFAULT_DURATION: default_duration})
+    else:
+        result = await submit(hass, result, {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     return result["result"]
@@ -172,10 +175,14 @@ async def test_add_strict_target_in_two_steps(
 async def test_add_loose_target_skips_duration(
     hass: HomeAssistant, fake_target: FakeTarget
 ) -> None:
-    """Loose mode has no use for a default duration, so none is asked or stored."""
+    """Loose mode has no use for a default duration, so none is asked or stored. The
+    form that follows the first asks for the limit instead."""
     result = await submit(
         hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
     )
+    assert result["step_id"] == "limit"
+
+    result = await submit(hass, result, {})
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["options"] == {
@@ -224,6 +231,8 @@ async def test_counting_runtime_is_one_tick_on_the_first_form(
     result = await submit(
         hass, form, {CONF_TARGET: TARGET_ID, CONF_MODE: "loose", CONF_RUNTIME: True}
     )
+    assert result["step_id"] == "limit"
+    result = await submit(hass, result, {})
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -328,6 +337,156 @@ async def test_a_maximum_in_part_minutes_is_refused(
     assert result["errors"] == {"base": "duration_not_whole"}
 
 
+async def test_a_loose_timer_is_asked_for_a_limit_and_a_strict_one_is_not(
+    hass: HomeAssistant, fake_target: FakeTarget, kettle: FakeTarget
+) -> None:
+    """After the first form, a loose timer is asked for how long its device may be left
+    on: one box, empty to begin with, of minutes up to a day. The minutes are in the
+    timer when it is added. A strict timer is asked for its default duration and never
+    for a limit, since every run of it has a countdown already."""
+    loose = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    )
+
+    assert loose["type"] is FlowResultType.FORM
+    assert loose["step_id"] == "limit"
+    assert selector_of(loose, CONF_LIMIT) == {
+        "number": {
+            "min": 1,
+            "max": MAX_MINUTES,
+            "step": 1,
+            "mode": "box",
+            "unit_of_measurement": "min",
+        }
+    }
+    assert CONF_LIMIT not in prefilled(loose["data_schema"])
+
+    added = await submit(hass, loose, {CONF_LIMIT: 120})
+
+    assert added["type"] is FlowResultType.CREATE_ENTRY
+    assert added["options"][CONF_LIMIT] == 120
+
+    strict = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: "kettle.tea", CONF_MODE: "strict"}
+    )
+    assert strict["step_id"] == "duration"
+    added = await submit(hass, strict, {CONF_DEFAULT_DURATION: 45})
+
+    assert added["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_LIMIT not in added["options"]
+
+
+async def test_an_empty_limit_box_means_no_limit(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """A user who has no use for a limit leaves the box empty: the timer is added
+    without one, and a boiler switched on by hand runs until someone turns it off."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    )
+
+    result = await submit(hass, result, {})
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_LIMIT not in result["options"]
+    await fake_target.set_state("on")
+    assert state_of(hass, SENSOR) == "unknown"
+
+
+async def test_the_settings_set_change_and_remove_the_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """The box is the second form of the settings of a loose timer. It opens empty for
+    a timer of an earlier release, then with the minutes the timer has, and emptying it
+    takes the limit away. Each save loads the timer again."""
+    entry = await setup_target(mode="loose")
+
+    form = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert form["step_id"] == "limit"
+    assert CONF_LIMIT not in prefilled(form["data_schema"])
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], {CONF_LIMIT: 90}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_LIMIT] == 90
+    assert entry.state is ConfigEntryState.LOADED
+
+    form = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert suggested_value(form, CONF_LIMIT) == 90
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], {CONF_LIMIT: 45}
+    )
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_LIMIT] == 45
+
+    form = await change_options(hass, entry, {CONF_MODE: "loose"})
+    result = await hass.config_entries.options.async_configure(form["flow_id"], {})
+    await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_LIMIT not in entry.options
+    assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_choosing_strict_removes_the_limit(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A limit means nothing in strict mode, so a timer that turns strict loses it, and
+    does not bring it back when it turns loose again: the box then opens empty."""
+    entry = await setup_target(mode="loose", limit=120)
+
+    result = await change_options(hass, entry, {CONF_MODE: "strict"})
+    assert result["step_id"] == "duration"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_DEFAULT_DURATION: 45}
+    )
+    await hass.async_block_till_done()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_MODE] == "strict"
+    assert CONF_LIMIT not in entry.options
+
+    form = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert form["step_id"] == "limit"
+    assert CONF_LIMIT not in prefilled(form["data_schema"])
+
+
+async def test_a_limit_in_part_minutes_is_refused(
+    hass: HomeAssistant, fake_target: FakeTarget
+) -> None:
+    """Minutes are the unit of the timer, so a fraction of one is refused on the form of
+    the limit, which stays open for the user to correct it."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    )
+
+    result = await submit(hass, result, {CONF_LIMIT: 90.5})
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "limit"
+    assert result["errors"] == {"base": "duration_not_whole"}
+
+    result = await submit(hass, result, {CONF_LIMIT: 90})
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_LIMIT] == 90
+
+
+@pytest.mark.parametrize("minutes", [0, MAX_MINUTES + 1])
+async def test_a_limit_outside_the_range_is_rejected(
+    hass: HomeAssistant, fake_target: FakeTarget, minutes: int
+) -> None:
+    """A limit lasts at least a minute and at most a day, like any duration."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
+    )
+
+    with pytest.raises(InvalidData):
+        await submit(hass, result, {CONF_LIMIT: minutes})
+
+
 async def test_the_turn_off_box_is_on_both_first_forms(
     hass: HomeAssistant, fake_target: FakeTarget
 ) -> None:
@@ -343,6 +502,7 @@ async def test_the_turn_off_box_is_on_both_first_forms(
         form,
         {CONF_TARGET: TARGET_ID, CONF_MODE: "loose", CONF_OFF_BUTTON: True},
     )
+    result = await submit(hass, result, {})
     await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -447,6 +607,7 @@ async def test_a_loose_timer_is_not_checked_until_it_turns_strict(
         hass,
         entry,
         {CONF_MODE: "loose", CONF_RUNTIME: False, CONF_RUN_FOR_MAX: 30},
+        {},
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
@@ -949,7 +1110,7 @@ async def test_options_change_mode_keeps_running_timer(
     await set_number(hass, NUMBER, 30)
     await advance(hass, freezer, minutes=10)
 
-    result = await change_options(hass, entry, {CONF_MODE: "loose"})
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_MODE] == "loose"
@@ -964,10 +1125,14 @@ async def test_options_change_mode_keeps_running_timer(
 async def test_options_switching_to_loose_needs_no_duration(
     hass: HomeAssistant, fake_target: FakeTarget
 ) -> None:
-    """Leaving strict mode ends the flow at once."""
+    """Leaving strict mode asks for no duration: the form of the limit comes instead,
+    and leaving its box empty ends the flow."""
     entry = await add_target(hass, mode="strict")
 
     result = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert result["step_id"] == "limit"
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    await hass.async_block_till_done()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options[CONF_MODE] == "loose"
@@ -1013,7 +1178,7 @@ async def test_options_offer_the_default_duration_kept_through_loose_mode(
     they had: loose mode ignores it and does not erase it."""
     entry = await setup_target(mode="strict", default_duration=45)
 
-    await change_options(hass, entry, {CONF_MODE: "loose"})
+    await change_options(hass, entry, {CONF_MODE: "loose"}, {})
 
     assert entry.options[CONF_MODE] == "loose"
     assert entry.options[CONF_DEFAULT_DURATION] == 45
@@ -1224,6 +1389,9 @@ async def test_workday_step_is_skipped_without_a_workday_sensor(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert CONF_WORKDAY_SENSOR not in entry.options
     result = await change_options(hass, entry, {CONF_MODE: "loose"})
+    assert result["step_id"] == "limit"
+    assert result["last_step"] is not False
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
 
@@ -1278,14 +1446,18 @@ async def test_workday_sensor_can_be_left_out(
     assert CONF_WORKDAY_SENSOR not in result["options"]
 
 
-async def test_loose_mode_asks_for_the_workday_sensor_after_the_mode(
+async def test_loose_mode_asks_for_the_workday_sensor_after_the_limit(
     hass: HomeAssistant, fake_target: FakeTarget, fake_workday: FakeWorkday
 ) -> None:
     """A loose timer has no default duration to ask for, so its second form is the
-    Workday sensor's."""
+    limit's and the Workday sensor's comes last."""
     result = await submit(
         hass, await start_flow(hass), {CONF_TARGET: TARGET_ID, CONF_MODE: "loose"}
     )
+    assert result["step_id"] == "limit"
+    assert result["last_step"] is not False
+
+    result = await submit(hass, result, {})
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "workday"
@@ -1346,7 +1518,7 @@ async def test_a_workday_sensor_that_is_gone_can_still_be_removed(
     form keeps showing it, so that the user can take it away."""
     entry = await setup_target(workday_sensor="binary_sensor.workday_sensor")
 
-    result = await change_options(hass, entry, {CONF_MODE: "loose"})
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "workday"
@@ -1367,7 +1539,7 @@ async def test_workday_sensor_in_use_cannot_be_removed(
     entry = await setup_target(workday_sensor=fake_workday.entity_id)
     await add_interval(hass, entry, days="workdays", start="06:30", end="07:15")
 
-    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {}, {})
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "workday"
@@ -1392,7 +1564,7 @@ async def test_workday_sensor_can_be_removed_when_only_weekdays_are_used(
     entry = await setup_target(workday_sensor=fake_workday.entity_id)
     await add_interval(hass, entry, start="06:30", end="07:15", weekdays=["mon"])
 
-    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {})
+    result = await change_options(hass, entry, {CONF_MODE: "loose"}, {}, {})
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert CONF_WORKDAY_SENSOR not in entry.options

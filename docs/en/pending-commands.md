@@ -25,7 +25,7 @@ Three rules always hold:
 
 What a command does at its time:
 
-- A command to turn on without minutes runs a device that is off to the end of the schedule window. This holds when a window is open at the command's time. In Strict mode the default duration is kept when it ends later. With no window open, a Strict device runs for the default duration. A Loose device runs without a countdown.
+- A command to turn on without minutes runs a device that is off to the end of the schedule window. This holds when a window is open at the command's time. In Strict mode the default duration is kept when it ends later. With no window open, a Strict device runs for the default duration. A Loose device runs without a countdown, and the timer's [limit](timers.md#turn-off-a-device-that-was-left-on), if it has one, turns it off in the end.
 - Without minutes, a device that is already running keeps its countdown. The command still sets its settings.
 - A command to turn off turns the device off and stops the countdown.
 - A command to turn on that comes due at the very moment a countdown ends keeps the device on. The device is not switched off and on.

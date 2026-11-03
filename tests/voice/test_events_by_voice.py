@@ -19,7 +19,7 @@ from .helpers import assist_api, call_tool, converse
 
 STARTED_FOR_45 = (
     EVENT_COUNTDOWN_STARTED,
-    {"entity_id": NUMBER, "ends_at": "2026-01-05T07:45:00+00:00"},
+    {"entity_id": NUMBER, "ends_at": "2026-01-05T07:45:00+00:00", "limit": False},
 )
 """The start of a countdown of 45 minutes from the time the scenarios begin at."""
 STOPPED = (EVENT_COUNTDOWN_ENDED, {"entity_id": NUMBER, "reason": "stopped"})

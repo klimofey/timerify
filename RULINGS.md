@@ -323,7 +323,8 @@ not repeated beside its successor.
   carried out however late, unless a schedule window was open at its time.** An open run
   has no end, so "for whatever is left of it" never runs out (§5.7), and P1 makes a command
   a firm promise: "turn the boiler on at 07:00" with Home Assistant back at 18:00 turns it
-  on at 18:00, with no countdown. Strict mode counts the default duration from the
+  on at 18:00, with no countdown. A timer with a limit (1.2.0) counts the limit of that run
+  from 18:00, when the command runs. Strict mode counts the default duration from the
   command's time, so a stale one is dropped; a command to turn off is always carried out.
   With a window open at the command's time the run lasts to the window's end in either
   mode (`_open_run_end`, #58), so it is dropped when that has passed too. Cost if wrong: a
@@ -351,8 +352,9 @@ not repeated beside its successor.
   stops the timer at start-up does count: it must hide R4 from the report of the same
   observation, or a stopped strict target would get the default duration. R4 and R5 end the run
   that a turn-on by hand gets where `_open_run_end` says: the default duration in strict mode,
-  the end of the window that is open in either mode (#58). Cost if wrong:
-  none found.
+  the end of the window that is open in either mode (#58). R5 is no longer "nothing happens to
+  the timer" for a loose timer that has a limit: with no window open, the device found on
+  gets the limit (1.2.0, below). Cost if wrong: none found.
 - **The controller notifies the entities when `end`, `commands` or the switched-off
   intervals changed, and each entity gates its own write.** The "Next command" sensor must
   show a command added to an idle timer, and the switch of an interval follows its flag.
@@ -2507,15 +2509,18 @@ in `docs/followups.md`.
   `test_stop_aimed_at_a_deleted_timer_lets_the_automation_go_on`.
 - **Countdowns and due commands are announced by the core and fired as Timerify's own
   events.** The core decides, in `_set_end` (the only writer of the end) and `_run_command`;
-  the controller fires `timerify_countdown_started` (`entity_id`, `ends_at`),
+  the controller fires `timerify_countdown_started` (`entity_id`, `ends_at`, `limit`),
   `timerify_countdown_ended` (`entity_id`, `reason`) and `timerify_command_due`
   (`entity_id`, `command_id`, `action`). `entity_id` is the timer's Run for, looked up in
   the registry when the event is fired, so a renamed Run for is named by its new id.
   `ends_at` is the end in the form of the Ends at state: UTC, to the second.
   - **A start** is a timer with no end getting one (Run, Add time on an idle timer, Run for,
     a manual on in strict mode or inside a window, a pending "on", a window that opens on an
-    idle timer). A loose run without a countdown starts none; one inside a window has a
-    countdown to the window's end, and starts it. A move of a running end, however it is made (Run
+    idle timer). A loose run without a countdown starts none, unless the timer has a limit
+    (1.2.0), which starts a limit: the event is the same, with `limit` true, and `ends_at` is
+    the limit's time; one inside a window has a countdown to the window's end, and starts it.
+    The start of a countdown that someone chose, also one that replaces a limit or is added
+    to it, carries `limit` false. A move of a running end, however it is made (Run
     for, Add time, Run with minutes, a pending "on", a window that ends later), announces
     neither a start nor an end. The pending command that came due in the middle of it is
     still announced. A start that the same step moves, because more than one write of the
@@ -2528,8 +2533,11 @@ in `docs/followups.md`.
     tools, Add time down to zero, a pending "off", a window taken away by switching off,
     editing or deleting its interval or by a change of the Workday sensor. `turned_off`:
     the target was switched off outside Timerify, by hand, by its app, by another
-    automation or by the device itself (`observe` with `by_us=False`). The core already
-    takes a different path for each, so the reason costs nothing to tell.
+    automation or by the device itself (`observe` with `by_us=False`). `limit`: the limit of a
+    run with no countdown came and Timerify turned the device off (1.2.0); a limit that ends
+    because the device is switched off is `turned_off`, and one that Timerify stops is
+    `stopped`. The core already takes a different path for each, so the reason costs nothing
+    to tell.
   - **A countdown whose end is not ahead of now is no countdown** (#42), whether or not a
     tick folded it. Run for, Run and Add time (up) on such a timer announce its end as
     `expired` first and then the start of the new countdown. Run for 0 announces only the
@@ -3771,7 +3779,8 @@ in `docs/followups.md`.
   how long such a run lasts. `latest` is the latest end of the windows that are open at `at`
   (their start has been folded and `at` is inside them), or none. Strict mode: the later of
   `at` plus the default duration and `latest`, so the window never shortens a run. Loose
-  mode: `latest`, and with no window open none, a run without a countdown as before. With
+  mode: `latest`, and with no window open none, a run without a countdown as before (bounded
+  by the limit, if the timer has one, since 1.2.0). With
   overlapping windows the end is the latest of them. A duration that is named is kept.
   After the window the turn-on is what it always was. This replaced the spec's S5 (the
   original design, "Assistant's call"): the window does not stretch a run that someone
@@ -3849,3 +3858,187 @@ in `docs/followups.md`.
   `test_a_bare_turn_on_inside_a_window_runs_to_its_end` and
   `test_a_turn_on_at_a_clock_time_inside_a_window_runs_to_its_end`. Cost if wrong: none
   found.
+
+## Release 1.2.0
+
+The decisions of the 1.2.0 release (`docs/superpowers/specs/2026-11-03-forgotten-device-limit-design.md`,
+planned in `docs/superpowers/plans/2026-11-03-release-1.2.0.md`), in the form they have now. What is
+still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`.
+
+### The limit of a device left on (#62)
+
+- **A loose device that is on with no countdown gets a limit, and is turned off when it comes
+  (the owner's rule, 2026-11-03).** The new optional setting `limit` (`CONF_LIMIT`, read with
+  `limit_minutes(options)`) is whole minutes, 1 to 1440, empty by default, and only a loose
+  timer has it. The core is given it as `TimerCore(..., limit=timedelta(...))`. The device is
+  turned off when the limit comes the way the end of a loose countdown turns it off (wish
+  "off"). A countdown that someone chose is never cut, and while one runs there is no limit.
+  Strict mode is not changed: every turn-on there gets the default duration already. Why: the
+  owner's automation "Auto-off boiler" turned the boiler off after two hours on and also cut
+  the runs he had asked for on purpose, so it was deleted and this replaces it. Cost if wrong:
+  a user who wants a hard cap on every run sets the maximum of Run for (#35) or an
+  automation; nothing here caps a run someone chose. Tests:
+  `test_a_boiler_turned_on_by_hand_turns_off_after_its_limit`,
+  `test_a_boiler_run_for_three_hours_is_not_limited` and
+  `test_a_boiler_without_a_limit_setting_runs_until_it_is_turned_off` (`tests/test_limit.py`),
+  and the limit section of `test_core.py`.
+- **The limit is a deadline of its own, not a marked end.** `Snapshot.limit_at` is never set
+  together with `end` and never in strict mode. `_set_end` and `_set_limit` are the only
+  writers and the only places that announce a start or an end. Why: Run for must show 0 while
+  a limit runs, because nobody chose a time and a dashboard or an automation that reads it
+  must not see a bound as a promise; `remaining_minutes`, `started_at` (the card's ring) and
+  the rulings that read `end` as the user's choice stay true. Cost if wrong: a reader of
+  Ends at that ignores the attribute `limit` takes the bound for a countdown, which is why
+  the attribute exists. Tests: `test_run_for_stays_zero_while_a_limit_runs` and
+  `test_a_boiler_turned_on_by_hand_turns_off_after_its_limit`.
+- **Every way a device comes to be on with no countdown starts the limit.** A turn-on by
+  hand or at the device (R5), a bare "turn on the boiler" to Assist, the card's run, the Run
+  action and the Run entity without minutes (R9: `run_open`), a pending "on" without minutes
+  when it falls due, a device found on at start-up and a device back from "unavailable" as
+  on. These are the paths that #58 gives the end of an open window to, and a person expects
+  the same of the switch on the wall and of "turn on the boiler". With a window open the
+  window's end is a countdown, so there is no limit. Cost if wrong: a bare "turn on" to
+  Assist turns the boiler off after the limit, as the switch on the wall does. Tests:
+  `test_a_manual_on_in_loose_mode_gets_a_limit`,
+  `test_a_bare_run_and_a_bare_command_get_a_limit`,
+  `test_start_up_with_the_target_on_starts_a_limit_or_keeps_the_stored_one`,
+  `test_back_from_unavailable_as_on_starts_a_limit`,
+  `test_a_turn_on_inside_a_window_gets_its_end_not_a_limit` (`test_core.py`) and
+  `test_a_boiler_run_without_minutes_gets_the_limit_too`.
+- **The limit counts from the moment Timerify sees the device on.** Home Assistant does not
+  keep when a device turned on across a restart, so a device turned on while it was down gets
+  its limit from the start-up. Two cases count from another moment, and both are the
+  engine's, with no new rule:
+  - **A run asked while the target is unavailable counts its limit from the call.** The report
+    that confirms it settles the wish and is not a "found on", so the limit is started by the
+    call, not by that report. Test: `test_a_run_asked_while_the_target_is_away_counts_its_limit_from_the_call`.
+  - **A late bare command counts its limit from when it runs.** A pending "on" without minutes
+    that falls due late turns the target on when it runs, so the device is on from that moment
+    and gets a whole limit, never one that began in the past. A command that runs on time counts
+    from its time, which is the moment it runs. Tests:
+    `test_a_bare_command_that_runs_late_gets_its_limit_from_when_it_runs` and
+    `test_a_bare_command_noticed_late_by_a_tick_gets_its_limit_from_the_tick`.
+
+  Cost if wrong: a device that was on for a long time before Home Assistant started is bounded
+  from the start-up, not from when it was switched on.
+- **A limit that is already reached is ended as `limit` first, before anything new starts.**
+  This is #42 for the limit: a limit that is not ahead of now is no limit, whether or not the
+  alarm folded it. Run for, Run, Add time and a bare turn-on found after the limit's time end
+  it, announced as `limit`, and then start the new countdown or limit. Why: the device was due
+  to be turned off at that time, and an automation that waits for the reason must hear it.
+  A command that is due at the very instant of the limit goes before the end of the fold (the
+  rule of phase 2, "a command before the end on a tie"), so:
+  - **a command with minutes due at the limit's exact moment replaces the limit silently**
+    (the device is not switched off and on, and the new countdown is announced as started);
+  - a bare command due at that moment finds the limit ended, and starts a new one from the
+    command's time.
+
+  Cost if wrong: an automation on the reason `limit` misses a limit that a command replaced at
+  the same instant. Tests: `test_a_countdown_chosen_as_the_limit_comes_ends_the_limit_first`,
+  `test_time_added_after_the_limit_came_starts_a_countdown_from_now`,
+  `test_a_limit_is_over_when_it_is_reached_though_nothing_folded_it`,
+  `test_a_bare_command_due_as_the_limit_comes_starts_a_new_limit` and
+  `test_a_chosen_countdown_replaces_a_limit_without_ending_it` (`test_core.py`).
+- **Choosing a time replaces the limit with an ordinary countdown; adding time adds to the
+  limit.** Run for, a run or a voice command with minutes, a pending command with minutes and a
+  window that opens are choices of the user's or the schedule's, and the device goes on running,
+  so the limit is not announced as ended: the new countdown is announced as started, with
+  `limit` false. "+15 min" at a limit of 13:30 gives a countdown to 13:45 that nothing cuts
+  (`add` writes `limit_at + delta` through `_run_until`); taking more than the limit away stops
+  the timer. Cost if wrong: a user who adds time to a limit and expects the limit to stay has
+  to set it again by turning the device off and on. Tests:
+  `test_adding_time_to_a_limit_gives_an_ordinary_countdown`,
+  `test_taking_more_than_a_limit_off_it_stops_the_timer`,
+  `test_a_window_that_opens_replaces_a_limit` (`test_core.py`) and
+  `test_adding_time_to_a_limit_on_the_device_page`.
+- **A bare turn-on while a limit runs keeps it.** The device is already on, and a bare turn-on
+  of a device that runs keeps how it stands today. No "Countdown started" fires. Tests:
+  `test_a_bare_run_while_a_limit_runs_keeps_it` and
+  `test_a_bare_command_while_a_limit_runs_keeps_it`.
+- **Whatever turns the device off ends the limit.** The device turned off by anyone, by hand, by
+  its own timer or from Home Assistant, ends it as `turned_off`; every way Timerify stops the
+  timer (Stop, Run for 0, the Turn off button, a pending "off") ends it as `stopped`. The next
+  turn-on without a time starts a new limit, whole and from that moment, not what was left of
+  the old one. Tests: `test_a_device_turned_off_before_its_limit_gets_a_new_one_next_time` and
+  `test_a_boiler_switched_on_again_after_its_limit_gets_a_new_limit`.
+- **The limit is kept across a restart, in the store (version 5).** The key is `limit_at`, a
+  time in UTC like `end`. Every older version migrates with `limit_at: null` (the branches do
+  not chain, as before). A file that holds both an end and a limit is refused with the reason
+  "the timer has both an end and a limit", through the repair of the stored timer. A stored
+  limit is dropped at start-up when the setting is empty or the mode is strict, with no
+  announcement; the device keeps running, and in strict mode the default duration then
+  applies as it does for any device found on. Tests:
+  `test_a_limit_restored_at_start_up_keeps_its_time`,
+  `test_a_stored_limit_the_timer_has_no_use_for_is_dropped`,
+  `test_file_that_contradicts_itself_is_refused[end-and-limit]` and
+  `test_version_4_store_is_migrated`.
+- **A limit that comes due while the device is unavailable is logged and carried out when it is
+  back (R10).** The log line is the one of a countdown that ends in the same case, worded for
+  the limit: "The limit of switch.boiler was reached while it is unavailable; it is turned off
+  when it is back". The event `limit` fires when the limit is reached, whether or not the
+  device could be told. Tests:
+  `test_a_limit_reached_while_the_target_is_away_is_logged_and_carried_out` and
+  `test_a_limit_reached_while_down_is_logged_at_start_up_if_the_target_is_away`.
+- **Changing the settings reloads the timer, and a reload is a start-up.** A device that is on
+  with no countdown and no limit gets a limit from the reload, counted from that moment (the
+  spec said "from the next turn-on", but every change of the settings reloads the timer, so
+  that could not hold). A limit that runs keeps its time through a reload, whatever the
+  setting is by then. Emptying the box, or switching to strict mode, drops the limit when the
+  timer loads again, and the device keeps running. Cost if wrong: a user who only wants the new
+  minutes for the next turn-on finds the running device limited from the reload. Tests:
+  `test_a_reload_keeps_a_running_limit_and_gives_one_to_a_device_left_on`,
+  `test_emptying_the_box_takes_the_limit_away_and_lets_the_boiler_run` and
+  `test_switching_to_strict_drops_the_limit_and_the_default_duration_applies`.
+- **The core neither validates nor caps the limit; the forms bound it to 1 to 1440 minutes.**
+  The core takes a `timedelta` as the caller gives it, as it takes the default duration. A zero
+  or a negative one would turn the target off at once, so the form is the one place that
+  bounds it, with the same selector as every duration (`_duration_selector`, whole minutes). A
+  limit may be longer than the maximum of Run for: it is not on the slider. Cost if wrong: a
+  caller other than the forms (none exists) could pass a limit of zero.
+
+### Forms and entities
+
+- **The setting is a step of its own for a loose timer: "Turn off if left on for".** The first
+  form does not hold it (the default duration is not on it either, so "next to it" means a step
+  in the same place). `_after_mode` routes loose mode to the step `limit`, as strict mode goes
+  to `duration`, and the limit step goes on to `workday`. Its one field is
+  `probatio.Optional(CONF_LIMIT)` with the duration selector and no default, so a new timer
+  opens it empty, the settings of a timer open it with the minutes the timer has, and an empty
+  box removes the option (`SchemaFlowFormStep` takes an omitted optional key away). A fraction
+  of a minute is refused with `duration_not_whole`. When the first form of the settings chooses
+  strict, its validation removes the option, because the step is not shown to a strict timer and
+  nothing else would take it away; it does not come back, unseen, when the timer turns loose
+  again. The Russian title says the same in its own words ("turn off, if forgotten, after").
+  Why: the same shape as the default duration, which a user already knows. Cost if wrong: a
+  loose timer takes one form more to add. Tests:
+  `test_a_loose_timer_is_asked_for_a_limit_and_a_strict_one_is_not`,
+  `test_an_empty_limit_box_means_no_limit`,
+  `test_the_settings_set_change_and_remove_the_limit`,
+  `test_choosing_strict_removes_the_limit`, `test_a_limit_in_part_minutes_is_refused` and
+  `test_a_limit_outside_the_range_is_rejected` (`tests/test_config_flow.py`).
+- **No new entity: "Ends at" shows the limit, with the attribute `limit`.** The state is
+  `end or limit_at`, and the attributes are `started_at` (None for a limit, which has no
+  beginning to count a share from) and `limit`, a bool: true while the time is a limit, false
+  otherwise, also while the state is unknown. The name of the attribute is the builder's call
+  (the spec left it open): `limit`, the same word as the setting and as the key of the event.
+  The controller's refresh memo holds `limit_at`, so the sensor is written when the limit is
+  set, replaced or ended, and not as the minutes pass. Why: the card, the voice answer and an
+  automation read one place for "when does it end", and the mark tells which kind of time it is.
+  Cost if wrong: a template that reads only the state takes a limit for a countdown. Tests:
+  `test_a_boiler_turned_on_by_hand_turns_off_after_its_limit` and
+  `test_adding_time_to_a_limit_on_the_device_page`.
+
+### Automations
+
+- **The events mark the limit.** `timerify_countdown_started` always carries `limit` (a bool),
+  `true` for a limit and `false` for a countdown that someone chose, so that `trigger.limit` is
+  defined in every template. `timerify_countdown_ended` gets the reason `limit` when the limit
+  turns the device off, next to `expired`, `stopped` and `turned_off`; an automation that waits
+  for `expired` goes on hearing only countdowns that someone chose. The device triggers fire for
+  a limit too, with the same variables. The ruling on the events (Release 1.1.0, "Countdowns and
+  due commands are announced by the core and fired as Timerify's own events") was rewritten in
+  place. Cost if wrong: an automation that matched the exact data of a start (a YAML trigger
+  with `event_data`) must add `limit`. Tests: `test_a_limit_is_announced_with_its_mark`,
+  `test_a_limit_ends_with_its_own_reason` (`tests/test_events.py`),
+  `test_a_limit_gives_the_automation_its_mark` and
+  `test_countdown_ended_tells_the_automation_how` (`tests/test_automation_triggers.py`).

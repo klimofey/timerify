@@ -36,7 +36,3 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#21](https://github.com/klimofey/timerify/issues/21) Phrasings Timerify lacks can be matched by core's gazetteer and switch the device
 - [#49](https://github.com/klimofey/timerify/issues/49) Voice: understand "7:30am", "half past 7" and "quarter to 8"
-
-## Tests and tooling
-
-- [#28](https://github.com/klimofey/timerify/issues/28) Pin happy-dom 21.0.4 (advisory GHSA-834v-8h66-3h79) on or after 2026-11-03

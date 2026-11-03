@@ -186,6 +186,14 @@ async def add_command(
     return response
 
 
+def listed(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
+    """The commands a "Next command" sensor lists in its attributes."""
+    state = hass.states.get(entity_id)
+    assert state is not None
+    commands: list[dict[str, Any]] = state.attributes["commands"]
+    return commands
+
+
 def prefilled(schema: probatio.Schema) -> dict[str, Any]:
     """What the frontend puts in a form before the user touches it, which is what it
     submits then: for each field its suggested value, else its default, and for a

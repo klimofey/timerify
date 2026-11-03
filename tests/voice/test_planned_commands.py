@@ -9,7 +9,7 @@ never does.
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -25,12 +25,14 @@ from ..helpers import (
     AC_NEXT,
     NEXT,
     NUMBER,
+    TURN_OFF,
     TURN_ON,
     add_command,
     advance,
     advance_to,
     call_service,
     local,
+    start_set_number,
     state_of,
 )
 from .helpers import (
@@ -501,6 +503,47 @@ async def test_a_command_planned_after_cancelling_runs(
     await advance(hass, freezer, minutes=5)
 
     assert fake_target.calls == [TURN_ON]
+
+
+# --- Planned while the device is slow ----------------------------------------------
+
+
+async def test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_off_now(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+) -> None:
+    """The boiler is slow to turn on, and while it is the user says "turn off the boiler
+    in 20 seconds". The answer comes 25 seconds later, when that time has passed. It
+    still names the end it set, as the user hears it, and the boiler is turned off at
+    once: not "turns off at ." and not left running."""
+    slow = fake_target.hold_next_call()
+    setting = start_set_number(hass, NUMBER, 30)
+    await slow.reached.wait()
+    talking = hass.async_create_task(
+        intent.async_handle(
+            hass,
+            "test",
+            "TimerifyDelayedCommand",
+            {
+                "name": {"value": "Boiler"},
+                "action": {"value": "off"},
+                "delay_seconds": {"value": 20},
+            },
+        )
+    )
+
+    freezer.tick(timedelta(seconds=25))
+    slow.release.set()
+    response = await talking
+    await setting
+    await hass.async_block_till_done()
+
+    assert response.speech_slots["outcome"] == "timer_set"
+    assert response.speech_slots["ends_at"] == "09:00"
+    assert response.speech_slots["ends_in_days"] == 0
+    assert fake_target.calls == [TURN_ON, TURN_OFF]
 
 
 # --- Words that are not about a timer ----------------------------------------------

@@ -448,8 +448,7 @@ class TimerCore:
         """Move the end by `delta`; on an idle timer only a positive delta starts it.
 
         An end that is not ahead is no countdown, as `wanted_running` judges it, though
-        nothing folded it yet (a command that waited for its turn until after the end,
-        #42): the timer is idle.
+        nothing folded it yet (its alarm is late): the timer is idle.
 
         Time added to a limit that runs is added to the limit: the result is a
         countdown that someone chose, which the limit never cuts. A limit that is not
@@ -471,7 +470,7 @@ class TimerCore:
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
         """End the countdown and switch the target off. An end that is not ahead is a
-        countdown that ran out, as for `set_duration` (#42)."""
+        countdown that ran out, as for `set_duration`: its alarm is late."""
         self._expire_stale_end(_utc(now))
         return self._stop()
 
@@ -959,9 +958,9 @@ class TimerCore:
         """Count down to `end`, at most a day from now, or stop if it is not ahead.
         The countdown began at `began`: now, or when the one that was running did.
 
-        A countdown whose end is not ahead is over, folded or not (#42): it is
-        announced as expired before anything new, so a stop that follows has none to
-        end, and a new end is a start, not a move.
+        A countdown whose end is not ahead is over, folded or not (its alarm may be
+        late): it is announced as expired before anything new, so a stop that follows
+        has none to end, and a new end is a start, not a move.
         """
         self._expire_stale_end(now)
         if end <= now:
@@ -1244,12 +1243,13 @@ class TimerCore:
 
     def _wants_running(self, at: datetime, wish: Literal["on", "off"] | None) -> bool:
         """Whether the target is wanted running at `at`, the instant an item falls due
-        or a command gets its turn: a countdown that ends after `at`, or a limit that
+        or a command is given: a countdown that ends after `at`, or a limit that
         comes after it, or, with none under way, what `_runs_as_of` says of `wish`.
 
         A countdown that ends at `at` or before is over, whether or not it was folded
         yet, and so is a limit, so a command that falls due as one ends meets a target
-        that is about to be off, and so does one that gets its turn after a slow call.
+        that is about to be off, and so does one that comes before the late alarm of the
+        end.
         """
         deadline = self._snapshot.end or self._snapshot.limit_at
         if deadline is not None:

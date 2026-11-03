@@ -16,7 +16,7 @@ All the actions act on the **Run for** entities of timers. Pick them, or their d
 
 In YAML, you write the settings next to the other fields. The form of an action puts them in a collapsed **Settings** section.
 
-A call can wait its turn behind a slow device. If the timer is unloaded meanwhile, the call fails with a message. It does not report success.
+A call can wait its turn behind a slow device. It is still carried out as at the moment you made it. A delay counts from that moment too. If the timer is unloaded meanwhile, the call fails with a message. It does not report success.
 
 ## Add time
 

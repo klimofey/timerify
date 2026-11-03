@@ -109,9 +109,20 @@ class DelayedCommandHandler(TimerifyIntentHandler):
                     **clock_slots(due, dt_util.utcnow()),
                 }
             )
-        elif await controller.async_turn_off_in(when, duration, settings):
+        elif (
+            end := await controller.async_turn_off_in(when, duration, settings)
+        ) is not None:
+            # The end the call set, not the timer's: a call that waited behind a slow
+            # device may find it passed, and the answer must still name it.
+            now = dt_util.utcnow()
+            clock = clock_slots(end, now)
             response.async_set_speech_slots(
-                {"outcome": "timer_set", **timer_slots(hass, entry, dt_util.utcnow())}
+                {
+                    "outcome": "timer_set",
+                    **timer_slots(hass, entry, now),
+                    "ends_at": clock["at"],
+                    "ends_in_days": clock["in_days"],
+                }
             )
         else:
             response.async_set_speech_slots(

@@ -58,6 +58,7 @@ from .helpers import (
     TURN_ON,
     add_interval,
     advance_to,
+    command_json,
     edit_interval,
     iso,
     local,
@@ -66,6 +67,7 @@ from .helpers import (
     saved,
     set_number,
     set_switch,
+    start_set_number,
     state_of,
     storage_key,
     timerify_info,
@@ -1068,6 +1070,54 @@ async def test_timer_unloaded_while_a_command_given_while_starting_waits_for_the
     assert raised.value.translation_key == "timer_unloaded"
     assert fake_target.calls == []
     assert hass_storage[storage_key(entry)] == stored
+
+
+@pytest.mark.parametrize("held", [True, False], ids=["slow_sensor", "quick_sensor"])
+async def test_a_command_given_while_starting_comes_before_what_falls_due_after_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    fake_workday: FakeWorkday,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+    held: bool,
+) -> None:
+    """Home Assistant is starting at 06:00, with a command to turn the boiler off at
+    06:00:20 in the file. At 06:00:10 "Run for 10" waits for the sensor, which works
+    the windows out first. The command was given before the off is due, so the off
+    comes after it and wins, whether the sensor answers at once or at 06:00:30: the
+    boiler is not left running until ten minutes after the sensor answered."""
+    entry = await set_up_boiler(hass, freezer, setup_target, fake_workday)
+    await add_interval(hass, entry, days="workdays", start="18:00", end="19:00")
+    await hass.config_entries.async_unload(entry.entry_id)
+    hass_storage[storage_key(entry)]["data"]["commands"] = [
+        command_json(iso(SUNDAY, "06:00:20"), "off")
+    ]
+    hass.set_state(CoreState.not_running)
+    await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    slow = fake_workday.hold_next_call() if held else None
+    freezer.move_to(local(SUNDAY, "06:00:10"))
+    setting = start_set_number(hass, NUMBER, 10)
+
+    if slow is None:
+        await hass.async_block_till_done()
+        freezer.move_to(local(SUNDAY, "06:00:30"))
+        async_fire_time_changed(hass)
+    else:
+        await slow.reached.wait()
+        freezer.move_to(local(SUNDAY, "06:00:30"))
+        async_fire_time_changed(hass)
+        slow.release.set()
+    await setting
+    await hass.async_block_till_done()
+
+    stored = saved(hass_storage, entry)
+    assert (stored["end"], stored["pending"], stored["commands"]) == (None, "off", [])
+    await fake_target.set_state("on")
+    await hass.async_start()
+    await hass.async_block_till_done()
+    assert fake_target.calls == [TURN_OFF]
 
 
 async def test_editing_a_running_interval_to_days_off_stops_the_boiler(

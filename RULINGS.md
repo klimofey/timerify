@@ -301,12 +301,16 @@ not repeated beside its successor.
   schema errors are not translatable per key. Cost if wrong: none.
 - **A naive `at` is Home Assistant's local time** (`dt_util.as_utc`), because the UI
   datetime picker sends no zone. Cost if wrong: none.
-- **A `delay` counts from the moment the command gets its turn.** The controller takes it
-  as a time span and makes a time of it under the timer's lock, so a call that waits
-  behind a slow device (each call may take 30 seconds, and a climate turn-on with mode,
-  temperature and fan mode is three) is not refused as already passed. `at` is taken as
-  given. Cost if wrong: a delay of one minute that waited ninety seconds is due ninety
-  seconds after the call, not sixty.
+- **A `delay` counts from the moment the command was given.** The controller takes it as a
+  time span and makes a time of it from the moment the command was given, which it reads
+  before the command waits for the timer's lock (`_command`, `_due`; "The delay rule flips
+  on purpose" under Release 1.3.0). A call that waits behind a slow device (each call may
+  take 30 seconds, and a climate turn-on with mode, temperature and fan mode is three) is
+  therefore not refused as already passed, and a delay that passed while it waited is
+  carried out at once. `at` is taken as given: one that was ahead when the command was given
+  is accepted though it passed during the wait. Cost if wrong: a delay of one minute that
+  waited ninety seconds is carried out at once, as it was due, and not kept for a minute
+  after the call returned.
 - **`action` accepts the booleans that YAML 1.1 makes of an unquoted `on` and `off`**
   (true is "on", false is "off"), because Home Assistant's own loader does so and a
   hand-written `action: on` would otherwise fail. The README quotes the words anyway. Cost
@@ -563,7 +567,7 @@ only the final behaviour is written.
   and a start-up that finds a kept window over asks twice.** A hung `check_date` holds the
   lock for up to 30 seconds once per refresh (the first unknown answer ends the questions),
   as a hung target call does ("A service call that takes longer than 30 seconds counts as
-  failed" and "A `delay` counts from the moment the command gets its turn"): target
+  failed" and "A `delay` counts from the moment the command was given"): target
   reports, commands and the wake-up wait, so an end can fire that late. The real
   `check_date` is a lookup in memory, and an unavailable sensor fails at once. When the
   start-up fold finds a window over that it kept because the sensor was unknown, the
@@ -1973,9 +1977,10 @@ in `docs/followups.md`.
   while Home Assistant starts. Then the interval keeps its stored window, as at any time
   the sensor does not answer, and the warning is logged once. If that window is not the one
   that is open now, start-up merges the right one after the change, and it may start then
-  (S1). A change that waits for its turn, behind another change
-  or a slow Workday answer, catches up to the moment it
-  runs, not the moment it was given, so it also wins over what fell due in between (#42).
+  (S1). A change that waits for its turn, behind another change or a slow Workday answer,
+  catches up to the moment it was given, not the moment it runs, so what falls due after
+  that moment comes after the change and wins over it, as with Home Assistant running
+  (#42; "The catch-up folds to the moment given" under Release 1.3.0).
   A report of the target before start-up is answered a few seconds later, at start-up.
 - **"Add time" counts a countdown whose end has passed as no countdown.** `add` judges the
   end as `wanted_running` does: an end at or before now is over, whether or not it was
@@ -1983,20 +1988,19 @@ in `docs/followups.md`.
   documented "adding to a timer that is not running starts it"): a positive delta runs the
   target for the added time, counted from now, and a negative one changes nothing. A
   change made while starting catches up first (see the ruling above), so `add` never meets
-  a passed end there. It meets one only in a race: `add` was given while the countdown
-  still ran, and waited for the lock behind a slow call until after the end. The lock wakes
-  its waiters in the order they came, so the alarm of the end, queued later, runs after
-  `add`: nothing that the end would fold is missed, and no S4 suppression either. The
-  difference is the time. The added minutes count from when the command ran (late by the
-  wait for the lock), not from the old end, and the countdown's beginning
-  (`started_at`) starts again. #42 tracks carrying out a command at the moment it was
-  given, which settles this race.
+  a passed end there. It meets one only from a late alarm: the command was given after the
+  end, and the alarm of the end had not run yet. `add` announces the end as `expired` first,
+  so nothing that the end would fold is missed, and no S4 suppression either; the alarm,
+  which comes later, finds nothing due. A command that was given while the countdown still
+  ran and waited for the lock behind a slow call until after the end does not meet a passed
+  end: it is carried out at the moment it was given (#42, settled in 1.3.0: "Reports and
+  alarms are stamped too" under Release 1.3.0).
   Why: an end that has passed is over for every other judgement (`wanted_running`,
   `run_open`, a pending command that falls due).
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
-  the next fold instead of being stopped at once. In the race above, the target runs
-  longer, by the wait for the lock, than with the command dated when it was given, and the
-  card's progress starts again.
+  the next fold instead of being stopped at once. With a late alarm, the added minutes
+  count from when the command was given, not from the old end, and the countdown's
+  beginning (`started_at`) starts again.
 - **Every fold says what came due while the target is away, and a fold says it only about
   a target that has reported "unavailable".** `_execute_fold(before, now, effects)` logs it
   (`_log_due_while_unavailable`) and then carries out the effects. All folds pass through
@@ -4159,3 +4163,114 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   the switch turns off at that moment and the timer is idle after it. It runs after the
   thermostat scenario and costs about a minute and a half. Cost if wrong: the container proves
   the limit only for a switch that sits on a device.
+
+## Release 1.3.0
+
+The decisions of the 1.3.0 release (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`),
+in the form they have now. The release is built in four parts, one plan each. Part A is
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md`; each later part adds
+its own plan and its own section here. What is still open is a GitHub issue of
+klimofey/timerify, listed in `docs/followups.md`.
+
+### Part A: engine
+
+- **Reports and alarms are stamped too (#42).** `_command`, `_handle_state_change` and
+  `_handle_wakeup` each read the clock as their first line, before they wait for the lock,
+  and use that moment where they used to read it inside it (`given` and `raised`). The moment
+  is the real clock, not `event.time_fired`, which can be earlier than a command queued
+  before the report. One loop thread and a first-in, first-out lock keep the moments in the
+  order of the queue. A command is carried out as at the moment it was given: time added to
+  a countdown that ended while the call waited extends the countdown (one "Countdown
+  started", no "Countdown ended", `started_at` kept, no turn-off); time taken off that ends it
+  stops it, as `stopped`; "Run for 10" ends ten minutes after it was given; time added to a
+  limit that passed meanwhile is added to the limit; and a pending command that falls due
+  after the moment given comes after the command and wins. Why: stamping only the commands
+  does not fix the common case. The target usually reports while the slow call still holds
+  the lock, so its report queues ahead of the command and folds the end with its own, later
+  moment: the device is turned off and on again. Measured on an air conditioner with three
+  slow calls: with only the commands stamped the flap stays, with the reports and the alarms
+  stamped as well there are the three calls of the run and nothing else. Cost if wrong: "Add
+  time" given just before the end counts as a new run and restarts `started_at`, and the
+  device is switched off and on. Tests (`tests/test_moment_of_a_command.py`):
+  `test_a_report_queued_ahead_of_add_time_does_not_end_the_countdown` (the one that fails if
+  only the commands are stamped), `test_add_time_given_before_the_end_extends_the_countdown`,
+  `test_time_taken_off_before_the_end_stops_the_countdown`,
+  `test_run_for_counts_from_the_moment_it_was_given`,
+  `test_add_time_then_stop_are_carried_out_in_that_order`,
+  `test_a_pending_off_due_while_a_command_waits_comes_after_it` and
+  `test_add_time_given_before_a_limit_and_run_after_it_adds_to_the_limit`.
+- **The catch-up folds to the moment given.** While Home Assistant starts, a command works
+  the windows out and folds what fell due before it (`_async_catch_up_while_starting_locked`).
+  It now does so for the moment it was given: `at` goes to `_async_refresh_windows_locked`,
+  which works the windows out for it and folds them to it, and `refresh_at` goes to
+  `_fold_due` and `_execute_fold`, so that the refresh after a window that ended uses it too.
+  Without `at` the two readings of the clock stay as they were (before and after the Workday
+  sensor is asked), so the other callers do not change. An item that falls due between that
+  moment and the real time stays armed. Its alarm, armed in the past, goes off on the next turn
+  of the loop and folds it after the command. Why: with the catch-up at the real time, a
+  stored "off" due ten seconds after the command was folded before it, when the sensor was
+  slow, and the command then left the boiler running for ten minutes after the sensor
+  answered. Cost if wrong: a command given while starting loses to something that fell due
+  after it, whenever the Workday sensor is slow. Tests:
+  `test_a_command_given_while_starting_comes_before_what_falls_due_after_it` (`test_workday.py`;
+  the `quick_sensor` case already passed and stays as the control).
+- **The delay rule flips on purpose.** A delay counts from the moment the command was given,
+  where it counted from the moment the command got its turn, and one test pinned that. A delay
+  that passed while the call waited is kept, and its alarm folds it at once. A moment `at`
+  that was ahead when the command was given is accepted, though it passed during the wait; one
+  that was already past is refused with `command_in_past`. `async_add_command` and
+  `async_turn_off_in` say so in their docstrings, and `docs/en/services.md` and
+  `docs/en/pending-commands.md` (and their Russian pages) say it to the user. Why: it is what
+  the user did. Someone who said "in one minute" and was kept waiting for 75 seconds by the
+  device meant a minute from when they said it. Cost if wrong: a delay that is shorter than
+  the wait is carried out at once, where someone may have wanted it counted from the answer.
+  Tests: `test_a_delay_that_passed_while_the_command_waited_is_carried_out_at_once` and
+  `test_a_delay_counts_from_the_moment_the_command_was_given` (`test_commands.py`, which
+  rewrite the test that pinned the old rule),
+  `test_a_moment_ahead_when_asked_is_kept_though_it_passed_while_waiting` and
+  `test_a_moment_already_past_when_asked_is_refused`.
+- **Start-up, window refreshes and the interval and schedule switches are not stamped.** They
+  learn the windows from the Workday sensor, and must fold to the time it answered. Stamping
+  the switch would carry a command out before the window it follows: the window that the
+  refresh learns opened before the command was given, and goes first. Why: pinned by
+  `test_window_made_by_a_slow_refresh_comes_before_a_later_command`, which passes unchanged.
+  Cost if wrong: a command given after a window opened is carried out before it, so the
+  window's end replaces the command's. Start-up is `_handle_started`, a refresh is
+  `_refresh_windows` (also for a change of the time zone) and the two switches are
+  `async_set_interval_enabled` and `async_set_schedule_enabled`: they read the clock when
+  they get the lock, as before.
+- **The race of a slow window refresh stays, and is not a defect.** A refresh that waited for
+  a slow sensor can fold an end that passed meanwhile before a command that was given earlier
+  and queued behind it. It is the same as before this fix, and needs a Workday sensor that
+  takes seconds to answer. Why it is left: the refresh must fold to the time the sensor
+  answered (the entry above). Cost if wrong: that command finds the countdown already
+  folded, and "Add time" starts a new run. Tests: none; the neighbours that pin the rule
+  above stay unchanged.
+- **The core keeps its signatures and the guard in `add`.** Every core method already takes
+  `now`, so the controller only hands it another moment. The guard in `add` that treats a
+  passed end as no end stays, because a late alarm can still bring one (the alarm of the end
+  has not gone off when a command that was given after the end is carried out). The three
+  comments of the core that cited #42 and the one of `_wants_running` that spoke of a call
+  that "gets its turn after a slow call" now name the late alarm. Why: nothing in the core
+  depends on who reads the clock. Cost if wrong: none for the signatures; without the guard
+  a late alarm would let "Add time" move an end that is over. Tests:
+  `test_add_to_a_countdown_that_has_ended_counts_from_now` and
+  `test_add_negative_to_a_countdown_that_has_ended_does_nothing` (`test_core.py`).
+- **Rejected: a `tick` before every command, a clamp so that time never goes back, and
+  applying commands outside the lock.** A `tick` to the moment given before each command
+  would send a turn-off for a passed end and then a turn-on: the flap again. A clamp would
+  freeze the core after a real step of the clock back. Applying a command to the core
+  outside the lock would break the order of the awaits of the calls to the device, which the
+  lock also keeps. Cost if wrong: none; they were measured on the prototype and found worse.
+- **The spoken turn-off answers with the end it set.** `async_turn_off_in` returns the end it
+  set, or None when the target was not wanted running, where it returned whether it was.
+  Whether it is wanted running is judged at the moment given, on the timer as the calls ahead
+  of it left it. `voice/commands.py` builds the answer from that end: `ends_at` and
+  `ends_in_days` come from `clock_slots(end, now)`, on top of what `timer_slots` says. Why:
+  with the delay counted from the moment given, "turn off the boiler in 20 seconds" behind a
+  slow call of 25 seconds has an end that passed before the answer is built. `timer_slots`
+  then says `off` with no `ends_at`, and the template renders "Boiler turns off at ." The
+  boiler is turned off at once, and a person expects an answer that names the time they
+  asked for. Cost if wrong: an answer with a hole in it, for a call that waited behind a slow
+  device. Test: `test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_off_now`
+  (`tests/voice/test_planned_commands.py`).

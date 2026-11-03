@@ -16,6 +16,7 @@ import {
   acTimer,
   boilerTimer,
   fakeHass,
+  limited,
   type FakeHass,
   type Language,
 } from "./fake-hass";
@@ -348,6 +349,26 @@ describe("adding and taking off time", () => {
     expect(isDisabled(control(root, "Stop"))).toBe(false);
   });
 
+  it("offers the minus, the plus and the stop under a limit, as for a countdown", async () => {
+    const { root } = await opened(limited(90));
+
+    expect(isDisabled(control(root, "Take off 5 min"))).toBe(false);
+    expect(isDisabled(control(root, "Add 5 min"))).toBe(false);
+    expect(isDisabled(control(root, "Stop"))).toBe(false);
+  });
+
+  it("adds time to a limit and takes time off it with Timerify's own action", async () => {
+    const hass = limited(90);
+    const { card, root } = await opened(hass);
+
+    control(root, "Add 5 min").click();
+    await settle(card);
+    control(root, "Take off 5 min").click();
+    await settle(card);
+
+    expect(hass.calls).toEqual([addTime(5), addTime(-5)]);
+  });
+
   it("offers no minus to a target that runs without a countdown, but a stop", async () => {
     const { root } = await opened(acHass({}, true), { entity: AC_NUMBER });
 
@@ -435,6 +456,50 @@ describe("the title", () => {
 
     expect(remainingOf(root)).toBe("45:00");
     expect(untilOf(root)).toBe(english.card_until.replace("{time}", "09:45"));
+  });
+
+  it("says when a device left on is turned off at the latest, with no time left", async () => {
+    const { root } = await opened(limited(90));
+
+    expect(untilOf(root)).toBe("by 10:30 at the latest");
+    expect(untilOf(root)).toBe(english.card_until_latest.replace("{time}", "10:30"));
+    expect(root.querySelector(".remaining")).toBeNull();
+  });
+
+  it("says the limit in the user's language", async () => {
+    const { root } = await opened(limited(90, { language: "ru" }));
+
+    expect(untilOf(root)).toBe(russian.card_until_latest.replace("{time}", "10:30"));
+  });
+
+  it("does not count down under a limit", async () => {
+    const { card, root } = await opened(limited(90));
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(60 * SECOND);
+    await card.updateComplete;
+    await popupOf(card).updateComplete;
+
+    expect(untilOf(root)).toBe("by 10:30 at the latest");
+  });
+
+  it("adding time to a limit shows an ordinary countdown", async () => {
+    const hass = limited(90);
+    const { card, root } = await opened(hass);
+
+    // Timerify gives the limit's end plus the time added as a countdown that someone chose.
+    card.hass = hass.state(ENDS_AT, isoAt(START + 105 * MINUTE), {
+      started_at: isoAt(START),
+      limit: false,
+    });
+    await settle(card);
+
+    expect(remainingOf(root)).toBe("1:45:00");
+    expect(untilOf(root)).toBe(english.card_until.replace("{time}", "10:45"));
+    await vi.advanceTimersByTimeAsync(SECOND);
+    await card.updateComplete;
+    await popupOf(card).updateComplete;
+    expect(remainingOf(root)).toBe("1:44:59");
   });
 
   it("says nothing of a countdown while there is none", async () => {

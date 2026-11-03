@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseConfig } from "../src/config";
 import type { HassEntity, TimerInfo } from "../src/hass";
 import {
+  isRunning,
   lookupTimer,
   serverNow,
   targetRunning,
@@ -16,6 +17,7 @@ import {
   acTimer,
   boilerTimer,
   fakeHass,
+  limited,
   type FakeHass,
 } from "./fake-hass";
 
@@ -97,6 +99,52 @@ describe("what the card shows of a timer", () => {
     const idle = timerView(fakeHass(), config, found(), START);
     expect(idle.state).toBe("idle");
     expect(idle.progress).toBe(0);
+  });
+
+  it("is a limit while Ends at holds the time a device left on is turned off at the latest", () => {
+    const view = timerView(limited(90), config, found(), START);
+
+    expect(view.state).toBe("limit");
+    expect(view.endsAt).toEqual(new Date(START + 90 * MINUTE));
+    // A limit is no promise: it has no time left to show and no share to empty.
+    expect(view.remaining).toBe(0);
+    expect(view.progress).toBe(1);
+    expect(isRunning(view)).toBe(true);
+  });
+
+  it("is a limit until it is turned off, however late the card hears of it", () => {
+    const view = timerView(limited(90), config, found(), START + 2 * 60 * MINUTE);
+
+    expect(view.state).toBe("limit");
+    expect(view.remaining).toBe(0);
+  });
+
+  it("counts a time that is not marked as a limit, whether the mark is false or missing", () => {
+    const marked = fakeHass().state(ENDS_AT, new Date(START + 45 * MINUTE).toISOString(), {
+      started_at: new Date(START).toISOString(),
+      limit: false,
+    });
+    const unmarked = counting(START + 45 * MINUTE);
+
+    for (const hass of [marked, unmarked]) {
+      const view = timerView(hass, config, found(), START);
+      expect(view.state).toBe("counting");
+      expect(view.remaining).toBe(2700);
+    }
+  });
+
+  it("counts again when time is added to a limit", () => {
+    const hass = limited(90);
+    expect(timerView(hass, config, found(), START).state).toBe("limit");
+
+    const added = hass.state(ENDS_AT, new Date(START + 105 * MINUTE).toISOString(), {
+      started_at: new Date(START).toISOString(),
+      limit: false,
+    });
+    const view = timerView(added, config, found(), START);
+
+    expect(view.state).toBe("counting");
+    expect(view.remaining).toBe(105 * 60);
   });
 
   it("is unavailable when its number or Ends at is", () => {

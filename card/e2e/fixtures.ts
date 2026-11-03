@@ -45,14 +45,15 @@ export async function commandsOf(ws: HassWs, timer: TimerEntities): Promise<Comm
 }
 
 /**
- * Puts the fixture back as `scripts.e2e.hass up` made it, whatever the last test did: both
- * numbers stopped, every command cancelled and the fixture's command added again, the
- * interval switched on, the dashboard saved as it was. Returns when Home Assistant shows it.
+ * Puts the fixture back as `scripts.e2e.hass up` made it, whatever the last test did: the
+ * three numbers stopped, which also ends the limit of the third, every command cancelled and
+ * the fixture's command added again, the interval switched on, the dashboard saved as it
+ * was. Returns when Home Assistant shows it.
  */
 export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
-  const { strict, loose } = state.timers;
+  const { strict, loose, limited } = state.timers;
   const timer = (entities: TimerEntities) => ({ entity_id: entities.run_for });
-  for (const entities of [strict, loose]) {
+  for (const entities of [strict, loose, limited]) {
     await ws.callService("number", "set_value", { value: 0 }, timer(entities));
     for (const command of await commandsOf(ws, entities)) {
       const data = { command_id: command.id };
@@ -77,6 +78,9 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
         loose: Number(await valueOf(loose.run_for)),
         looseTarget: await valueOf(loose.target),
         looseCommands: (await commandsOf(ws, loose)).length,
+        limited: Number(await valueOf(limited.run_for)),
+        limitedTarget: await valueOf(limited.target),
+        limitedEndsAt: await valueOf(limited.ends_at),
         interval: await valueOf(state.interval.switch),
         dashboard: await dashboardIsRestored(),
       }),
@@ -89,6 +93,9 @@ export async function resetFixture(state: E2EState, ws: HassWs): Promise<void> {
       loose: 0,
       looseTarget: "off",
       looseCommands: 1,
+      limited: 0,
+      limitedTarget: "off",
+      limitedEndsAt: "unknown",
       interval: "on",
       dashboard: true,
     });

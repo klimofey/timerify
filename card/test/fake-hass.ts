@@ -445,6 +445,20 @@ export function counting(minutes: number, options: FakeHassOptions = {}, began =
   return fakeHass({ timeFormat: "24", ...options }).state(
     ENDS_AT,
     new Date(began + minutes * MINUTE).toISOString(),
-    { started_at: new Date(began).toISOString() },
+    { started_at: new Date(began).toISOString(), limit: false },
   );
+}
+
+/**
+ * The boiler of a loose timer, left on with no countdown, `minutes` before its limit turns it
+ * off: Ends at holds that moment and says it is a limit, which has no beginning.
+ */
+export function limited(minutes: number, options: FakeHassOptions = {}, from = START): FakeHass {
+  const timers = [boilerTimer({ mode: "loose", default_duration: null })];
+  return fakeHass({ timers, timeFormat: "24", ...options })
+    .state(BOILER, "on", { friendly_name: "Boiler" })
+    .state(ENDS_AT, new Date(from + minutes * MINUTE).toISOString(), {
+      started_at: null,
+      limit: true,
+    });
 }

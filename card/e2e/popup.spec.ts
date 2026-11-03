@@ -5,34 +5,11 @@
 // View "popup": the strict timer's pill, which has the interval, and the loose timer's, which
 // has the fixture's pending command.
 import type { Locator, Page } from "@playwright/test";
+import { clockText } from "./clock";
 import { expect, test } from "./fixtures";
 import { tap } from "./press";
 import { stringsIn } from "./strings";
 import { hassWs } from "./ws";
-
-/** The browser's time zone, which the user's profile follows by default (the config's). */
-const ZONE = "America/New_York";
-
-const dayIn = (moment: number) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: ZONE }).format(moment);
-
-/**
- * A time as the card writes it at this moment: in the user's language and the browser's time
- * zone, with the short weekday when it falls on another day than today, which a command that
- * is due in ten hours does, and a countdown does in its last minutes before midnight.
- */
-function clockText(language: string, hourCycle: "h12" | "h23", moment: number): string {
-  const options: Intl.DateTimeFormatOptions = {
-    timeZone: ZONE,
-    hour: "numeric",
-    minute: "2-digit",
-    hourCycle,
-  };
-  if (dayIn(moment) !== dayIn(Date.now())) {
-    options.weekday = "short";
-  }
-  return new Intl.DateTimeFormat(language, options).format(moment).replace(/\s+/g, " ");
-}
 
 /** The cards of the view, in the order of the dashboard: the strict timer's, the loose one's. */
 function cardsOf(page: Page): { strict: Locator; loose: Locator } {

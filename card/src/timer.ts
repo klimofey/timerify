@@ -85,17 +85,22 @@ export function targetRunning(
   return rule.states.includes(target.state) === (rule.match === "is");
 }
 
-export type TimerState = "idle" | "counting" | "open" | "unavailable";
+/**
+ * What the timer is doing: counting down to a time someone chose, or running with no countdown
+ * under a limit that turns the target off at the latest (`limit`), or with none (`open`).
+ */
+export type TimerState = "idle" | "counting" | "limit" | "open" | "unavailable";
 
 export interface TimerView {
   name: string;
   icon: { icon: string } | { stateObj: HassEntity };
   target?: HassEntity;
   state: TimerState;
-  /** Seconds left of the countdown; 0 unless counting. */
+  /** Seconds left of the countdown; 0 unless counting, as a limit is no time that is promised. */
   remaining: number;
   /** The share of the countdown that is left, from 0 (over) to 1 (just started, or not known). */
   progress: number;
+  /** When the countdown ends, or the limit turns the target off; set while counting or limited. */
   endsAt?: Date;
 }
 
@@ -142,6 +147,11 @@ export function timerView(
       ? { ...view, state: "open", progress: 1 }
       : { ...view, state: "idle", progress: 0 };
   }
+  // Ends at holds the time of a limit with the mark `limit`: a bound with no beginning to count
+  // a share from, which the card shows as full, like a run with no countdown at all.
+  if (endsAt.attributes.limit === true) {
+    return { ...view, state: "limit", progress: 1, endsAt: new Date(end) };
+  }
   const start = momentOf(endsAt.attributes.started_at);
   const length = start === undefined ? 0 : (end - start) / 1000;
   const remaining = Math.max(0, (end - now) / 1000);
@@ -154,9 +164,16 @@ export function timerView(
   };
 }
 
-/** Whether the target runs, with a countdown or without one: there is something to stop. */
+/**
+ * Whether the target runs, with a countdown, under a limit or without either: there is
+ * something to stop.
+ */
 export const isRunning = ({ state }: Pick<TimerView, "state">): boolean =>
-  state === "counting" || state === "open";
+  state === "counting" || state === "limit" || state === "open";
+
+/** Whether the target has a time it is turned off at: a countdown's end or a limit. */
+export const hasEnd = ({ state }: Pick<TimerView, "state">): boolean =>
+  state === "counting" || state === "limit";
 
 /** The entities whose states the card reads: its number, and what Timerify names as its own. */
 export function watchedEntities(entityId: string, info: TimerInfo | undefined): string[] {

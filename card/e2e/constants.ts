@@ -59,6 +59,12 @@ export interface E2EState {
     strict: TimerEntities;
     /** On a switch that sits on a device of its own. */
     loose: TimerEntities;
+    /**
+     * Loose, on another switch that sits on a device of its own, with a limit of two hours:
+     * the device left on, for the tests of a limit. The `loose` timer has no limit, because
+     * the tests of a run with no countdown rely on that.
+     */
+    limited: TimerEntities;
     /** Its "Ends at" sensor is disabled in the registry, and stays so. */
     disabled: TimerEntities;
   };

@@ -1,5 +1,6 @@
 // The round layout: a ring that shows the share of the countdown that is left, the time left
-// in its centre while it counts (the icon of the timer's target otherwise), and the name below.
+// in its centre while it counts (the icon of the timer's target otherwise, under a limit too),
+// and the name below.
 // A press anywhere on the card reaches its body; what a press does is set in the config, and a
 // long press starts or stops the timer unless it is set to something else, see `press.ts`. The
 // one control beside the body is the optional Turn off button, under the name.
@@ -27,7 +28,10 @@ const STROKE = 6;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 
-/** The time left while the timer counts; the icon of its target otherwise. */
+/**
+ * The time left while the timer counts; the icon of its target otherwise, under a limit too,
+ * which has no time left to show.
+ */
 function renderCentre(view: TimerView): TemplateResult {
   if (view.state !== "counting") {
     return html`<span class="icon">${renderIcon(view)}</span>`;

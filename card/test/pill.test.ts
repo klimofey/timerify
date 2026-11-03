@@ -12,6 +12,7 @@ import {
   START,
   counting,
   fakeHass,
+  limited,
 } from "./fake-hass";
 import { bodyOf, mountCard, popupOf, textOf, turnOffOf } from "./mount";
 
@@ -28,6 +29,7 @@ afterEach(() => {
 });
 
 const until = (time: string) => english.card_until.replace("{time}", time);
+const untilLatest = (time: string) => english.card_until_latest.replace("{time}", time);
 const addTime = (minutes: number) => ({
   domain: "timerify",
   service: "add_time",
@@ -151,6 +153,65 @@ describe("the countdown on the pill", () => {
     const card = await mountCard(counting(45, { timeFormat: "12", localeTimeZone: "local" }));
 
     expect(textOf(card)).toMatch(new RegExp(`^Boiler 45:00 ${until("2:45\\sAM")}$`));
+  });
+});
+
+describe("the limit on the pill", () => {
+  it("a device left on shows the time it turns off at the latest", async () => {
+    const card = await mountCard(limited(90));
+
+    expect(textOf(card)).toBe("Boiler by 10:30 at the latest");
+    expect(fillOf(card)).toBe("100%");
+  });
+
+  it("says the limit in the user's language", async () => {
+    const card = await mountCard(limited(90, { language: "ru" }));
+
+    expect(textOf(card)).toBe(`Boiler ${russian.card_until_latest.replace("{time}", "10:30")}`);
+    expect(textOf(card)).not.toMatch(/\bat the latest\b/);
+  });
+
+  it("shows the time of the limit in the user's clock and time zone", async () => {
+    const card = await mountCard(limited(90, { timeFormat: "12", localeTimeZone: "local" }));
+
+    expect(textOf(card)).toMatch(new RegExp(`^Boiler ${untilLatest("3:30\\sAM")}$`));
+  });
+
+  it("names the day of a limit that falls on another", async () => {
+    const card = await mountCard(limited(17 * 60));
+
+    expect(textOf(card)).toBe(`Boiler ${untilLatest("Tue 02:00")}`);
+  });
+
+  it("does not count down, as a limit is no countdown", async () => {
+    const card = await mountCard(limited(90));
+
+    expect(vi.getTimerCount()).toBe(0);
+    await passSeconds(card, 60);
+    expect(textOf(card)).toBe(`Boiler ${untilLatest("10:30")}`);
+  });
+
+  it("adding time to a limit shows an ordinary countdown", async () => {
+    const card = await mountCard(limited(90));
+
+    // Timerify gives the limit's end plus the time added as a countdown that someone chose.
+    card.hass = counting(105);
+    await card.updateComplete;
+
+    expect(textOf(card)).toBe(`Boiler 1:45:00 ${until("10:45")}`);
+    expect(vi.getTimerCount()).toBe(1);
+    await passSeconds(card, 1);
+    expect(textOf(card)).toContain("1:44:59");
+  });
+
+  it("goes back to the state of the device when the limit turns it off", async () => {
+    const hass = limited(90);
+    const card = await mountCard(hass);
+
+    card.hass = hass.state(ENDS_AT, "unknown").state(BOILER, "off", { friendly_name: "Boiler" });
+    await card.updateComplete;
+
+    expect(textOf(card)).toBe("Boiler off");
   });
 });
 
@@ -437,12 +498,14 @@ describe("the quick chip", () => {
 describe("the Turn off button of the pill", () => {
   const WITH_BUTTON = { entity: NUMBER, show_turn_off: true } as const;
 
-  it("shows Turn off while the boiler runs, with or without a countdown", async () => {
+  it("shows Turn off while the boiler runs, with or without a countdown, or under a limit", async () => {
     const counts = await mountCard(counting(45), WITH_BUTTON);
     const runs = await mountCard(running(), WITH_BUTTON);
+    const limits = await mountCard(limited(90), WITH_BUTTON);
 
     expect(turnOffOf(counts)).not.toBeNull();
     expect(turnOffOf(runs)).not.toBeNull();
+    expect(turnOffOf(limits)).not.toBeNull();
   });
 
   it("is hidden while the boiler is off, and without the option", async () => {

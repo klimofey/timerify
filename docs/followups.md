@@ -16,7 +16,6 @@ One line per issue: its number and its title, under the area it belongs to.
 - [#51](https://github.com/klimofey/timerify/issues/51) Card: say why the pop-up shows no presets when each is above the maximum
 - [#52](https://github.com/klimofey/timerify/issues/52) Card: the round tile's dial is wider than the tile at its smallest size
 - [#53](https://github.com/klimofey/timerify/issues/53) Card: an action given without its press choice does nothing
-- [#59](https://github.com/klimofey/timerify/issues/59) Card editor: the press choice "Run for the default duration" runs to the window's end while a schedule window is open
 
 ## Engine
 

@@ -550,11 +550,13 @@ async def add_timer(
     mode: Literal["strict", "loose"] = "strict",
     on_target_device: bool = False,
     runtime: bool = False,
+    limit: int | None = None,
 ) -> Timer:
     """Add a timer for `target` in Timerify the way the integrations page does.
 
     A strict timer gets the default duration of `DEFAULT_DURATION_MINUTES`; a loose one
-    has none, and its limit box is left empty, so it has no limit. With
+    has none. Its limit box, "Turn off if left on for", holds `limit` minutes, or is
+    left empty, so that the timer has no limit; a strict timer has no such box. With
     `on_target_device` the target must sit on a device, and the timer's entities must
     sit on that same device. With `runtime` the box "Count runtime" of the first form is
     ticked; without it the form is submitted as before the counter existed, which
@@ -586,7 +588,7 @@ async def add_timer(
     if mode == "strict":
         steps.append(("duration", {"default_duration": DEFAULT_DURATION_MINUTES}))
     else:
-        steps.append(("limit", {}))
+        steps.append(("limit", {} if limit is None else {"limit": limit}))
     for step_id, user_input in steps:
         if flow["type"] != "form" or flow["step_id"] != step_id:
             raise HarnessFailure(

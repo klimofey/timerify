@@ -7,7 +7,7 @@ import { formatClock, formatRemaining } from "./format";
 import type { HomeAssistant } from "./hass";
 import { mush } from "./mushroom";
 import { t } from "./strings";
-import { hasValue, isRunning, type TimerView } from "./timer";
+import { hasEnd, hasValue, isRunning, type TimerView } from "./timer";
 
 /** The icon of the timer's target, or the one the config chooses. */
 export function renderIcon(view: TimerView): TemplateResult {
@@ -114,8 +114,9 @@ function stateText(view: TimerView, config: CardConfig, hass: HomeAssistant): st
 }
 
 /**
- * What the card says of the timer's state: the time left and when it ends while counting,
- * else the state of the target (or that the timer is unavailable).
+ * What the card says of the timer's state: the time left and when it ends while counting, the
+ * time the target is turned off at the latest under a limit, else the state of the target (or
+ * that the timer is unavailable). A limit is a bound, not a promise, so no time is left to say.
  */
 export function renderStatus(
   view: TimerView,
@@ -123,10 +124,13 @@ export function renderStatus(
   hass: HomeAssistant,
   now: number,
 ) {
-  if (view.state !== "counting" || view.endsAt === undefined) {
+  if (!hasEnd(view) || view.endsAt === undefined) {
     return stateText(view, config, hass);
   }
   const time = formatClock(hass, view.endsAt, now);
+  if (view.state === "limit") {
+    return html`<span class="until">${t(hass, "card_until_latest", { time })}</span>`;
+  }
   return html`
     <span class="remaining">${formatRemaining(view.remaining)}</span>
     <span class="until">${t(hass, "card_until", { time })}</span>
@@ -219,6 +223,7 @@ export const commonStyles = css`
     color: var(--state-icon-color, var(--secondary-text-color));
   }
   .counting .icon,
+  .limit .icon,
   .open .icon {
     color: var(--state-active-color, var(--primary-color));
   }
@@ -277,6 +282,7 @@ export const mushroomStyles = css`
       color 280ms ease-in-out;
   }
   :host([data-mushroom]) .counting .icon,
+  :host([data-mushroom]) .limit .icon,
   :host([data-mushroom]) .open .icon {
     background: rgba(${mush.activeRgb}, 0.2);
     color: rgb(${mush.activeRgb});

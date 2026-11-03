@@ -142,8 +142,7 @@ def start_set_number(
 
 def run_for_of(hass: HomeAssistant, entry: ConfigEntry) -> str:
     """The entity id of the "Run for" number of the timer of `entry`, from the registry:
-    a device with two timers gives their numbers ids that tell the timers apart only by
-    a suffix."""
+    a second timer on a device has an id that names its target."""
     entity_id = er.async_get(hass).async_get_entity_id(
         "number", DOMAIN, timer_unique_id(entry.entry_id, KEY_RUN_FOR)
     )

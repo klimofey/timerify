@@ -293,16 +293,33 @@
     "button": {
       "turn_off": {
         "name": "Turn off"
+      },
+      "turn_off_with_target": {
+        "name": "Turn off ({target})"
       }
     },
     "number": {
       "run_for": {
         "name": "Run for"
+      },
+      "run_for_with_target": {
+        "name": "Run for ({target})"
       }
     },
     "sensor": {
       "ends_at": {
         "name": "Ends at",
+        "state_attributes": {
+          "started_at": {
+            "name": "Started at"
+          },
+          "limit": {
+            "name": "Is a limit"
+          }
+        }
+      },
+      "ends_at_with_target": {
+        "name": "Ends at ({target})",
         "state_attributes": {
           "started_at": {
             "name": "Started at"
@@ -320,13 +337,27 @@
           }
         }
       },
+      "next_command_with_target": {
+        "name": "Next command ({target})",
+        "state_attributes": {
+          "commands": {
+            "name": "Commands"
+          }
+        }
+      },
       "runtime": {
         "name": "Runtime"
+      },
+      "runtime_with_target": {
+        "name": "Runtime ({target})"
       }
     },
     "switch": {
       "interval": {
         "name": "Schedule {interval}"
+      },
+      "interval_with_target": {
+        "name": "Schedule {interval} ({target})"
       }
     }
   },

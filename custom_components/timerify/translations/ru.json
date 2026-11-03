@@ -293,16 +293,33 @@
     "button": {
       "turn_off": {
         "name": "Выключить"
+      },
+      "turn_off_with_target": {
+        "name": "Выключить ({target})"
       }
     },
     "number": {
       "run_for": {
         "name": "Включить на"
+      },
+      "run_for_with_target": {
+        "name": "Включить на ({target})"
       }
     },
     "sensor": {
       "ends_at": {
         "name": "Выключится в",
+        "state_attributes": {
+          "started_at": {
+            "name": "Запущен в"
+          },
+          "limit": {
+            "name": "Это предел"
+          }
+        }
+      },
+      "ends_at_with_target": {
+        "name": "Выключится в ({target})",
         "state_attributes": {
           "started_at": {
             "name": "Запущен в"
@@ -320,13 +337,27 @@
           }
         }
       },
+      "next_command_with_target": {
+        "name": "Следующая команда ({target})",
+        "state_attributes": {
+          "commands": {
+            "name": "Команды"
+          }
+        }
+      },
       "runtime": {
         "name": "Время работы"
+      },
+      "runtime_with_target": {
+        "name": "Время работы ({target})"
       }
     },
     "switch": {
       "interval": {
         "name": "Расписание {interval}"
+      },
+      "interval_with_target": {
+        "name": "Расписание {interval} ({target})"
       }
     }
   },

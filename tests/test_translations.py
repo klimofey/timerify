@@ -126,3 +126,35 @@ def test_card_strings_name_their_own_language(language: str) -> None:
     the file, as Intl reads it. A new language that forgets it would have its helper
     text written in English."""
     assert translations_of(language)["common"]["card_language"] == language
+
+
+WITH_TARGET = "_with_target"
+"""The suffix of the key an entity is translated by on a device with more than one
+timer, which names its target in brackets."""
+
+
+def without_name(translation: dict[str, Any]) -> dict[str, Any]:
+    """What an entity's translation says besides its name: its attributes and states."""
+    return {key: text for key, text in translation.items() if key != "name"}
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_a_name_with_its_target_says_what_the_plain_name_says(language: str) -> None:
+    """The entity of a timer on a device with more than one timer is translated by its
+    key and `_with_target`. That key has the name of the plain one with the target in
+    brackets, and the rest of its translation is the plain key's, so that the
+    attributes of the state read the same."""
+    entities = translations_of(language)["entity"]
+
+    for platform, keys in entities.items():
+        for key, translation in keys.items():
+            path = f"{platform}.{key}"
+            if key.endswith(WITH_TARGET):
+                assert key.removesuffix(WITH_TARGET) in keys, f"{path} has no plain key"
+                continue
+            assert f"{key}{WITH_TARGET}" in keys, f"{path} has no key with its target"
+            with_target = keys[f"{key}{WITH_TARGET}"]
+            assert blanks_of(with_target["name"]) == blanks_of(translation["name"]) | {
+                "target"
+            }, path
+            assert without_name(with_target) == without_name(translation), path

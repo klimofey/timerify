@@ -3,10 +3,16 @@
     "button": {
       "turn_off": {
         "default": "mdi:power"
+      },
+      "turn_off_with_target": {
+        "default": "mdi:power"
       }
     },
     "number": {
       "run_for": {
+        "default": "mdi:timer-outline"
+      },
+      "run_for_with_target": {
         "default": "mdi:timer-outline"
       }
     },
@@ -14,15 +20,30 @@
       "ends_at": {
         "default": "mdi:clock-end"
       },
+      "ends_at_with_target": {
+        "default": "mdi:clock-end"
+      },
       "next_command": {
         "default": "mdi:calendar-clock"
       },
+      "next_command_with_target": {
+        "default": "mdi:calendar-clock"
+      },
       "runtime": {
+        "default": "mdi:timer-sand-complete"
+      },
+      "runtime_with_target": {
         "default": "mdi:timer-sand-complete"
       }
     },
     "switch": {
       "interval": {
+        "default": "mdi:calendar-check",
+        "state": {
+          "off": "mdi:calendar-remove"
+        }
+      },
+      "interval_with_target": {
         "default": "mdi:calendar-check",
         "state": {
           "off": "mdi:calendar-remove"

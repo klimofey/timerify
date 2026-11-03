@@ -135,11 +135,14 @@ SIGNAL_TIMERS_CHANGED: Final = "timerify_timers_changed"
 """Sent when a timer is set up or unloaded, so that the names of the targets are listed
 again."""
 EVENT_COUNTDOWN_STARTED: Final = "timerify_countdown_started"
-"""Fired when a timer with no countdown begins one. Data: `entity_id`, the timer's Run
-for, and `ends_at`, the end as the Ends at sensor states it (ISO 8601 in UTC)."""
+"""Fired when a timer with no countdown begins one, or sets the limit of a run that has
+none. Data: `entity_id`, the timer's Run for, `ends_at`, the end as the Ends at sensor
+states it (ISO 8601 in UTC), and `limit`: true when `ends_at` is the time of a limit,
+false when it is the end of a countdown that someone chose."""
 EVENT_COUNTDOWN_ENDED: Final = "timerify_countdown_ended"
-"""Fired when the countdown of a timer is over. Data: `entity_id`, the timer's Run for,
-and `reason`: `expired`, `stopped` or `turned_off` (`EndReason`)."""
+"""Fired when the countdown of a timer, or its limit, is over. Data: `entity_id`, the
+timer's Run for, and `reason`: `expired`, `stopped`, `turned_off` or `limit`
+(`EndReason`)."""
 EVENT_COMMAND_DUE: Final = "timerify_command_due"
 """Fired when a pending command is carried out at its time. Data: `entity_id`, the
 timer's Run for, `command_id`, as `add_command` answered it, and `action`: `on` or

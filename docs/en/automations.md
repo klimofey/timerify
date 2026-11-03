@@ -32,7 +32,7 @@ For example, to run the boiler for 20 minutes, pick **Run** and set **Minutes** 
 | Trigger | When it fires |
 | --- | --- |
 | **Countdown started** | A timer that was not counting down starts. Changing a countdown that already runs does not fire it. Nor does a device that runs without a countdown in **Loose** mode. A **Loose** device switched on inside a schedule window does get a countdown, so it fires it. So does a **Loose** device left on with a [limit](timers.md#turn-off-a-device-that-was-left-on): the limit fires it when it starts. |
-| **Countdown ended** | The countdown runs out, Timerify stops it, the device is switched off outside Timerify, or the limit of a device left on turns it off. |
+| **Countdown ended** | The countdown runs out, Timerify stops it, or the device is switched off outside Timerify. A limit that turns off a device left on fires it too. |
 | **Pending command came due** | A pending command is carried out at its time. A command to turn on whose run is already over does not fire it. |
 
 The [Modes](timers.md#modes) section explains **Loose** mode.
@@ -57,7 +57,7 @@ The reason is one of four words:
 - `turned_off`: the device was switched off outside Timerify. That is you by hand or in its own app, another automation, or the device itself.
 - `limit`: the limit of a device left on came, and Timerify turned the device off.
 
-A limit that you replace with a time you chose does not end. The device keeps running, and **Countdown started** fires with `trigger.limit` set to `false`. A limit that ends because someone switches the device off has the reason `turned_off`.
+A time you chose can replace a limit. **Countdown ended** does not fire then. The device keeps running, and **Countdown started** fires with `trigger.limit` set to `false`. A limit that ends because someone switches the device off has the reason `turned_off`.
 
 The [Events](services.md#events) section lists every cause of `stopped`.
 

@@ -377,7 +377,7 @@ async def test_a_loose_timer_is_asked_for_a_limit_and_a_strict_one_is_not(
 
 
 async def test_an_empty_limit_box_means_no_limit(
-    hass: HomeAssistant, fake_target: FakeTarget
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, fake_target: FakeTarget
 ) -> None:
     """A user who has no use for a limit leaves the box empty: the timer is added
     without one, and a boiler switched on by hand runs until someone turns it off."""
@@ -392,6 +392,9 @@ async def test_an_empty_limit_box_means_no_limit(
     assert CONF_LIMIT not in result["options"]
     await fake_target.set_state("on")
     assert state_of(hass, SENSOR) == "unknown"
+    await advance(hass, freezer, hours=24)
+    assert fake_target.calls == []
+    assert state_of(hass, TARGET_ID) == "on"
 
 
 async def test_the_settings_set_change_and_remove_the_limit(

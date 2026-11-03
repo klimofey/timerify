@@ -21,7 +21,7 @@ The timer appears on the device page of the entity. The **Add integration** butt
 
 ### Change a timer later
 
-Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode, the runtime counter, **Maximum of Run for**, **Turn off button**, the default duration, **Turn off if left on for** and the Workday sensor.
+Open the timer on the Timerify integration page and choose **Configure**. There you can change the mode and the runtime counter. You can also change **Maximum of Run for**, **Turn off button**, the default duration, **Turn off if left on for** and the Workday sensor.
 
 You cannot change the entity. Add a timer for the other entity instead.
 
@@ -58,12 +58,16 @@ The default duration is how long a Strict device runs when it is turned on witho
 A Loose device that you switch on by hand has no countdown. If you forget it, it runs on. The setting **Turn off if left on for** is a fuse against that. It is a number of minutes, from 1 to 1440. It is empty to begin with, which means no limit. A Strict timer does not have it, because every run of a Strict device has a countdown already.
 
 - A Loose device is on, and Timerify has no countdown for it. Timerify then sets a limit: the moment now, plus the minutes you chose. When the limit comes, Timerify turns the device off.
-- A time you chose is never cut. **Run for**, **Add time**, a run or a voice command with minutes, a pending command with minutes and a schedule window each give the device a countdown. There is no limit while it runs.
+- A time you chose is never cut. Each of these gives the device a countdown, and there is no limit while it runs:
+  - **Run for** and **Add time**.
+  - A run or a voice command with minutes.
+  - A pending command with minutes.
+  - A schedule window.
 - Turning the device off ends the limit, whoever does it. The next turn-on without a time starts a new limit.
 - These start a limit:
   - You switch the device on by hand.
   - **Run** has no minutes, or a voice command or a pending command names no time.
-  - Home Assistant starts, or the device comes back from unavailable, and finds it on.
+  - Timerify finds the device on when Home Assistant starts, or when the device comes back from unavailable.
 - The limit counts from the moment Timerify sees the device on. A device switched on while Home Assistant was down gets its limit from the start-up.
 - **Ends at** shows the moment of the limit. The limit is a bound, not a promise: it is the latest the device stays on. **Run for** stays 0, because nobody chose a time.
 - Adding time to a limit gives a countdown that you chose. A limit of 13:30 with 15 minutes added is a countdown to 13:45, and nothing cuts it.
@@ -80,7 +84,7 @@ All the entities of a timer sit on the device's own page in Home Assistant. If t
 | Entity | What it shows |
 | --- | --- |
 | **Run for** (a number) | The minutes left, rounded up. Setting it starts, changes or stops the countdown. |
-| **Ends at** (a sensor) | The moment the countdown ends. In Loose mode, while a device left on has a limit, it shows the moment of the limit instead: the time the device turns off at the latest. It is unknown while neither runs. Home Assistant shows it as, for example, "in 7 minutes". It also keeps the moment the countdown began, which is empty while no countdown runs, and whether the time is a limit. The dashboard card uses them to draw its fill. |
+| **Ends at** (a sensor) | The moment the countdown ends. In Loose mode, a device left on can have a limit. While it runs, the sensor shows the moment of the limit: the latest time the device turns off. It is unknown while neither runs. Home Assistant shows it as, for example, "in 7 minutes". Two attributes go with it. One is the moment the countdown began, which is empty while no countdown runs. The other says whether the time is a limit. The dashboard card draws its fill from the first. |
 | **Next command** (a sensor) | The moment the next pending command is due. It is unknown while there is none. See [Pending commands](pending-commands.md#the-next-command-sensor). |
 | `Schedule 06:30–07:15, Sun–Thu` (a switch) | One for each schedule interval. It is on while the interval is in use, and off to skip it. See [Schedules](schedules.md#switch-an-interval-on-or-off). |
 | **Runtime** (a sensor) | Only when you ask for it. The minutes the device was on, as a total that only goes up. The [Runtime page](runtime.md) tells more. |

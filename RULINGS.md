@@ -355,9 +355,10 @@ not repeated beside its successor.
   the end of the window that is open in either mode (#58). R5 is no longer "nothing happens to
   the timer" for a loose timer that has a limit: with no window open, the device found on
   gets the limit (1.2.0, below). Cost if wrong: none found.
-- **The controller notifies the entities when `end`, `commands` or the switched-off
-  intervals changed, and each entity gates its own write.** The "Next command" sensor must
-  show a command added to an idle timer, and the switch of an interval follows its flag.
+- **The controller notifies the entities when `end`, `started_at`, `limit_at`, `commands`
+  or the switched-off intervals changed, and each entity gates its own write.** The "Next
+  command" sensor must show a command added to an idle timer, the switch of an interval
+  follows its flag, and "Ends at" shows a limit, which is a deadline of its own (1.2.0).
   Cost if wrong: none.
 - **The "Next command" sensor writes its state only when the command list changes, and its
   attribute is unrecorded**, proven with the recorder fixture (§3, a small recorder).
@@ -4037,8 +4038,10 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   for `expired` goes on hearing only countdowns that someone chose. The device triggers fire for
   a limit too, with the same variables. The ruling on the events (Release 1.1.0, "Countdowns and
   due commands are announced by the core and fired as Timerify's own events") was rewritten in
-  place. Cost if wrong: an automation that matched the exact data of a start (a YAML trigger
-  with `event_data`) must add `limit`. Tests: `test_a_limit_is_announced_with_its_mark`,
+  place. Cost if wrong: none for a YAML `event` trigger, whose `event_data` matches a subset
+  of the data, so the extra key breaks no automation; a template that compares the whole
+  `trigger.event.data` with a dict would see the new key. Tests:
+  `test_a_limit_is_announced_with_its_mark`,
   `test_a_limit_ends_with_its_own_reason` (`tests/test_events.py`),
   `test_a_limit_gives_the_automation_its_mark` and
   `test_countdown_ended_tells_the_automation_how` (`tests/test_automation_triggers.py`).

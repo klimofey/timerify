@@ -166,7 +166,7 @@ Timerify fires three events. The [triggers](automations.md#triggers) are built o
 | `timerify_countdown_ended` | `entity_id`, `reason` | A countdown or a limit is over. |
 | `timerify_command_due` | `entity_id`, `command_id`, `action` | A pending command is carried out at its time. |
 
-`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `limit` is `true` when `ends_at` is the moment of a limit, and `false` when it is the end of a countdown that someone chose. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
+`entity_id` is the **Run for** entity of the timer. `ends_at` is the end of the countdown in UTC, in the form of the state of the **Ends at** sensor. The dashboard shows that time in your local time. `limit` is `true` when `ends_at` is the moment of a limit. It is `false` when `ends_at` is the end of a countdown that someone chose. `command_id` is the id that `timerify.add_command` gave the command. `action` is `on` or `off`.
 
 A countdown or a limit ends for one of four reasons. The event names it in `reason`.
 
@@ -209,7 +209,7 @@ One exception: if you give an action while Home Assistant is still starting, the
 
 Two sensors of a timer carry attributes for dashboards and templates.
 
-- The sensor **Ends at** has the attributes `started_at` and `limit`. `started_at` holds the moment the countdown began, and it is empty while no countdown runs or a limit does. `limit` is `true` while the time of the sensor is the [limit](timers.md#turn-off-a-device-that-was-left-on) of a device left on, and `false` otherwise. The [dashboard card](card.md) uses them to draw its fill.
+- The sensor **Ends at** has the attributes `started_at` and `limit`. `started_at` holds the moment the countdown began. It is empty while no countdown runs, and while a limit runs. `limit` is `true` while the time of the sensor is the [limit](timers.md#turn-off-a-device-that-was-left-on) of a device left on, and `false` otherwise. The [dashboard card](card.md) draws its fill from `started_at`.
 - The sensor **Next command** has the attribute `commands`. It lists all the pending commands, the earliest first. The list is not kept in the history database. [The Next command sensor](pending-commands.md#the-next-command-sensor) shows what it looks like.
 
 ## The command of the dashboard card

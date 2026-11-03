@@ -193,8 +193,12 @@ async def test_countdown_ended_tells_the_automation_how(
 ) -> None:
     """However the countdown ends, the automation hears of it once and is told which
     way it ended: it ran out, Timerify stopped it, someone switched the boiler off, or
-    the boiler was left on and its limit turned it off."""
-    await setup_target(mode="loose", limit=120)
+    the boiler was left on and its limit turned it off. The first three are the
+    countdowns of a strict timer; the limit is a loose timer's."""
+    if how == "limit":
+        await setup_target(mode="loose", limit=120)
+    else:
+        await setup_target()
     records = await watch(
         hass,
         "countdown_ended",

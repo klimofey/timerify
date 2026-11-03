@@ -1210,32 +1210,30 @@ class TargetController:
                 " it is turned on when it is back, if the window is still open then",
                 self.target_entity_id,
             )
-        # A countdown that ended is one that wants the target off; a command that was
-        # due with it may have moved the end or made the target wanted on instead.
-        if (
-            before.end is not None
-            and before.end <= now
-            and after.end is None
-            and after.pending == "off"
-        ):
-            _LOGGER.info(
+        # A countdown that ended, or a limit that was reached, is one that wants the
+        # target off; a command that was due with it may have moved the end or made the
+        # target wanted on instead.
+        for before_at, after_at, message in (
+            (
+                before.end,
+                after.end,
                 "The timer of %s ended while it is unavailable;"
                 " it is turned off when it is back",
-                self.target_entity_id,
-            )
-        # The same for the limit of a run that has no countdown: reached, it wants the
-        # target off.
-        if (
-            before.limit_at is not None
-            and before.limit_at <= now
-            and after.limit_at is None
-            and after.pending == "off"
-        ):
-            _LOGGER.info(
+            ),
+            (
+                before.limit_at,
+                after.limit_at,
                 "The limit of %s was reached while it is unavailable;"
                 " it is turned off when it is back",
-                self.target_entity_id,
-            )
+            ),
+        ):
+            if (
+                before_at is not None
+                and before_at <= now
+                and after_at is None
+                and after.pending == "off"
+            ):
+                _LOGGER.info(message, self.target_entity_id)
         dropped = {e.command.id for e in effects if isinstance(e, CommandDropped)}
         kept = {command.id for command in after.commands}
         if any(c.id not in kept and c.id not in dropped for c in before.commands):

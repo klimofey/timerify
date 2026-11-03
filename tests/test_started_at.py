@@ -508,7 +508,11 @@ async def test_countdown_stored_by_0_4_0_has_no_beginning(
     """A countdown that version 0.4.0 stored runs on with no beginning, since nothing
     says when it began, and the file is written in the current version."""
     await fake_target.set_state("on")
-    version_3 = {k: v for k, v in payload(end=at(30)).items() if k != "started_at"}
+    version_3 = {
+        k: v
+        for k, v in payload(end=at(30)).items()
+        if k not in ("started_at", "limit_at")
+    }
 
     entry = await setup_target(stored=version_3, stored_version=3)
 
@@ -516,6 +520,29 @@ async def test_countdown_stored_by_0_4_0_has_no_beginning(
     assert began(hass) is None
     assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
     assert saved(hass_storage, entry) == payload(end=at(30))
+
+
+async def test_version_4_store_is_migrated(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    hass_storage: dict[str, Any],
+) -> None:
+    """A countdown that version 4 stored, before a limit existed, runs on with its
+    beginning and no limit, and the file is written in the current version."""
+    await fake_target.set_state("on")
+    version_4 = {
+        k: v
+        for k, v in payload(end=at(30), started_at=at(0)).items()
+        if k != "limit_at"
+    }
+
+    entry = await setup_target(stored=version_4, stored_version=4)
+
+    assert state_of(hass, NUMBER) == "30"
+    assert began(hass) == when(0)
+    assert hass_storage[storage_key(entry)]["version"] == TimerStore.STORAGE_VERSION
+    assert saved(hass_storage, entry) == payload(end=at(30), started_at=at(0))
 
 
 @pytest.mark.parametrize("started", [at(30), at(31)])

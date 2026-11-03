@@ -17,7 +17,7 @@ from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.timerify.const import freeze_settings
-from custom_components.timerify.core import Command
+from custom_components.timerify.core import Command, Snapshot
 from custom_components.timerify.store import TimerStore, command_to_json
 
 from .conftest import FakeTarget, SetupTarget
@@ -27,6 +27,7 @@ from .helpers import (
     AC_NUMBER,
     NUMBER,
     SENSOR,
+    START,
     SUNDAY,
     TARGET_ID,
     TURN_OFF,
@@ -555,6 +556,43 @@ async def test_file_that_contradicts_itself_is_refused(
     assert complaint in caplog.text
     assert "ValueError" not in caplog.text
     assert fake_target.calls == []
+
+
+async def test_a_file_with_an_end_and_a_limit_is_refused(
+    hass: HomeAssistant, fake_target: FakeTarget, setup_target: SetupTarget
+) -> None:
+    """A countdown and a limit are never there together, so a file that holds both is
+    refused with a reason, as any other file that no timer could have written is."""
+    entry = await setup_target(stored=payload(end=at(30), limit_at=at(60)))
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert entry.error_reason_translation_key == "stored_timer_invalid"
+    assert entry.reason is not None
+    assert "has both an end and a limit" in entry.reason
+    assert fake_target.calls == []
+
+
+async def test_a_limit_survives_a_restart(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    """The file holds a limit as a time in UTC, the timer read from it has the limit
+    again, and a timer written back carries the new time."""
+    key = "timerify.limit-entry"
+    hass_storage[key] = {
+        "version": TimerStore.STORAGE_VERSION,
+        "minor_version": 1,
+        "key": key,
+        "data": payload(limit_at=at(60)),
+    }
+    store = TimerStore(hass, "limit-entry")
+
+    snapshot = await store.async_load()
+
+    assert snapshot == Snapshot(limit_at=START + timedelta(minutes=60))
+
+    await store.async_save(Snapshot(limit_at=START + timedelta(minutes=90)))
+
+    assert hass_storage[key]["data"] == payload(limit_at=at(90))
 
 
 def test_command_is_stored_as_plain_data_in_utc() -> None:

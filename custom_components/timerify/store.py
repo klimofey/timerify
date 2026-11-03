@@ -122,6 +122,8 @@ def _validated(snapshot: Snapshot) -> Snapshot:
             raise ValueError("the countdown has a beginning but no end")
         if snapshot.started_at >= snapshot.end:
             raise ValueError("the countdown begins at or after its end")
+    if snapshot.limit_at is not None and snapshot.end is not None:
+        raise ValueError("the timer has both an end and a limit")
     if snapshot.owed_turn_on_only and not snapshot.owed_settings:
         raise ValueError("the turn-on-only marker is set without owed settings")
     return snapshot
@@ -137,9 +139,10 @@ def _disabled_from_json(interval_ids: list[str]) -> frozenset[str]:
 
 def _payload(snapshot: Snapshot) -> dict[str, Any]:
     """What is stored of a snapshot: the countdown with when it began, and the interval
-    whose window end it carries, the wish not yet confirmed, the settings not yet
-    confirmed with whether they may only go with a turn-on, the pending commands, the
-    schedule windows and the intervals that are switched off.
+    whose window end it carries, the limit of a run with no countdown, the wish not yet
+    confirmed, the settings not yet confirmed with whether they may only go with a
+    turn-on, the pending commands, the schedule windows and the intervals that are
+    switched off.
 
     `last_actual` describes the live target, so it is not stored: after a restart
     nothing is known about the target until it reports.
@@ -147,6 +150,7 @@ def _payload(snapshot: Snapshot) -> dict[str, Any]:
     return {
         "end": _time_to_json(snapshot.end),
         "started_at": _time_to_json(snapshot.started_at),
+        "limit_at": _time_to_json(snapshot.limit_at),
         "pending": snapshot.pending,
         "owed_settings": dict(snapshot.owed_settings),
         "commands": [command_to_json(command) for command in snapshot.commands],
@@ -187,7 +191,7 @@ class _TimerFile(Store[dict[str, Any]]):
         command and may reach a running target (P1), and no window existed for a timer
         to be carried by, nor an interval to be switched off. Version 3 knew no
         beginning of a countdown, and nothing says when one that is stored began, so it
-        has none.
+        has none. Version 4 knew no limit, so none runs.
         """
         if old_major_version == 1:
             return {
@@ -199,6 +203,7 @@ class _TimerFile(Store[dict[str, Any]]):
                 "windows": [],
                 "disabled_intervals": [],
                 "started_at": None,
+                "limit_at": None,
             }
         if old_major_version == 2:
             return {
@@ -208,16 +213,19 @@ class _TimerFile(Store[dict[str, Any]]):
                 "windows": [],
                 "disabled_intervals": [],
                 "started_at": None,
+                "limit_at": None,
             }
         if old_major_version == 3:
-            return {**old_data, "started_at": None}
+            return {**old_data, "started_at": None, "limit_at": None}
+        if old_major_version == 4:
+            return {**old_data, "limit_at": None}
         raise NotImplementedError
 
 
 class TimerStore:
     """The stored timer of one config entry, in a versioned file of its own."""
 
-    STORAGE_VERSION: Final = 4
+    STORAGE_VERSION: Final = 5
 
     def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
         self._store = _TimerFile(hass, self.STORAGE_VERSION, f"timerify.{entry_id}")
@@ -257,6 +265,9 @@ class TimerStore:
                 end=_optional_time_from_json(data["end"], "the end of the countdown"),
                 started_at=_optional_time_from_json(
                     data["started_at"], "the beginning of the countdown"
+                ),
+                limit_at=_optional_time_from_json(
+                    data["limit_at"], "the limit of the run"
                 ),
                 pending=data["pending"],
                 owed_settings=freeze_settings(data["owed_settings"]),

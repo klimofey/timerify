@@ -68,6 +68,7 @@ from ..helpers import (
     advance,
     restart,
     retitle_interval,
+    run_for_of,
     state_of,
 )
 from .helpers import (
@@ -542,6 +543,26 @@ async def test_removed_target_leaves_the_list(
 
     assert listed(hass, "en") == [BOILER]
     assert not reached_time_left(await converse(hass, "how long is left on the fan"))
+
+
+@pytest.mark.usefixtures("assist")
+async def test_a_second_timer_on_a_device_leaves_the_voice_settings_alone(
+    hass: HomeAssistant,
+    fake_relay: tuple[FakeTarget, FakeTarget],
+    setup_target: SetupTarget,
+) -> None:
+    """The Voice settings entry is loaded among the timers and has no target. The user
+    adds the timers of both channels of a relay. The first one is renamed at once, and
+    the settings are neither reloaded nor failed by it."""
+    voice = await add_voice_entry(hass, languages=("en",))
+
+    one = await setup_target(target="switch.relay_1")
+    await setup_target(target="switch.relay_2")
+
+    assert voice.state is ConfigEntryState.LOADED
+    state = hass.states.get(run_for_of(hass, one))
+    assert state is not None
+    assert state.attributes["friendly_name"] == "Relay Run for (Channel 1)"
 
 
 @pytest.mark.usefixtures("assist")

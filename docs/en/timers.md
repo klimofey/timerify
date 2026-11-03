@@ -79,7 +79,7 @@ The events and triggers tell an automation when a limit starts and ends. See [Au
 
 ## What a timer adds to the device page
 
-All the entities of a timer sit on the device's own page in Home Assistant. If the entity is on no Home Assistant device, the timer makes a device named after it. If the entity is linked to a device later, the timer's entities move to that device. They keep their names and entity ids. The device that was made for them is removed.
+All the entities of a timer sit on the device's own page in Home Assistant. If the entity is on no Home Assistant device, the timer makes a device named after it. If the entity is linked to a device later, the timer's entities move to that device. They keep their entity ids. Their names keep the same form, unless the new device holds another timer. Then they name the target in brackets, as [A device with two timers](automations.md#a-device-with-two-timers) explains. The device that was made for them is removed.
 
 | Entity | What it shows |
 | --- | --- |

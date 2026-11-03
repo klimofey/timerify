@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import probatio
 import pytest
 from freezegun.api import FrozenDateTimeFactory
+from homeassistant import config_entries
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
@@ -30,6 +31,9 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from pytest_homeassistant_custom_component.typing import MockHAClientWebSocket
 
 from custom_components.timerify.const import (
+    CONF_DEFAULT_DURATION,
+    CONF_MODE,
+    CONF_TARGET,
     DOMAIN,
     EVENT_COMMAND_DUE,
     EVENT_COUNTDOWN_ENDED,
@@ -37,6 +41,7 @@ from custom_components.timerify.const import (
     KEY_RUN_FOR,
     SUBENTRY_INTERVAL,
     DaysMode,
+    Mode,
     timer_unique_id,
 )
 
@@ -251,6 +256,44 @@ def prefilled(schema: probatio.Schema) -> dict[str, Any]:
             if inside or isinstance(marker, probatio.Required):
                 values[marker.schema] = inside
     return values
+
+
+async def start_flow(hass: HomeAssistant) -> FlowResult:
+    """Press "Add entry" on the integration page and "Add a timer" in the menu it
+    shows; return the form that asks for the target."""
+    menu = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert menu["type"] is FlowResultType.MENU
+    return await hass.config_entries.flow.async_configure(
+        menu["flow_id"], {"next_step_id": "target"}
+    )
+
+
+async def submit(
+    hass: HomeAssistant, result: FlowResult, user_input: dict[str, Any]
+) -> FlowResult:
+    """Fill in the form `result` shows and submit it."""
+    return await hass.config_entries.flow.async_configure(result["flow_id"], user_input)
+
+
+async def add_target(
+    hass: HomeAssistant,
+    target: str = TARGET_ID,
+    mode: Mode = "strict",
+    default_duration: int = 45,
+) -> ConfigEntry:
+    """Add a timer through the whole flow, with no limit; return its config entry."""
+    result = await submit(
+        hass, await start_flow(hass), {CONF_TARGET: target, CONF_MODE: mode}
+    )
+    if mode == "strict":
+        result = await submit(hass, result, {CONF_DEFAULT_DURATION: default_duration})
+    else:
+        result = await submit(hass, result, {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    return result["result"]
 
 
 async def submit_interval(

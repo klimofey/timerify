@@ -21,7 +21,6 @@ One line per issue: its number and its title, under the area it belongs to.
 ## Forms
 
 - [#40](https://github.com/klimofey/timerify/issues/40) The integration page does not re-render after a timer or a schedule interval is added
-- [#46](https://github.com/klimofey/timerify/issues/46) The Run for entities of two timers on one device have the same name
 
 ## Schedules
 

@@ -37,6 +37,7 @@ from .runtime import RuntimeStore
 from .schedule import async_title_labels, stored_interval_title
 from .services import async_setup_services
 from .store import StoredTimerInvalid, TimerStore
+from .target import shares_its_device, timers_by_device
 from .voice import async_register_intents
 from .voice.files import (
     VoiceConfigEntry,
@@ -114,6 +115,10 @@ async def async_setup_entry(
         # that loads again raises them again.
         async_clear_settings_warnings(hass, entry.entry_id)
         raise
+    finally:
+        # Also after a failure: a timer that does not load still holds its place on the
+        # device, so its siblings are named for it.
+        _async_reload_timers_named_otherwise(hass, entry.entry_id)
 
 
 async def _async_setup_timer(hass: HomeAssistant, entry: TimerifyConfigEntry) -> bool:
@@ -139,6 +144,39 @@ async def _async_setup_timer(hass: HomeAssistant, entry: TimerifyConfigEntry) ->
     await controller.async_start()
     async_dispatcher_send(hass, SIGNAL_TIMERS_CHANGED)
     return True
+
+
+@callback
+def _async_reload_timers_named_otherwise(
+    hass: HomeAssistant, entry_id: str, *, removed: bool = False
+) -> None:
+    """Reload each loaded timer whose entities are named otherwise than the count of
+    timers on its device now says.
+
+    A timer on a device that holds more than one timer names its target in its entity
+    names, and one that is alone does not. The names are made when the entities are, so
+    a timer that joins a device or leaves it changes what its siblings should be called,
+    and only a reload makes them again. This runs once the timer `entry_id` is set up,
+    whether or not it loaded, and once it is removed (`removed`), when it no longer
+    counts.
+
+    It reloads each timer once, and only the ones that differ: a scheduled reload does
+    not merge with another, so a reload from each entity would run the timer as many
+    times as it has entities, and the third timer on a device, or the second after the
+    third is removed, changes no name and reloads nobody. It looks at every loaded
+    timer, not only those on the device of `entry_id`, since a target that moves from
+    one device to another leaves the timers of both with a new count. The settings of
+    the voice have no target and are never reloaded here.
+    """
+    timers = timers_by_device(hass, removed=entry_id if removed else None)
+    for other in hass.config_entries.async_loaded_entries(DOMAIN):
+        if other.entry_id == entry_id or is_voice_entry(other):
+            continue
+        controller = other.runtime_data
+        if (controller.target_label is not None) != shares_its_device(
+            hass, controller.target_entity_id, timers
+        ):
+            hass.config_entries.async_schedule_reload(other.entry_id)
 
 
 async def _async_entry_updated(hass: HomeAssistant, entry: TimerifyConfigEntry) -> None:
@@ -173,6 +211,7 @@ async def async_remove_entry(
     async_clear_settings_warnings(hass, entry.entry_id)
     await TimerStore(hass, entry.entry_id).async_remove()
     await RuntimeStore(hass, entry.entry_id).async_remove()
+    _async_reload_timers_named_otherwise(hass, entry.entry_id, removed=True)
 
 
 def _follow_target(hass: HomeAssistant, entry: TimerifyConfigEntry) -> CALLBACK_TYPE:

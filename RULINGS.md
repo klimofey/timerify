@@ -4179,9 +4179,10 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 
 The decisions of the 1.3.0 release (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`),
 in the form they have now. The release is built in four parts, one plan each. Part A is
-planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md`; each later part adds
-its own plan and its own section here. What is still open is a GitHub issue of
-klimofey/timerify, listed in `docs/followups.md`.
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md` and Part B in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md`; each later part adds its own
+plan and its own section here. What is still open is a GitHub issue of klimofey/timerify,
+listed in `docs/followups.md`.
 
 ### Part A: engine
 
@@ -4450,3 +4451,127 @@ klimofey/timerify, listed in `docs/followups.md`.
   of the cause's context would let the logbook say that the device was switched by Timerify,
   after the user. It is not part of this release, and gets a line in `docs/followups.md`
   only if the owner opens an issue for it.
+
+### Part B: entity names (#46)
+
+The decisions of Part B (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`, part B,
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md`), in the form they have
+now.
+
+- **Only a device that holds more than one timer names its targets.** Always naming the
+  target would rename every installed entity, and "Boiler Run for (Boiler plug)" is noise on
+  a device with one timer. Why: the names are only there to tell two timers on one device
+  apart. Cost if wrong: always naming renames every entity of every installed timer at the
+  update, in every list and dashboard that shows them; never naming leaves the two Run for
+  entities of a relay alike, which is the defect (#46). Tests
+  (`tests/test_entity_names.py`): `test_one_timer_on_a_relay_keeps_its_plain_names`,
+  `test_timers_on_targets_with_no_device_are_never_named_after_them` and
+  `test_a_third_timer_on_the_device_reloads_nobody`.
+- **Each entity has a second translation key, `<key>_with_target`, with the placeholder
+  `{target}` in brackets.** The names are "Run for ({target})", "Ends at ({target})", "Next
+  command ({target})", "Runtime ({target})", "Turn off ({target})" and, for the interval
+  switch, "Schedule {interval} ({target})". In every language the name is the plain name, a
+  space and the target in brackets: the brackets need no inflection in Russian. The key is
+  chosen in `TimerifyEntity.__init__`, with the placeholder, when the entity object is made.
+  Rejected: one key with an optional suffix placeholder (the translator loses the
+  punctuation); overriding `name` (the entity ids would follow the language of the house);
+  child devices (the entities would leave the page of the target's device). Cost if wrong: a
+  translation that puts the target elsewhere reads differently from the other languages,
+  which is why the copy rule is pinned. Tests:
+  `test_two_timers_on_a_relay_name_their_channels_after_a_restart` and, for every language,
+  `test_a_name_with_its_target_says_what_the_plain_name_says`
+  (`tests/test_translations.py`).
+- **The `_with_target` keys carry the base key's attribute names and icon.**
+  `ends_at_with_target` and `next_command_with_target` have the `state_attributes` of
+  `ends_at` and `next_command`, and every `_with_target` key has the icons of its base key,
+  the interval switch's `state.off` included. Why: the frontend finds both by
+  `translation_key`, so a key without them shows the raw attribute names and the default
+  icons. Cost if wrong: the timers on a shared device look different from a timer alone on
+  its device, in the more-info dialog and on the dashboard. Tests:
+  `test_a_name_with_its_target_says_what_the_plain_name_says` (the subtree without `name`
+  equals the base's) and `test_every_entity_key_has_its_icon` (`tests/test_icons.py`).
+- **`{target}` is the target's own name, without its device's name.** It is
+  `er.async_get_unprefixed_name` of the target's registry entry, so the list reads "Relay
+  Run for (Channel 1)" and not "Relay Run for (Relay Channel 1)". When nothing is left of
+  it, as for a boiler called Boiler on a device called Boiler, or the target has no registry
+  entry, it is the target's full name (`target_name`), so that the brackets are never empty.
+  One helper, `target_label` in `target.py`. Cost if wrong: the device's name twice in every
+  name, or empty brackets. Tests: `test_a_target_named_like_its_device_is_named_in_full` and
+  `test_two_timers_on_a_relay_name_their_channels_after_a_restart`.
+- **Every timer on the device counts, loaded or not.** A timer that is disabled, or failed
+  to load, still has its target on the device and comes back to it, so it counts, and at
+  start-up both timers of a relay see each other: the first is named as it loads, and the
+  second one's loading does not load it again. The Voice settings entry has no target and
+  never counts. A target on no device gets a device of its own for its timer, so two such
+  timers share nothing and are never named after their targets. Cost if wrong: a timer that
+  counted only when loaded would leave the first timer of a relay plain until the second one
+  loads, and every start-up would then reload it. Tests:
+  `test_a_disabled_timer_still_counts_for_its_sibling`,
+  `test_at_start_up_two_timers_on_a_relay_load_once_each`,
+  `test_a_second_timer_on_a_device_leaves_the_voice_settings_alone`
+  (`tests/voice/test_voice_entry.py`) and
+  `test_timers_on_targets_with_no_device_are_never_named_after_them`.
+- **One place reloads the siblings, once each, and only those whose naming differs.**
+  `_async_reload_timers_named_otherwise` in `__init__.py` runs after a timer is set up and
+  after one is removed. It compares each other loaded timer, whether its controller has a
+  `target_label`, with what the count of timers on its device now says, and schedules one
+  reload for each that differs. Why: `Entity.name` is cached per entity object, so only a
+  reload makes a timer name its target; scheduled reloads do not merge, so a reload from
+  each entity would run the timer as many times as it has entities; and only the step from
+  one timer to two, and back, changes a naming, so a third timer on the device, or the
+  second after the third is removed, reloads nobody. The reload keeps what the timer has:
+  the countdown is in its file, the entity ids and the history are in the registry. The
+  entities are unavailable for a moment, as at any change of the timer's settings. An entity
+  id never changes, and a name the user gave is never touched, since the registry updates
+  `original_name` and never `entity_id` or `name`; a second timer added from now on gets ids
+  after its name, such as `number.relay_run_for_channel_2`. Cost if wrong: a rename that
+  waits for the next restart, or a timer that goes unavailable every time another is added
+  to its device. Tests: `test_a_second_timer_added_while_the_first_runs_renames_it_at_once`
+  (the ids are kept, the interval switch stays off, the relay is not switched, no event
+  repeats and the countdown ends on time),
+  `test_deleting_one_of_two_timers_makes_the_other_plain_again`,
+  `test_a_name_the_user_gave_survives_both_renames` and
+  `test_a_third_timer_on_the_device_reloads_nobody`.
+- **A renamed target does not reload the timer.** The bracket follows at the next load, as
+  the title of the entry does. Why: the bracket is a label and not a state, and a reload for
+  it would make a rename of the target a short outage of its timer. Cost if wrong: the
+  bracket names the target as it was called until the next load. Tests: none; it is the
+  absence of a listener.
+- **The check covers every loaded timer, not only those on one device.** One pass counts the
+  timers of every device, and a timer is reloaded when its own naming differs from its
+  device's count. Why: a target that moves from one device to another changes the count of
+  two devices, and the timer set up after the move is on only one of them; the timer it left
+  behind is on the other. Cost if wrong: when the pump leaves the relay, the relay's timer
+  stays named after a sibling it no longer has. Test:
+  `test_a_target_that_moves_between_devices_renames_both_sides`.
+- **The check also runs after a set-up that failed.** `async_setup_entry` calls it in a
+  `finally`. Why: a timer that fails to load, for example because its stored file
+  contradicts itself, still has its target on the device and counts, so its sibling must be
+  named for it at once, as it would be for a timer that loaded. Cost if wrong: the first
+  timer of a relay is named only once the second one loads, and a failing second timer
+  leaves it plain beside a sibling that is named. Test:
+  `test_a_timer_that_fails_to_load_still_renames_its_sibling`.
+- **The removed entry is excluded by id.** `async_remove_entry` calls the check with
+  `removed=True`, and `timers_by_device` leaves the entry with that id out. Home Assistant
+  2026.10 already takes the entry out of the list before it calls `async_remove_entry`
+  (`config_entries.py:2379`); the exclusion keeps the count right if that order changes, and
+  costs one comparison. Cost if wrong: the removed timer would still count, and the other
+  timer of the relay would stay named after a sibling that is gone. Test:
+  `test_deleting_one_of_two_timers_makes_the_other_plain_again`, which passes with either
+  order.
+- **A deleted target counts on no device.** The registry entry is what says which device a
+  target is on, and a deleted target has none, so its timer counts on no device. Nothing is
+  reloaded when the target is deleted: its siblings follow at their next load, and a
+  restored target reloads its timer (`_follow_target_restored`), which runs the check and
+  renames them at once. Cost if wrong: a delete that reloaded the siblings would turn the
+  deletion of one entity into a short outage of its neighbour's timer. Test:
+  `test_a_deleted_target_leaves_its_sibling_named_until_it_is_loaded_again`.
+- **The device of a target is read from the registry, not with
+  `async_entity_id_to_device_id`.** `timers_by_device` and `shares_its_device` use
+  `er.async_get(hass).async_get(...)`, which takes an entity id or a registry id and returns
+  None for an unknown one. `async_entity_id_to_device_id` raises `Invalid` for a registry id
+  that is no longer in the registry. Why: `timers_by_device` reads the options of every
+  timer in the house, so one stale option would break the load of a different timer. Cost if
+  wrong: a timer fails to load because of the deleted target of another. Tests: none; the
+  form stores an entity id (`_validate_target`), so a registry id comes only from an entry
+  that was written by hand.

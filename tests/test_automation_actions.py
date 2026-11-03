@@ -27,7 +27,6 @@ from .helpers import (
     add_automation,
     components_for_device,
     record_action,
-    restart,
     run_for_of,
     set_number,
     state_of,
@@ -254,7 +253,6 @@ async def test_the_run_for_of_two_channels_name_their_channels(
     tells the two apart by name, and the entity id of the second says it too."""
     one = await setup_target(target="switch.relay_1")
     two = await setup_target(target="switch.relay_2")
-    await restart(hass, one)
 
     assert [run_for_of(hass, entry) for entry in (one, two)] == [
         "number.relay_run_for",

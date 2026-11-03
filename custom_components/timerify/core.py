@@ -635,15 +635,22 @@ class TimerCore:
         alarm of that one may not have run yet: an alarm armed in the past is raised
         only when it is armed, behind whatever was given meanwhile. So the command given
         at `now` calls this first, and carries out its own effects after the ones
-        returned here. The end, the limit and the windows are not folded: the end and
-        the limit have their guards (`_expire_stale_end`, and the one in `add`), and the
-        alarm of a window is armed ahead, so it queues in its own order.
+        returned here. The windows are not folded: the alarm of a window is armed
+        ahead, so it queues in its own order.
+
+        An end or a limit that fell due before a command is ended before it, as
+        `_catch_up` would, so that a countdown that ran out is announced as having run
+        out and a command that turns on starts a new one, not moves the old one. One
+        that falls due at the command's time or later is left to its guard
+        (`_expire_stale_end`, and the one in `add`).
         """
         now = _utc(now)
         effects: list[Effect] = []
         wish: Literal["on", "off"] | None = None
         folded = False
         while self._snapshot.commands and self._snapshot.commands[0].at <= now:
+            if self._end_before(self._snapshot.commands[0].at):
+                wish = "off"
             wish = self._fold_first_command(now, wish, effects)
             folded = True
         if not folded:
@@ -1009,6 +1016,19 @@ class TimerCore:
     def _stop(self) -> list[Effect]:
         self._end_timer()
         return [self._wakeup(), *self._want("off")]
+
+    def _end_before(self, at: datetime) -> bool:
+        """End a countdown or a limit that fell due before `at`, as the fold of what is
+        due would have when it did, for `expired` or `limit`; True if there was one.
+        What falls due at `at` comes after the item that is due then (`_Rank`)."""
+        snapshot = self._snapshot
+        if snapshot.end is not None and snapshot.end < at:
+            self._end_timer(ended_by="expired")
+        elif snapshot.limit_at is not None and snapshot.limit_at < at:
+            self._end_timer(ended_by="limit")
+        else:
+            return False
+        return True
 
     def _end_timer(self, *, ended_by: EndReason = "stopped") -> None:
         """The countdown, or the limit, is over, for `ended_by`: there is no end and no

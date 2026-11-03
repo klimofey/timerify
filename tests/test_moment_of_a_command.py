@@ -10,6 +10,7 @@ nothing but the time the answer takes.
 
 import asyncio
 import copy
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -35,6 +36,7 @@ from .helpers import (
     AC_ID,
     AC_NEXT,
     AC_NUMBER,
+    NEXT,
     NUMBER,
     START,
     TURN_OFF,
@@ -52,7 +54,14 @@ from .helpers import (
     start_set_number,
     state_of,
     storage_key,
+    timerify_info,
 )
+
+CAME_DUE_WHILE_UNAVAILABLE = (
+    "A pending command for switch.boiler came due while it is unavailable;"
+    " it is applied when it is back, if it is still relevant then"
+)
+"""What is logged for a command that falls due while the target is away."""
 
 
 def start_add_command(
@@ -485,3 +494,92 @@ async def test_add_time_given_before_a_limit_and_run_after_it_adds_to_the_limit(
     assert shows_a_limit(hass) is False
     assert ended == []
     assert "turn_off" not in [call[0] for call in fake_climate.calls]
+
+
+async def test_a_command_that_folds_a_pending_one_says_it_came_due_while_unavailable(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    setup_target: SetupTarget,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A cloud boiler hangs on the turn-on of a run from 07:00:00. An "off" is asked for
+    at 07:00:15, and at 07:00:10 the boiler reports that it is unavailable. At 07:00:20
+    the user adds five minutes, and the call gets its turn at 07:00:25. The "off" fell
+    due while the boiler was away, and the call carries it out before it acts. The log
+    says so, as it does when the command's own alarm or a command with no wait carries
+    it out: it is the only sign that the switch waits for the boiler to come back."""
+    caplog.set_level(logging.INFO, logger="custom_components.timerify")
+    await setup_target()
+    slow = fake_target.hold_next_call()
+    fake_target.ignore_next_call()
+    running = start_call_service(hass, "run", {"entity_id": NUMBER}, minutes=10)
+    await slow.reached.wait()
+    freezer.move_to(moment(5))
+    keeping = start_call_service(
+        hass, "add_command", {"entity_id": NUMBER}, action="off", at=stamp(15)
+    )
+    freezer.move_to(moment(10))
+    fake_target.write("unavailable")
+    freezer.move_to(moment(20))
+    adding = start_call_service(hass, "add_time", {"entity_id": NUMBER}, minutes=5)
+    freezer.move_to(moment(25))
+
+    slow.release.set()
+    await asyncio.gather(running, keeping, adding)
+    await hass.async_block_till_done()
+
+    assert timerify_info(caplog) == [CAME_DUE_WHILE_UNAVAILABLE]
+    assert listed(hass, NEXT) == []
+
+
+async def test_a_countdown_that_ran_out_before_a_late_command_is_announced_as_run_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The air conditioner runs for two minutes from 07:00:00. A slow call holds the
+    timer from 07:00:50, and behind it the user asks for a turn-on for ten minutes at
+    07:01:05, takes a minute off the countdown, which now ends at 07:01:00, and at
+    07:01:10 adds five minutes. The countdown ran out before the turn-on fell due, so
+    the call that carries the turn-on out says so, and the turn-on starts a new
+    countdown: the events are what they would be with a quick device, and the air
+    conditioner is not switched off and on."""
+    await setup_target(target=AC_ID)
+    await call_service(hass, "run", {"entity_id": AC_NUMBER}, minutes=2)
+    freezer.move_to(moment(50))
+    slow = fake_climate.hold_next_call()
+    running = start_call_service(hass, "run", {"entity_id": AC_NUMBER}, temperature=24)
+    await slow.reached.wait()
+    fired = record_events(hass)
+    freezer.move_to(moment(55))
+    keeping = start_call_service(
+        hass,
+        "add_command",
+        {"entity_id": AC_NUMBER},
+        action="on",
+        at=stamp(65),
+        minutes=10,
+    )
+    freezer.move_to(moment(57))
+    shortening = start_call_service(
+        hass, "add_time", {"entity_id": AC_NUMBER}, minutes=-1
+    )
+    freezer.move_to(moment(70))
+    adding = start_call_service(hass, "add_time", {"entity_id": AC_NUMBER}, minutes=5)
+    freezer.move_to(moment(75))
+
+    slow.release.set()
+    await asyncio.gather(running, keeping, shortening, adding)
+    await hass.async_block_till_done()
+
+    assert [event for event, _ in fired] == [
+        EVENT_COUNTDOWN_ENDED,
+        EVENT_COMMAND_DUE,
+        EVENT_COUNTDOWN_STARTED,
+    ]
+    assert fired[0][1]["reason"] == "expired"
+    assert fired[2][1]["ends_at"] == stamp(665)
+    assert "turn_off" not in [call[0] for call in fake_climate.calls]
+    assert state_of(hass, AC_ENDS_AT) == stamp(965)

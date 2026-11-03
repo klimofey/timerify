@@ -519,8 +519,10 @@ only the final behaviour is written.
   settings are filtered when they are sent, whoever owes them" under Release 1.1.0.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
   callbacks use `_refresh_windows`, which takes the lock; after every await the controller
-  re-checks that it is still loaded and takes `now` afresh, except in the catch-up of a
-  command given while starting, which folds to the moment the command was given.**
+  re-checks that it is still loaded; the refreshes take `now` afresh, while a command, a
+  report and an alarm keep the moment they were raised ("Reports and alarms are stamped
+  too" under Release 1.3.0), and the catch-up of a command given while starting folds to
+  that moment.**
   `asyncio.Lock` is not
   re-entrant (a wake-up or a toggle calling the locking variant deadlocks), and a stale
   controller that outlived a reload during a Workday call must not save over the new one.
@@ -2011,8 +2013,9 @@ in `docs/followups.md`.
   (`_log_due_while_unavailable`) and then carries out the effects. All folds pass through
   it: a tick (`_fold_due`: the alarm, the refresh of the windows, the switching off of an
   interval, and the catch-up of a change made while starting), the first observation of the
-  target at start-up (`_handle_started`) and each report of it (`_handle_state_change`),
-  with the `now` the fold observed at. Before, only the tick logged, so a countdown or a
+  target at start-up (`_handle_started`), each report of it (`_handle_state_change`) and the
+  pending commands that a command folds before it acts (`_command`), with the `now` the fold
+  observed at. Before, only the tick logged, so a countdown or a
   command that came due while Home Assistant was down, and a command that fell due as the
   target dropped off, went unsaid. The three texts are unchanged.
   A fold before start-up says nothing. The catch-up of a change made while starting is
@@ -3922,10 +3925,13 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
   - **A run asked while the target is unavailable counts its limit from the call.** The report
     that confirms it settles the wish and is not a "found on", so the limit is started by the
     call, not by that report. Test: `test_a_run_asked_while_the_target_is_away_counts_its_limit_from_the_call`.
-  - **A late bare command counts its limit from when it runs.** A pending "on" without minutes
-    that falls due late turns the target on when it runs, so the device is on from that moment
-    and gets a whole limit, never one that began in the past. A command that runs on time counts
-    from its time, which is the moment it runs. Tests:
+  - **A late bare command counts its limit from the moment its fold was raised.** A pending
+    "on" without minutes that falls due late turns the target on when its fold runs, so the
+    device is on from that moment and gets a whole limit, never one that began before it. That
+    moment is the one of the alarm that folds the command, or of the command that folds it
+    first (`fold_commands_due`), which can be the wait for a slow call earlier than the moment
+    the device is turned on. A command that runs on time counts from its time, which is the
+    moment it runs. Tests:
     `test_a_bare_command_that_runs_late_gets_its_limit_from_when_it_runs` and
     `test_a_bare_command_noticed_late_by_a_tick_gets_its_limit_from_the_tick`.
 
@@ -4209,16 +4215,26 @@ klimofey/timerify, listed in `docs/followups.md`.
 - **A command folds the pending commands that fell due before it.** After the catch-up and
   before it acts, `_command` calls `TimerCore.fold_commands_due(given)`: the pending commands
   that are due at or before the moment given are carried out first, in the order they fall due,
-  each announced as `command_due`. Their effects are carried out in an `_execute` of their own,
-  as their alarm would, and then the command's own in a second one, both under the one hold of
-  the lock: each batch has its own save, announcements, calls to the target and failure
-  accounting (`_carry_out`, `_not_delivered`), so a turn-off that the device does not confirm
-  is booked against the turn-off and not against the later wish. If the timer is unloaded
-  while the first batch is carried out, the command is not made (`timer_unloaded`). It folds
-  pending commands only. The end and the limit keep their stale guards (`_expire_stale_end` and
-  the guard in `add`), and the windows are left alone, because the alarm of a window is armed
-  ahead and so queues in its own order. It is not the rejected `tick` (below). A command that is
-  refused leaves what it folded carried out, since that ran first. Only `_command` does this:
+  each announced as `command_due`. Their effects are carried out in an `_execute_fold` of their
+  own, with the snapshot taken before the fold and no context, as their alarm would, and then
+  the command's own in an `_execute` of its own, both under the one hold of the lock: each batch
+  has its own save, announcements, calls to the target and failure accounting (`_carry_out`,
+  `_not_delivered`), so a turn-off that the device does not confirm is booked against the
+  turn-off and not against the later wish. The first goes through `_execute_fold`, the sink of
+  every fold, so that a command that falls due while the target is away is said so in the log
+  (R10), as it is when its alarm or a command with no wait carries it out; with a bare
+  `_execute` the line was lost, since the alarm then finds nothing due. If the timer is
+  unloaded while the first batch is carried out, the command is not made (`timer_unloaded`).
+  It folds pending commands, and before each one it ends a countdown or a limit that fell due
+  strictly before the command's time (`TimerCore._end_before`), as the fold of what is due
+  would have done at that time. A countdown that ran out before a command that turns on for
+  some minutes is then announced as run out, and the command starts a new one, where it moved
+  the old one without a word (found by the final review). An end or a limit that falls due at
+  the command's time or later keeps its stale guards (`_expire_stale_end` and the guard in
+  `add`), and the command goes first at a tie (`_Rank`). The windows are left alone, because
+  the alarm of a window is armed ahead and so queues in its own order. It is not the rejected
+  `tick` (below). A command that is refused leaves what it folded carried out, since that ran
+  first. Only `_command` does this:
   the interval and schedule switches, the refreshes and start-up do not call it. Why: with the delay and `at` rule flipped, a pending command can be
   added behind a slow call and be due before a command that is given later. Its alarm is armed
   in the past when the call gets its turn, and an alarm is raised, and queued, only when it is
@@ -4240,8 +4256,14 @@ klimofey/timerify, listed in `docs/followups.md`.
   `test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out` and
   `test_timer_unloaded_while_what_fell_due_before_a_command_is_carried_out`; and in
   `test_core.py`: `test_fold_commands_due_with_no_command_due_does_nothing`,
-  `test_fold_commands_due_carries_out_the_commands_due_and_nothing_else` and
-  `test_fold_commands_due_leaves_a_stale_end_to_its_guard`.
+  `test_fold_commands_due_carries_out_the_commands_due_and_nothing_else`,
+  `test_fold_commands_due_leaves_a_stale_end_to_its_guard`,
+  `test_fold_commands_due_ends_a_countdown_that_ran_out_before_the_command`,
+  `test_fold_commands_due_ends_a_limit_that_came_before_the_command` and
+  `test_fold_commands_due_moves_a_countdown_that_ends_with_the_command`; and for the log and
+  the end that ran out, in `test_moment_of_a_command.py`:
+  `test_a_command_that_folds_a_pending_one_says_it_came_due_while_unavailable` and
+  `test_a_countdown_that_ran_out_before_a_late_command_is_announced_as_run_out`.
 - **The catch-up folds to the moment given.** While Home Assistant starts, a command works
   the windows out and folds what fell due before it (`_async_catch_up_while_starting_locked`).
   It now does so for the moment it was given: `at` goes to `_async_refresh_windows_locked`,
@@ -4289,7 +4311,11 @@ klimofey/timerify, listed in `docs/followups.md`.
   Workday answer. It is the same as before this fix, and needs a Workday sensor that takes
   seconds to answer. Why it is left: the refresh must fold to the time the sensor
   answered (the entry above). Cost if wrong: that command finds the countdown already
-  folded, and "Add time" starts a new run. Tests: none; the neighbours that pin the rule
+  folded, and "Add time" starts a new run. A report or an alarm that is raised during such a
+  refresh reaches the core with a moment earlier than the one the refresh folded to, and that
+  is harmless: the tick finds nothing due that the core has not folded, and a report repeats
+  the state that the start-up read or counts its change by hand from the earlier moment. The
+  core does not assume that the moments it is given only grow. Tests: none; the neighbours that pin the rule
   above stay unchanged.
 - **The core keeps its signatures and the guard in `add`.** Every core method already takes
   `now`, so the controller only hands it another moment. The guard in `add` that treats a

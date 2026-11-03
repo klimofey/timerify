@@ -797,8 +797,12 @@ class TargetController:
             # as its alarm would, on its own, and the command after it: each has its
             # own save, announcements and calls to the target, and each answers for its
             # own failure. A command that is refused leaves what it folded carried out.
+            # It goes through the sink of every fold, so that what came due while the
+            # target is away is said (`_execute_fold`), and has no context: it is
+            # time's doing.
+            before = self.snapshot
             if folded := self._core.fold_commands_due(given):
-                await self._execute(folded, None)
+                await self._execute_fold(before, given, folded)
                 self._raise_if_unloaded()
             await self._execute(command(given), context)
 
@@ -1289,8 +1293,9 @@ class TargetController:
     ) -> None:
         """Carry out the effects of a fold of what fell due at `now`, which `tick` and
         `observe` make, and say what came due while the target is away. Every fold
-        goes through here: a tick, the first observation of the target at start-up and
-        each later report of it. The snapshot before the fold is `before`.
+        goes through here: a tick, the first observation of the target at start-up,
+        each later report of it and the pending commands that a command folds before it
+        acts (`_command`, with no context). The snapshot before the fold is `before`.
 
         `context` is the cause of the fold, None where time is: the alarm, a refresh
         of the windows and the catch-up at start-up. A report of the target gives the

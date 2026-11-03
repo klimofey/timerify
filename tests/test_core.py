@@ -2243,6 +2243,60 @@ def test_fold_commands_due_leaves_a_stale_end_to_its_guard() -> None:
     assert c.snapshot.end is not None
 
 
+def test_fold_commands_due_ends_a_countdown_that_ran_out_before_the_command() -> None:
+    """The countdown ran out at 06:52, and a command that turns on for ten minutes fell
+    due at 06:55. The countdown is announced as run out, and the command starts a new
+    one: it does not move the old one. The target is not switched off and on."""
+    on = cmd(-5, "on", minutes=10)
+    c = holding("strict", "on", on, end=NOW - minutes(8))
+
+    fx = c.fold_commands_due(NOW)
+
+    assert TurnOff() not in fx
+    assert c.snapshot.end == NOW + minutes(5)
+    assert c.take_announcements() == [
+        CountdownEnded("expired"),
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(5)),
+    ]
+
+
+def test_fold_commands_due_ends_a_limit_that_came_before_the_command() -> None:
+    """The same for the limit of a device that was left on: it came before the command,
+    so it is announced as the limit, and the command's countdown replaces it."""
+    on = cmd(-5, "on", minutes=10)
+    c = loose_with_limit("on", limit_at=NOW - minutes(8), commands=(on,))
+
+    fx = c.fold_commands_due(NOW)
+
+    assert TurnOff() not in fx
+    assert (c.snapshot.limit_at, c.snapshot.end) == (None, NOW + minutes(5))
+    assert c.take_announcements() == [
+        CountdownEnded("limit"),
+        CommandCameDue(on),
+        CountdownStarted(NOW + minutes(5)),
+    ]
+
+
+def test_fold_commands_due_moves_a_countdown_that_ends_with_the_command() -> None:
+    """A countdown that runs out at the very time of a command that turns on is moved by
+    it, not ended: the command goes first, as the fold of what is due has it
+    (`_Rank`)."""
+    on = cmd(-5, "on", minutes=10)
+    folded = holding("strict", "on", on, end=NOW - minutes(5))
+    ticked = holding("strict", "on", on, end=NOW - minutes(5))
+
+    folded.fold_commands_due(NOW)
+    ticked.tick(NOW)
+
+    assert folded.snapshot == ticked.snapshot
+    assert (
+        folded.take_announcements()
+        == ticked.take_announcements()
+        == [CommandCameDue(on)]
+    )
+
+
 def test_command_with_a_naive_time_is_rejected() -> None:
     """Commands are kept in UTC: a time without a zone is refused, not guessed."""
     c = core("strict", "off")

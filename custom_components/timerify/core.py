@@ -627,6 +627,33 @@ class TimerCore:
         return effects
 
     @_reports_change
+    def fold_commands_due(self, now: datetime) -> list[Effect]:
+        """Carry out the pending commands that are due at or before `now`, in the order
+        they fall due, and nothing else: not a `tick`.
+
+        A command given at `now` comes after a pending one that fell due before it. The
+        alarm of that one may not have run yet: an alarm armed in the past is raised
+        only when it is armed, behind whatever was given meanwhile. So the command given
+        at `now` calls this first, and carries out its own effects after the ones
+        returned here. The end, the limit and the windows are not folded: the end and
+        the limit have their guards (`_expire_stale_end`, and the one in `add`), and the
+        alarm of a window is armed ahead, so it queues in its own order.
+        """
+        now = _utc(now)
+        effects: list[Effect] = []
+        wish: Literal["on", "off"] | None = None
+        folded = False
+        while self._snapshot.commands and self._snapshot.commands[0].at <= now:
+            wish = self._fold_first_command(now, wish, effects)
+            folded = True
+        if not folded:
+            return []
+        effects.append(self._wakeup())
+        if wish is not None:
+            effects += self._want(wish)
+        return effects
+
+    @_reports_change
     def settings_applied(self, now: datetime) -> list[Effect]:
         """The calls that carried the owed settings all went through: nothing is owed
         any more. The caller reports it right after executing the effects."""
@@ -745,12 +772,7 @@ class TimerCore:
                     if self._start_window(now, window, wish):
                         wish = "on"
                 case Command():
-                    commands = self._snapshot.commands[1:]
-                    self._snapshot = replace(self._snapshot, commands=commands)
-                    if (command_wish := self._run_command(now, item, wish)) is None:
-                        effects.append(CommandDropped(item))
-                    else:
-                        wish = command_wish
+                    wish = self._fold_first_command(now, wish, effects)
                 case "end":
                     self._end_timer(ended_by="expired")
                     wish = "off"
@@ -849,6 +871,22 @@ class TimerCore:
         moved = latest.end != self._snapshot.end
         self._set_end(latest.end, began=self._kept_beginning(at), by=latest.interval_id)
         return "on" if moved else None
+
+    def _fold_first_command(
+        self,
+        now: datetime,
+        wish: Literal["on", "off"] | None,
+        effects: list[Effect],
+    ) -> Literal["on", "off"] | None:
+        """Take the command that is due first out of the snapshot and fold it in at
+        `now`; return the wish after it, given the wish of the items folded before it.
+        A command that is dropped (§5.7) adds `CommandDropped` to `effects`."""
+        command, *later = self._snapshot.commands
+        self._snapshot = replace(self._snapshot, commands=tuple(later))
+        if (command_wish := self._run_command(now, command, wish)) is None:
+            effects.append(CommandDropped(command))
+            return wish
+        return command_wish
 
     def _run_command(
         self, now: datetime, command: Command, wish: Literal["on", "off"] | None

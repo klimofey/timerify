@@ -37,7 +37,11 @@ from .helpers import (
     AC_NUMBER,
     START,
     add_command,
+    advance,
+    call_service,
     listed,
+    record_events,
+    set_number,
     start_call_service,
     start_set_number,
     state_of,
@@ -372,6 +376,112 @@ async def test_a_pending_off_due_while_a_command_waits_comes_after_it(
     assert fake_climate.calls[-1][0] == "turn_off"
     assert state_of(hass, AC_ENDS_AT) == "unknown"
     assert len(due) == 1
+
+
+async def test_a_pending_off_that_fell_due_while_a_command_waited_comes_before_it(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """At 07:00:00 the user asks for the air conditioner to be turned off at 07:00:10,
+    and at 07:00:20 moves "Run for" to ten minutes, both behind the same slow calls. The
+    off fell due ten seconds before the second word, so it comes first and the second
+    word wins, as it would with a quick device: the off is announced before the new
+    countdown starts, the air conditioner is turned off and on again, and it runs until
+    07:10:20."""
+    await setup_target(target=AC_ID)
+    fired = record_events(hass)
+
+    await run_ac_slowly(
+        hass,
+        freezer,
+        fake_climate,
+        {
+            0: lambda: start_add_command(hass, action="off", at=stamp(10)),
+            20: lambda: start_set_number(hass, AC_NUMBER, 10),
+        },
+    )
+
+    assert [event for event, _ in fired[1:]] == [
+        EVENT_COMMAND_DUE,
+        EVENT_COUNTDOWN_ENDED,
+        EVENT_COUNTDOWN_STARTED,
+    ]
+    assert [call[0] for call in fake_climate.calls][3:] == ["turn_off", "turn_on"]
+    assert state_of(hass, AC_ENDS_AT) == stamp(620)
+
+
+async def test_a_pending_off_and_a_later_command_with_no_wait_are_carried_out_alike(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The control of the scenario above, with a device that answers at once: the off
+    falls due at 07:00:10 and is carried out, and "Run for" ten minutes at 07:00:20
+    starts a new countdown. It is the sequence the slow device must end with too."""
+    await setup_target(target=AC_ID)
+    await call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=1,
+        hvac_mode="cool",
+        temperature=24,
+        fan_mode="high",
+    )
+    fired = record_events(hass)
+    await add_command(hass, AC_NUMBER, action="off", at=stamp(10))
+
+    await advance(hass, freezer, seconds=10)
+    await advance(hass, freezer, seconds=10)
+    await set_number(hass, AC_NUMBER, 10)
+
+    assert [event for event, _ in fired] == [
+        EVENT_COMMAND_DUE,
+        EVENT_COUNTDOWN_ENDED,
+        EVENT_COUNTDOWN_STARTED,
+    ]
+    assert [call[0] for call in fake_climate.calls][3:] == ["turn_off", "turn_on"]
+    assert state_of(hass, AC_ENDS_AT) == stamp(620)
+
+
+async def test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """The air conditioner is to be turned off at 07:00:10. At 07:00:20 the user asks
+    for another command at 07:00:05, which is past, and is refused when the call gets
+    its turn. The off had fallen due before that, and is carried out all the same: the
+    air conditioner is turned off, and the countdown is stopped, not run out."""
+    await setup_target(target=AC_ID)
+    fired = record_events(hass)
+
+    adding, refused = await run_ac_slowly(
+        hass,
+        freezer,
+        fake_climate,
+        {
+            0: lambda: start_add_command(hass, action="off", at=stamp(10)),
+            20: lambda: start_add_command(hass, action="off", at=stamp(5)),
+        },
+    )
+
+    await adding
+    with pytest.raises(ServiceValidationError) as raised:
+        await refused
+    assert raised.value.translation_key == "command_in_past"
+    assert [event for event, _ in fired[1:]] == [
+        EVENT_COMMAND_DUE,
+        EVENT_COUNTDOWN_ENDED,
+    ]
+    assert fired[2][1]["reason"] == "stopped"
+    assert [call[0] for call in fake_climate.calls][3:] == ["turn_off"]
+    assert state_of(hass, AC_ENDS_AT) == "unknown"
+    assert listed(hass, AC_NEXT) == []
 
 
 async def test_add_time_given_before_a_limit_and_run_after_it_adds_to_the_limit(

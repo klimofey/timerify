@@ -16,6 +16,7 @@ import pytest
 from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import intent
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.timerify.const import MAX_COMMANDS
@@ -25,6 +26,7 @@ from ..helpers import (
     AC_NEXT,
     NEXT,
     NUMBER,
+    START,
     TURN_OFF,
     TURN_ON,
     add_command,
@@ -514,13 +516,17 @@ async def test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_of
     fake_target: FakeTarget,
     boiler: MockConfigEntry,
 ) -> None:
-    """The boiler is slow to turn on, and while it is the user says "turn off the boiler
-    in 20 seconds". The answer comes 25 seconds later, when that time has passed. It
-    still names the end it set, as the user hears it, and the boiler is turned off at
-    once: not "turns off at ." and not left running."""
+    """The boiler is slow to turn on. At 07:00:30 the user sets it to run for half an
+    hour, and at 07:00:35, while it is still turning on, says "turn off the boiler in
+    20 seconds". The call gets its turn at 07:01:00, when that time has passed. The
+    answer still names the end it set, 07:00:55 by the clock of the house, as the user
+    hears it, and not 07:01:20 as counted from the turn: not "turns off at ." either.
+    The boiler is turned off at once."""
+    freezer.move_to(START + timedelta(seconds=30))
     slow = fake_target.hold_next_call()
     setting = start_set_number(hass, NUMBER, 30)
     await slow.reached.wait()
+    freezer.move_to(START + timedelta(seconds=35))
     talking = hass.async_create_task(
         intent.async_handle(
             hass,
@@ -534,14 +540,15 @@ async def test_turn_off_in_seconds_behind_a_slow_call_names_the_end_and_turns_of
         )
     )
 
-    freezer.tick(timedelta(seconds=25))
+    freezer.move_to(START + timedelta(seconds=60))
     slow.release.set()
     response = await talking
     await setting
     await hass.async_block_till_done()
 
+    ends = dt_util.as_local(START + timedelta(seconds=55))
     assert response.speech_slots["outcome"] == "timer_set"
-    assert response.speech_slots["ends_at"] == "09:00"
+    assert response.speech_slots["ends_at"] == ends.strftime("%H:%M")
     assert response.speech_slots["ends_in_days"] == 0
     assert fake_target.calls == [TURN_ON, TURN_OFF]
 

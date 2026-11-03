@@ -737,8 +737,11 @@ class TargetController:
         outcome it would have had at that moment: time added to a countdown that ended
         while it waited still extends the countdown, and a delay counts from it. The
         lock serves its waiters in the order they came, so the moments of commands do
-        not go back. What falls due between that moment and the time the command gets
-        its turn stays armed, and its alarm folds it after the command.
+        not go back. The pending commands that fell due before that moment are carried
+        out first (`TimerCore.fold_commands_due`): an alarm that is armed in the past is
+        raised only when it is armed, so it would queue behind a command given later.
+        What else falls due between that moment and the time the command gets its turn
+        stays armed, and its alarm folds it after the command.
 
         Raises HomeAssistantError, having done nothing, if the timer was unloaded
         before its turn came: the call reached the timer, so returning as if the
@@ -748,7 +751,18 @@ class TargetController:
         async with self._lock:
             self._raise_if_unloaded()
             await self._async_catch_up_while_starting_locked(given)
-            await self._execute(command(given))
+            # A pending command that fell due before `given` comes before this one,
+            # though its alarm, armed in the past, queues behind it. They are carried
+            # out together, the folded ones first. A command that is refused leaves
+            # what it folded to be carried out all the same.
+            folded = self._core.fold_commands_due(given)
+            try:
+                effects = command(given)
+            except Exception:
+                if folded:
+                    await self._execute(folded)
+                raise
+            await self._execute([*folded, *effects])
 
     async def _async_catch_up_while_starting_locked(
         self, at: datetime | None = None

@@ -2206,6 +2206,43 @@ def test_tick_on_idle_timer_without_commands_is_stale() -> None:
     assert core("strict", "off").tick(NOW) == []
 
 
+def test_fold_commands_due_with_no_command_due_does_nothing() -> None:
+    c = holding("strict", "on", cmd(30), end=NOW + minutes(10))
+    before = c.snapshot
+
+    assert c.fold_commands_due(NOW + minutes(5)) == []
+    assert c.snapshot == before
+    assert c.take_announcements() == []
+
+
+def test_fold_commands_due_carries_out_the_commands_due_and_nothing_else() -> None:
+    """The commands due at or before the moment are folded, the later one is kept, and
+    the end, which is not ahead of the moment, is left to what folds it: the command,
+    which fell due before the end, stops the countdown first."""
+    off = cmd(-10, "off")
+    later = cmd(10, "on", minutes=20, id="c2")
+    c = holding("strict", "on", off, later, end=NOW - minutes(2))
+
+    fx = c.fold_commands_due(NOW)
+
+    assert fx == [Arm(later.at), TurnOff(), Changed()]
+    assert c.snapshot.commands == (later,)
+    assert c.snapshot.end is None
+    assert c.take_announcements() == [CommandCameDue(off), CountdownEnded("stopped")]
+
+
+def test_fold_commands_due_leaves_a_stale_end_to_its_guard() -> None:
+    """An end that has passed is not folded by this step, though a command is: it is
+    left to its own alarm, and to the guard of the command that follows."""
+    on = cmd(-10, "on")
+    c = holding("loose", "on", on, end=NOW - minutes(2))
+
+    c.fold_commands_due(NOW)
+
+    assert c.snapshot.commands == ()
+    assert c.snapshot.end is not None
+
+
 def test_command_with_a_naive_time_is_rejected() -> None:
     """Commands are kept in UTC: a time without a zone is refused, not guessed."""
     c = core("strict", "off")

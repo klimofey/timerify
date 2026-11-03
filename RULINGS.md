@@ -519,7 +519,9 @@ only the final behaviour is written.
   settings are filtered when they are sent, whoever owes them" under Release 1.1.0.
 - **Window refreshes run under the one lock through `_async_refresh_windows_locked`; event
   callbacks use `_refresh_windows`, which takes the lock; after every await the controller
-  re-checks that it is still loaded and takes `now` afresh.** `asyncio.Lock` is not
+  re-checks that it is still loaded and takes `now` afresh, except in the catch-up of a
+  command given while starting, which folds to the moment the command was given.**
+  `asyncio.Lock` is not
   re-entrant (a wake-up or a toggle calling the locking variant deadlocks), and a stale
   controller that outlived a reload during a Workday call must not save over the new one.
   The fresh `now` matters: a command that queues behind a slow refresh must find a window
@@ -1989,12 +1991,15 @@ in `docs/followups.md`.
   target for the added time, counted from now, and a negative one changes nothing. A
   change made while starting catches up first (see the ruling above), so `add` never meets
   a passed end there. It meets one only from a late alarm: the command was given after the
-  end, and the alarm of the end had not run yet. `add` announces the end as `expired` first,
-  so nothing that the end would fold is missed, and no S4 suppression either; the alarm,
-  which comes later, finds nothing due. A command that was given while the countdown still
-  ran and waited for the lock behind a slow call until after the end does not meet a passed
-  end: it is carried out at the moment it was given (#42, settled in 1.3.0: "Reports and
-  alarms are stamped too" under Release 1.3.0).
+  end, and the alarm of the end had not run yet. A positive `add` announces the end as
+  `expired` first, so nothing that the end would fold is missed, and no S4 suppression
+  either; the alarm, which comes later, finds nothing due. A zero or negative one writes
+  nothing and announces nothing, and the alarm that comes later announces the end ("A
+  countdown whose end is not ahead of now is no countdown" under Release 1.1.0). A
+  command that was given while the countdown still ran and waited for the lock behind a
+  slow call until after the end does not meet a passed end: it is carried out at the
+  moment it was given (#42, settled in 1.3.0: "Reports and alarms are stamped too" under
+  Release 1.3.0).
   Why: an end that has passed is over for every other judgement (`wanted_running`,
   `run_open`, a pending command that falls due).
   Cost if wrong: a countdown that ends exactly now and gets a negative delta is left for
@@ -4178,8 +4183,10 @@ klimofey/timerify, listed in `docs/followups.md`.
   `_handle_wakeup` each read the clock as their first line, before they wait for the lock,
   and use that moment where they used to read it inside it (`given` and `raised`). The moment
   is the real clock, not `event.time_fired`, which can be earlier than a command queued
-  before the report. One loop thread and a first-in, first-out lock keep the moments in the
-  order of the queue. A command is carried out as at the moment it was given: time added to
+  before the report. One loop thread and a first-in, first-out lock keep the moments of what
+  is raised in the order of the queue. An alarm that is armed in the past is raised only when
+  it is armed, so it can queue behind a command given after the moment it was due: the next
+  entry settles that. A command is carried out as at the moment it was given: time added to
   a countdown that ended while the call waited extends the countdown (one "Countdown
   started", no "Countdown ended", `started_at` kept, no turn-off); time taken off that ends it
   stops it, as `stopped`; "Run for 10" ends ten minutes after it was given; time added to a
@@ -4199,6 +4206,35 @@ klimofey/timerify, listed in `docs/followups.md`.
   `test_add_time_then_stop_are_carried_out_in_that_order`,
   `test_a_pending_off_due_while_a_command_waits_comes_after_it` and
   `test_add_time_given_before_a_limit_and_run_after_it_adds_to_the_limit`.
+- **A command folds the pending commands that fell due before it.** After the catch-up and
+  before it acts, `_command` calls `TimerCore.fold_commands_due(given)`: the pending commands
+  that are due at or before the moment given are carried out first, in the order they fall due,
+  each announced as `command_due`, and their effects come before the command's own, in one
+  `_execute` batch (one hold of the lock, one save, the announcements in order). It folds
+  pending commands only. The end and the limit keep their stale guards (`_expire_stale_end` and
+  the guard in `add`), and the windows are left alone, because the alarm of a window is armed
+  ahead and so queues in its own order. It is not the rejected `tick` (below). A command that is
+  refused leaves what it folded to be carried out all the same (`_execute(folded)`, then the
+  error). Only `_command` does this: the interval and schedule switches, the refreshes and
+  start-up do not call it. Why: with the delay and `at` rule flipped, a pending command can be
+  added behind a slow call and be due before a command that is given later. Its alarm is armed
+  in the past when the call gets its turn, and an alarm is raised, and queued, only when it is
+  armed, so it queues behind every command given in between. Those ran first, and the pending
+  command, which fell due before them, ran after them and won: "off at 07:00:10", then "Run for
+  10" at 07:00:20, left the air conditioner off (found by review; the old code refused the "off"
+  as past, and so the air conditioner ran). Cost if wrong: folded first, the two words are an
+  "off" and then a start, so the device is switched off and on again. A run with no wait does
+  the same (the control test), so it is the outcome at the moment given and not a flap of the
+  engine; without the fold the later word loses to the earlier one. Tests
+  (`tests/test_moment_of_a_command.py`):
+  `test_a_pending_off_that_fell_due_while_a_command_waited_comes_before_it`, its control
+  `test_a_pending_off_and_a_later_command_with_no_wait_are_carried_out_alike`, its mirror
+  `test_a_pending_off_due_while_a_command_waits_comes_after_it` (an "off" due after the
+  moment given comes after the command and wins) and
+  `test_a_refused_command_still_leaves_what_fell_due_before_it_carried_out`; and in
+  `test_core.py`: `test_fold_commands_due_with_no_command_due_does_nothing`,
+  `test_fold_commands_due_carries_out_the_commands_due_and_nothing_else` and
+  `test_fold_commands_due_leaves_a_stale_end_to_its_guard`.
 - **The catch-up folds to the moment given.** While Home Assistant starts, a command works
   the windows out and folds what fell due before it (`_async_catch_up_while_starting_locked`).
   It now does so for the moment it was given: `at` goes to `_async_refresh_windows_locked`,
@@ -4216,7 +4252,8 @@ klimofey/timerify, listed in `docs/followups.md`.
   the `quick_sensor` case already passed and stays as the control).
 - **The delay rule flips on purpose.** A delay counts from the moment the command was given,
   where it counted from the moment the command got its turn, and one test pinned that. A delay
-  that passed while the call waited is kept, and its alarm folds it at once. A moment `at`
+  that passed while the call waited is kept, and is folded at once, by its alarm or by the next
+  command (`fold_commands_due`). A moment `at`
   that was ahead when the command was given is accepted, though it passed during the wait; one
   that was already past is refused with `command_in_past`. `async_add_command` and
   `async_turn_off_in` say so in their docstrings, and `docs/en/services.md` and
@@ -4239,10 +4276,11 @@ klimofey/timerify, listed in `docs/followups.md`.
   `_refresh_windows` (also for a change of the time zone) and the two switches are
   `async_set_interval_enabled` and `async_set_schedule_enabled`: they read the clock when
   they get the lock, as before.
-- **The race of a slow window refresh stays, and is not a defect.** A refresh that waited for
-  a slow sensor can fold an end that passed meanwhile before a command that was given earlier
-  and queued behind it. It is the same as before this fix, and needs a Workday sensor that
-  takes seconds to answer. Why it is left: the refresh must fold to the time the sensor
+- **The race of a slow window refresh stays, and is not a defect.** A refresh, the start-up or
+  an interval switch that waited for a slow sensor can fold an end that passed meanwhile
+  before a command that was given earlier and queued behind it: they read the clock after the
+  Workday answer. It is the same as before this fix, and needs a Workday sensor that takes
+  seconds to answer. Why it is left: the refresh must fold to the time the sensor
   answered (the entry above). Cost if wrong: that command finds the countdown already
   folded, and "Add time" starts a new run. Tests: none; the neighbours that pin the rule
   above stay unchanged.

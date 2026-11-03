@@ -187,28 +187,28 @@ def _refuse_a_run_of_off(
 
 
 def _due(
-    now: datetime,
+    given: datetime,
     when: datetime | timedelta,
     ahead: timedelta,
     too_far: Callable[[], ServiceValidationError],
 ) -> datetime:
-    """The moment a command that gets its turn at `now` is due: `when`, or `when` from
-    now.
+    """The moment a command given at `given` is due: `when`, or `when` after `given`.
 
-    Raises ServiceValidationError (`command_in_past`) for a moment that is not ahead,
-    and the error `too_far` makes for one more than `ahead` ahead. A delay is compared
-    with `ahead` before it is added to `now`: one of centuries is no date at all.
+    Raises ServiceValidationError (`command_in_past`) for a moment that was not ahead
+    of `given`, and the error `too_far` makes for one more than `ahead` ahead of it. A
+    delay is compared with `ahead` before it is added to `given`: one of centuries is
+    no date at all.
     """
     if isinstance(when, timedelta) and when > ahead:
         raise too_far()
-    at = now + when if isinstance(when, timedelta) else when
-    if at <= now:
+    at = given + when if isinstance(when, timedelta) else when
+    if at <= given:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="command_in_past",
             translation_placeholders={"at": _local_time(at)},
         )
-    if at > now + ahead:
+    if at > given + ahead:
         raise too_far()
     return at
 
@@ -251,6 +251,13 @@ class TargetController:
     (`timer_unloaded`) if the timer was unloaded meanwhile. While Home Assistant is
     still starting, a command first folds what fell due before it, without the target
     (`_async_catch_up_while_starting_locked`).
+
+    A command, a report of the target and an alarm take their moment when they are
+    raised, before they wait for their turn, and have the outcome they would have had
+    at that moment (`_command`, `_handle_state_change`, `_handle_wakeup`). The two
+    switches of intervals, the start-up and the refresh of the windows take theirs when
+    they get their turn: they learn the windows from the Workday sensor, and fold them
+    to the time it answered.
     """
 
     def __init__(
@@ -379,8 +386,14 @@ class TargetController:
         """
         self._set_target_deleted(True)
 
-    async def async_set_minutes(self, minutes: int) -> None:
+    async def async_set_minutes(
+        self, minutes: int, *, context: Context | None = None
+    ) -> None:
         """Count down `minutes` from now; zero stops the timer.
+
+        The events that it causes carry `context`, as do those of every command below
+        that takes one: the context of the call, button, sentence or switch that gave
+        it, None when nobody did (`_announce`).
 
         Raises ServiceValidationError (`duration_out_of_range`), before anything runs,
         for fewer than 0 minutes or more than a day.
@@ -388,10 +401,13 @@ class TargetController:
         if not 0 <= minutes <= MAX_MINUTES:
             raise duration_out_of_range()
         await self._command(
-            lambda now: self._core.set_duration(now, timedelta(minutes=minutes))
+            lambda now: self._core.set_duration(now, timedelta(minutes=minutes)),
+            context,
         )
 
-    async def async_add_minutes(self, minutes: int) -> None:
+    async def async_add_minutes(
+        self, minutes: int, *, context: Context | None = None
+    ) -> None:
         """Move the end of the countdown by `minutes`, which may be negative.
 
         The end is never more than a day ahead: adding past it runs for a day, and
@@ -400,10 +416,16 @@ class TargetController:
         way is all that can change the end, and a count of centuries is no time.
         """
         bounded = max(-MAX_MINUTES, min(minutes, MAX_MINUTES))
-        await self._command(lambda now: self._core.add(now, timedelta(minutes=bounded)))
+        await self._command(
+            lambda now: self._core.add(now, timedelta(minutes=bounded)), context
+        )
 
     async def async_run(
-        self, minutes: int | None = None, settings: Mapping[str, Any] | None = None
+        self,
+        minutes: int | None = None,
+        settings: Mapping[str, Any] | None = None,
+        *,
+        context: Context | None = None,
     ) -> None:
         """Switch the target on for `minutes`, or without a duration, with `settings` if
         there are any.
@@ -421,11 +443,11 @@ class TargetController:
             raise duration_out_of_range()
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         if minutes is None:
-            await self._command(lambda now: self._core.run_open(now, owed))
+            await self._command(lambda now: self._core.run_open(now, owed), context)
         else:
             duration = timedelta(minutes=minutes)
             await self._command(
-                lambda now: self._core.set_duration(now, duration, owed)
+                lambda now: self._core.set_duration(now, duration, owed), context
             )
 
     async def async_add_command(
@@ -434,19 +456,24 @@ class TargetController:
         when: datetime | timedelta,
         minutes: int | None,
         settings: Mapping[str, Any] | None,
+        *,
+        context: Context | None = None,
     ) -> str:
         """Keep a command to turn the target `action` and return its id.
 
         `when` is the moment it is due, or how long from now: a delay is counted from
-        the moment the command gets its turn, so a call that waits behind a slow
-        device is not found to be late. `minutes` is how long an "on" runs and
-        `settings` what it turns the target on with; an "off" takes neither.
+        the moment the command was given, so a call that waits behind a slow device is
+        not found to be late, and one whose delay passed while it waited is carried out
+        at once. `minutes` is how long an "on" runs and `settings` what it turns the
+        target on with; an "off" takes neither.
 
         Raises ServiceValidationError, before anything is kept, for an "off" with
         either, for `minutes` outside 1 to a day (`duration_out_of_range`), for settings
-        that the target cannot take, for a time that is not ahead or is more than
-        `MAX_COMMAND_AHEAD` ahead (`command_too_far`, whatever the delay is), and when
-        the timer already keeps `MAX_COMMANDS`.
+        that the target cannot take, for a time that was not ahead when the command was
+        given, though it may have passed while the call waited (`command_in_past`, which
+        a zero delay is), or is more than `MAX_COMMAND_AHEAD` ahead of it
+        (`command_too_far`, whatever the delay is), and when the timer already keeps
+        `MAX_COMMANDS`.
         """
         if action == "off":
             _refuse_a_run_of_off(minutes, settings)
@@ -455,8 +482,8 @@ class TargetController:
         owed = validate_settings(self._hass, self.target_entity_id, settings or {})
         command_id = uuid4().hex
 
-        def add(now: datetime) -> list[Effect]:
-            at = _due(now, when, MAX_COMMAND_AHEAD, command_too_far)
+        def add(given: datetime) -> list[Effect]:
+            at = _due(given, when, MAX_COMMAND_AHEAD, command_too_far)
             if len(self.snapshot.commands) >= MAX_COMMANDS:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
@@ -467,10 +494,10 @@ class TargetController:
                     },
                 )
             return self._core.add_command(
-                now, Command(command_id, at, action, minutes, owed)
+                given, Command(command_id, at, action, minutes, owed)
             )
 
-        await self._command(add)
+        await self._command(add, context)
         return command_id
 
     async def async_turn_off_in(
@@ -478,38 +505,48 @@ class TargetController:
         when: datetime | timedelta,
         minutes: int | None = None,
         settings: Mapping[str, Any] | None = None,
-    ) -> bool:
-        """Have the target turned off at `when`, a moment or how long from now, and say
-        whether it was: set the countdown to end then if the target is wanted running,
-        change nothing if it is not.
+        *,
+        context: Context | None = None,
+    ) -> datetime | None:
+        """Have the target turned off at `when`, a moment or how long from now: set the
+        countdown to end then if the target is wanted running, and return that end;
+        change nothing if it is not, and return None. The end may have passed by the
+        time the call returns, when it waited behind a slow device: the target is then
+        turned off at once.
 
-        Whether it is wanted running is judged when the call gets its turn, from the
-        desired state (see `TimerCore.wanted_running`), so a turn-on or a turn-off that
-        the target has not confirmed yet counts, and a target that is away while its
-        timer counts is running (R10). The countdown is set as by hand: whatever time
-        was left is replaced, shorter or longer.
+        A delay is counted from the moment the call was given. Whether the target is
+        wanted running is judged at that moment too, on the timer as the calls ahead of
+        it left it, from the desired state (see `TimerCore.wanted_running`), so a
+        turn-on or a turn-off that the target has not confirmed yet counts, and a target
+        that is away while its timer counts is running (R10). The countdown is set as
+        by hand: whatever time was left is replaced, shorter or longer.
 
         Raises ServiceValidationError, before anything runs, for `minutes` or `settings`
         (an "off" has neither: `off_takes_no_duration_or_settings`), and when the call
-        gets its turn, for a moment that is not ahead (`command_in_past`, which a zero
-        delay is) or is more than a day ahead (`duration_out_of_range`, whatever the
-        delay is), whether or not the target is running.
+        gets its turn, for a moment that was not ahead when it was given
+        (`command_in_past`, which a zero delay is) or is more than a day ahead of it
+        (`duration_out_of_range`, whatever the delay is), whether or not the target is
+        running.
         """
         _refuse_a_run_of_off(minutes, settings)
-        running = False
+        end: datetime | None = None
 
-        def turn_off_at(now: datetime) -> list[Effect]:
-            nonlocal running
-            at = _due(now, when, timedelta(minutes=MAX_MINUTES), duration_out_of_range)
-            running = self._core.wanted_running(now)
-            if not running:
+        def turn_off_at(given: datetime) -> list[Effect]:
+            nonlocal end
+            at = _due(
+                given, when, timedelta(minutes=MAX_MINUTES), duration_out_of_range
+            )
+            if not self._core.wanted_running(given):
                 return []
-            return self._core.set_duration(now, at - now)
+            end = at
+            return self._core.set_duration(given, at - given)
 
-        await self._command(turn_off_at)
-        return running
+        await self._command(turn_off_at, context)
+        return end
 
-    async def async_cancel_command(self, command_id: str) -> Command:
+    async def async_cancel_command(
+        self, command_id: str, *, context: Context | None = None
+    ) -> Command:
         """Forget the pending command with that id and return it.
 
         Raises ServiceValidationError (`unknown_command`) when this timer keeps no such
@@ -529,11 +566,11 @@ class TargetController:
                 ) from err
             return effects
 
-        await self._command(cancel)
+        await self._command(cancel, context)
         return cancelled[0]
 
     async def async_cancel_commands(
-        self, which: Literal["next", "all"]
+        self, which: Literal["next", "all"], *, context: Context | None = None
     ) -> tuple[Command, ...]:
         """Forget the pending command that is due first, or every one, and return what
         was forgotten, in the order the commands are due; nothing when none is pending.
@@ -553,10 +590,12 @@ class TargetController:
             )
             return effects
 
-        await self._command(cancel)
+        await self._command(cancel, context)
         return cancelled
 
-    async def async_set_interval_enabled(self, interval_id: str, enabled: bool) -> None:
+    async def async_set_interval_enabled(
+        self, interval_id: str, enabled: bool, *, context: Context | None = None
+    ) -> None:
         """Switch a schedule interval on or off.
 
         Switching off is an edit of the schedule (S2): the window goes and the timer,
@@ -577,10 +616,14 @@ class TargetController:
         async with self._lock:
             self._raise_if_unloaded()
             await self._async_catch_up_while_starting_locked()
-            await self._async_set_interval_enabled_locked(interval_id, enabled)
+            await self._async_set_interval_enabled_locked(interval_id, enabled, context)
 
     async def async_set_schedule_enabled(
-        self, enabled: bool, interval: str | None = None
+        self,
+        enabled: bool,
+        interval: str | None = None,
+        *,
+        context: Context | None = None,
     ) -> tuple[str, ...]:
         """Switch the whole schedule on or off, or the intervals that carry the title
         `interval` (compared as `title_key` compares) or, while they still have the
@@ -635,7 +678,9 @@ class TargetController:
             await self._async_catch_up_while_starting_locked()
             for interval_id in chosen:
                 self._raise_if_unloaded()
-                await self._async_set_interval_enabled_locked(interval_id, enabled)
+                await self._async_set_interval_enabled_locked(
+                    interval_id, enabled, context
+                )
             return tuple(subentry.title for subentry in chosen.values())
 
     def _unknown_interval(
@@ -680,25 +725,29 @@ class TargetController:
         )
 
     async def _async_set_interval_enabled_locked(
-        self, interval_id: str, enabled: bool
+        self, interval_id: str, enabled: bool, context: Context | None
     ) -> None:
         """Switch a schedule interval on or off, as `async_set_interval_enabled` says;
         the caller holds the lock, has seen that the timer is not unloaded and, while
         Home Assistant is still starting, has folded what fell due before the switch
-        (`_async_catch_up_while_starting_locked`)."""
+        (`_async_catch_up_while_starting_locked`).
+
+        The switch is the cause of what follows from it: the countdown that an interval
+        switched on inside its open window starts, and the one that a switched off
+        interval's window had running ends, carry `context` (`_execute_fold`)."""
         now = dt_util.utcnow()
         if enabled and interval_id not in self.snapshot.disabled_intervals:
             return
         if enabled:
             effects = self._core.set_interval_enabled(now, interval_id, True)
-            if not await self._async_refresh_windows_locked(effects):
+            if not await self._async_refresh_windows_locked(effects, context=context):
                 raise _unloaded_error()
         else:
             effects = self._core.set_interval_enabled(now, interval_id, False)
             # The tick folds what fell due while this call waited for its turn. A
             # window that it finds over is replaced like any other (the interval that
             # was switched off is not: its window left with the flag).
-            await self._fold_due(now, effects)
+            await self._fold_due(now, effects, context=context)
 
     @callback
     def async_add_listener(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
@@ -711,28 +760,63 @@ class TargetController:
 
         return remove
 
-    async def _command(self, command: Callable[[datetime], list[Effect]]) -> None:
-        """Run `command` with the time now and carry out its effects; while Home
-        Assistant is still starting, after what fell due before it
+    async def _command(
+        self, command: Callable[[datetime], list[Effect]], context: Context | None
+    ) -> None:
+        """Run `command` with the moment it was given and carry out its effects; while
+        Home Assistant is still starting, after what fell due before that moment
         (`_async_catch_up_while_starting_locked`).
+
+        The events of the command carry `context`, the cause that gave it. What is
+        carried out before it, the catch-up and the pending commands that fell due, is
+        time's doing and has none (`_announce`).
+
+        The moment is read before the command waits for the lock, which a slow call to
+        the target holds for up to the time the call may take, so the command has the
+        outcome it would have had at that moment: time added to a countdown that ended
+        while it waited still extends the countdown, and a delay counts from it. The
+        lock serves its waiters in the order they came, so the moments of commands do
+        not go back. The pending commands that fell due before that moment are carried
+        out first, each batch on its own, as their alarm would
+        (`TimerCore.fold_commands_due`): an alarm that is armed in the past is raised
+        only when it is armed, so it would queue behind a command given later. What
+        else falls due between that moment and the time the command gets its turn stays
+        armed, and its alarm folds it after the command.
 
         Raises HomeAssistantError, having done nothing, if the timer was unloaded
         before its turn came: the call reached the timer, so returning as if the
-        change had been made would be a lie.
+        change had been made would be a lie. So does one that was unloaded while the
+        pending commands were carried out: the command is then not made.
         """
+        given = dt_util.utcnow()
         async with self._lock:
             self._raise_if_unloaded()
-            await self._async_catch_up_while_starting_locked()
-            await self._execute(command(dt_util.utcnow()))
+            await self._async_catch_up_while_starting_locked(given)
+            # A pending command that fell due before `given` comes before this one,
+            # though its alarm, armed in the past, queues behind it. It is carried out
+            # as its alarm would, on its own, and the command after it: each has its
+            # own save, announcements and calls to the target, and each answers for its
+            # own failure. A command that is refused leaves what it folded carried out.
+            # It goes through the sink of every fold, so that what came due while the
+            # target is away is said (`_execute_fold`), and has no context: it is
+            # time's doing.
+            before = self.snapshot
+            if folded := self._core.fold_commands_due(given):
+                await self._execute_fold(before, given, folded)
+                self._raise_if_unloaded()
+            await self._execute(command(given), context)
 
-    async def _async_catch_up_while_starting_locked(self) -> None:
-        """Before start-up has taken stock, bring the timer up to now as start-up
-        would, so that a command given now comes after what fell due before it, as it
-        would with Home Assistant running: the windows are worked out and merged, and
-        the stored end, the commands and the windows that fell due while Home Assistant
-        was down are folded in, in the order they fell due. After start-up has taken
-        stock this returns at once; after an earlier command while starting, the alarms
-        it armed have folded what came due since, and this finds little to fold.
+    async def _async_catch_up_while_starting_locked(
+        self, at: datetime | None = None
+    ) -> None:
+        """Before start-up has taken stock, bring the timer up to `at`, now when it is
+        None, as start-up would, so that a command given then comes after what fell due
+        before it, as it would with Home Assistant running: the windows are worked out
+        and merged, and the stored end, the commands and the windows that fell due
+        while Home Assistant was down are folded in, in the order they fell due. After
+        start-up has taken stock this returns at once; after an earlier command while
+        starting, the alarms it armed have folded what came due since, and this finds
+        little to fold.
 
         The fold changes the timer only, and so do the alarms it arms: the target has
         not been seen, so nothing is sent to it (`TimerCore` treats it as away), and
@@ -743,7 +827,7 @@ class TargetController:
         """
         if self._started:
             return
-        await self._async_refresh_windows_locked()
+        await self._async_refresh_windows_locked(at=at)
         self._raise_if_unloaded()
 
     def _raise_if_unloaded(self) -> None:
@@ -862,12 +946,25 @@ class TargetController:
         )
 
     async def _async_refresh_windows_locked(
-        self, effects: Sequence[Effect] = ()
+        self,
+        effects: Sequence[Effect] = (),
+        *,
+        at: datetime | None = None,
+        context: Context | None = None,
     ) -> bool:
         """Work out the windows again and fold them into the timer: the new windows are
         merged and followed at once, so that the timer does not rest, or is stored,
         between an edited window and the timer that follows it (S2). `effects` are those
         of a change that is made with them, and are carried out with them.
+
+        With `at`, the windows are worked out for `at` and folded to it, and so is the
+        refresh that follows a window that ended. `at` is the moment a command was given
+        while Home Assistant is starting: what falls due after it comes after the
+        command. Without `at` the clock is read twice, before and after the Workday
+        sensor is asked, so that the timer is folded to the time the sensor answered.
+
+        `context` is the cause of `effects`, as `_execute_fold` says: the switch that
+        made them. The refresh that follows a window that ended has none.
 
         The caller holds the lock. Returns False, with the timer untouched but for
         what `effects` are of, when the timer was unloaded while the windows were worked
@@ -876,11 +973,18 @@ class TargetController:
         Workday sensor may take that long, is replaced like any other that a fold finds
         over.
         """
-        windows, unknown = await self._async_windows(dt_util.utcnow())
+        windows, unknown = await self._async_windows(
+            at if at is not None else dt_util.utcnow()
+        )
         if self._stopped:
             return False
-        now = dt_util.utcnow()
-        await self._fold_due(now, [*effects, *self._set_windows(now, windows, unknown)])
+        now = at if at is not None else dt_util.utcnow()
+        await self._fold_due(
+            now,
+            [*effects, *self._set_windows(now, windows, unknown)],
+            refresh_at=at,
+            context=context,
+        )
         return True
 
     async def _refresh_windows(self) -> None:
@@ -952,6 +1056,10 @@ class TargetController:
         await self._refresh_windows()
 
     async def _handle_state_change(self, event: Event[EventStateChangedData]) -> None:
+        # The report counts at the moment it arrived, not when it gets its turn behind a
+        # slow call. Not `event.time_fired`: it can be earlier than a command that was
+        # given before the report and is ahead of it in the queue.
+        raised = dt_util.utcnow()
         async with self._lock:
             if self._stopped or not self._started:
                 return  # `_handle_started` reads the state itself
@@ -962,13 +1070,13 @@ class TargetController:
             if new_state is not None:
                 self._set_target_deleted(False)
             before = self.snapshot
-            now = dt_util.utcnow()
-            effects = self._core.observe(
-                now,
-                actual_state(new_state),
-                by_us=event.context.id in self._own_contexts,
+            by_us = event.context.id in self._own_contexts
+            effects = self._core.observe(raised, actual_state(new_state), by_us=by_us)
+            # The answer to one of our own calls is no person's doing, and all that its
+            # fold announces came from time, so it has no context to give.
+            await self._execute_fold(
+                before, raised, effects, context=None if by_us else event.context
             )
-            await self._execute_fold(before, now, effects)
             await self._async_check_interval_settings()
 
     def _target_exists(self) -> bool:
@@ -1145,42 +1253,76 @@ class TargetController:
             async_clear_settings_warnings(self._hass, self._entry.entry_id)
 
     async def _handle_wakeup(self, _scheduled: datetime) -> None:
+        # The alarm counts at the moment it went off, as a report does
+        # (`_handle_state_change`).
+        raised = dt_util.utcnow()
         async with self._lock:
             if self._stopped:
                 return
-            await self._fold_due(dt_util.utcnow(), [])
+            await self._fold_due(raised, [])
 
-    async def _fold_due(self, now: datetime, effects: list[Effect]) -> None:
+    async def _fold_due(
+        self,
+        now: datetime,
+        effects: list[Effect],
+        *,
+        refresh_at: datetime | None = None,
+        context: Context | None = None,
+    ) -> None:
         """Carry out `effects`, which the caller has just made the core produce, and
         whatever falls due at `now` on top of them. Every event that folds what is due
         by a tick goes through here: the alarm, the refresh of the windows (also the
         catch-up of a change made while starting) and the switching off of an
-        interval."""
+        interval. `refresh_at` is the moment at which a window that the fold finds over
+        is replaced (`_async_refresh_windows_locked`). `context` is the cause of
+        `effects`, as `_execute_fold` says."""
         before = self.snapshot
         effects = effects + self._core.tick(now)
-        await self._execute_fold(before, now, effects)
+        await self._execute_fold(
+            before, now, effects, refresh_at=refresh_at, context=context
+        )
 
     async def _execute_fold(
-        self, before: Snapshot, now: datetime, effects: list[Effect]
+        self,
+        before: Snapshot,
+        now: datetime,
+        effects: list[Effect],
+        *,
+        refresh_at: datetime | None = None,
+        context: Context | None = None,
     ) -> None:
         """Carry out the effects of a fold of what fell due at `now`, which `tick` and
         `observe` make, and say what came due while the target is away. Every fold
-        goes through here: a tick, the first observation of the target at start-up and
-        each later report of it. The snapshot before the fold is `before`.
+        goes through here: a tick, the first observation of the target at start-up,
+        each later report of it and the pending commands that a command folds before it
+        acts (`_command`, with no context). The snapshot before the fold is `before`.
+
+        `context` is the cause of the fold, None where time is: the alarm, a refresh
+        of the windows and the catch-up at start-up. A report of the target gives the
+        context of the change that made it, unless that is the answer to one of our own
+        calls, which is no person's doing and gives none. The switch of an interval
+        gives its own. The events of the fold carry it, except those that time caused
+        (`_announce`). It goes to this fold only, not to the refresh that follows a
+        window that ended: that is time's doing.
+
+        It is imprecise in one known way: a report of a change by hand, or a switch,
+        whose fold also starts a window or a pending command that fell due gives that
+        start its own context, though the person did not cause it.
 
         A window the fold found over is replaced by the next one of its interval. That
         goes for whichever event folds it: a report of the target may get the lock
         before the alarm of the end does, and the alarm then finds nothing due. It goes
         for the fold of a refresh too, since asking the Workday sensor may take until a
-        window that was just worked out is over.
+        window that was just worked out is over. That refresh is made at `refresh_at`,
+        or at the time it gets its turn when there is none.
         """
         ended = {w.interval_id for w in before.windows} - {
             w.interval_id for w in self.snapshot.windows
         }
         self._log_due_while_unavailable(before, now, effects)
-        await self._execute(effects)
+        await self._execute(effects, context)
         if ended and not self._stopped:
-            await self._async_refresh_windows_locked()
+            await self._async_refresh_windows_locked(at=refresh_at)
 
     def _log_due_while_unavailable(
         self, before: Snapshot, now: datetime, effects: list[Effect]
@@ -1250,7 +1392,9 @@ class TargetController:
         self._schedule_refresh()
         self._notify()
 
-    async def _execute(self, effects: list[Effect]) -> None:
+    async def _execute(self, effects: list[Effect], context: Context | None) -> None:
+        """Save the timer, tell what happened and carry out `effects`. The events carry
+        `context`, the cause of the batch (`_announce`); None where time is."""
         self._forget_settled_failure()
         if any(isinstance(effect, Changed) for effect in effects):
             # Saved ahead of the effects: a service call may take up to
@@ -1263,7 +1407,7 @@ class TargetController:
         # automation sees the new Ends at, and a slow device does not delay it.
         announcements = self._core.take_announcements()
         if not self._stopped:
-            self._announce(announcements)
+            self._announce(announcements, context)
         for effect in effects:
             if self._stopped:
                 return  # Unloaded while an earlier effect was under way.
@@ -1305,10 +1449,20 @@ class TargetController:
                 case _:
                     assert_never(effect)
 
-    def _announce(self, announcements: Sequence[Announcement]) -> None:
+    def _announce(
+        self, announcements: Sequence[Announcement], context: Context | None
+    ) -> None:
         """Fire what the core announced as events, in the order it happened. Each names
         the timer by its Run for as it is called now, so a renamed one is named by its
-        new id."""
+        new id.
+
+        An event carries `context` itself, not a child of it: the cause of the batch,
+        that of a call, a button, a sentence, a switch or a device switched by hand.
+        What time caused has a context of its own, with no user and no parent, whatever
+        the batch: a countdown that ran out or a limit that came (`expired` and
+        `limit`), and a pending command that came due. A call that finds the end
+        passed announces the run out and its own start in one batch, and only the start
+        is its doing."""
         if not announcements:
             return
         run_for = er.async_get(self._hass).async_get_entity_id(
@@ -1331,10 +1485,13 @@ class TargetController:
                             "ends_at": _ends_at(end),
                             "limit": limit,
                         },
+                        context=context,
                     )
                 case CountdownEnded(reason):
                     self._hass.bus.async_fire(
-                        EVENT_COUNTDOWN_ENDED, {"entity_id": run_for, "reason": reason}
+                        EVENT_COUNTDOWN_ENDED,
+                        {"entity_id": run_for, "reason": reason},
+                        context=None if reason in ("expired", "limit") else context,
                     )
                 case CommandCameDue(command):
                     self._hass.bus.async_fire(
@@ -1452,7 +1609,7 @@ class TargetController:
                 await self._not_delivered()
                 return
         if with_settings:
-            await self._execute(self._core.settings_applied(dt_util.utcnow()))
+            await self._execute(self._core.settings_applied(dt_util.utcnow()), None)
 
     async def _call(self, label: Label, call: TargetCall) -> bool:
         """Make one service call as ourselves; False, after logging why, if it fails."""
@@ -1529,7 +1686,7 @@ class TargetController:
     async def _not_delivered(self) -> None:
         """Tell the core the target did not get the wish or the settings, so they are
         sent again."""
-        await self._execute(self._core.call_failed(dt_util.utcnow()))
+        await self._execute(self._core.call_failed(dt_util.utcnow()), None)
 
     def _arm(self, at: datetime) -> None:
         """Wake up at `at` to carry out what is due, replacing any earlier alarm."""

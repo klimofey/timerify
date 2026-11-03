@@ -2,11 +2,16 @@
 
 They are Timerify's own events, whoever asks: Assist's built-in agent and the tools of
 an LLM agent reach the same timer as the dashboard does, so an automation hears them
-alike. Stopping is Timerify's doing, so the reason is `stopped`.
+alike. Stopping is Timerify's doing, so the reason is `stopped`. The events carry the
+context of the request, so the logbook says who asked.
 """
 
-from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.core import Context, HomeAssistant
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    MockUser,
+    async_capture_events,
+)
 
 from custom_components.timerify.const import (
     EVENT_COUNTDOWN_ENDED,
@@ -48,3 +53,40 @@ async def test_running_and_stopping_the_boiler_by_an_llm_tool_fires_the_same(
 
     assert fired == [STARTED_FOR_45, STOPPED]
     assert fake_target.calls == [TURN_ON, TURN_OFF]
+
+
+async def test_a_spoken_request_gives_its_context_to_the_event(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    hass_admin_user: MockUser,
+) -> None:
+    """A user tells Assist to turn the boiler on for ten minutes. The countdown that
+    starts is the doing of that request: the logbook can say who asked."""
+    started = async_capture_events(hass, EVENT_COUNTDOWN_STARTED)
+    ctx = Context(user_id=hass_admin_user.id)
+
+    await converse(hass, "turn on the boiler for 10 minutes", context=ctx)
+
+    assert len(started) == 1
+    assert started[0].context.id == ctx.id
+    assert started[0].context.user_id == hass_admin_user.id
+
+
+async def test_a_tool_call_gives_its_context_to_the_event(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    boiler: MockConfigEntry,
+    hass_admin_user: MockUser,
+) -> None:
+    """An LLM agent that a user talks to runs the boiler for ten minutes with a tool.
+    The countdown that starts is the doing of the user's request."""
+    started = async_capture_events(hass, EVENT_COUNTDOWN_STARTED)
+    ctx = Context(user_id=hass_admin_user.id)
+    api = await assist_api(hass, context=ctx)
+
+    await call_tool(api, "timerify__run", {"name": "Boiler", "minutes": 10})
+
+    assert len(started) == 1
+    assert started[0].context.id == ctx.id
+    assert started[0].context.user_id == hass_admin_user.id

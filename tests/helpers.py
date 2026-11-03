@@ -2,10 +2,10 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 from zoneinfo import ZoneInfo
 
 import probatio
@@ -14,7 +14,7 @@ from freezegun.api import FrozenDateTimeFactory
 from homeassistant.components.climate.const import ClimateEntityFeature
 from homeassistant.config_entries import ConfigEntry, SubentryFlowResult
 from homeassistant.const import EVENT_HOMEASSISTANT_FINAL_WRITE
-from homeassistant.core import Event, HomeAssistant, ServiceResponse, callback
+from homeassistant.core import Context, Event, HomeAssistant, ServiceResponse, callback
 from homeassistant.data_entry_flow import FlowResult, FlowResultType, section
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -37,6 +37,9 @@ from custom_components.timerify.const import (
     DaysMode,
     timer_unique_id,
 )
+
+if TYPE_CHECKING:
+    from .conftest import FakeTarget
 
 START = datetime(2026, 1, 5, 7, 0, tzinfo=UTC)
 """The frozen time every entity test starts at."""
@@ -90,25 +93,40 @@ SMALL_AC_NEXT = "sensor.small_ac_next_command"
 
 
 async def call_service(
-    hass: HomeAssistant, service: str, target: dict[str, Any], **data: Any
+    hass: HomeAssistant,
+    service: str,
+    target: dict[str, Any],
+    *,
+    context: Context | None = None,
+    **data: Any,
 ) -> None:
-    """Call a Timerify service the way an automation or the UI does."""
-    await hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
+    """Call a Timerify service the way an automation or the UI does, as the person or
+    the automation that `context` names."""
+    await hass.services.async_call(
+        DOMAIN, service, {**target, **data}, blocking=True, context=context
+    )
     await hass.async_block_till_done()
 
 
 def start_call_service(
-    hass: HomeAssistant, service: str, target: dict[str, Any], **data: Any
+    hass: HomeAssistant,
+    service: str,
+    target: dict[str, Any],
+    *,
+    context: Context | None = None,
+    **data: Any,
 ) -> asyncio.Task[ServiceResponse]:
     """Start a Timerify service call and leave it running, as a call is while a slow
     device answers: the task ends when the call does, and nothing is settled before."""
     return hass.async_create_task(
-        hass.services.async_call(DOMAIN, service, {**target, **data}, blocking=True)
+        hass.services.async_call(
+            DOMAIN, service, {**target, **data}, blocking=True, context=context
+        )
     )
 
 
 def start_set_number(
-    hass: HomeAssistant, entity_id: str, value: float
+    hass: HomeAssistant, entity_id: str, value: float, *, context: Context | None = None
 ) -> asyncio.Task[ServiceResponse]:
     """Start moving the slider and leave the call running, as `start_call_service`."""
     return hass.async_create_task(
@@ -117,6 +135,7 @@ def start_set_number(
             "set_value",
             {"entity_id": entity_id, "value": value},
             blocking=True,
+            context=context,
         )
     )
 
@@ -170,7 +189,11 @@ def record_action(fields: Sequence[str]) -> dict[str, Any]:
 
 
 async def add_command(
-    hass: HomeAssistant, number: str | list[str], **data: Any
+    hass: HomeAssistant,
+    number: str | list[str],
+    *,
+    context: Context | None = None,
+    **data: Any,
 ) -> dict[str, Any]:
     """Add a pending command to the timers of the "Run for" number(s) `number` and
     return the response of the service: the new command's id for each number."""
@@ -180,10 +203,19 @@ async def add_command(
         {"entity_id": number, **data},
         blocking=True,
         return_response=True,
+        context=context,
     )
     await hass.async_block_till_done()
     assert response is not None
     return response
+
+
+def listed(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
+    """The commands a "Next command" sensor lists in its attributes."""
+    state = hass.states.get(entity_id)
+    assert state is not None
+    commands: list[dict[str, Any]] = state.attributes["commands"]
+    return commands
 
 
 def prefilled(schema: probatio.Schema) -> dict[str, Any]:
@@ -319,32 +351,48 @@ async def change_options(
     return result
 
 
-async def set_number(hass: HomeAssistant, entity_id: str, value: float) -> None:
+async def set_number(
+    hass: HomeAssistant,
+    entity_id: str,
+    value: float,
+    *,
+    context: Context | None = None,
+) -> None:
     """Move the slider, as the dashboard does, and let the target's report settle."""
     await hass.services.async_call(
         "number",
         "set_value",
         {"entity_id": entity_id, "value": value},
         blocking=True,
+        context=context,
     )
     await hass.async_block_till_done()
 
 
-async def press_button(hass: HomeAssistant, entity_id: str) -> None:
+async def press_button(
+    hass: HomeAssistant, entity_id: str, *, context: Context | None = None
+) -> None:
     """Press a button, as the dashboard does, and let everything that follows settle."""
     await hass.services.async_call(
-        "button", "press", {"entity_id": entity_id}, blocking=True
+        "button", "press", {"entity_id": entity_id}, blocking=True, context=context
     )
     await hass.async_block_till_done()
 
 
-async def set_switch(hass: HomeAssistant, entity_id: str, on: bool) -> None:
+async def set_switch(
+    hass: HomeAssistant,
+    entity_id: str,
+    on: bool,
+    *,
+    context: Context | None = None,
+) -> None:
     """Flip a switch, as the dashboard does, and let everything that follows settle."""
     await hass.services.async_call(
         "switch",
         "turn_on" if on else "turn_off",
         {"entity_id": entity_id},
         blocking=True,
+        context=context,
     )
     await hass.async_block_till_done()
 
@@ -390,6 +438,78 @@ def iso(day: date, clock: str) -> str:
     """What the "Ends at" sensor shows, and the file stores, for `clock` on `day` in
     Jerusalem: the moment in UTC."""
     return local(day, clock).isoformat()
+
+
+type Given = Mapping[float, Callable[[], asyncio.Task[Any] | None]]
+"""What a scenario does, and when: at each second after `START`, a call that starts and
+returns its task, or a report of the device, which returns nothing."""
+
+FIRST_TWO_LET_GO_AT: Final = (25, 50)
+"""The seconds after `START` at which the first and the second of the three slow calls
+are let go."""
+LAST_LET_GO_AT: Final = 75
+"""The second after `START` at which the third is let go: the end of the run."""
+
+
+def moment(seconds: float) -> datetime:
+    """The moment `seconds` after `START`."""
+    return START + timedelta(seconds=seconds)
+
+
+def stamp(seconds: float) -> str:
+    """What the "Ends at" sensor shows for `moment(seconds)`."""
+    return moment(seconds).isoformat()
+
+
+async def run_ac_slowly(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    given: Given,
+    *,
+    slow: bool = True,
+) -> list[asyncio.Task[Any]]:
+    """Run the air conditioner for one minute from 07:00:00, cooling at 24 with the fan
+    high, and do what `given` says while it is under way.
+
+    That is three calls to the device, which are slow: the first is let go at 07:00:25,
+    the second at 07:00:50 and the third at 07:01:15, when the countdown has been over
+    for fifteen seconds. Each step of `given` moves the clock to its second and starts
+    its call or writes its report; ties with a call being let go come first. The
+    returned tasks are the calls that were started, which a scenario awaits when it
+    wants their answer. With `slow` off the device answers at once, and the clock
+    goes through the same seconds with everything settled at each.
+    """
+    held = fake_climate.hold_next_call() if slow else None
+    running = start_call_service(
+        hass,
+        "run",
+        {"entity_id": AC_NUMBER},
+        minutes=1,
+        hvac_mode="cool",
+        temperature=24,
+        fan_mode="high",
+    )
+    if held is not None:
+        await held.reached.wait()
+    tasks: list[asyncio.Task[Any]] = []
+    for second in sorted({*given, *(FIRST_TWO_LET_GO_AT if slow else ())}):
+        freezer.move_to(moment(second))
+        if second in given and (task := given[second]()) is not None:
+            tasks.append(task)
+        if held is None:
+            await hass.async_block_till_done()
+        elif second in FIRST_TWO_LET_GO_AT:
+            finished, held = held, fake_climate.hold_next_call()
+            finished.release.set()
+            await held.reached.wait()
+    freezer.move_to(moment(LAST_LET_GO_AT))
+    if held is not None:
+        held.release.set()
+    async_fire_time_changed(hass)
+    await running
+    await hass.async_block_till_done()
+    return tasks
 
 
 async def restart(hass: HomeAssistant, entry: ConfigEntry) -> None:

@@ -448,8 +448,7 @@ class TimerCore:
         """Move the end by `delta`; on an idle timer only a positive delta starts it.
 
         An end that is not ahead is no countdown, as `wanted_running` judges it, though
-        nothing folded it yet (a command that waited for its turn until after the end,
-        #42): the timer is idle.
+        nothing folded it yet (its alarm is late): the timer is idle.
 
         Time added to a limit that runs is added to the limit: the result is a
         countdown that someone chose, which the limit never cuts. A limit that is not
@@ -471,7 +470,7 @@ class TimerCore:
     @_reports_change
     def stop(self, now: datetime) -> list[Effect]:
         """End the countdown and switch the target off. An end that is not ahead is a
-        countdown that ran out, as for `set_duration` (#42)."""
+        countdown that ran out, as for `set_duration`: its alarm is late."""
         self._expire_stale_end(_utc(now))
         return self._stop()
 
@@ -628,6 +627,40 @@ class TimerCore:
         return effects
 
     @_reports_change
+    def fold_commands_due(self, now: datetime) -> list[Effect]:
+        """Carry out the pending commands that are due at or before `now`, in the order
+        they fall due, and nothing else: not a `tick`.
+
+        A command given at `now` comes after a pending one that fell due before it. The
+        alarm of that one may not have run yet: an alarm armed in the past is raised
+        only when it is armed, behind whatever was given meanwhile. So the command given
+        at `now` calls this first, and carries out its own effects after the ones
+        returned here. The windows are not folded: the alarm of a window is armed
+        ahead, so it queues in its own order.
+
+        An end or a limit that fell due before a command is ended before it, as
+        `_catch_up` would, so that a countdown that ran out is announced as having run
+        out and a command that turns on starts a new one, not moves the old one. One
+        that falls due at the command's time or later is left to its guard
+        (`_expire_stale_end`, and the one in `add`).
+        """
+        now = _utc(now)
+        effects: list[Effect] = []
+        wish: Literal["on", "off"] | None = None
+        folded = False
+        while self._snapshot.commands and self._snapshot.commands[0].at <= now:
+            if self._end_before(self._snapshot.commands[0].at):
+                wish = "off"
+            wish = self._fold_first_command(now, wish, effects)
+            folded = True
+        if not folded:
+            return []
+        effects.append(self._wakeup())
+        if wish is not None:
+            effects += self._want(wish)
+        return effects
+
+    @_reports_change
     def settings_applied(self, now: datetime) -> list[Effect]:
         """The calls that carried the owed settings all went through: nothing is owed
         any more. The caller reports it right after executing the effects."""
@@ -746,12 +779,7 @@ class TimerCore:
                     if self._start_window(now, window, wish):
                         wish = "on"
                 case Command():
-                    commands = self._snapshot.commands[1:]
-                    self._snapshot = replace(self._snapshot, commands=commands)
-                    if (command_wish := self._run_command(now, item, wish)) is None:
-                        effects.append(CommandDropped(item))
-                    else:
-                        wish = command_wish
+                    wish = self._fold_first_command(now, wish, effects)
                 case "end":
                     self._end_timer(ended_by="expired")
                     wish = "off"
@@ -850,6 +878,22 @@ class TimerCore:
         moved = latest.end != self._snapshot.end
         self._set_end(latest.end, began=self._kept_beginning(at), by=latest.interval_id)
         return "on" if moved else None
+
+    def _fold_first_command(
+        self,
+        now: datetime,
+        wish: Literal["on", "off"] | None,
+        effects: list[Effect],
+    ) -> Literal["on", "off"] | None:
+        """Take the command that is due first out of the snapshot and fold it in at
+        `now`; return the wish after it, given the wish of the items folded before it.
+        A command that is dropped (§5.7) adds `CommandDropped` to `effects`."""
+        command, *later = self._snapshot.commands
+        self._snapshot = replace(self._snapshot, commands=tuple(later))
+        if (command_wish := self._run_command(now, command, wish)) is None:
+            effects.append(CommandDropped(command))
+            return wish
+        return command_wish
 
     def _run_command(
         self, now: datetime, command: Command, wish: Literal["on", "off"] | None
@@ -959,9 +1003,9 @@ class TimerCore:
         """Count down to `end`, at most a day from now, or stop if it is not ahead.
         The countdown began at `began`: now, or when the one that was running did.
 
-        A countdown whose end is not ahead is over, folded or not (#42): it is
-        announced as expired before anything new, so a stop that follows has none to
-        end, and a new end is a start, not a move.
+        A countdown whose end is not ahead is over, folded or not (its alarm may be
+        late): it is announced as expired before anything new, so a stop that follows
+        has none to end, and a new end is a start, not a move.
         """
         self._expire_stale_end(now)
         if end <= now:
@@ -972,6 +1016,19 @@ class TimerCore:
     def _stop(self) -> list[Effect]:
         self._end_timer()
         return [self._wakeup(), *self._want("off")]
+
+    def _end_before(self, at: datetime) -> bool:
+        """End a countdown or a limit that fell due before `at`, as the fold of what is
+        due would have when it did, for `expired` or `limit`; True if there was one.
+        What falls due at `at` comes after the item that is due then (`_Rank`)."""
+        snapshot = self._snapshot
+        if snapshot.end is not None and snapshot.end < at:
+            self._end_timer(ended_by="expired")
+        elif snapshot.limit_at is not None and snapshot.limit_at < at:
+            self._end_timer(ended_by="limit")
+        else:
+            return False
+        return True
 
     def _end_timer(self, *, ended_by: EndReason = "stopped") -> None:
         """The countdown, or the limit, is over, for `ended_by`: there is no end and no
@@ -1244,12 +1301,13 @@ class TimerCore:
 
     def _wants_running(self, at: datetime, wish: Literal["on", "off"] | None) -> bool:
         """Whether the target is wanted running at `at`, the instant an item falls due
-        or a command gets its turn: a countdown that ends after `at`, or a limit that
+        or a command is given: a countdown that ends after `at`, or a limit that
         comes after it, or, with none under way, what `_runs_as_of` says of `wish`.
 
         A countdown that ends at `at` or before is over, whether or not it was folded
         yet, and so is a limit, so a command that falls due as one ends meets a target
-        that is about to be off, and so does one that gets its turn after a slow call.
+        that is about to be off, and so does one that comes before the late alarm of the
+        end.
         """
         deadline = self._snapshot.end or self._snapshot.limit_at
         if deadline is not None:

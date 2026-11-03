@@ -23,6 +23,8 @@ Three rules always hold:
 - **Using the device by hand does not cancel it.** Between now and then you may turn the device on or off yourself, or a countdown may end. The command stays in place. Only cancelling the command removes it.
 - **"Turn on for N minutes" at its time is the same as setting Run for to N minutes at that time.**
 
+A delay counts from the moment you give the command, even when the call waits behind a slow device. If the delay has passed by the time the call gets its turn, the command is carried out at once.
+
 What a command does at its time:
 
 - A command to turn on without minutes runs a device that is off to the end of the schedule window. This holds when a window is open at the command's time. In Strict mode the default duration is kept when it ends later. With no window open, a Strict device runs for the default duration. A Loose device runs without a countdown, and the timer's [limit](timers.md#turn-off-a-device-that-was-left-on), if it has one, turns it off in the end.

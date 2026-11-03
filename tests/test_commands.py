@@ -16,8 +16,14 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import async_capture_events
 
-from custom_components.timerify.const import CONF_TARGET, DOMAIN, MAX_COMMANDS
+from custom_components.timerify.const import (
+    CONF_TARGET,
+    DOMAIN,
+    EVENT_COMMAND_DUE,
+    MAX_COMMANDS,
+)
 from custom_components.timerify.controller import command_when
 
 from .conftest import FakeTarget, SetupTarget
@@ -37,6 +43,7 @@ from .helpers import (
     at,
     call_service,
     command_json,
+    listed,
     payload,
     record_writes,
     saved,
@@ -58,14 +65,6 @@ CAME_DUE_WHILE_UNAVAILABLE = (
     " it is applied when it is back, if it is still relevant then"
 )
 """What is logged for a command that falls due while the target is away."""
-
-
-def listed(hass: HomeAssistant, entity_id: str) -> list[dict[str, Any]]:
-    """The commands a "Next command" sensor lists in its attributes."""
-    state = hass.states.get(entity_id)
-    assert state is not None
-    commands: list[dict[str, Any]] = state.attributes["commands"]
-    return commands
 
 
 async def test_stored_command_runs_on_time(
@@ -918,16 +917,16 @@ async def test_command_the_week_ahead_is_accepted(
     ]
 
 
-async def test_delay_of_a_command_that_waited_for_a_slow_device_counts_from_its_turn(
+async def add_command_behind_three_slow_calls(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_climate: FakeTarget,
-    setup_target: SetupTarget,
-) -> None:
-    """A cloud air conditioner takes 25 seconds for each of the three calls that turn
-    it on cooling, at 24, with a fan mode. A command for one minute from now that waits
-    behind them is not refused as already passed: it is due a minute after its turn."""
-    await setup_target(target=AC_ID)
+    delay: int,
+) -> dict[str, Any]:
+    """Turn the AC on cooling, at 24, with a fan mode: a cloud air conditioner takes 25
+    seconds for each of the three calls. At 07:00:00, behind them, give the command to
+    turn it off in `delay` minutes. The lock is free at 07:01:15, and the response of
+    the command is returned."""
     slow = fake_climate.hold_next_call()
     running = hass.async_create_task(
         hass.services.async_call(
@@ -947,7 +946,7 @@ async def test_delay_of_a_command_that_waited_for_a_slow_device_counts_from_its_
         hass.services.async_call(
             DOMAIN,
             "add_command",
-            {"entity_id": AC_NUMBER, "action": "off", "delay": 1},
+            {"entity_id": AC_NUMBER, "action": "off", "delay": delay},
             blocking=True,
             return_response=True,
         )
@@ -965,8 +964,46 @@ async def test_delay_of_a_command_that_waited_for_a_slow_device_counts_from_its_
     await hass.async_block_till_done()
 
     assert response is not None
+    return response
+
+
+async def test_a_delay_that_passed_while_the_command_waited_is_carried_out_at_once(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A command to turn the AC off in a minute, given behind the three slow calls that
+    turn it on, is due at 07:01:00. Its call gets its turn at 07:01:15, a quarter of a
+    minute late, and it is not kept for another minute: the AC is turned off at once,
+    the command came due, and nothing is left on the "Next command" sensor."""
+    await setup_target(target=AC_ID)
+    due = async_capture_events(hass, EVENT_COMMAND_DUE)
+
+    await add_command_behind_three_slow_calls(hass, freezer, fake_climate, delay=1)
+
+    assert [event.data["action"] for event in due] == ["off"]
+    assert fake_climate.calls[-1][0] == "turn_off"
+    assert listed(hass, AC_NEXT) == []
+
+
+async def test_a_delay_counts_from_the_moment_the_command_was_given(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_climate: FakeTarget,
+    setup_target: SetupTarget,
+) -> None:
+    """A command to turn the AC off in five minutes, given at 07:00:00 behind the three
+    slow calls that turn it on, is due at 07:05:00, five minutes after the user gave
+    it, though its call got its turn at 07:01:15."""
+    await setup_target(target=AC_ID)
+
+    response = await add_command_behind_three_slow_calls(
+        hass, freezer, fake_climate, delay=5
+    )
+
     assert [(c["id"], c["at"]) for c in listed(hass, AC_NEXT)] == [
-        (response[AC_NUMBER]["command_id"], "2026-01-05T07:02:15+00:00")
+        (response[AC_NUMBER]["command_id"], "2026-01-05T07:05:00+00:00")
     ]
 
 

@@ -146,20 +146,30 @@ async def talk(
     language: str = "en",
     *,
     conversation_id: str | None = None,
+    context: Context | None = None,
 ) -> conversation.ConversationResult:
-    """Say `text` to the built-in agent, in the conversation `conversation_id` (a new
-    one without), and return its result: the answer and the conversation's id."""
+    """Say `text` to the built-in agent, as the person that `context` names (nobody
+    without), in the conversation `conversation_id` (a new one without), and return its
+    result: the answer and the conversation's id."""
     return await conversation.async_converse(
-        hass, text, conversation_id, Context(), language=language
+        hass,
+        text,
+        conversation_id,
+        Context() if context is None else context,
+        language=language,
     )
 
 
 async def converse(
-    hass: HomeAssistant, text: str, language: str = "en"
+    hass: HomeAssistant,
+    text: str,
+    language: str = "en",
+    *,
+    context: Context | None = None,
 ) -> intent.IntentResponse:
     """Say `text` to the built-in agent, as the first thing of a conversation, and
     return its answer."""
-    return (await talk(hass, text, language)).response
+    return (await talk(hass, text, language, context=context)).response
 
 
 def speech(response: intent.IntentResponse) -> str:
@@ -178,9 +188,12 @@ async def assist_api(
     hass: HomeAssistant,
     language: str | None = "en",
     assistant: str = ASSISTANT,
+    *,
+    context: Context | None = None,
 ) -> llm.APIInstance:
     """The Assist API as an LLM agent is given it: the tools and the prompt of every
-    integration, for a request in `language` that `assistant` makes.
+    integration, for a request in `language` that `assistant` makes as the person that
+    `context` names (nobody without).
 
     The LLM integration is set up first, as it is in a house that has an LLM agent.
     """
@@ -190,7 +203,7 @@ async def assist_api(
         llm.LLM_API_ASSIST,
         llm.LLMContext(
             platform="test",
-            context=Context(),
+            context=Context() if context is None else context,
             language=language,
             assistant=assistant,
             device_id=None,

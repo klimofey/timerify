@@ -81,6 +81,8 @@ An automation that turns the device on again when its countdown ends should chec
 
 The reason `expired` is only for countdowns that someone chose. To hear of a device that was left on, check for `limit`.
 
+The trace and the **Logbook** of the automation name what caused the event. That is the action, the **Run for** slider, the button, an interval switch, the voice request or the device switched by hand, with the user who did it. An event caused by time, such as a countdown that ran out, names no cause and no user.
+
 ### After a restart
 
 A countdown that ended while Home Assistant was down triggers **Countdown ended** once, when Home Assistant has started. The reason is `expired`. The device is turned off then, if it is still on. A countdown that still runs does not trigger again.

@@ -100,7 +100,9 @@ class RunHandler(TimerifyIntentHandler):
     ) -> None:
         hass = intent_obj.hass
         await entry.runtime_data.async_run(
-            duration_of(slots), settings_of(hass, entry, slots)
+            duration_of(slots),
+            settings_of(hass, entry, slots),
+            context=intent_obj.context,
         )
         response.async_set_speech_slots(timer_slots(hass, entry, dt_util.utcnow()))
 
@@ -139,7 +141,7 @@ class AddTimeHandler(TimerifyIntentHandler):
             raise ServiceValidationError(
                 translation_domain=DOMAIN, translation_key="no_time_to_add"
             )
-        await entry.runtime_data.async_add_minutes(minutes)
+        await entry.runtime_data.async_add_minutes(minutes, context=intent_obj.context)
         response.async_set_speech_slots(
             timer_slots(intent_obj.hass, entry, dt_util.utcnow())
         )
@@ -166,7 +168,7 @@ class StopHandler(TimerifyIntentHandler):
         slots: Mapping[str, Any],
         response: intent.IntentResponse,
     ) -> None:
-        await entry.runtime_data.async_set_minutes(0)
+        await entry.runtime_data.async_set_minutes(0, context=intent_obj.context)
         response.async_set_speech_slots(
             timer_slots(intent_obj.hass, entry, dt_util.utcnow())
         )

@@ -127,6 +127,15 @@ async def say_at(
     return await converse(hass, text, language)
 
 
+async def say_slots(hass: HomeAssistant, slots: dict[str, object]) -> None:
+    """Ask the clock handler to turn the Boiler on with the clock `slots`, as a sentence
+    of the built-in agent would."""
+    said = {"name": "Boiler", "action": "on", **slots}
+    await intent.async_handle(
+        hass, "test", CLOCK, {key: {"value": value} for key, value in said.items()}
+    )
+
+
 def turn_on_at(language: str, clock: str) -> str:
     """The sentence of the shipped files that turns the Boiler on, with `clock` as the
     time it says: the first sentence with a command before the time, taken from the
@@ -1665,6 +1674,116 @@ async def test_noon_and_midnight_are_the_only_times_with_no_hour(
 
 
 @pytest.mark.parametrize(
+    ("slots", "days", "clock"),
+    [
+        ({"clock_ordinal": 8, "clock_minute": 30}, 0, "07:30"),
+        ({"clock_ordinal": 1, "clock_minute": 30, "clock_part": "night"}, 1, "00:30"),
+        ({"clock_ordinal": 6, "clock_minute": 30, "clock_part": "night"}, 1, "05:30"),
+        ({"clock_ordinal": 12, "clock_minute": 30, "clock_part": "am"}, 0, "11:30"),
+    ],
+    ids=["the eighth", "the first at night", "the sixth at night", "the twelfth am"],
+)
+async def test_an_ordinal_hour_is_the_hour_that_ends_it(
+    hass: HomeAssistant,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+    days: int,
+    clock: str,
+) -> None:
+    """The Nth hour of the dial is the one that runs from N-1 to N, so 30 minutes of the
+    eighth is 07:30 and of the first, which is 12 less one, is 00:30; a part of the day
+    still names the half."""
+    await say_slots(hass, slots)
+
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("slots", "days", "clock"),
+    [
+        ({"clock_hour": 8, "clock_before": 15}, 0, "07:45"),
+        ({"clock_part": "pm", "clock_before": 15}, 0, "11:45"),
+        ({"clock_part": "am", "clock_before": 15}, 0, "23:45"),
+        ({"clock_part": "am", "clock_before": 15, "clock_day": 1}, 1, "23:45"),
+    ],
+    ids=["an hour", "noon", "midnight", "midnight tomorrow"],
+)
+async def test_minutes_before_come_with_an_hour_or_noon_or_midnight(
+    hass: HomeAssistant,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+    days: int,
+    clock: str,
+) -> None:
+    """Minutes before an hour are said of a named hour, and of noon and midnight, which
+    have no hour: "quarter to midnight" is 23:45, and "tomorrow at quarter to midnight"
+    is the 23:45 that ends tomorrow."""
+    await say_slots(hass, slots)
+
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("slots", "days", "clock"),
+    [
+        ({"clock_part": "tonight", "clock_hour": 7}, 0, "19:00"),
+        ({"clock_part": "tonight", "clock_hour": 2}, 1, "02:00"),
+    ],
+    ids=["tonight at 7", "tonight at 2"],
+)
+async def test_tonight_is_the_night_of_today(
+    hass: HomeAssistant,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+    days: int,
+    clock: str,
+) -> None:
+    """ "Tonight" is the night with today named: 7 is the evening of today, and 2 is the
+    small hours of the night after today, by the rule of the night."""
+    await say_slots(hass, slots)
+
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    "slots",
+    [
+        {"clock_ordinal": 8, "clock_hour": 7},
+        {"clock_ordinal": 8, "clock_before": 15},
+        {"clock_hour": 8, "clock_before": 15, "clock_minute": 10},
+        {"clock_hour": 8, "clock_before": 0},
+        {"clock_hour": 8, "clock_before": 60},
+        {"clock_ordinal": 0, "clock_minute": 30},
+        {"clock_ordinal": 13, "clock_minute": 30},
+    ],
+    ids=[
+        "an ordinal and an hour",
+        "an ordinal and minutes before",
+        "minutes before and minutes after",
+        "no minutes before",
+        "an hour of minutes before",
+        "the zeroth hour",
+        "the thirteenth hour",
+    ],
+)
+async def test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    slots: dict[str, object],
+) -> None:
+    """No sentence names two hours, or minutes both before and after one, or minutes
+    outside 1 to 59 or an hour outside 1 to 12 in the ordinal. Slots that say it, from a
+    caller that is not a sentence, are refused as invalid, and nothing is kept or
+    switched."""
+    with pytest.raises(intent.InvalidSlotInfo):
+        await say_slots(hass, slots)
+
+    assert pending(hass) == []
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
     ("hour", "text", "now", "days", "clock"),
     [
         (7, "07", "08:00", 1, "07:00"),
@@ -1731,6 +1850,7 @@ async def test_the_text_of_the_hour_tells_whether_it_was_written_with_a_zero(
         ("am", {12: 0, 1: 1, 7: 7, 11: 11}),
         ("pm", {12: 12, 1: 13, 7: 19, 11: 23}),
         ("night", {12: 0, 1: 1, 5: 5, 6: 18, 7: 19, 11: 23}),
+        ("tonight", {12: 0, 1: 1, 5: 5, 6: 18, 7: 19, 11: 23}),
         (None, {0: 0, 7: 7, 13: 13, 23: 23}),
     ],
 )
@@ -1739,7 +1859,7 @@ def test_the_hour_of_the_day_follows_the_part_it_is_said_with(
 ) -> None:
     """The morning is the hour as it is but for 12, which is 0; the afternoon and the
     evening add 12 but to 12, which stays; the night is the small hours for 1 to 5 and
-    the evening for 6 to 11."""
+    the evening for 6 to 11, and so is "tonight"."""
     assert {hour: hour_of_day(hour, part) for hour in table} == table
 
 
@@ -1779,6 +1899,68 @@ def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
     )
 
     assert moment == local(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize(
+    ("now", "hour", "part", "day", "before", "days", "clock"),
+    [
+        ("06:00", 8, None, None, 15, 0, "07:45"),
+        ("19:50", 8, None, None, 15, 1, "07:45"),
+        ("06:00", 12, None, None, 15, 0, "11:45"),
+        ("12:00", 12, None, None, 15, 0, "23:45"),
+        ("23:50", 12, "am", None, 15, 1, "23:45"),
+        ("08:00", 8, "pm", None, 15, 0, "19:45"),
+        ("06:00", 1, "night", None, 10, 1, "00:50"),
+        ("06:00", 8, None, 1, 15, 1, "07:45"),
+    ],
+    ids=[
+        "the morning one",
+        "the evening one has passed",
+        "to 12 is the nearer of 11:45 and 23:45",
+        "to 12 at noon is tonight's",
+        "to midnight after 23:45 needs the third day",
+        "pm names the hour",
+        "ten to one at night is in the small hours",
+        "a day word",
+    ],
+)
+def test_minutes_before_an_hour_are_taken_off_on_the_wall_clock(
+    now: str,
+    hour: int,
+    part: DayPart | None,
+    day: int | None,
+    before: int,
+    days: int,
+    clock: str,
+) -> None:
+    """The hour is read first, with its part and its day, and the minutes come off it on
+    the wall clock, so "quarter to 8" is 07:45 or 19:45, whichever is ahead, "quarter to
+    midnight" is 23:45 and "ten to 1 at night" is 00:50."""
+    moment = clock_moment(
+        local(SUNDAY, now), ZoneInfo(JERUSALEM), hour, 0, part, day, before=before
+    )
+
+    assert moment == local(SUNDAY + timedelta(days=days), clock)
+
+
+@pytest.mark.parametrize("hour", [3, 4])
+def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
+    hour: int,
+) -> None:
+    """The clock goes from 02:00 to 03:00 in Jerusalem on 2026-03-27. Quarter to 3 is
+    02:45, which the clock skips, so it happens later by the gap, at 03:45, as quarter
+    to 4 does."""
+    moment = clock_moment(
+        local(date(2026, 3, 26), "23:00"),
+        ZoneInfo(JERUSALEM),
+        hour,
+        0,
+        "am",
+        None,
+        before=15,
+    )
+
+    assert moment == datetime(2026, 3, 27, 0, 45, tzinfo=UTC)
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:

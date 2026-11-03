@@ -181,10 +181,12 @@ def _clock_time_of(slots: Mapping[str, Any]) -> datetime | None:
     return moment
 
 
-type DayPart = Literal["am", "pm", "night"]
-"""What a speaker says after an hour of the twelve-hour clock to tell its two times
+type DayPart = Literal["am", "pm", "night", "tonight"]
+"""What a speaker says with an hour of the twelve-hour clock to tell its two times
 apart: "am" or the Russian word for the morning, "pm" or the words for the afternoon and
-the evening, and the Russian word for the night."""
+the evening, and the Russian word for the night. "Tonight" is the night of today: the
+hour is that of the night, and the handler reads it as the night with the day word
+"today" (`ClockCommandHandler`)."""
 
 _HALF_DAY: Final = 12
 _NIGHT_ENDS: Final = 6
@@ -197,9 +199,9 @@ def hour_of_day(hour: int, part: DayPart | None) -> int:
     """The hour of the 24-hour clock, 0 to 23, that `hour` means said with `part`.
 
     The morning (`am`) has 12 as 0 and every other hour as it is. The afternoon and the
-    evening (`pm`) have 12 as 12 and every other hour plus 12. The night has 12 as 0,
-    1 to 5 as they are and 6 to 11 plus 12. Without a part the hour is already that of
-    the 24-hour clock.
+    evening (`pm`) have 12 as 12 and every other hour plus 12. The night, and "tonight"
+    with it, has 12 as 0, 1 to 5 as they are and 6 to 11 plus 12. Without a part the
+    hour is already that of the 24-hour clock.
     """
     match part:
         case None:
@@ -208,7 +210,7 @@ def hour_of_day(hour: int, part: DayPart | None) -> int:
             return hour % _HALF_DAY
         case "pm":
             return hour % _HALF_DAY + _HALF_DAY
-        case "night":
+        case "night" | "tonight":
             evening = _NIGHT_ENDS <= hour < _HALF_DAY
             return hour % _HALF_DAY + (_HALF_DAY if evening else 0)
 
@@ -222,10 +224,12 @@ def clock_moment(
     day: int | None,
     *,
     zero: bool = False,
+    before: int = 0,
 ) -> datetime:
     """The moment, in UTC, that a clock time said at `now` means on the wall clock of
     `zone`; `day` is the day word said with it, in days from today, or None; `zero` is
-    whether the hour was written with a leading zero ("07").
+    whether the hour was written with a leading zero ("07"); `before` is the minutes
+    said to be before it ("quarter to 8" is the hour 8 and 15 before).
 
     An hour from 1 to 12 said with no part and no zero is the nearer of its morning and
     evening times that is ahead; any other hour is that of the 24-hour clock, and a
@@ -236,21 +240,33 @@ def clock_moment(
     hour can mean is taken unless it has passed today and the other has not. A time
     that has passed is returned as it is: the controller refuses it.
 
-    The wall time follows `schedule.wall_moment`: a time the clock skips happens later
-    by the gap. A time the clock repeats happens twice, and of its two moments the
-    earliest that is ahead is taken, so "1:30" said at 01:45 in the first pass of the
-    night is the second 01:30.
+    The minutes before are taken off the wall time of the hour on its day, after the
+    day and the part are read, so the hour keeps the rules of its part of the day and
+    "quarter to midnight" is 23:45 of the day before the midnight. That can be a day
+    earlier than the hour, so with no day word today, tomorrow and the day after are
+    searched: "quarter to midnight" said at 23:50 is tomorrow's 23:45.
+
+    The wall time, once the minutes are off, follows `schedule.wall_moment`: a time the
+    clock skips happens later by the gap, so "quarter to 3" on the night the clock
+    goes from 02:00 to 03:00 is 03:45. A time the clock repeats happens twice, and of
+    its two moments the earliest that is ahead is taken, so "1:30" said at 01:45 in the
+    first pass of the night is the second 01:30.
     """
     if part is None and not zero and 1 <= hour <= _HALF_DAY:
         hours = [hour % _HALF_DAY, hour % _HALF_DAY + _HALF_DAY]
     else:
         hours = [hour_of_day(hour, part)]
     today = now.astimezone(zone).date()
+    wall_times = (
+        datetime.combine(today + timedelta(days=ahead), time(h, minute))
+        - timedelta(minutes=before)
+        for ahead in ((0, 1, 2) if day is None else (day,))
+        for h in hours
+    )
     moments = sorted(
         moment
-        for ahead in ((0, 1) if day is None else (day,))
-        for h in hours
-        for moment in wall_moments(today + timedelta(days=ahead), time(h, minute), zone)
+        for wall in wall_times
+        for moment in wall_moments(wall.date(), wall.time(), zone)
     )
     return min((moment for moment in moments if moment > now), default=moments[0])
 
@@ -284,6 +300,22 @@ class ClockCommandHandler(DelayedCommandHandler):
     "Noon" and "midnight" say a part of the day and no hour, the hour being 12: that
     is not the bare 12 of "at 12", which is the nearer of the two.
 
+    The slot a sentence fills is the direction of the minutes, so that no word of any
+    language is known here. `clock_minute` counts minutes after the hour ("half past 7"
+    is the hour 7 and 30) and `clock_before` minutes before it ("quarter to 8" is the
+    hour 8 and 15 before); they are not said together. The minutes before are taken
+    off after the day and the part of the day are read (`clock_moment`), so "quarter
+    to 8 in the evening" is 19:45 and "quarter to midnight", whose hour is 12, is
+    23:45.
+
+    `clock_ordinal` is an ordinal hour, as in the Russian "v polovine vos'mogo" (half
+    past 7, literally "at the half of the eighth"): the Nth hour is the one that runs
+    from N-1 to N, so it is the hour N-1, with 0 read as 12. It stands instead of
+    `clock_hour`, and minutes before are not said with it.
+
+    The part "tonight" is the night with today named: "tonight at 7" is 19:00 today,
+    and "tonight at 2" is the 02:00 that follows today.
+
     With a day word, a time of the night's small hours (midnight, and 12 or 1 to 5 said
     with "night") is in the night that follows that day: "tomorrow at midnight" and
     "tomorrow night at 12" are the 00:00 after tomorrow, "tomorrow at 2 at night" is
@@ -299,11 +331,14 @@ class ClockCommandHandler(DelayedCommandHandler):
     description = (
         "Plans to turn a device on or off at a time of day, said as a person says it:"
         " 'clock_hour' (0 to 23, or 1 to 12 with 'clock_part'), 'clock_minute' (0 to"
-        " 59), 'clock_part' ('am', 'pm' or 'night') and 'clock_day' (0 for today, 1 for"
-        " tomorrow, 2 for the day after). Only the sentences of the built-in agent say"
-        " a time so; a model plans a command at a time of day with the tool of the"
-        " delayed command, which takes 'at'. 'name', 'action', 'hours', 'minutes' and"
-        " the settings are those of that tool."
+        " 59, the minutes after the hour), 'clock_before' (1 to 59, the minutes before"
+        " the hour, not with 'clock_minute'), 'clock_ordinal' (1 to 12, the hour that"
+        " ends the time, instead of 'clock_hour'), 'clock_part' ('am', 'pm', 'night' or"
+        " 'tonight', the night of today) and 'clock_day' (0 for today, 1 for tomorrow,"
+        " 2 for the day after). Only the sentences of the built-in agent say a time so;"
+        " a model plans a command at a time of day with the tool of the delayed"
+        " command, which takes 'at'. 'name', 'action', 'hours', 'minutes' and the"
+        " settings are those of that tool."
     )
     offered_as_tool = False
     slot_schema: ClassVar[dict[Any, Any]] = {
@@ -315,7 +350,13 @@ class ClockCommandHandler(DelayedCommandHandler):
         probatio.Optional("clock_minute"): probatio.All(
             whole_slot, probatio.Range(min=0, max=59)
         ),
-        probatio.Optional("clock_part"): probatio.In(["am", "pm", "night"]),
+        probatio.Optional("clock_before"): probatio.All(
+            whole_slot, probatio.Range(min=1, max=59)
+        ),
+        probatio.Optional("clock_ordinal"): probatio.All(
+            whole_slot, probatio.Range(min=1, max=12)
+        ),
+        probatio.Optional("clock_part"): probatio.In(["am", "pm", "night", "tonight"]),
         probatio.Optional("clock_day"): probatio.In([0, 1, 2]),
         probatio.Optional("hours"): whole_slot,
         probatio.Optional("minutes"): whole_slot,
@@ -327,8 +368,10 @@ class ClockCommandHandler(DelayedCommandHandler):
     def when(self, slots: Mapping[str, Any]) -> datetime | timedelta:
         """The moment the clock slots say, on the clock of the house.
 
-        Raises `probatio.Invalid` for slots that no sentence makes: a time with no hour
-        that is not noon or midnight, which the agents answer as not understood.
+        Raises `probatio.Invalid` for slots that no sentence makes, which the agents
+        answer as not understood: a time with no hour that is not noon or midnight, an
+        ordinal hour with an hour or with minutes before, and minutes before with
+        minutes after.
         """
         part = slots.get("clock_part", {}).get("value")
         day = slots.get("clock_day", {}).get("value")
@@ -336,6 +379,18 @@ class ClockCommandHandler(DelayedCommandHandler):
         hour = hour_slot.get("value")
         zero = _written_with_a_zero(hour_slot)
         minute = slots.get("clock_minute", {}).get("value")
+        before = slots.get("clock_before", {}).get("value", 0)
+        ordinal = slots.get("clock_ordinal", {}).get("value")
+        if part == "tonight":
+            part = "night"
+            day = 0 if day is None else day
+        if ordinal is not None and (hour is not None or before):
+            raise probatio.Invalid("an ordinal hour is said with no other hour")
+        if before and minute is not None:
+            raise probatio.Invalid("minutes are before the hour or after it, not both")
+        if ordinal is not None:
+            # The Nth hour is the one that runs from N-1 to N.
+            hour = ordinal - 1 or _HALF_DAY
         if hour is None:
             if part not in ("am", "pm") or minute is not None:
                 raise probatio.Invalid("expected an hour, or noon or midnight")
@@ -351,11 +406,15 @@ class ClockCommandHandler(DelayedCommandHandler):
         if in_the_night_after and day is not None:
             if day == 0:
                 # Said in the small hours, "today" names the night in progress.
-                moment = clock_moment(now, zone, hour, minute, part, 0, zero=zero)
+                moment = clock_moment(
+                    now, zone, hour, minute, part, 0, zero=zero, before=before
+                )
                 if moment > now:
                     return moment
             day += 1
-        return clock_moment(now, zone, hour, minute, part, day, zero=zero)
+        return clock_moment(
+            now, zone, hour, minute, part, day, zero=zero, before=before
+        )
 
 
 def command_slots(command: Command, now: datetime) -> dict[str, Any]:

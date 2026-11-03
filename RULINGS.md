@@ -4179,8 +4179,9 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 
 The decisions of the 1.3.0 release (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`),
 in the form they have now. The release is built in four parts, one plan each. Part A is
-planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md` and Part B in
-`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md`; each later part adds its own
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md`, Part B in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md` and Part C in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-c-voice.md`; each later part adds its own
 plan and its own section here. What is still open is a GitHub issue of klimofey/timerify,
 listed in `docs/followups.md`.
 
@@ -4619,3 +4620,46 @@ now.
   timers on shared devices asks the user for an entity that the picker could have chosen.
   Test (`card/test/editor.test.ts`): "picks a timer on a device with two timers for a new
   card", beside a number of another integration with the second key, which is left out.
+
+### Part C: voice (#49)
+
+- **A time said around an hour is worked out by one function.** `clock_moment` takes a new
+  `before` (minutes), and `ClockCommandHandler` takes three slots from the sentences. The
+  slot a template fills is the direction, so Python knows no word of any language.
+  `clock_minute` is minutes after the hour (as before), `clock_before` (1 to 59) is minutes
+  before it, and `clock_ordinal` (1 to 12) is an ordinal hour, which the Russian sentences
+  fill. An ordinal is turned into its hour as N-1, with 0 read as 12: the Nth hour is the one
+  that runs from N-1 to N, so "v polovine vos'mogo" (half past 7) is the hour 7 and 30
+  minutes, and "v polovine pervogo" is the hour 12 and 30 minutes. The minutes before are
+  taken off the wall time of the hour on its own day, after the day word and the part of the
+  day are read, so the hour keeps every rule it has (the nearer of the morning and the evening
+  one, the part, a leading zero, the night after a day word). This is the spec's call "Which
+  hour a part of the day belongs to": "quarter to 8 in the evening" is 19:45, "quarter to
+  midnight" is 23:45 and "v polovine pervogo nochi" is 00:30. The subtraction can land on the
+  day before the hour ("quarter to midnight" is 00:00 less 15 minutes), so a time with no day
+  word is searched on three days, today, tomorrow and the day after, not two: "quarter to
+  midnight" said at 23:50 is the 23:45 of tomorrow. The third day adds nothing for minutes
+  after the hour or for none, since the day after tomorrow is always later than tomorrow's
+  time: every result with `before=0` is what it was. The sum is done on the naive wall time,
+  and the result then goes through `wall_moments` like any other, so a wall time the clock
+  skips happens later by the gap: "quarter to 3" on the night the clock goes from 02:00 to
+  03:00 is 03:45, the same moment as "quarter to 4". "Tonight" is a new `clock_part` value
+  that `when` reads as the night with the day word "today" when no day is said, so "tonight
+  at 7" is 19:00 today, "tonight at 2" is the 02:00 that follows today, and an evening
+  one that has passed is refused as "today at 7" is; `hour_of_day` gives it the hours of the night, so its
+  `match` stays total. The slot combinations that no sentence makes are refused as invalid,
+  like a time with no hour: an ordinal with an hour or with minutes before, minutes before
+  with minutes after, and minutes before with no hour that is not noon or midnight. The
+  schema refuses a `clock_before` outside 1 to 59 and a `clock_ordinal` outside 1 to 12.
+  Noon and midnight with minutes before stay valid: no hour, the part `pm` or `am`, no
+  minutes after. Why: one place for the sums, so that a language adds only words; a signed
+  offset in a list would put a sum in the data ("chetvert' vos'mogo" as -45). Cost if wrong:
+  a wrong sum is wrong in every language at once, which the tables of the tests catch before
+  any sentence is involved. Tests (`tests/voice/test_clock_commands.py`):
+  `test_the_hour_of_the_day_follows_the_part_it_is_said_with` (with "tonight"),
+  `test_minutes_before_an_hour_are_taken_off_on_the_wall_clock`,
+  `test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap`,
+  `test_an_ordinal_hour_is_the_hour_that_ends_it`,
+  `test_minutes_before_come_with_an_hour_or_noon_or_midnight`,
+  `test_tonight_is_the_night_of_today` and
+  `test_an_ordinal_or_minutes_before_with_another_hour_are_not_understood`.

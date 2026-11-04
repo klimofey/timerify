@@ -18,6 +18,8 @@ Timers for any Home Assistant entity, without writing automations.
 
 Timerify attaches a countdown to an entity you already have, the way Powercalc attaches a virtual power sensor to a device. A boiler that is just a smart switch gains a "Run for" control on its own device page. Set 10 minutes, and the boiler turns on and turns itself off when the time is up.
 
+![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/card-pill.png)
+
 ## Installation
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)

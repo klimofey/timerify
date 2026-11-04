@@ -38,10 +38,12 @@ decisions made where the spec was silent in `RULINGS.md`, and open items (GitHub
    reminder asks for them. The `commit-msg` hook enforces this.
 3. **Hooks are versioned in `.githooks/`.** After every fresh clone run
    `git config core.hooksPath .githooks`. Never bypass them with `--no-verify`.
-4. **GitHub Actions stay disabled.** Workflow files may be written and kept in the repo, but
-   they are disabled (`gh workflow disable <name>`) and are enabled only with the owner's
-   explicit permission. A green CI is never a merge gate: the gate is a full local run of the
-   checks below on the final tree, with the result reported.
+4. **GitHub Actions: only `Validate` runs.** The owner enabled the `Validate` workflow
+   (`.github/workflows/validate.yml`: hassfest, the HACS action and the Python tests) on
+   2026-11-04, because the HACS catalog asks for links to passing HACS and hassfest runs. Any
+   other workflow is written disabled (`gh workflow disable <name>`) and is enabled only with
+   the owner's explicit permission. A green CI is never a merge gate: the gate is a full local
+   run of the checks below on the final tree, with the result reported.
 5. **Public, built as a product.** The repository is public (since 1.0.0): configurable for
    anyone's setup, nothing tailored to one home. Rulesets protect it: `main` changes only
    through a pull request and cannot be deleted or force-pushed, and release tags `v*` cannot be

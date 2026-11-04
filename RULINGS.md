@@ -5157,8 +5157,8 @@ now.
   0.85 of the ring's inner circle, and that of the icon at most 0.64 (Mushroom's shape). So 20,
   40 and 45 held, and none was changed after the first run. Cost if wrong: on a phone, a round
   tile of 2 columns shows the ring and the icon, and a person opens the pop-up to read the time;
-  from 3 columns the time is there. The rule is the one number `MIN_TIME_PX`: a person who wants
-  the time smaller or larger changes it, and the threshold follows. A browser below the floor
+  from 3 columns the time is there. The rule is the one number `MIN_TIME_PX`: a contributor who
+  wants the time smaller or larger changes it, and the threshold follows. A browser below the floor
   shows a dial that is wider than a small tile, as before 1.3.0. Tests: end to end, `holds the
   time, or the icon where the time cannot be read, inside its ring` (`card/e2e/sizes.spec.ts`;
   its twin for the Mushroom style in `card/e2e/mushroom.spec.ts`; the steps are in

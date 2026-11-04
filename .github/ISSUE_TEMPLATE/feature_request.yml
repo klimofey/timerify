@@ -1,0 +1,26 @@
+name: Feature request
+description: Something you would like Timerify to do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A short story helps most: the device, what you wanted to do, and where Timerify got in the way.
+        You can write in English or Russian.
+  - type: textarea
+    id: story
+    attributes:
+      label: What you want to do
+      placeholder: "My grow light should run 12 hours a day, but on cloudy days I want..."
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you do it today
+      description: An automation, a helper, by hand, or not at all.
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea, if you have one
+      description: How it could look in the forms, on the card or by voice.

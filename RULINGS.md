@@ -1453,8 +1453,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
   press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
-  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
-  hands to Home Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
+  (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant action,
+  `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home Assistant's
+  own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **A tap is the `click` event of the card's body (a mouse, a finger, the keyboard and assistive
   technology all produce it); a hold is added on top of it.** The hold fires on release after
   at least 500 ms, as Home Assistant's own handler does, and swallows the click that follows
@@ -1468,9 +1469,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   act; there is none for keyboard users either, who start and stop through the pop-up. Changed in
   1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one
   of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice
-  `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which
-  the card hands to Home Assistant's own handler as a `hass-action` event (#36)." under
-  Release 1.1.0.
+  `action` (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant
+  action, `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home
+  Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **The body is an empty layer that covers the whole card, border included, under the content,
   as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
   `aria-labelledby` the name and the status text, and, on the pill, the fill; the round tile's
@@ -3468,8 +3469,9 @@ in `docs/followups.md`.
 
 - **A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
-  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the
-  card hands to Home Assistant's own handler as a `hass-action` event (#36).** The defaults keep
+  (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant action,
+  `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home Assistant's
+  own handler as a `hass-action` event (#36).** The defaults keep
   the card of 1.0.0: `tap: popup`, `double_tap: none`, and `hold: run_or_stop` on the round layout
   and `none` on the pill. An unknown choice is `card_error_press`, and an action that is not a set
   of settings is `card_error_action`; the visual editor is thrown out of the form only for a
@@ -5130,7 +5132,8 @@ now.
   `.content` as no container. The dial has a width of its own, so containment costs it nothing,
   and `max-width: 100%` resolves against the room in `.content`; a percentage that depends on
   the content counts as none when a layout asks for the intrinsic size, so such a layout still
-  gets 80 px. Why one `@supports` block, where the spec said "a plain declaration first":
+  gets 80 px. Why one `@supports` block, where the plan, and the spec before its amendment,
+  said "a plain declaration first":
   `max-width: 100%` alone would shrink the dial in a browser that has no `aspect-ratio`, with its
   height still 80 px, and `--mdc-icon-size: min(32px, 40cqw)` is a custom property, which a
   browser that does not know `cqw` takes without a complaint and then finds invalid where

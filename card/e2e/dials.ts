@@ -114,7 +114,8 @@ export async function expectDialsToFit(
 export async function expectTimeFromTheWidth(card: Locator): Promise<void> {
   await isReady(card);
   const dial = card.locator(".dial");
-  // What the tile has around its dial: the border and the padding of the card.
+  // What the tile has around its dial: the border and the padding of the card. Measured while
+  // the dial is below its 80 px cap and so fills the room, the difference is only these two.
   const chrome = (await boxOf(card.locator("ha-card"))).width - (await boxOf(dial)).width;
   for (let width = TIME_FROM - 5; width <= TIME_FROM + 5; width += 1) {
     await card.evaluate((host, tile) => {

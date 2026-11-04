@@ -28,7 +28,7 @@ On the pill are the icon of the device, its name, and the time left with the mom
 
 ![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](../screenshots/card-pill.png)
 
-The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. On a very small tile, the centre shows the icon instead of the time left. The time is in the pop-up. The name is below.
+The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. On a tile of 2 columns on a phone, the centre shows the icon instead of the time left. The time is in the pop-up and in the words for screen readers. The name is below.
 
 The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses). Its optional **Turn off** button is below the name.
 
@@ -166,9 +166,9 @@ Enter and Space do what a tap does, at once. The keyboard has no double tap and 
 Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used when its press is set to **Home Assistant action**, and when the press is not set. So an action alone is enough. Set only the **Tap action** to **Toggle**, and a tap toggles the device. A press that you set to something else keeps that choice.
 
 - The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
-- Leave the field on **Default**, and Home Assistant opens the dialog of the device.
+- With the press set to **Home Assistant action**, leave the field on **Default (More info)**, and Home Assistant opens the dialog of the device. With the press left empty, **Default (More info)** leaves the press to do what it does by default.
 - With the press left empty, the action **Nothing** switches the press off. So it switches off the long press of the round tile, as the press choice **Nothing** does.
-- If you cleared a press in the form and its action is still set, the press runs that action. To go back to what the press does by default (the pop-up, for a tap), set the action to **Default**. Or set the press to **Open the pop-up**.
+- If you cleared a press in the form and its action is still set, the press runs that action. To go back to what the press does by default (the pop-up, for a tap), set the action to **Default (More info)**. Or set the press to **Open the pop-up**.
 - The card does nothing until it has found its timer, which takes a moment after the page loads.
 
 This round tile opens the dialog of the device on a long press, and starts or stops the timer on a tap. A double tap opens the pop-up:

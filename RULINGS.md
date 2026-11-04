@@ -5304,3 +5304,22 @@ now.
   - `finds the next midnight where the calendar skips a day`: Apia, 30 December 2011.
   - `finds the next midnight in the browser's zone when none is given`
   - `reads the zone the label is written in`
+
+## Release 1.3.1: the HACS catalog
+
+- **The manifest names the categories `helpers` and `plugs_switches`.** Home Assistant's
+  category guide puts a helper under Helpers first, and adds a real-world category only when
+  the helper is clearly about one. Timerify creates its own entities with no device behind
+  them, so Helpers comes first. Most of its targets are smart plugs, switches and relays (a
+  boiler, a grow light, a fan), and people who look for a timer for a switch browse Plugs &
+  switches, so it is the second. Climate is not listed: a thermostat is one target among
+  several, not what the integration is for. Hassfest checks the form and the count (one to
+  three, unique) and, in a core checkout, the names; both names are in the list of the
+  hassfest image of 2026-11-04. Cost if wrong: the catalog lists Timerify in a category where
+  fewer people look; changing the list is one line and a release.
+- **The `Validate` workflow runs on GitHub, with the owner's permission (2026-11-04).** The
+  pull request template of `hacs/default` asks for links to a passing HACS action and a
+  passing hassfest run in the repository itself; a local run cannot be linked. The workflow
+  gains `workflow_dispatch`, so a run can also be started by hand. The local gate stays the
+  merge gate (CLAUDE.md rule 4). Cost if wrong: none for the code; a red run on GitHub is
+  visible to visitors until the next green one.

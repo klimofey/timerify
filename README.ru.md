@@ -18,6 +18,8 @@
 
 Timerify добавляет отсчёт к объекту, который у вас уже есть, так же как Powercalc добавляет виртуальный датчик мощности к устройству. Котёл, который всего лишь умный выключатель, получает на странице своего устройства элемент «Включить на». Задайте 10 минут, и котёл включится, а когда время выйдет, сам выключится.
 
+![Вид «Капсула»: отсчёт 30:00, остаётся две трети заливки, и быстрая кнопка, а ниже выключенный таймер](https://raw.githubusercontent.com/klimofey/timerify/main/docs/screenshots/card-pill.png)
+
 ## Установка
 
 [![Open in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=klimofey&repository=timerify&category=integration)

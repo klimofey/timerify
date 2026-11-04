@@ -10,7 +10,9 @@ An hour from 1 to 12 said with no "am", "pm" or Russian word for the time of day
 nearer of its morning and evening times that is still ahead (the owner's decision of
 2026-11-02); the hour of 0 or from 13 to 23 is that of the 24-hour clock, and so is an
 hour written with a leading zero, "07:30" (the owner's decision of 2026-11-03). A part
-of the day still chooses the half.
+of the day picks which of the two times of an hour is meant, by the window of twelve
+hours it has, and a bare 12 with a day word is noon (the owner's decisions of
+2026-11-04).
 """
 
 import re
@@ -26,11 +28,7 @@ from homeassistant.helpers import intent
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from unicode_rbnf import RbnfEngine
 
-from custom_components.timerify.voice.commands import (
-    DayPart,
-    clock_moment,
-    hour_of_day,
-)
+from custom_components.timerify.voice.commands import WindowPart, clock_moment
 
 from ..conftest import FakeTarget, SetupTarget
 from ..helpers import (
@@ -261,7 +259,7 @@ async def test_turn_on_at_a_clock_time_keeps_a_command_for_then(
         ("tomorrow at 7", "07:00", 1),
         ("at 7 tomorrow", "07:00", 1),
         ("the day after tomorrow at 7", "07:00", 2),
-        ("tomorrow at 12:30", "00:30", 1),
+        ("tomorrow at 12:30", "12:30", 1),
         ("at seven thirty", "07:30", 0),
         ("at seven thirty pm", "19:30", 0),
     ],
@@ -362,7 +360,13 @@ async def test_the_time_it_is_now_means_tomorrow(
 
 
 @pytest.mark.parametrize(
-    ("now", "said"), [("20:00", "today at 7"), ("08:00", "today at 7 am")]
+    ("now", "said", "refused"),
+    [
+        ("20:00", "today at 7", "07:00"),
+        ("08:00", "today at 7 am", "07:00"),
+        ("13:00", "today at 12:30", "12:30"),
+        ("13:00", "today at 12", "12:00"),
+    ],
 )
 async def test_today_at_a_time_that_has_passed_is_refused(
     hass: HomeAssistant,
@@ -371,16 +375,18 @@ async def test_today_at_a_time_that_has_passed_is_refused(
     clock_boiler: MockConfigEntry,
     now: str,
     said: str,
+    refused: str,
 ) -> None:
     """ "Today" is today: the time that has passed is not moved to tomorrow, and nothing
     is kept. At eight in the evening both 7 in the morning and 7 in the evening have
-    passed; the morning one is named."""
+    passed; the morning one is named. A bare 12 names noon, and so does "today at 12:30"
+    said at 13:00, though 00:30 is a time of today too."""
     response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
 
     assert reached(response) == CLOCK, speech(response)
     assert refusal_of(response) == translated(
         "en", "exceptions", "command_in_past", "message"
-    ).format(at="07:00")
+    ).format(at=refused)
     assert state_of(hass, NEXT) == "unknown"
     assert fake_target.calls == []
 
@@ -826,7 +832,10 @@ async def test_a_part_of_the_day_wins_over_a_leading_zero(
     """The evening is the evening whether the hour is written "07" or "7": said at eight
     in the morning, "07:30 pm" and "07 in the evening" are tonight's, with every word
     that means the afternoon or the evening."""
-    words = spoken_values(language, "timerify_day_parts")["pm"]
+    parts = spoken_values(language, "timerify_day_parts")
+    words = [
+        word for part in ("pm", "afternoon", "evening") for word in parts.get(part, [])
+    ]
     assert words
 
     for word in words:
@@ -968,7 +977,7 @@ async def test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_neare
         ("tomorrow in the morning at 7", "18:00", 1, "07:00"),
     ],
 )
-async def test_a_part_of_the_day_said_in_words_names_the_half_it_means(
+async def test_a_part_of_the_day_said_in_words_picks_the_time_it_means(
     hass: HomeAssistant,
     freezer: FrozenDateTimeFactory,
     fake_target: FakeTarget,
@@ -978,7 +987,7 @@ async def test_a_part_of_the_day_said_in_words_names_the_half_it_means(
     day: int,
     clock: str,
 ) -> None:
-    """ "In the morning", "in the evening", "tomorrow morning" fix the half of the day
+    """ "In the morning", "in the evening", "tomorrow morning" pick the time of the hour
     as "am" and "pm" do: they are what a speaker whose "at 7" was read as the evening
     says to get the morning, and core's gazetteer turned the boiler on at once for
     them."""
@@ -1491,6 +1500,76 @@ async def test_a_temperature_is_read_beside_a_part_of_the_day_with_its_mark(
     assert fake_full_ac.call_data == []
 
 
+# --- The hour 12 and a part of the day (the owner's decisions, 2026-11-04) ---------
+
+
+@pytest.mark.parametrize(
+    ("now", "said", "days", "clock"),
+    [
+        ("06:00", "tomorrow morning at quarter to 12", 1, "11:45"),
+        ("06:00", "this morning at quarter to 12", 0, "11:45"),
+        ("06:00", "at quarter to 12 in the morning", 0, "11:45"),
+        ("20:45", "in the evening at quarter to 12", 0, "23:45"),
+        ("10:00", "this evening at quarter to 12", 0, "23:45"),
+        ("10:00", "this evening at 12", 1, "00:00"),
+        ("10:00", "this evening at half past 12", 1, "00:30"),
+        ("10:00", "this afternoon at quarter to 1", 0, "12:45"),
+        ("06:00", "at 11 in the afternoon", 0, "11:00"),
+    ],
+)
+async def test_a_part_of_the_day_picks_which_of_the_two_times(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    said: str,
+    days: int,
+    clock: str,
+) -> None:
+    """The time is worked out on the dial first, which gives two times twelve hours
+    apart, and the part of the day takes the one inside its hours. So the morning has no
+    23:45, "quarter to 12 in the morning" is 11:45, the evening runs past midnight and
+    "this evening at 12" is the midnight that ends today, and the afternoon starts at
+    11:00."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+    assert fake_target.calls == []
+
+
+@pytest.mark.parametrize(
+    ("now", "said", "days", "clock"),
+    [
+        ("06:00", "tomorrow at 12:30", 1, "12:30"),
+        ("06:00", "tomorrow at 12", 1, "12:00"),
+        ("06:00", "today at 12:30", 0, "12:30"),
+        ("06:00", "today at quarter to 12", 0, "11:45"),
+        ("13:00", "today at quarter to 12", 0, "23:45"),
+        ("13:00", "at 12:30", 1, "00:30"),
+        ("06:00", "tomorrow at 12 am", 1, "00:00"),
+    ],
+)
+async def test_a_bare_12_with_a_day_word_is_noon(
+    hass: HomeAssistant,
+    freezer: FrozenDateTimeFactory,
+    clock_boiler: MockConfigEntry,
+    now: str,
+    said: str,
+    days: int,
+    clock: str,
+) -> None:
+    """With a day word, 12 is noon and midnight only once noon has passed: "tomorrow at
+    12:30" is 12:30, and "today at quarter to 12" is 11:45, or 23:45 at 13:00. Without a
+    day word a bare 12 is still the nearer of its two times, and "12 am" is the start of
+    the day it names."""
+    response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
+
+    assert reached(response) == CLOCK, speech(response)
+    assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
+
+
 # --- Russian -----------------------------------------------------------------------
 
 
@@ -1623,7 +1702,8 @@ async def test_russian_minutes_said_with_their_word_may_be_one_digit(
     ("part", "hour", "days", "clock"),
     [
         ("am", 7, 0, "07:00"),
-        ("pm", 7, 0, "19:00"),
+        ("afternoon", 7, 0, "19:00"),
+        ("evening", 7, 0, "19:00"),
         ("night", 7, 0, "19:00"),
         ("night", 2, 1, "02:00"),
     ],
@@ -1657,10 +1737,10 @@ async def test_russian_day_parts_mean_the_hours_they_name(
 @pytest.mark.parametrize(
     ("part", "now", "days", "clock"),
     [
-        ("pm", "13:00", 1, "12:00"),
-        ("pm", "11:00", 0, "12:00"),
-        ("am", "13:00", 1, "00:00"),
-        ("am", "11:00", 1, "00:00"),
+        ("afternoon", "13:00", 1, "12:00"),
+        ("afternoon", "11:00", 0, "12:00"),
+        ("evening", "13:00", 1, "00:00"),
+        ("evening", "11:00", 1, "00:00"),
     ],
 )
 async def test_the_russian_words_for_noon_and_midnight_name_their_time(
@@ -1703,10 +1783,12 @@ async def test_the_russian_midnight_with_a_day_is_the_one_that_ends_the_day(
 ) -> None:
     """As in English: with the word for today, tomorrow or the day after, the word for
     midnight is the 00:00 that ends that day, whichever comes first in the sentence."""
-    midnight = re.escape(spoken_values("ru", "timerify_clock_words")["am"][0])
+    midnight = re.escape(spoken_values("ru", "timerify_clock_words")["evening"][0])
     word = re.escape(spoken_values("ru", "timerify_clock_days")[day][0])
     texts = {
-        "timerify_clock_words": spoken_values("ru", "timerify_clock_words")["am"][0],
+        "timerify_clock_words": spoken_values("ru", "timerify_clock_words")["evening"][
+            0
+        ],
         "timerify_clock_days": spoken_values("ru", "timerify_clock_days")[day][0],
     }
     pattern = rf"{word} \S+ {midnight}" if day_first else rf"\S+ {midnight} {word}"
@@ -2038,6 +2120,8 @@ async def test_a_time_that_is_none_is_not_understood(
         "turn on the boiler tonight at 12:30pm",
         "turn on the boiler this evening at 12 pm",
         "turn on the boiler at 12 pm tonight",
+        "turn on the boiler tonight at midnight",
+        "turn on the boiler tonight at quarter to midnight",
     ],
 )
 async def test_the_forms_left_out_of_a_part_of_the_day_are_not_understood(
@@ -2051,8 +2135,9 @@ async def test_the_forms_left_out_of_a_part_of_the_day_are_not_understood(
     half, so "tonight at 7 am" and "this morning at 7 pm" say two halves of the day,
     "night" has no mark to repeat it, and minutes past or to an hour take none after a
     part of the day. The evening and "tonight" take no 12 with a mark, since "tonight
-    at 12 pm" is meant for midnight and "pm" would plan noon. What is not a time reaches
-    no handler, and nothing is kept or switched."""
+    at 12 pm" is meant for midnight and "pm" would plan noon, and "tonight" takes no
+    "midnight" ("tonight at 12" says it). What is not a time reaches no handler, and
+    nothing is kept or switched."""
     response = await converse(hass, said)
 
     assert reached(response) is None, speech(response)
@@ -2148,10 +2233,20 @@ async def test_a_time_of_two_digit_minutes_is_kept_with_how_long_the_ac_runs(
         {},
         {"clock_day": 1},
         {"clock_part": "night"},
+        {"clock_part": "am"},
+        {"clock_part": "pm"},
         {"clock_minute": 30},
-        {"clock_part": "pm", "clock_minute": 30},
+        {"clock_part": "afternoon", "clock_minute": 30},
     ],
-    ids=["nothing", "a day only", "night", "minutes only", "noon with minutes"],
+    ids=[
+        "nothing",
+        "a day only",
+        "night",
+        "am",
+        "pm",
+        "minutes only",
+        "noon with minutes",
+    ],
 )
 async def test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understood(
     hass: HomeAssistant,
@@ -2159,10 +2254,11 @@ async def test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understoo
     clock_boiler: MockConfigEntry,
     slots: dict[str, object],
 ) -> None:
-    """Noon and midnight are a part of the day with no hour; no sentence makes any
-    other time without one. Slots that say it, from a caller that is not a sentence,
-    are refused as invalid, not read as the nearer of noon and midnight, and nothing is
-    kept or switched."""
+    """Noon (the afternoon) and midnight (the evening) are a part of the day with no
+    hour and no minutes after it; no sentence makes any other time without one. "Am" and
+    "pm" are marks of a time and name no noon or midnight alone. Slots that say it, from
+    a caller that is not a sentence, are refused as invalid, not read as the nearer of
+    noon and midnight, and nothing is kept or switched."""
     said = {"name": "Boiler", "action": "on", **slots}
 
     with pytest.raises(intent.InvalidSlotInfo):
@@ -2180,10 +2276,10 @@ async def test_a_time_with_no_hour_that_is_not_noon_or_midnight_is_not_understoo
 @pytest.mark.parametrize(
     ("slots", "day", "clock"),
     [
-        ({"clock_part": "pm"}, 1, "12:00"),
-        ({"clock_part": "am"}, 1, "00:00"),
-        ({"clock_part": "pm", "clock_day": 1}, 1, "12:00"),
-        ({"clock_part": "am", "clock_day": 0}, 1, "00:00"),
+        ({"clock_part": "afternoon"}, 1, "12:00"),
+        ({"clock_part": "evening"}, 1, "00:00"),
+        ({"clock_part": "afternoon", "clock_day": 1}, 1, "12:00"),
+        ({"clock_part": "evening", "clock_day": 0}, 1, "00:00"),
     ],
     ids=["noon", "midnight", "noon tomorrow", "midnight today"],
 )
@@ -2255,14 +2351,14 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
     ("slots", "days", "clock"),
     [
         ({"clock_hour": 8, "clock_before": 15}, 0, "07:45"),
-        ({"clock_part": "pm", "clock_before": 15}, 0, "11:45"),
-        ({"clock_part": "am", "clock_before": 15}, 0, "23:45"),
-        ({"clock_part": "am", "clock_before": 15, "clock_day": 0}, 0, "23:45"),
-        ({"clock_part": "am", "clock_before": 15, "clock_day": 1}, 1, "23:45"),
+        ({"clock_part": "afternoon", "clock_before": 15}, 0, "11:45"),
+        ({"clock_part": "evening", "clock_before": 15}, 0, "23:45"),
+        ({"clock_part": "evening", "clock_before": 15, "clock_day": 0}, 0, "23:45"),
+        ({"clock_part": "evening", "clock_before": 15, "clock_day": 1}, 1, "23:45"),
         (
             {"clock_hour": 12, "clock_part": "am", "clock_before": 15, "clock_day": 1},
             1,
-            "23:45",
+            "11:45",
         ),
         ({"clock_hour": 12, "clock_before": 15, "clock_day": 0}, 0, "11:45"),
         ({"clock_hour": 12, "clock_before": 15, "clock_day": 1}, 1, "11:45"),
@@ -2274,7 +2370,7 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
         "midnight",
         "midnight today",
         "midnight tomorrow",
-        "12 am tomorrow",
+        "quarter to 12 am tomorrow",
         "12 today",
         "12 tomorrow",
         "1 tomorrow",
@@ -2290,7 +2386,8 @@ async def test_minutes_before_come_with_an_hour_or_noon_or_midnight(
     """Minutes before an hour are said of a named hour, and of noon and midnight, which
     have no hour: "quarter to midnight" is 23:45, and "tomorrow at quarter to midnight"
     is the 23:45 that ends tomorrow. A day word names the day of the time, so "tomorrow
-    at quarter to 12" is 11:45 tomorrow and not the 23:45 of today."""
+    at quarter to 12" is 11:45 tomorrow and not the 23:45 of today, and so is "quarter
+    to 12 am", whose "am" picks the morning one."""
     await say_slots(hass, slots)
 
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
@@ -2457,23 +2554,37 @@ async def test_the_text_of_the_hour_tells_whether_it_was_written_with_a_zero(
 # --- The rules the handler reads ---------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("part", "table"),
-    [
-        ("am", {12: 0, 1: 1, 7: 7, 11: 11}),
-        ("pm", {12: 12, 1: 13, 7: 19, 11: 23}),
-        ("night", {12: 0, 1: 1, 5: 5, 6: 18, 7: 19, 11: 23}),
-        ("tonight", {12: 0, 1: 1, 5: 5, 6: 18, 7: 19, 11: 23}),
-        (None, {0: 0, 7: 7, 13: 13, 23: 23}),
-    ],
-)
-def test_the_hour_of_the_day_follows_the_part_it_is_said_with(
-    part: DayPart | None, table: dict[int, int]
+def hour_the_part_went_with(part: WindowPart, hour: int) -> int:
+    """The hour of the 24-hour clock that a whole `hour` said with `part` was when the
+    part went with the hour named: the morning has 12 as 0, the afternoon and the
+    evening add 12 but to 12, and the night is the small hours for 1 to 5 and the
+    evening for 6 to 11."""
+    if part == "am":
+        return hour % 12
+    if part == "night":
+        return hour % 12 + (12 if 6 <= hour < 12 else 0)
+    return hour % 12 + 12
+
+
+@pytest.mark.parametrize("part", ["am", "pm", "afternoon", "evening", "night"])
+@pytest.mark.parametrize("hour", range(1, 13))
+def test_a_whole_hour_with_a_part_keeps_its_time_but_for_11_and_12(
+    part: WindowPart, hour: int
 ) -> None:
-    """The morning is the hour as it is but for 12, which is 0; the afternoon and the
-    evening add 12 but to 12, which stays; the night is the small hours for 1 to 5 and
-    the evening for 6 to 11, and so is "tonight"."""
-    assert {hour: hour_of_day(hour, part) for hour in table} == table
+    """Said with no day word at six in the morning, a whole hour is the hour it was when
+    a part went with the hour named. Only two differ, because of where the windows
+    start: the afternoon starts at 11:00, so "11 in the afternoon" is 11:00 and not
+    23:00, and the evening ends at 01:00, so "12 in the evening" is 00:00 and not
+    noon."""
+    expected = {("afternoon", 11): 11, ("evening", 12): 0}.get(
+        (part, hour), hour_the_part_went_with(part, hour)
+    )
+
+    moment = clock_moment(
+        local(SUNDAY, "06:00"), ZoneInfo(JERUSALEM), hour, 0, part, None
+    )
+
+    assert moment.astimezone(ZoneInfo(JERUSALEM)).hour == expected
 
 
 @pytest.mark.parametrize(
@@ -2496,11 +2607,11 @@ def test_the_hour_of_the_day_follows_the_part_it_is_said_with(
     ],
 )
 def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
-    now: str, hour: int, part: DayPart | None, zero: bool, days: int, clock: str
+    now: str, hour: int, part: WindowPart | None, zero: bool, days: int, clock: str
 ) -> None:
     """The nearer of two times is for an hour from 1 to 12 with no part and no zero. A
     zero fixes the hour as it is, so 12 is noon and not the nearer of noon and midnight,
-    and a part of the day still chooses the half."""
+    and a part of the day still picks the time."""
     moment = clock_moment(
         local(SUNDAY, now),
         ZoneInfo(JERUSALEM),
@@ -2521,7 +2632,7 @@ def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
         ("19:50", 8, None, None, 15, 1, "07:45"),
         ("06:00", 12, None, None, 15, 0, "11:45"),
         ("12:00", 12, None, None, 15, 0, "23:45"),
-        ("23:50", 12, "am", None, 15, 1, "23:45"),
+        ("23:50", 12, "evening", None, 15, 1, "23:45"),
         ("08:00", 8, "pm", None, 15, 0, "19:45"),
         ("06:00", 1, "night", None, 10, 1, "00:50"),
         ("06:00", 8, None, 1, 15, 1, "07:45"),
@@ -2532,7 +2643,7 @@ def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
         "to 12 is the nearer of 11:45 and 23:45",
         "to 12 at noon is tonight's",
         "to midnight after 23:45 needs the third day",
-        "pm names the hour",
+        "pm picks the evening one",
         "ten to one at night is in the small hours",
         "a day word",
     ],
@@ -2540,14 +2651,14 @@ def test_an_hour_written_with_a_zero_is_one_time_of_the_24_hour_clock(
 def test_minutes_before_an_hour_are_taken_off_on_the_wall_clock(
     now: str,
     hour: int,
-    part: DayPart | None,
+    part: WindowPart | None,
     day: int | None,
     before: int,
     days: int,
     clock: str,
 ) -> None:
-    """The hour is read first, with its part and its day, and the minutes come off it on
-    the wall clock, so "quarter to 8" is 07:45 or 19:45, whichever is ahead, "quarter to
+    """The minutes come off the dial on the wall clock, and the part and the day pick
+    the time, so "quarter to 8" is 07:45 or 19:45, whichever is ahead, "quarter to
     midnight" is 23:45 and "ten to 1 at night" is 00:50."""
     moment = clock_moment(
         local(SUNDAY, now), ZoneInfo(JERUSALEM), hour, 0, part, day, before=before
@@ -2577,21 +2688,22 @@ def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
 
 
 @pytest.mark.parametrize(
-    ("now", "hour", "part", "day", "night_after", "before", "days", "clock"),
+    ("now", "hour", "part", "day", "before", "days", "clock"),
     [
-        ("06:00", 12, None, 1, False, 15, 1, "11:45"),
-        ("06:00", 12, None, 0, False, 15, 0, "11:45"),
-        ("06:00", 1, None, 1, False, 15, 1, "00:45"),
-        ("06:00", 12, "am", 1, True, 15, 1, "23:45"),
-        ("06:00", 12, "am", 0, True, 15, 0, "23:45"),
-        ("06:00", 12, "night", 1, True, 15, 1, "23:45"),
-        ("06:00", 1, "night", 1, True, 10, 2, "00:50"),
-        ("00:20", 1, "night", 0, True, 10, 0, "00:50"),
-        ("01:00", 1, "night", 0, True, 10, 1, "00:50"),
-        ("13:00", 12, None, 0, False, 15, 0, "23:45"),
-        ("06:00", 12, "am", 1, False, 15, 1, "23:45"),
-        ("06:00", 12, "am", 0, False, 15, 0, "23:45"),
-        ("06:00", 0, None, 1, False, 15, 1, "23:45"),
+        ("06:00", 12, None, 1, 15, 1, "11:45"),
+        ("06:00", 12, None, 0, 15, 0, "11:45"),
+        ("06:00", 1, None, 1, 15, 1, "00:45"),
+        ("06:00", 12, "evening", 1, 15, 1, "23:45"),
+        ("06:00", 12, "evening", 0, 15, 0, "23:45"),
+        ("06:00", 12, "night", 1, 15, 1, "23:45"),
+        ("06:00", 1, "night", 1, 10, 2, "00:50"),
+        ("00:20", 1, "night", 0, 10, 0, "00:50"),
+        ("01:00", 1, "night", 0, 10, 1, "00:50"),
+        ("13:00", 12, None, 0, 15, 0, "23:45"),
+        ("06:00", 12, "am", 1, 15, 1, "11:45"),
+        ("06:00", 12, "am", 0, 15, 0, "11:45"),
+        ("13:00", 12, "am", 0, 15, 0, "11:45"),
+        ("06:00", 0, None, 1, 15, 1, "23:45"),
     ],
     ids=[
         "tomorrow at quarter to 12",
@@ -2606,15 +2718,15 @@ def test_minutes_before_an_hour_the_clock_skips_happen_later_by_the_gap(
         "today at quarter to 12, said after 11:45",
         "tomorrow at quarter to 12 am",
         "today at quarter to 12 am",
+        "today at quarter to 12 am, said after 11:45",
         "tomorrow at quarter to the hour 0",
     ],
 )
 def test_minutes_before_an_hour_stay_on_the_day_said(
     now: str,
     hour: int,
-    part: DayPart | None,
+    part: WindowPart | None,
     day: int,
-    night_after: bool,
     before: int,
     days: int,
     clock: str,
@@ -2622,9 +2734,9 @@ def test_minutes_before_an_hour_stay_on_the_day_said(
     """A day word names the day of the time said, so the minutes before an hour do not
     take it to the day before: "tomorrow at quarter to 12" is 11:45 tomorrow and not the
     23:45 before tomorrow's start. The midnight that ends the day is on the day it
-    ends, so the same words are 23:45 tomorrow once 11:45 has passed or with "am", as
-    "tomorrow at quarter to midnight" is, and the night after the day is read as it is
-    without the minutes."""
+    ends, so the same words are 23:45 tomorrow once 11:45 has passed, as "tomorrow at
+    quarter to midnight" is. With "am" they are 11:45 of the morning, and a morning
+    that has passed is named and not moved: the controller refuses it."""
     moment = clock_moment(
         local(SUNDAY, now),
         ZoneInfo(JERUSALEM),
@@ -2633,45 +2745,51 @@ def test_minutes_before_an_hour_stay_on_the_day_said(
         part,
         day,
         before=before,
-        night_after=night_after,
     )
 
     assert moment == local(SUNDAY + timedelta(days=days), clock)
 
 
 @pytest.mark.parametrize(
-    ("hour", "part", "zero", "night_after"),
-    [(hour, None, True, False) for hour in range(24)]
-    + [(hour, None, False, False) for hour in range(1, 13)]
-    + [(12, "am", False, True)]
-    + [(hour, "night", False, True) for hour in (12, 1, 2, 3, 4, 5)],
+    ("hour", "part", "zero"),
+    [(hour, None, True) for hour in range(24)]
+    + [(hour, None, False) for hour in range(1, 13)]
+    + [
+        (hour, part, False)
+        for part in ("am", "pm", "afternoon", "evening", "night")
+        for hour in range(1, 13)
+    ],
 )
-def test_a_time_with_a_day_word_and_minutes_before_is_always_on_the_day_named(
-    hour: int, part: DayPart | None, zero: bool, night_after: bool
+def test_a_time_with_a_day_word_is_always_on_the_day_named(
+    hour: int, part: WindowPart | None, zero: bool
 ) -> None:
-    """Of the dates an hour is read on, the minutes before put one on the named day (the
-    night after it may also end on the day after), so a day word never leaves a time
-    without a moment: "tomorrow at quarter to 12 am" is not a case that is refused."""
+    """A window lasts twelve hours, so a part of the day always leaves exactly one time,
+    and of the two dates an hour with no part is read on, the minutes before put one on
+    the named day: a day word never leaves a time without a moment, and
+    "tomorrow at quarter to 12 am" is not a case that is refused. The evening and the
+    night run past midnight, so their time may be on the date after the named day. A
+    time that has passed is on the named day too, whenever it is said."""
     zone = ZoneInfo(JERUSALEM)
-    for day in (0, 1, 2):
-        for before in (0, 1, 15, 30, 59):
-            moment = clock_moment(
-                local(SUNDAY, "06:00"),
-                zone,
-                hour,
-                0,
-                part,
-                day,
-                zero=zero,
-                before=before,
-                night_after=night_after,
-            )
+    after = int(part in ("evening", "night"))
+    for now in ("00:30", "06:00", "13:00", "23:30"):
+        for day in (0, 1, 2):
+            for before in (0, 1, 15, 30, 59):
+                moment = clock_moment(
+                    local(SUNDAY, now),
+                    zone,
+                    hour,
+                    0,
+                    part,
+                    day,
+                    zero=zero,
+                    before=before,
+                )
 
-            named = SUNDAY + timedelta(days=day)
-            assert moment.astimezone(zone).date() in (
-                named,
-                named + timedelta(days=int(night_after)),
-            ), (day, before)
+                named = SUNDAY + timedelta(days=day)
+                assert moment.astimezone(zone).date() in (
+                    named,
+                    named + timedelta(days=after),
+                ), (now, day, before)
 
 
 def spoken(language: str, rule: str, texts: dict[str, str] | None = None) -> set[str]:

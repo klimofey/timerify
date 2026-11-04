@@ -433,14 +433,22 @@ lists:
     values:
       - in: "[a] quarter"
         out: 15
-  # Which half of the day an hour of the 12-hour clock is in, said after the time. The
-  # night is the small hours for 1 to 5 and the evening for 6 to 11.
+  # Which part of the day an hour of the 12-hour clock is in, said after the time. The
+  # part picks which of the two times the hour means: its window of twelve hours holds
+  # exactly one (clock_moment). Am and pm are the halves of the clock, from 00:00 and from
+  # 12:00. The afternoon runs from 11:00 and the evening from 13:00 to 01:00, so "at 11 in
+  # the afternoon" is 11:00 and "at 12 in the evening" is midnight. The night runs from
+  # 18:00 to 06:00.
   timerify_day_parts:
     values:
       - in: "(am|a.m.|in the morning)"
         out: am
-      - in: "(pm|p.m.|in the afternoon|in the evening)"
+      - in: "(pm|p.m.)"
         out: pm
+      - in: "in the afternoon"
+        out: afternoon
+      - in: "in the evening"
+        out: evening
       - in: "at night"
         out: night
   # "Am" and "pm" written right after the minutes, with no space: "7:30am". Only these two
@@ -476,20 +484,23 @@ lists:
     values:
       - in: "morning"
         out: am
-      - in: "(afternoon|evening)"
-        out: pm
+      - in: "afternoon"
+        out: afternoon
+      - in: "evening"
+        out: evening
       - in: "night"
         out: night
   # The times that are said in a word, which name their hour as well as their part of the
-  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
-  # which the handler then takes to be 12, so that "at noon" is not the bare 12 of "at 12",
-  # which is the nearer of noon and midnight.
+  # day: noon is 12 in the afternoon and midnight is 12 in the evening, the 00:00 that
+  # ends it. They fill the part and leave out the hour, which the handler then takes to be
+  # 12, so that "at noon" is not the bare 12 of "at 12", which is the nearer of noon and
+  # midnight.
   timerify_clock_words:
     values:
       - in: "noon"
-        out: pm
+        out: afternoon
       - in: "midnight"
-        out: am
+        out: evening
   # The day a time is said for, in days from today.
   timerify_clock_days:
     values:

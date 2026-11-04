@@ -321,24 +321,28 @@ lists:
     values:
     - in: утра
       out: am
-    - in: (дня|вечера)
-      out: pm
+    - in: дня
+      out: afternoon
+    - in: вечера
+      out: evening
     - in: ночи
       out: night
   timerify_clock_part_words:
     values:
     - in: утром
       out: am
-    - in: (днём|днем|вечером)
-      out: pm
+    - in: (днём|днем)
+      out: afternoon
+    - in: вечером
+      out: evening
     - in: ночью
       out: night
   timerify_clock_words:
     values:
     - in: полдень
-      out: pm
+      out: afternoon
     - in: полночь
-      out: am
+      out: evening
   timerify_clock_days:
     values:
     - in: сегодня

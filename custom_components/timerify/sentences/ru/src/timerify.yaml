@@ -148,10 +148,10 @@ expansion_rules:
   timerify_clock_time: "(в ({timerify_clock_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_clock_hours:clock_hour}.<timerify_clock_minute>|{timerify_clock_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_clock_hours:clock_hour}|{timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute> {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]] {timerify_day_parts:clock_part}|{timerify_half_day_hours:clock_hour} {timerify_day_parts:clock_part}|{timerify_clock_words:clock_part})|[в] <timerify_clock_into> [{timerify_day_parts:clock_part}]|<timerify_clock_before> [{timerify_day_parts:clock_part}])"
 # A part of the day said before the time as an adverb, with a day word or without one
 # ("завтра утром в 7", "вечером в 9", "ночью в 2"). The hour is one of the 12-hour clock,
-# and the adverb chooses its half as the genitive after the time does ("в 9 вечера"), so
-# the hour comes from timerify_half_day_hours alone. The minutes counted to an hour
-# (timerify_clock_into, timerify_clock_before) take the part of the day as they do after
-# the time: it goes with the hour they are counted from.
+# and the adverb picks which of its two times is meant as the genitive after the time
+# does ("в 9 вечера"), so the hour comes from timerify_half_day_hours alone. The minutes
+# counted to an hour (timerify_clock_into, timerify_clock_before) take the part of the
+# day as they do after the time: it picks which of the two times the minutes make.
   timerify_clock_part_of_day: "[<timerify_clock_day>] {timerify_clock_part_words:clock_part} <timerify_clock_part_time>"
   timerify_clock_part_time: "(в ({timerify_half_day_hours:clock_hour}(:| )<timerify_clock_minute>|{timerify_half_day_hours:clock_hour}.<timerify_clock_minute>|{timerify_half_day_hours:clock_hour} час[а|ов] [{timerify_clock_minutes:clock_minute} минут[у|ы]]|{timerify_half_day_hours:clock_hour})|[в] <timerify_clock_into>|<timerify_clock_before>)"
 # Minutes counted to the next hour, the way Russian says them: "в половине восьмого" is
@@ -159,10 +159,9 @@ expansion_rules:
 # counted to (timerify_clock_hour_ordinals) and fills clock_ordinal, which the handler
 # turns into the hour before it. "Без" counts the minutes short of an hour, in
 # clock_before, and the hour after it is a cardinal ("без четверти восемь", "без пяти
-# час"). A word for the part of the day goes with the hour that the minutes are counted
-# from: with an ordinal that is the hour before it, so "в половине первого ночи" is 00:30
-# (the 12 of the night) and "в половине двенадцатого утра" is 11:30; after "без" it is the
-# hour named, so "без четверти двенадцать ночи" is 23:45.
+# час"). A word for the part of the day picks which of the two times the minutes make:
+# "в половине первого ночи" is 00:30, "в половине двенадцатого дня" is 11:30, "без
+# четверти двенадцать утра" is 11:45 and "без четверти двенадцать ночи" is 23:45.
   timerify_clock_into: "({timerify_minutes_of_hour:clock_minute} минут[а|у|ы] <timerify_clock_ordinal>|{timerify_clock_fractions:clock_minute}[ ]<timerify_clock_ordinal>)"
   timerify_clock_ordinal: "{timerify_clock_hour_ordinals:clock_ordinal}"
   timerify_clock_before: "без ({timerify_minutes_of_hour:clock_before} [минут[ы]]|{timerify_clock_fractions_before:clock_before}) ({timerify_half_day_hours:clock_hour}|{timerify_clock_hour_one:clock_hour})"
@@ -421,15 +420,19 @@ lists:
     values:
       - in: "час"
         out: 1
-  # Which half of the day an hour of the 12-hour clock is in: the morning, the afternoon
-  # and the evening (the last two are one half), and the night, which is the small hours
-  # for 1 to 5 and the evening for 6 to 11.
+  # Which part of the day an hour of the 12-hour clock is in. The part picks which of the
+  # two times the hour means: its window of twelve hours holds exactly one (clock_moment).
+  # The morning runs from 00:00 to 12:00, the afternoon from 11:00 to 23:00, the evening
+  # from 13:00 to 01:00 and the night from 18:00 to 06:00. So "в 11 дня" is 11:00, "в 12
+  # вечера" is midnight and "без четверти двенадцать утра" is 11:45.
   timerify_day_parts:
     values:
       - in: "утра"
         out: am
-      - in: "(дня|вечера)"
-        out: pm
+      - in: "дня"
+        out: afternoon
+      - in: "вечера"
+        out: evening
       - in: "ночи"
         out: night
   # The same parts as adverbs that go before the time: "завтра утром в 7". The afternoon
@@ -438,20 +441,23 @@ lists:
     values:
       - in: "утром"
         out: am
-      - in: "(днём|днем|вечером)"
-        out: pm
+      - in: "(днём|днем)"
+        out: afternoon
+      - in: "вечером"
+        out: evening
       - in: "ночью"
         out: night
   # The times that are said in a word, which name their hour as well as their part of the
-  # day: noon is 12 pm and midnight is 12 am. They fill the part and leave out the hour,
-  # which the handler then takes to be 12, so that "в полдень" is not the bare 12 of "в 12",
-  # which is the nearer of noon and midnight.
+  # day: noon is 12 in the afternoon and midnight is 12 in the evening, the 00:00 that
+  # ends it. They fill the part and leave out the hour, which the handler then takes to
+  # be 12, so that "в полдень" is not the bare 12 of "в 12", which is the nearer of noon
+  # and midnight.
   timerify_clock_words:
     values:
       - in: "полдень"
-        out: pm
+        out: afternoon
       - in: "полночь"
-        out: am
+        out: evening
   # The day a time is said for, in days from today.
   timerify_clock_days:
     values:

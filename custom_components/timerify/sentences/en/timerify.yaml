@@ -322,8 +322,12 @@ lists:
     values:
     - in: (am|a.m.|in the morning)
       out: am
-    - in: (pm|p.m.|in the afternoon|in the evening)
+    - in: (pm|p.m.)
       out: pm
+    - in: in the afternoon
+      out: afternoon
+    - in: in the evening
+      out: evening
     - in: at night
       out: night
   timerify_clock_day_marks:
@@ -352,16 +356,18 @@ lists:
     values:
     - in: morning
       out: am
-    - in: (afternoon|evening)
-      out: pm
+    - in: afternoon
+      out: afternoon
+    - in: evening
+      out: evening
     - in: night
       out: night
   timerify_clock_words:
     values:
     - in: noon
-      out: pm
+      out: afternoon
     - in: midnight
-      out: am
+      out: evening
   timerify_clock_days:
     values:
     - in: today

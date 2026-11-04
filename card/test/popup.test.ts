@@ -250,7 +250,25 @@ describe("the presets", () => {
     const { root } = await opened(endingAt(boilerHass(), 90), { entity: NUMBER, presets: [120, 240] });
 
     expect(presetsOf(root)).toEqual([]);
-    expect(textIn(root.querySelector(".above-maximum"))).toMatch(/maximum of 1 hr 30 min\.$/);
+    expect(textIn(root.querySelector(".above-maximum"))).toBe(
+      english.card_presets_above_maximum.replace("{maximum}", "1 hr 30 min"),
+    );
+  });
+
+  it("says why it shows no presets while the timer is unavailable, and offers nothing to press", async () => {
+    // Home Assistant keeps the capability attributes of a number, `max` among them, while it is
+    // unavailable.
+    const number = boilerHass().states[NUMBER] as HassEntity;
+    const hass = boilerHass().state(NUMBER, "unavailable", { ...number.attributes, max: 10 });
+    const { root } = await opened(hass);
+
+    expect(presetsOf(root)).toEqual([]);
+    expect(textIn(root.querySelector(".above-maximum"))).toBe(
+      english.card_presets_above_maximum.replace("{maximum}", "10 min"),
+    );
+    for (const name of ["Add 5 min", "Take off 5 min", "Stop"]) {
+      expect(isDisabled(control(root, name)), `"${name}" is off`).toBe(true);
+    }
   });
 
   it("the presets follow a maximum that changes", async () => {

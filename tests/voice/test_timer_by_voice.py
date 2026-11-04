@@ -563,45 +563,52 @@ async def test_a_thermostat_that_no_mode_is_listed_for_is_still_run_for_a_time(
     assert off_only.call_data == [("turn_on", {})]
 
 
+RUSSIAN_HVAC_WORDS = [
+    pytest.param(mode, word, id=f"{mode}-{number}")
+    for mode, words in spoken_values("ru", LIST_HVAC_MODE).items()
+    for number, word in enumerate(words, start=1)
+]
+"""Every way the shipped Russian sentences say an HVAC mode, with the mode it means, one
+case for each. A case is named by its mode and the place of the word in the list, so
+that no Cyrillic is in a test id."""
+
+
 @pytest.mark.usefixtures("assist")
+@pytest.mark.parametrize(("mode", "word"), RUSSIAN_HVAC_WORDS)
 async def test_russian_hvac_words_are_scoped_per_ac(
     hass: HomeAssistant,
     fake_full_ac: FakeTarget,
     fake_small_ac: FakeTarget,
     setup_target: SetupTarget,
+    mode: str,
+    word: str,
 ) -> None:
-    """Every Russian word for an HVAC mode, said of the small AC, arrives as the mode it
+    """A Russian word for an HVAC mode, said of the small AC, arrives as the mode it
     means when the small AC has it, and as no HVAC mode otherwise: it is never told to
     take a mode it lacks, and the AC that has the mode is never turned on instead. (The
     word for an automatic fan is also one for the mode `auto`, and is the fan's.)"""
     await with_voice_settings(hass, setup_target, fake_full_ac, fake_small_ac)
-    numbers = {"timerify_minutes": 30}
     own_modes = {"cool", "fan_only"}
+    texts = samples(
+        "ru",
+        RUN,
+        names=("Small AC",),
+        numbers={"timerify_minutes": 30},
+        texts={"timerify_hvac_mode": word},
+        absent=("timerify_mode",),
+        requiring="climate",
+    )
+    text = next(text for text in texts if word in text)
+    fake_small_ac.call_data.clear()
 
-    for mode, words in spoken_values("ru", LIST_HVAC_MODE).items():
-        for word in words:
-            texts = samples(
-                "ru",
-                RUN,
-                names=("Small AC",),
-                numbers=numbers,
-                texts={"timerify_hvac_mode": word},
-                absent=("timerify_mode",),
-                requiring="climate",
-            )
-            text = next(text for text in texts if word in text)
-            fake_small_ac.call_data.clear()
+    response = await converse(hass, text, language="ru")
 
-            response = await converse(hass, text, language="ru")
-
-            slots = {} if response.intent is None else response.intent.slots
-            assert ("hvac_mode" in slots) == (mode in own_modes), text
-            assert [
-                data
-                for service, data in fake_small_ac.call_data
-                if service == "set_hvac_mode"
-            ] == ([{"hvac_mode": mode}] if mode in own_modes else []), text
-            assert fake_full_ac.calls == [], text
+    slots = {} if response.intent is None else response.intent.slots
+    assert ("hvac_mode" in slots) == (mode in own_modes), text
+    assert [
+        data for service, data in fake_small_ac.call_data if service == "set_hvac_mode"
+    ] == ([{"hvac_mode": mode}] if mode in own_modes else []), text
+    assert fake_full_ac.calls == [], text
 
 
 @pytest.mark.usefixtures("assist")

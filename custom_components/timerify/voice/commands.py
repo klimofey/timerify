@@ -266,22 +266,31 @@ def _moments_on_dates(
     today = now.astimezone(zone).date()
     bare = not zero and 1 <= hour <= _HALF_DAY
     hours = (hour % _HALF_DAY, hour % _HALF_DAY + _HALF_DAY) if bare else (hour,)
-    if bare and hour == _HALF_DAY and day is not None:
-        hours = (_HALF_DAY, 0)
+    noon_first = bare and hour == _HALF_DAY and day is not None
     dates_ahead = (0, 1, 2) if day is None else (day, day + 1)
     walls = (
-        datetime.combine(today + timedelta(days=ahead), time(h, minute))
-        - timedelta(minutes=before)
+        (
+            h,
+            datetime.combine(today + timedelta(days=ahead), time(h, minute))
+            - timedelta(minutes=before),
+        )
         for h in hours
         for ahead in dates_ahead
     )
-    moments = [
-        moment
-        for wall in walls
+    readings = [
+        (h, moment)
+        for h, wall in walls
         if day is None or (wall.date() - today).days == day
         for moment in wall_moments(wall.date(), wall.time(), zone)
     ]
-    return sorted(moments) if day is None else moments
+
+    def preference(reading: tuple[int, datetime]) -> tuple[bool, datetime]:
+        """The midnight reading after the others when noon is preferred, and then the
+        earliest moment."""
+        read_as, moment = reading
+        return (noon_first and read_as == 0, moment)
+
+    return [moment for _, moment in sorted(readings, key=preference)]
 
 
 def clock_moment(

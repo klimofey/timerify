@@ -3002,11 +3002,12 @@ in `docs/followups.md`.
     the day got hours of their own.) The first design had the words fill `clock_hour` with
     12 and 0; but "noon" said at 13:00 then came out as a bare 12, which is the nearer of
     noon and midnight, and so it meant midnight. So `clock_hour` is optional in the slot
-    schema and the words are lists of parts. A bare "at 12" stays the nearer of the two. A
-    missing hour is valid for nothing else: the handler raises `probatio.Invalid`, which
-    the agents answer as not understood (`InvalidSlotInfo`), for slots with no hour and a
-    part that is not `afternoon` or `evening`, for minutes without an hour, and for no
-    time at all, instead of reading them as the nearer of noon and midnight. Cost if wrong:
+    schema and the words are lists of parts. A bare "at 12" with no day word stays the
+    nearer of the two (with a day word it is noon). A missing hour is valid for nothing
+    else: the handler raises `probatio.Invalid`, which the agents answer as not understood
+    (`InvalidSlotInfo`), for slots with no hour and a part that is not `afternoon` or
+    `evening`, for minutes without an hour, and for no time at all, instead of reading them
+    as the nearer of noon and midnight. Cost if wrong:
     none; this is a correction of the interface the plan described, found by the tests
     `test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_nearer` and
     `test_the_russian_words_for_noon_and_midnight_name_their_time`.

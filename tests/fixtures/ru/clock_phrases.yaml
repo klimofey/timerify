@@ -340,6 +340,12 @@
   days: 1
   clock: "00:00"
 
+- name: twelve in the evening is the midnight that ends it
+  said: "в 12 вечера"
+  now: "10:00"
+  days: 1
+  clock: "00:00"
+
 - name: tomorrow at twelve is noon
   said: "завтра в 12"
   now: "06:00"

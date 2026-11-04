@@ -451,7 +451,7 @@ lists:
   # day: noon is 12 in the afternoon and midnight is 12 in the evening, the 00:00 that
   # ends it. They fill the part and leave out the hour, which the handler then takes to
   # be 12, so that "в полдень" is not the bare 12 of "в 12", which is the nearer of noon
-  # and midnight.
+  # and midnight when no day word is said, and noon when one is.
   timerify_clock_words:
     values:
       - in: "полдень"

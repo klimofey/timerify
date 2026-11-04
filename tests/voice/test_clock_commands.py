@@ -942,7 +942,9 @@ async def test_noon_and_midnight_are_the_times_they_name_and_twelve_is_the_neare
     clock: str,
 ) -> None:
     """The words name their time whenever they are said: "at noon" is never midnight.
-    The bare "at 12" is a bare hour like the others, so it is the nearer of the two."""
+    With no day word the bare "at 12" is a bare hour like the others, so it is the
+    nearer of the two. With a day word it is noon, and that test is
+    `test_a_bare_12_with_a_day_word_is_noon`."""
     response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
 
     assert reached(response) == CLOCK, speech(response)
@@ -1515,6 +1517,9 @@ async def test_a_temperature_is_read_beside_a_part_of_the_day_with_its_mark(
         ("10:00", "this evening at half past 12", 1, "00:30"),
         ("10:00", "this afternoon at quarter to 1", 0, "12:45"),
         ("06:00", "at 11 in the afternoon", 0, "11:00"),
+        ("06:00", "at quarter to 12 pm", 0, "23:45"),
+        ("10:00", "at quarter to 1 in the evening", 1, "00:45"),
+        ("10:00", "at quarter to 6 at night", 1, "05:45"),
     ],
 )
 async def test_a_part_of_the_day_picks_which_of_the_two_times(
@@ -1531,7 +1536,9 @@ async def test_a_part_of_the_day_picks_which_of_the_two_times(
     apart, and the part of the day takes the one inside its hours. So the morning has no
     23:45, "quarter to 12 in the morning" is 11:45, the evening runs past midnight and
     "this evening at 12" is the midnight that ends today, and the afternoon starts at
-    11:00."""
+    11:00. The pm is the half from noon, so "quarter to 12 pm" is 23:45. The evening
+    ends at 01:00 and the night at 06:00 of the next date, so "quarter to 1 in the
+    evening" is 00:45 and "quarter to 6 at night" is 05:45 of the next morning."""
     response = await say_at(hass, freezer, SUNDAY, now, f"turn on the boiler {said}")
 
     assert reached(response) == CLOCK, speech(response)
@@ -1573,12 +1580,11 @@ async def test_a_bare_12_with_a_day_word_is_noon(
 # --- Russian -----------------------------------------------------------------------
 
 
-async def test_russian_clock_forms_reach_the_clock_handler(
+async def test_russian_sampled_clock_sentences_reach_the_clock_handler(
     hass: HomeAssistant, fake_target: FakeTarget, clock_boiler: MockConfigEntry
 ) -> None:
     """Every sentence the shipped files can say a clock time with, in Russian, reaches
-    the handler: the sampled sentences, and each way of saying the time after a
-    command."""
+    the handler: the sampled sentences."""
     sentences = samples(
         "ru",
         CLOCK,
@@ -1588,11 +1594,7 @@ async def test_russian_clock_forms_reach_the_clock_handler(
         absent=SETTING_LISTS,
         admitting="switch",
     )
-    sentences += [
-        turn_on_at("ru", form)
-        for form in spoken_rule("ru", "timerify_clock", NUMBERS, MINUTES)
-    ]
-    assert len(sentences) > 100
+    assert len(sentences) > 10
 
     for text in sentences:
         response = await converse(hass, text, "ru")
@@ -1602,10 +1604,38 @@ async def test_russian_clock_forms_reach_the_clock_handler(
     assert fake_target.calls == []
 
 
-async def test_english_clock_forms_reach_the_clock_handler(
+RUSSIAN_CLOCK_FORMS = list(
+    dict.fromkeys(spoken_rule("ru", "timerify_clock", NUMBERS, MINUTES))
+)
+"""Each way the shipped sentences say a time in Russian, once. There are hundreds, so
+each is a case of its own and the cases can run on different workers. A case is named by
+its place in the list, so that no Cyrillic is in a test id."""
+
+
+@pytest.mark.parametrize(
+    "form",
+    RUSSIAN_CLOCK_FORMS,
+    ids=[f"form-{number:03d}" for number in range(1, len(RUSSIAN_CLOCK_FORMS) + 1)],
+)
+async def test_russian_clock_forms_reach_the_clock_handler(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    form: str,
+) -> None:
+    """Each way of saying the time in Russian after a command reaches the handler."""
+    text = turn_on_at("ru", form)
+
+    response = await converse(hass, text, "ru")
+
+    assert reached(response) == CLOCK, text
+    assert fake_target.calls == []
+
+
+async def test_english_sampled_clock_sentences_reach_the_clock_handler(
     hass: HomeAssistant, fake_target: FakeTarget, clock_boiler: MockConfigEntry
 ) -> None:
-    """The same of English: every sentence sampled, and each form of the time."""
+    """The same of English: every sentence sampled."""
     sentences = samples(
         "en",
         CLOCK,
@@ -1615,17 +1645,36 @@ async def test_english_clock_forms_reach_the_clock_handler(
         absent=SETTING_LISTS,
         admitting="switch",
     )
-    sentences += [
-        turn_on_at("en", form)
-        for form in spoken_rule("en", "timerify_clock", NUMBERS, MINUTES)
-    ]
-    assert len(sentences) > 40
+    assert len(sentences) > 10
 
     for text in sentences:
         response = await converse(hass, text, "en")
 
         assert reached(response) == CLOCK, text
         await cancel_pending(hass, NUMBER, NEXT)
+    assert fake_target.calls == []
+
+
+ENGLISH_CLOCK_FORMS = list(
+    dict.fromkeys(spoken_rule("en", "timerify_clock", NUMBERS, MINUTES))
+)
+"""Each way the shipped sentences say a time in English, once. There are hundreds, so
+each is a case of its own and the cases can run on different workers."""
+
+
+@pytest.mark.parametrize("form", ENGLISH_CLOCK_FORMS, ids=ENGLISH_CLOCK_FORMS)
+async def test_english_clock_forms_reach_the_clock_handler(
+    hass: HomeAssistant,
+    fake_target: FakeTarget,
+    clock_boiler: MockConfigEntry,
+    form: str,
+) -> None:
+    """The same of English: each form of the time, said after a command."""
+    text = turn_on_at("en", form)
+
+    response = await converse(hass, text, "en")
+
+    assert reached(response) == CLOCK, text
     assert fake_target.calls == []
 
 
@@ -2340,8 +2389,8 @@ async def test_an_ordinal_hour_is_the_hour_that_ends_it(
     clock: str,
 ) -> None:
     """The Nth hour of the dial is the one that runs from N-1 to N, so 30 minutes of the
-    eighth is 07:30 and of the first, which is 12 less one, is 00:30; a part of the day
-    still names the half."""
+    eighth is 07:30 and of the first is 00:30. With no part of the day each is the
+    nearer of two times twelve hours apart, and a part of the day picks which."""
     await say_slots(hass, slots)
 
     assert state_of(hass, NEXT) == at(SUNDAY + timedelta(days=days), clock)
@@ -2575,16 +2624,18 @@ def test_a_whole_hour_with_a_part_keeps_its_time_but_for_11_and_12(
     a part went with the hour named. Only two differ, because of where the windows
     start: the afternoon starts at 11:00, so "11 in the afternoon" is 11:00 and not
     23:00, and the evening ends at 01:00, so "12 in the evening" is 00:00 and not
-    noon."""
+    noon. The moment is the next one of that hour: today when it is after 06:00, and
+    tomorrow otherwise, as "12 in the evening" and the small hours of the night are."""
     expected = {("afternoon", 11): 11, ("evening", 12): 0}.get(
         (part, hour), hour_the_part_went_with(part, hour)
     )
+    days = 0 if expected > 6 else 1
 
     moment = clock_moment(
         local(SUNDAY, "06:00"), ZoneInfo(JERUSALEM), hour, 0, part, None
     )
 
-    assert moment.astimezone(ZoneInfo(JERUSALEM)).hour == expected
+    assert moment == local(SUNDAY + timedelta(days=days), f"{expected:02d}:00")
 
 
 @pytest.mark.parametrize(

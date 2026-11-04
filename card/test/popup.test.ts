@@ -205,12 +205,52 @@ describe("the presets", () => {
     expect(presetsOf(root)).toEqual([]);
     // An empty row of presets would still take its share of the gap between the rows.
     expect(root.querySelector(".presets")).toBeNull();
+    // In its place the pop-up says why, and names the maximum.
+    expect(textIn(root.querySelector(".above-maximum"))).toBe(
+      english.card_presets_above_maximum.replace("{maximum}", "10 min"),
+    );
 
     control(root, "Add 5 min").click();
     control(root, "Take off 5 min").click();
     control(root, "Stop").click();
     await settle(card);
     expect(hass.calls).toEqual([addTime(5), addTime(-5), stopped()]);
+  });
+
+  it("says in Russian why it shows no presets", async () => {
+    const { root } = await opened(endingAt(boilerHass({ counting: 8, language: "ru" }), 10));
+
+    expect(presetsOf(root)).toEqual([]);
+    const minutes = new Intl.NumberFormat("ru", {
+      style: "unit",
+      unit: "minute",
+      unitDisplay: "short",
+      useGrouping: false,
+    }).format(10);
+    expect(textIn(root.querySelector(".above-maximum"))).toBe(
+      russian.card_presets_above_maximum.replace("{maximum}", minutes),
+    );
+  });
+
+  it("says nothing when only some presets are longer than the maximum", async () => {
+    const { root } = await opened(endingAt(boilerHass(), 45));
+
+    expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min"]);
+    expect(root.querySelector(".above-maximum")).toBeNull();
+  });
+
+  it("shows a preset equal to the maximum, and no line", async () => {
+    const { root } = await opened(endingAt(boilerHass(), 15));
+
+    expect(presetsOf(root)).toEqual(["15 min"]);
+    expect(root.querySelector(".above-maximum")).toBeNull();
+  });
+
+  it("names a maximum over an hour in hours and minutes", async () => {
+    const { root } = await opened(endingAt(boilerHass(), 90), { entity: NUMBER, presets: [120, 240] });
+
+    expect(presetsOf(root)).toEqual([]);
+    expect(textIn(root.querySelector(".above-maximum"))).toMatch(/maximum of 1 hr 30 min\.$/);
   });
 
   it("the presets follow a maximum that changes", async () => {
@@ -222,9 +262,17 @@ describe("the presets", () => {
     await settle(card);
     expect(presetsOf(root)).toEqual(["15 min", "30 min"]);
 
+    card.hass = endingAt(hass, 10);
+    await settle(card);
+    expect(presetsOf(root)).toEqual([]);
+    expect(textIn(root.querySelector(".above-maximum"))).toBe(
+      english.card_presets_above_maximum.replace("{maximum}", "10 min"),
+    );
+
     card.hass = endingAt(hass, 1440);
     await settle(card);
     expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+    expect(root.querySelector(".above-maximum")).toBeNull();
   });
 
   it("shows every preset while the number states no maximum", async () => {
@@ -232,6 +280,7 @@ describe("the presets", () => {
     const { root } = await opened(boilerHass());
 
     expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+    expect(root.querySelector(".above-maximum")).toBeNull();
   });
 
   it.each([null, "unknown", Number.NaN])(
@@ -240,6 +289,7 @@ describe("the presets", () => {
       const { root } = await opened(endingAt(boilerHass(), max));
 
       expect(presetsOf(root)).toEqual(["15 min", "30 min", "45 min", "1 hr", "2 hr"]);
+      expect(root.querySelector(".above-maximum")).toBeNull();
     },
   );
 

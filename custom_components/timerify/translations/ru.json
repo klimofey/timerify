@@ -640,6 +640,7 @@
     "card_until_latest": "не позже {time}",
     "card_add_time": "Добавить {duration}",
     "card_subtract_time": "Убавить {duration}",
+    "card_presets_above_maximum": "Все готовые значения больше максимума этого таймера: {maximum}.",
     "card_stop": "Остановить",
     "card_turn_off": "Выключить",
     "card_schedule": "Расписание",

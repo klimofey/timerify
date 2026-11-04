@@ -39,15 +39,20 @@ interface PendingCommand {
 }
 
 /**
- * The presets the timer can run for: those that are not longer than the maximum its number
- * states in `max`, in the order of the card. A number that states no maximum, or one that is
- * not a number, leaves no limit, so that every preset shows.
+ * The longest the timer can run for, in minutes: the `max` its number states. A number that
+ * states no maximum, or one that is not a number, leaves no limit.
  */
-function presetsWithinMaximum(presets: readonly number[], runFor: HassEntity | undefined): number[] {
+function maximumOf(runFor: HassEntity | undefined): number | undefined {
   const max: unknown = runFor?.attributes["max"];
-  return typeof max === "number" && Number.isFinite(max)
-    ? presets.filter((minutes) => minutes <= max)
-    : [...presets];
+  return typeof max === "number" && Number.isFinite(max) ? max : undefined;
+}
+
+/**
+ * The presets the timer can run for: those that are not longer than the maximum, in the order
+ * of the card. Without a maximum every preset shows.
+ */
+function presetsWithin(presets: readonly number[], maximum: number | undefined): number[] {
+  return maximum === undefined ? [...presets] : presets.filter((minutes) => minutes <= maximum);
 }
 
 /**
@@ -464,11 +469,13 @@ export class TimerifyCardPopup extends LitElement {
     const unavailable = view.state === "unavailable";
     // Home Assistant refuses a value above the maximum of the number, so none is offered. The
     // row is left out when nothing is left: empty, it would still take its gap in the column.
-    const presets = presetsWithinMaximum(config.presets, hass.states[config.entity]);
+    // The presets are never empty to begin with, so a row left out means the maximum, and a
+    // line in its place says so.
+    const maximum = maximumOf(hass.states[config.entity]);
+    const presets = presetsWithin(config.presets, maximum);
     return html`
-      ${presets.length === 0
-        ? nothing
-        : html`
+      ${presets.length > 0
+        ? html`
             <div class="presets">
               ${presets.map(
                 (minutes) => html`
@@ -482,7 +489,16 @@ export class TimerifyCardPopup extends LitElement {
                 `,
               )}
             </div>
-          `}
+          `
+        : maximum === undefined
+          ? nothing
+          : html`
+              <p class="note above-maximum">
+                ${t(hass, "card_presets_above_maximum", {
+                  maximum: formatMinutes(hass, maximum),
+                })}
+              </p>
+            `}
       <div class="adjust">
         <button
           class="action step"

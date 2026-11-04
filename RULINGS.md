@@ -3442,12 +3442,13 @@ in `docs/followups.md`.
 
 - **The pop-up offers only the presets that are not longer than the maximum of the timer's "Run
   for" number, which it reads from the `max` attribute of that number's state at every render
-  (#35).** `presetsWithinMaximum` keeps `minutes <= max` in the order of the card, so a preset equal
-  to the maximum is shown. A number that has no `max`, or whose `max` is not a finite number
-  (missing, `null`, text, `NaN`), sets no limit, and every preset is shown. The list is filtered
-  from the live state each time the pop-up renders and is never kept: the number is one of the
-  entities the pop-up watches, so a new maximum reaches an open pop-up with the next `hass`. When
-  no preset is left, the row is not rendered, and the plus, minus and Stop buttons remain.
+  (#35).** `maximumOf` reads that `max`, and `presetsWithin` keeps `minutes <= maximum` in the
+  order of the card, so a preset equal to the maximum is shown. A number that has no `max`, or
+  whose `max` is not a finite number (missing, `null`, text, `NaN`), sets no limit, and every
+  preset is shown. The list is filtered from the live state each time the pop-up renders and is
+  never kept: the number is one of the entities the pop-up watches, so a new maximum reaches an
+  open pop-up with the next `hass`. When no preset is left, the row is not rendered, a line says
+  why (the entry on #51 in Part D of this release), and the plus, minus and Stop buttons remain.
   Why: `number.set_value` raises `out_of_range` for a value above the number's maximum, so the
   button of a longer preset would answer every press with an error. The card's `presets` cannot
   be checked once, when the config is read: the maximum belongs to the timer, not to the card
@@ -3456,14 +3457,14 @@ in `docs/followups.md`.
   that says "2 hr" and runs for 1 hr, and a preset left out of the config would not come back
   when the maximum is raised. The row is left out, rather than left empty, because an empty row
   would still take its 16 px gap in the column of the pop-up.
-  Cost if wrong: a card whose presets are all above the maximum shows no preset and does not say
-  why; the docs name the maximum as the cause. If a future Home Assistant wrote `max` as text,
-  every preset would show again and a press of a long one would be refused as before.
+  Cost if wrong: if a future Home Assistant wrote `max` as text, every preset would show again
+  and a press of a long one would be refused as before.
   Tests (`card/test/popup.test.ts`): `the pop-up hides a preset longer than the timer's maximum`
   (the preset equal to the maximum stays and runs), `the pop-up shows no presets when each is
-  above the maximum` (no row; plus, minus and Stop work), `the presets follow a maximum that
-  changes` (a lower and a higher maximum, each in a new `hass`), `shows every preset while the
-  number states no maximum` and `shows every preset when the maximum is not a number`.
+  above the maximum` (no row, and the line; plus, minus and Stop work), `the presets follow a
+  maximum that changes` (a lower and a higher maximum, each in a new `hass`), `shows every
+  preset while the number states no maximum` and `shows every preset when the maximum is not a
+  number`.
 
 - **A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
@@ -5144,3 +5145,31 @@ now.
   `show a round tile with the button as an icon alone under its dial, inside it` (and its twin
   for Mushroom) has the dial inside the tile with the Turn off button on a phone 320 px wide;
   `keeps its dial at 80 px where there is room` (`card/e2e/round.spec.ts`).
+- **When every preset is longer than the timer's maximum, a line stands where the pop-up's row of
+  presets would be: "Every preset is longer than this timer's maximum of {maximum}." (#51).** In
+  `#controls` (`card/src/popup.ts`), `maximumOf(runFor)` returns the `max` attribute of the Run
+  for number when it is a finite number, and `presetsWithin(presets, maximum)` keeps the presets
+  of at most that maximum, or all of them when there is none; it replaces `presetsWithinMaximum`.
+  When the presets left are none and the maximum is defined, `<p class="note above-maximum">`
+  says `card_presets_above_maximum`, with the maximum written by `formatMinutes` ("10 min",
+  "1 hr 30 min"); otherwise the row shows as it did. Nothing is said when only some presets are
+  hidden, when a preset equals the maximum (a maximum of 15 shows "15 min" and no line), or when
+  the number states no maximum. The pop-up line only, not the editor's helper, which the issue
+  offered second: `computeHelper(schema, localize)` of Home Assistant's form gets neither the
+  config nor `hass`, and `getConfigForm` is built once for every card, so a helper cannot know
+  the maximum of the timer a card has chosen. One string, `card_presets_above_maximum` in
+  `en.json` and `ru.json`, with the blank `{maximum}`, in the existing `.note` style. The maximum
+  is read on its own, so that the line can name it. Why: a card whose presets are all above the
+  maximum showed no preset and no reason, and a person could not tell a short maximum from a
+  broken card. The presets are never empty to begin with (`parsePresets` falls back to the
+  defaults), so an empty list after the filter means exactly this case, and the line stands in
+  the column where the row would, with no gap to manage. Cost if wrong: a person who picks
+  presets in the editor still learns of the maximum only when the pop-up opens, since the form
+  cannot say it earlier; a custom editor, which could, is a larger change that this release does
+  not make. Tests
+  (`card/test/popup.test.ts`): `the pop-up shows no presets when each is above the maximum` (the
+  line, in English), `says in Russian why it shows no presets`, `says nothing when only some
+  presets are longer than the maximum`, `names a maximum over an hour in hours and minutes`,
+  `shows a preset equal to the maximum, and no line`, `the presets follow a maximum that
+  changes` (the line at 10, gone at 1440), `shows every preset while the number states no
+  maximum` and `shows every preset when the maximum is not a number` (no line).

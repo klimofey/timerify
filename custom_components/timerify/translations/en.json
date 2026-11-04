@@ -640,6 +640,7 @@
     "card_until_latest": "by {time} at the latest",
     "card_add_time": "Add {duration}",
     "card_subtract_time": "Take off {duration}",
+    "card_presets_above_maximum": "Every preset is longer than this timer's maximum of {maximum}.",
     "card_stop": "Stop",
     "card_turn_off": "Turn off",
     "card_schedule": "Schedule",

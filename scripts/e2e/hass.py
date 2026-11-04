@@ -138,6 +138,19 @@ def wide_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, An
     ]
 
 
+def dial_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, Any]]:
+    """The cards of the "dials" views: three round tiles with no Turn off button. The
+    strict timer asks for one column, which is less than a round tile declares, so Home
+    Assistant gives it the fewest it declares; then it asks for three, the width a
+    round tile starts at. The loose timer, at the fewest columns, stays idle and shows
+    its icon in the dial."""
+    return [
+        timerify_card(strict, layout="round", grid_options={"columns": 1}, **options),
+        timerify_card(strict, layout="round", grid_options={"columns": 3}, **options),
+        timerify_card(loose, layout="round", grid_options={"columns": 1}, **options),
+    ]
+
+
 def dashboard_config(
     strict: Timer, loose: Timer, limited: Timer, disabled: Timer
 ) -> dict[str, Any]:
@@ -254,6 +267,21 @@ def dashboard_config(
                 "type": "sections",
                 "sections": [
                     {"type": "grid", "cards": wide_cards(strict, loose, mushroom=True)}
+                ],
+            },
+            {
+                # The dial of the round tile at every size the tile allows: with the
+                # Home Assistant look, then in the Mushroom style, which the tests turn
+                # on by defining a stand-in for one of Mushroom's cards on the page.
+                "title": "Dials",
+                "path": "dials",
+                "type": "sections",
+                "sections": [
+                    {
+                        "type": "grid",
+                        "cards": dial_cards(strict, loose)
+                        + dial_cards(strict, loose, mushroom=True),
+                    }
                 ],
             },
             {

@@ -7,9 +7,13 @@
 //
 // Mushroom is Apache-2.0 licensed, and is not part of this repository: the file is fetched for
 // the run and left in the folder of the cache.
+//
+// The tests that measure a card in the Mushroom style use a stand-in instead, `loadMushroom`:
+// all the card looks for is one of Mushroom's cards being defined.
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { LOCAL_DIR, REPO_ROOT } from "./constants";
 
 /** The release that the pictures are taken with, and the hash of its `mushroom.js`. */
@@ -59,6 +63,10 @@ export async function mushroomBundle(): Promise<Buffer> {
   await rename(partial, CACHE_FILE);
   return bytes;
 }
+
+/** What Mushroom does on a page: its cards become known to the browser, after ours did. */
+export const loadMushroom = (page: Page) =>
+  page.evaluate(() => customElements.define("mushroom-entity-card", class extends HTMLElement {}));
 
 /** Mushroom in the folder that Home Assistant serves: where the dashboard finds it. */
 export interface InstalledMushroom {

@@ -5,16 +5,26 @@
 // size: the look Mushroom gives it, the look a theme's variables change, and that the Turn off
 // button still fits at the narrowest and the widest the card is made.
 // Views "mushroom-pill" and "mushroom-round": the two layouts with the option on; "mushroom-sizes"
-// and "mushroom-wide": the cards of the views "sizes" and "wide", with the option on.
-import type { Locator, Page } from "@playwright/test";
+// and "mushroom-wide": the cards of the views "sizes" and "wide", with the option on; "dials": the
+// round tiles of the dial's test, the last three of them with the option on.
+import type { Locator } from "@playwright/test";
 import { expect, test } from "./fixtures";
+import { loadMushroom } from "./mushroom";
 import { isReady } from "./ready";
-import { PHONE, TARGET, boxOf, isCutOff, runBothTimers } from "./sizing";
+import {
+  DIAL,
+  DIAL_PAGE_WIDTHS,
+  PHONE,
+  TARGET,
+  boxOf,
+  expectDialToFit,
+  fitsInRing,
+  isCutOff,
+  isInside,
+  reloadAtWidth,
+  runBothTimers,
+} from "./sizing";
 import { stringsIn } from "./strings";
-
-/** What Mushroom does on a page: its cards become known to the browser, after ours did. */
-const loadMushroom = (page: Page) =>
-  page.evaluate(() => customElements.define("mushroom-entity-card", class extends HTMLElement {}));
 
 /** What a theme says in Mushroom's variables: larger spacing and icon, and another colour. */
 const THEME = `:root {
@@ -256,6 +266,9 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
     const dial = await boxOf(round.locator(".dial"));
     const turnOff = await boxOf(button);
 
+    // The dial has shrunk to the room this phone leaves it, and its time is inside its ring.
+    expect(isInside(dial, outline)).toBe(true);
+    expect(await fitsInRing(round.locator(".dial"), round.locator(".time"))).toBe(true);
     expect(turnOff.width).toBe(42);
     expect(turnOff.height).toBe(42);
     // The card's spacing, 10 px, is left on each side.
@@ -263,6 +276,41 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
     expect(turnOff.right).toBeLessThanOrEqual(outline.right - 10);
     expect(turnOff.top).toBeGreaterThanOrEqual(dial.bottom);
     expect(turnOff.bottom).toBeLessThanOrEqual(outline.bottom);
+  });
+});
+
+// The dial of the round tile in the Mushroom style, at every size the tile allows: the last three
+// cards of the view "dials" (see sizes.spec.ts, which measures the first three in the Home
+// Assistant look). Mushroom's time and icon are measured, with what the style gives them.
+test.describe("the round tile's dial in the Mushroom style at every size the tile allows", () => {
+  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+    const { run_for } = state.timers.strict;
+    await ws.callService("number", "set_value", { value: 90 }, { entity_id: run_for });
+    await openDashboard(page, "dials");
+  });
+
+  test("is inside its tile, and holds the time or the icon inside its ring", async ({ page }) => {
+    for (const width of DIAL_PAGE_WIDTHS) {
+      await reloadAtWidth(page, width);
+      const cards = page.locator("timerify-card");
+      await expect(cards).toHaveCount(6);
+      await loadMushroom(page);
+      const [strictFewest, strictThree, looseFewest] = [cards.nth(3), cards.nth(4), cards.nth(5)];
+      for (const card of [strictFewest, strictThree, looseFewest]) {
+        await isReady(card);
+        await expect(card).toHaveAttribute("data-mushroom", "");
+      }
+      await expect(strictFewest.locator(".time")).toBeVisible();
+      await expect(strictThree.locator(".time")).toBeVisible();
+      await expect(looseFewest.locator(".icon")).toBeVisible();
+
+      await expectDialToFit(strictFewest, ".time");
+      await expectDialToFit(strictThree, ".time");
+      await expectDialToFit(looseFewest, ".icon");
+      if (width === 1280) {
+        expect((await boxOf(strictThree.locator(".dial"))).width).toBe(DIAL);
+      }
+    }
   });
 });
 

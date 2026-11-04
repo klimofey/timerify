@@ -5,12 +5,25 @@
 // they declare, so Home Assistant gives each the fewest columns it declares; the test narrows
 // the page to the narrowest phone, 320 px, and reads it in Russian, the longer language, whose
 // words need the most room. View "wide": cards of 12 columns, and one pill on each side of the
-// width where the words begin.
+// width where the words begin. View "dials": the round tile without the button, whose dial is
+// measured at three widths of the page.
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 import { tabToButton } from "./focus";
 import { isReady } from "./ready";
-import { PHONE, TARGET, boxOf, isCutOff, runBothTimers } from "./sizing";
+import {
+  DIAL,
+  DIAL_PAGE_WIDTHS,
+  PHONE,
+  TARGET,
+  boxOf,
+  expectDialToFit,
+  fitsInRing,
+  isCutOff,
+  isInside,
+  reloadAtWidth,
+  runBothTimers,
+} from "./sizing";
 import { stringsIn } from "./strings";
 
 /** The space the pill leaves at its right: its padding and the border of the card. */
@@ -87,9 +100,10 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     const dial = await boxOf(round.locator(".dial"));
     const turnOff = await boxOf(button);
 
-    // The dial is wider than the content of a tile of 3 columns on this phone, with the button or
-    // without it, and that is the tile's own size (the follow-up in RULINGS), so what is checked
-    // is what the button adds: it is as big as a finger needs, and inside the tile.
+    // The dial has shrunk to the room this phone leaves it, and its time is inside its ring.
+    expect(isInside(dial, outline)).toBe(true);
+    expect(await fitsInRing(round.locator(".dial"), round.locator(".time"))).toBe(true);
+    // The button is as big as a finger needs, and inside the tile.
     expect(turnOff.width).toBeGreaterThanOrEqual(TARGET);
     expect(turnOff.height).toBeGreaterThanOrEqual(TARGET);
     // The card's own padding, 8 px, is left on each side.
@@ -122,6 +136,41 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
       .toBe("off");
     await expect(button).toHaveCount(0);
     await expect(pill.locator(".body")).toBeFocused();
+  });
+});
+
+// The dial of the round tile is 80 px where the tile has room for it, and follows the tile where
+// it has less: 2 columns on any screen, 3 on a narrow phone. View "dials": three round tiles with
+// no Turn off button, the strict timer at the fewest columns, then at 3, and the loose timer at
+// the fewest (its dial holds the icon, as the strict timer's holds the time). The strict timer
+// runs for 90 minutes, so that the time reads `1:29:xx`, the longest text the dial holds.
+test.describe("the round tile's dial at every size the tile allows", () => {
+  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+    const { run_for } = state.timers.strict;
+    await ws.callService("number", "set_value", { value: 90 }, { entity_id: run_for });
+    await openDashboard(page, "dials");
+  });
+
+  test("is inside its tile, and holds the time or the icon inside its ring", async ({ page }) => {
+    for (const width of DIAL_PAGE_WIDTHS) {
+      await reloadAtWidth(page, width);
+      const cards = page.locator("timerify-card");
+      await expect(cards).toHaveCount(6);
+      const [strictFewest, strictThree, looseFewest] = [cards.nth(0), cards.nth(1), cards.nth(2)];
+      for (const card of [strictFewest, strictThree, looseFewest]) {
+        await isReady(card);
+      }
+      await expect(strictFewest.locator(".time")).toBeVisible();
+      await expect(strictThree.locator(".time")).toBeVisible();
+      await expect(looseFewest.locator(".icon")).toBeVisible();
+
+      await expectDialToFit(strictFewest, ".time");
+      await expectDialToFit(strictThree, ".time");
+      await expectDialToFit(looseFewest, ".icon");
+      if (width === 1280) {
+        expect((await boxOf(strictThree.locator(".dial"))).width).toBe(DIAL);
+      }
+    }
   });
 });
 

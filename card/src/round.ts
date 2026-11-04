@@ -240,4 +240,38 @@ export const roundStyles = css`
   :host([data-mushroom]) .turn-off-slot {
     height: ${mush.controlHeight};
   }
+  /*
+   * The dial shrinks with its tile: it is 80 px where the tile has room, and as wide as the room
+   * where it has less, and the time and the icon follow it in container units. The dial is the
+   * container and not .content, so that a card without the Turn off button is laid out as
+   * before (see turnOffAsIcon: only a card that has the button makes .content a container).
+   * All of it is one block, so that a browser that does not know container units keeps the dial
+   * at 80 px: a width capped without an aspect ratio would not be a square, and a custom
+   * property with cqw in it is invalid only where it is used.
+   */
+  @supports (width: 1cqw) {
+    .dial {
+      max-width: 100%;
+      height: auto;
+      aspect-ratio: 1;
+      container-type: inline-size;
+    }
+    .round .time {
+      font-size: min(var(--ha-font-size-l, 16px), 20cqw);
+    }
+    :host(:not([data-mushroom])) .round .icon {
+      /* No line of text around a small symbol: the box of the icon is the symbol. */
+      line-height: 0;
+      --mdc-icon-size: min(32px, 40cqw);
+    }
+    :host([data-mushroom]) .round .time {
+      font-size: min(${mush.primaryFontSize}, 20cqw);
+    }
+    /* 45 % of the full dial, 80 px, is 36 px, the size of Mushroom's icon shape. */
+    :host([data-mushroom]) .round .icon {
+      width: min(${mush.iconSize}, 45cqw);
+      height: min(${mush.iconSize}, 45cqw);
+      font-size: min(${mush.iconSize}, 45cqw);
+    }
+  }
 `;

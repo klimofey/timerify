@@ -5207,68 +5207,97 @@ now.
   states no maximum` and `shows every preset when the maximum is not a number` (no line).
 - **A label that shows a day is redrawn once, at the next midnight by the server's clock, in the
   zone the label is written in (#63).** `MidnightController` (`card/src/midnight.ts`) is a Lit
-  controller in the style of `CountdownController`. It is built from the host, a callback for
-  the moments the host writes, one for the time now and one for the zone. It is armed while the
-  host is on the page and some moment is on another calendar day than now: only such a label
-  carries a weekday or a date, and a time today ends with a state change that redraws the card
-  anyway. Armed, it holds one `setTimeout` for `startOfNextDay(zone, now) - now`, and remembers
-  the zone and the midnight it armed for. It looks again on `hostConnected` and on every
-  `hostUpdated`: the same zone and midnight keep the timeout, a change rearms it, and nothing
-  left to wait for clears it. The callbacks `now` and `timeZone` are asked only when there is a
-  moment. When the timeout fires it forgets what it armed for and calls `requestUpdate()`; that
-  redraw's `hostUpdated` arms again if a day is still shown, so a card never waits on a day it
-  has stopped showing. A bare `requestUpdate()` passes both hosts' `shouldUpdate`, since
-  `mattersToRender` is true for an empty set of changes. There are two instances. The card's
-  covers the end of a limit (state `limit`), which the pill writes and the round tile keeps in
-  its `.status` for screen readers. The pop-up's covers, while it is open and only then, the end
-  of a limit and the `at` of every pending command that the "Next command" sensor lists: the
-  commands of an idle timer are written in the open pop-up, and nothing else redraws it. A date
-  ("Jan 12") turns into a weekday at midnight six days before, by the same rule. The zone is one
-  rule now, `displayTimeZone(hass)` in `card/src/format.ts` (`hass.config.time_zone` when the
-  profile's `locale.time_zone` is "server", else none, which `Intl` reads as the browser's), taken
-  out of `formatClock`, and `calendarDay` is exported for the controller. The label and the
-  controller cannot disagree about where the day changes. A change of the profile's zone is a
-  change of `locale`, which `mattersToRender` lets through, so the next `hostUpdated` rearms the
-  timeout for the new zone's midnight, or clears it when no day is shown in it any more. The clock
-  is the server's: `now` is `serverNow(lookup)`, the clock `formatClock` is given. The delay is
-  the difference of two instants of that clock (the midnight, found from `now`, and `now`), so
-  the offset that the lookup measured cancels out of it, and the timeout counts on the
-  browser's own timer, which is right for a difference. If a new lookup measures the offset
-  again while the timeout waits, for example after a reconnect, the midnight is the same instant
-  of the server's clock and the timeout is kept; it may then fire a few seconds before the
-  midnight by the new measure. The redraw finds the label's day unchanged, and `hostUpdated`
-  arms again for the seconds left. That cannot loop: `startOfNextDay` is always later than
-  `now`, and each timeout fires once. `startOfNextDay(zone, instant)` is the first whole second
-  of the next calendar day. It bisects between `instant`, floored to the second, and 49 hours on,
-  which is later than any day ends, and keeps the upper end on the later day by `calendarDay`; it
-  needs about 18 steps and 0.5 ms. It is exact on a day of 23 or 25 hours, where "24 hours minus
-  the time since midnight" is an hour wrong (the timeout fires an hour early, which the rearm
-  absorbs, or an hour late, and the label is stale for an hour), and on a day the calendar
-  skips. It does not use `Temporal`, which is not in every browser that runs the card (the
-  bundle targets es2022). The page that becomes visible: a tablet or a phone can sleep through a
-  midnight, and the timeout with it. `hostConnected` adds a `visibilitychange` listener on
-  `document` and `hostDisconnected` removes it. When the page becomes visible while the timeout
-  is armed, the controller clears it, forgets it and calls `requestUpdate()`, and the redraw
-  arms for the midnight that is left, if there is one. Why: the label says "Tue" for a time that
-  is now today, until the next state change, which for a limit or an idle timer may be hours
-  away; ticking every second for it would redraw a card that has nothing else to change. One
-  timeout at the one moment the text changes is the least that fixes it. Cost if wrong: a card in
-  a hidden tab, whose browser holds timers back, can keep the old weekday until the tab is seen
-  (then it is redrawn at once); if a zone's rules change while the timeout waits (a new rule file
-  for a daylight-saving day), it may fire an hour off, and the label is stale for up to that
-  until the next redraw; a pop-up open on a counting timer with a command on another day finds
-  the midnight again at every tick, for half a millisecond. Tests (`card/test/midnight.test.ts`):
-  `drops the weekday of a limit at midnight, with no state
-  change` (the pill, one timeout, none after) and its twin for the round tile's `.status`, `drops
-  the weekday of a pending command in the open pop-up of an idle timer` and `sets no timeout once
-  the pop-up is shut`, `turns a date into a weekday at midnight six days before`, `follows the
-  zone the label is written in` (the browser's zone against the server's), `follows a change of
-  the profile's time zone` and `waits for the midnight of the zone the profile has now` (two
-  zones that both show a day, with different midnights), `arms again for the rest when it fires
-  before midnight by a clock measured again` (the offset moves 5 s after the timeout was armed),
-  `sets no timeout while nothing shown has a day, and none after the card is removed` and
-  `redraws a label with a day when the page becomes visible after midnight`; and, in
-  `card/test/format.test.ts`, `finds the next midnight exactly on the days the clocks change`
-  (London on 29 March and 25 October 2026, and half a second before midnight), `finds the next
-  midnight where the calendar skips a day` (Apia, 30 December 2011), `finds the next midnight in
-  the browser's zone when none is given` and `reads the zone the label is written in`.
+  controller in the style of `CountdownController`. It is built from the host and three callbacks:
+  the moments the host writes, the time now, and the zone. The decisions:
+  - It is armed while the host is on the page and some moment is on a later calendar day than
+    today. Only such a label carries a weekday or a date, and a time today ends with a state
+    change that redraws the card anyway. A moment that has passed on an earlier day keeps its
+    date whatever the hour, so it arms nothing. The callbacks `now` and `timeZone` are asked
+    only when there is a moment.
+  - Armed, it holds one `setTimeout` for `startOfNextDay(zone, now) - now`, and remembers the
+    zone and the day it waits to end (`calendarDay` of now in that zone), which fix the midnight.
+    It looks again on `hostConnected` and on every `hostUpdated`: the same zone and day keep
+    the timeout, a change rearms it, and nothing left to wait for clears it. The midnight is
+    looked for only when it arms, so an update that keeps the timeout costs `calendarDay` for
+    now and for each moment (one `Intl` formatter each), not the bisection.
+  - When the timeout fires it forgets what it armed for and calls `requestUpdate()`. That
+    redraw's `hostUpdated` arms again if a later day is still shown, so a card never waits on a
+    day it has stopped showing. A bare `requestUpdate()` passes both hosts' `shouldUpdate`,
+    since `mattersToRender` is true for an empty set of changes.
+  - There are two instances. The card's covers the end of a limit (state `limit`), which the
+    pill writes and the round tile keeps in its `.status` for screen readers. The pop-up's
+    covers, while it is open and only then, the end of a limit and the `at` of every pending
+    command that the "Next command" sensor lists: the commands of an idle timer are written in
+    the open pop-up, and nothing else redraws it. Inside the card the pop-up's limit moment is
+    also covered by the card's instance, which hands the pop-up a new view at every draw; the
+    pop-up keeps its own so that it does not depend on that. A date ("Jan 12") turns into a
+    weekday at midnight six days before, by the same rule.
+  - The zone is one rule now, `displayTimeZone(hass)` in `card/src/format.ts`
+    (`hass.config.time_zone` when the profile's `locale.time_zone` is "server", else none, which
+    `Intl` reads as the browser's), taken out of `formatClock`; `calendarDay` is exported for the
+    controller. The label and the controller cannot disagree about where the day changes. A
+    change of the profile's zone is a change of `locale`, which `mattersToRender` lets through,
+    so the next `hostUpdated` rearms the timeout for the new zone's midnight, or clears it when
+    no later day is shown in it any more. The zone is part of what the timeout is kept for
+    because two zones can be on the same day with different midnights.
+  - The clock is the server's: `now` is `serverNow(lookup)`, the clock `formatClock` is given.
+    The delay is the difference of two instants of that clock (the midnight, found from `now`,
+    and `now`), so the offset that the lookup measured cancels out of it, and the timeout counts
+    on the browser's own timer, which is right for a difference. If a new lookup measures the
+    offset again while the timeout waits, for example after a reconnect, it is still the same
+    day in the same zone, so the timeout is kept; it may then fire a few seconds before the
+    midnight by the new measure. The redraw finds the label's day unchanged, and `hostUpdated`
+    arms again for the seconds left. That cannot loop: `startOfNextDay` is always later than
+    `now`, and each timeout fires once.
+  - `startOfNextDay(zone, instant)` is the first whole second of the next calendar day. It
+    bisects between `instant`, floored to the second, and 49 hours on, which is later than the
+    end of any day (a date that the calendar repeats lasts 48 hours), and keeps the upper end
+    on the later day by `calendarDay`. It needs about 18 steps and 0.5 ms. It is exact on a day
+    of 23 or 25 hours, where "24 hours minus the time since midnight" is an hour wrong (the
+    timeout fires an hour early, which the rearm absorbs, or an hour late, and the label is
+    stale for an hour), and on a day the calendar skips. It does not use `Temporal`, which is
+    not in every browser that runs the card (the bundle targets es2022).
+  - The page that becomes visible: a tablet or a phone can sleep through a midnight, and the
+    timeout with it. `hostConnected` adds a `visibilitychange` listener on `document` and
+    `hostDisconnected` removes it. When the page becomes visible while the timeout is armed,
+    the controller clears it, forgets it and calls `requestUpdate()`, and the redraw arms for
+    the midnight that is left, if there is one.
+  Why: the label says "Tue" for a time that is now today, until the next state change, which
+  for a limit or an idle timer may be hours away; ticking every second for it would redraw a
+  card that has nothing else to change. One timeout at the one moment the text changes is the
+  least that fixes it.
+  Cost if wrong:
+  - A card in a hidden tab, whose browser holds timers back, can keep the old weekday until the
+    tab is seen; then it is redrawn at once.
+  - A device that suspends without hiding the page (a laptop with its lid closed) fires no
+    `visibilitychange`, so its timeout fires late by the length of the sleep, and the weekday
+    stays until then.
+  - If a zone's rules change while the timeout waits (a new rule file for a daylight-saving
+    day), it may fire an hour off, and the label is stale for up to that until the next redraw.
+  - An update that keeps the timeout asks `calendarDay` once for now and once for each moment.
+    A pop-up open on a counting timer, with a command on a later day, does that every second.
+  Tests (`card/test/midnight.test.ts`):
+  - `drops the weekday of a limit at midnight, with no state change`: the pill, with one
+    timeout, and none after.
+  - `drops the weekday of a limit on the round tile at midnight`: the `.status` for screen
+    readers.
+  - `drops the weekday of a pending command in the open pop-up of an idle timer`
+  - `sets no timeout once the pop-up is shut`
+  - `drops the weekday of a limit at midnight without the card drawing it again`: a pop-up with
+    no card around it, which has only its own timeout.
+  - `arms nothing for a command that is overdue from yesterday`
+  - `turns a date into a weekday at midnight six days before`
+  - `follows the zone the label is written in`: the browser's zone against the server's.
+  - `follows a change of the profile's time zone`
+  - `waits for the midnight of the zone the profile has now`: two zones that are on the same
+    day, with midnights 10 and 17 hours away.
+  - `arms again for the rest when it fires before midnight by a clock measured again`: the
+    offset moves 5 s after the timeout was armed.
+  - `sets no timeout while nothing shown has a day, and none after the card is removed`
+  - `redraws a label with a day when the page becomes visible after midnight`
+  In `card/test/format.test.ts`:
+  - `finds the next midnight exactly on the days the clocks change`: London on 29 March and 25
+    October 2026, and half a second before midnight.
+  - `finds the next midnight where the calendar skips a day`: Apia, 30 December 2011.
+  - `finds the next midnight in the browser's zone when none is given`
+  - `reads the zone the label is written in`

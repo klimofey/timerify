@@ -32,7 +32,11 @@ function countsTwelveHours({ language, time_format }: HomeAssistant["locale"]): 
 
 const MS_PER_SECOND = 1000;
 const MS_PER_DAY = 86_400_000;
-/** Longer than any day lasts (25 hours where the clocks go back), so the next day has begun. */
+/**
+ * Longer than the rest of any day, so that the next day has begun by then. The longest a day
+ * lasts is 48 hours, for a date the calendar repeats (Samoa's 4 July 1892), counted from the
+ * first moment of it; an hour of margin on top.
+ */
 const LONGER_THAN_A_DAY = 49 * 3_600_000;
 
 /**

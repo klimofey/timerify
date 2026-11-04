@@ -4,16 +4,17 @@
 import type { ReactiveController, ReactiveControllerHost } from "lit";
 import { calendarDay, startOfNextDay } from "./format";
 
-/** The timeout, and what it waits for: the zone the day is counted in, and its midnight. */
+/** The timeout, and what it waits for: the end of a day, in the zone that counts it. */
 interface Armed {
   timer: ReturnType<typeof setTimeout>;
   timeZone: string | undefined;
-  midnight: number;
+  /** The day that ends, as `calendarDay` counts it; with the zone it fixes the midnight. */
+  day: number;
 }
 
 /**
- * Draws the host again at the next midnight, for as long as it writes a time that is on
- * another day than today.
+ * Draws the host again at the next midnight, for as long as it writes a time that is on a
+ * later day than today.
  */
 export class MidnightController implements ReactiveController {
   readonly #host: ReactiveControllerHost;
@@ -70,19 +71,19 @@ export class MidnightController implements ReactiveController {
   };
 
   /**
-   * Waits for the midnight while the host is on the page and writes a moment that is on
-   * another day than now. The timeout is kept while it waits for the same midnight in the
-   * same zone, whatever else the host redrew for.
+   * Waits for the midnight while the host is on the page and writes a moment on a later day
+   * than today. The timeout is kept while it waits for the end of the same day in the same
+   * zone, whatever else the host redrew for, so the midnight is looked for only when it arms.
    */
   #follow(): void {
-    const wanted = this.#connected ? this.#nextMidnight() : undefined;
+    const wanted = this.#connected ? this.#dayToWaitOut() : undefined;
     if (wanted === undefined) {
       this.#disarm();
       return;
     }
-    const { timeZone, midnight, delay } = wanted;
+    const { timeZone, day, now } = wanted;
     const armed = this.#armed;
-    if (armed !== undefined && armed.timeZone === timeZone && armed.midnight === midnight) {
+    if (armed !== undefined && armed.timeZone === timeZone && armed.day === day) {
       return;
     }
     this.#disarm();
@@ -93,24 +94,26 @@ export class MidnightController implements ReactiveController {
     const timer = setTimeout(() => {
       this.#armed = undefined;
       this.#host.requestUpdate();
-    }, delay);
-    this.#armed = { timer, timeZone, midnight };
+    }, startOfNextDay(timeZone, now) - now);
+    this.#armed = { timer, timeZone, day };
   }
 
-  /** The midnight that puts an end to the day of some moment written, if there is one. */
-  #nextMidnight(): { timeZone: string | undefined; midnight: number; delay: number } | undefined {
+  /**
+   * Today, with the zone and the time it was counted by, when some moment written is on a
+   * later day: its label carries a day that the midnight will take away. A moment that has
+   * passed on an earlier day keeps its date, whatever the hour.
+   */
+  #dayToWaitOut(): { timeZone: string | undefined; day: number; now: number } | undefined {
     const moments = this.#moments();
     if (moments.length === 0) {
       return undefined;
     }
     const now = this.#now();
     const timeZone = this.#timeZone();
-    const today = calendarDay(timeZone, now);
-    if (moments.every((moment) => calendarDay(timeZone, moment.getTime()) === today)) {
-      return undefined;
-    }
-    const midnight = startOfNextDay(timeZone, now);
-    return { timeZone, midnight, delay: midnight - now };
+    const day = calendarDay(timeZone, now);
+    return moments.some((moment) => calendarDay(timeZone, moment.getTime()) > day)
+      ? { timeZone, day, now }
+      : undefined;
   }
 
   #disarm(): void {

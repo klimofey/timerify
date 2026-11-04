@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { common as english } from "../../custom_components/timerify/translations/en.json";
+import { parseConfig } from "../src/config";
+import type { TimerifyCardPopup } from "../src/popup";
 import type { TimerifyCard } from "../src/timerify-card";
+import { lookupTimer, serverNow, timerView } from "../src/timer";
 import {
   NEXT_COMMAND,
   NUMBER,
@@ -112,6 +115,21 @@ describe("the weekday of a pending command", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("arms nothing for a command that is overdue from yesterday", async () => {
+    const sunday = Date.UTC(2026, 0, 4, 5, 0); // 07:00 in Jerusalem, a day before LATE
+    const { popup, rows } = await opened(idleUntil(sunday));
+
+    // The date of a moment in the past stays what it is when the day changes.
+    expect(rows()).toEqual(["Off at Jan 4, 07:00"]);
+    expect(vi.getTimerCount()).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(31 * SECOND);
+    await popup.updateComplete;
+
+    expect(rows()).toEqual(["Off at Jan 4, 07:00"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("turns a date into a weekday at midnight six days before", async () => {
     const monday12th = Date.UTC(2026, 0, 12, 6, 0); // 08:00 in Jerusalem
     const { popup, rows } = await opened(idleUntil(monday12th));
@@ -128,6 +146,37 @@ describe("the weekday of a pending command", () => {
     await popup.updateComplete;
 
     expect(rows()).toEqual(["Off at Mon 08:00"]);
+  });
+});
+
+describe("the pop-up on its own", () => {
+  it("drops the weekday of a limit at midnight without the card drawing it again", async () => {
+    // The card gives the pop-up a new view whenever it draws, so inside a card the pop-up
+    // follows the card's own timeout. Alone, it has to wait for midnight itself.
+    const hass = limited(30.5, {}, LATE);
+    const config = parseConfig({ entity: NUMBER });
+    const lookup = await lookupTimer(hass, NUMBER);
+    if (lookup.status !== "found") {
+      throw new Error("The boiler timer was not found");
+    }
+    const popup = document.createElement("timerify-card-popup") as TimerifyCardPopup;
+    popup.hass = hass;
+    popup.config = config;
+    popup.lookup = lookup;
+    popup.view = timerView(hass, config, lookup, serverNow(lookup));
+    document.body.append(popup);
+    popup.open();
+    await popup.updateComplete;
+    const until = () => popup.shadowRoot?.querySelector(".until")?.textContent?.trim();
+
+    expect(until()).toBe(untilLatest("Tue 00:30"));
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(31 * SECOND);
+    await popup.updateComplete;
+
+    expect(until()).toBe(untilLatest("00:30"));
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

@@ -167,8 +167,8 @@ Set a press to **Home Assistant action** to give it one of the actions that Home
 
 - The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
 - Leave the field on **Default**, and Home Assistant opens the dialog of the device.
-- The action **Nothing** switches its press off. That is how you switch off the long press of the round tile.
-- If you cleared a press in the form and its action is still set, the press runs that action. To go back to the pop-up, set the action to **Default**, or set the press to **Open the pop-up**.
+- With the press left empty, the action **Nothing** switches the press off. So it switches off the long press of the round tile, as the press choice **Nothing** does.
+- If you cleared a press in the form and its action is still set, the press runs that action. To go back to what the press does by default (the pop-up, for a tap), set the action to **Default**. Or set the press to **Open the pop-up**.
 - The card does nothing until it has found its timer, which takes a moment after the page loads.
 
 This round tile opens the dialog of the device on a long press, and starts or stops the timer on a tap. A double tap opens the pop-up:

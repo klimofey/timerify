@@ -3504,10 +3504,10 @@ in `docs/followups.md`.
   because the card's entity is the "Run for" number, which cannot be toggled and whose
   more-info dialog is not the one the user means. A missing key makes Home Assistant open the
   more-info dialog, so a press set to `action` with no action does that. Since 1.3.0 a press with
-  no choice but an action given does the action (see Part D under Release 1.3.0). The
-  selector's own "Default" choice writes no key. The `visible` condition of a form field, which would hide an
-  action while its press is not `action`, is not in the developer documentation, so the six
-  fields are always shown and the helper under each action says when it is used. The six fields
+  no choice but an action given does the action (see Part D under Release 1.3.0). The selector's
+  own "Default" choice writes no key. The `visible` condition of a form field, which would hide an
+  action while its press is not `action`, is not in the developer documentation, so the six fields
+  are always shown and the helper under each action says when it is used. The six fields
   sit in an `expandable` group with `flatten: true`, which keeps them at the top level of the
   config (without it they would be written under an `interactions` key). That key belongs to
   the frontend and is not in the form schema the developer documentation describes, so the card

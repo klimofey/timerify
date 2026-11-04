@@ -107,12 +107,15 @@ const behaviour = (page: Page, label: string, words: Record<string, string> = en
 const menuChoice = (page: Page, key: string, words: Record<string, string> = english) =>
   page.getByRole("menuitem", { name: words[key], exact: true });
 
+/** The drop-down of the form that carries this label. */
+const fieldOf = (page: Page, label: string) =>
+  page.locator(`ha-picker-field[aria-label="${english[label]}"]`);
+
 /**
  * The cross that clears a drop-down of the form once it holds a choice. It has no name of its
  * own, so it is found by its place: in the field that carries the label.
  */
-const clearOf = (page: Page, label: string) =>
-  page.locator(`ha-picker-field[aria-label="${english[label]}"]`).locator(".clear");
+const clearOf = (page: Page, label: string) => fieldOf(page, label).locator(".clear");
 
 /**
  * A yes-or-no field of the form, found by the words beside it: the switch has no name of its
@@ -323,7 +326,10 @@ test.describe("the card in Home Assistant's editor", () => {
     await behaviour(page, "card_editor_tap_action").click();
     await page.getByRole("menuitem", { name: "Toggle", exact: true }).click();
 
-    // The editor wrote the action and no choice: the press is still empty in the form.
+    // The editor wrote the action and no choice: the drop-down of the tap is still empty, so it
+    // has no cross to clear it.
+    await expect(fieldOf(page, "card_editor_tap")).toBeVisible();
+    await expect(clearOf(page, "card_editor_tap")).toBeHidden();
     await expect(page.locator("timerify-card ha-card.pill")).toBeVisible();
     await saveCard(page);
     await expect

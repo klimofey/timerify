@@ -14,8 +14,15 @@ import {
   stop,
 } from "./actions";
 import type { CardConfig } from "./config";
-import { formatClock, formatMinutes, formatRemaining, settingText } from "./format";
+import {
+  displayTimeZone,
+  formatClock,
+  formatMinutes,
+  formatRemaining,
+  settingText,
+} from "./format";
 import type { HassEntity, HomeAssistant, IntervalInfo } from "./hass";
+import { MidnightController } from "./midnight";
 import { t } from "./strings";
 import {
   hasEnd,
@@ -316,6 +323,22 @@ export class TimerifyCardPopup extends LitElement {
   constructor() {
     super();
     this.opened = false;
+    // The limit and the commands that wait are written with their weekday when they are not
+    // today's, and only while the pop-up is open.
+    new MidnightController(
+      this,
+      () =>
+        this.opened
+          ? [
+              ...(this.view.state === "limit" && this.view.endsAt ? [this.view.endsAt] : []),
+              ...pendingCommands(this.hass.states[this.lookup.info.next_command]).map(
+                ({ at }) => at,
+              ),
+            ]
+          : [],
+      () => serverNow(this.lookup),
+      () => displayTimeZone(this.hass),
+    );
   }
 
   /** Shows the pop-up over the page. */

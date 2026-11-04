@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { formatClock, formatMinutes, formatRemaining, settingText } from "../src/format";
+import {
+  displayTimeZone,
+  formatClock,
+  formatMinutes,
+  formatRemaining,
+  settingText,
+  startOfNextDay,
+} from "../src/format";
 import { AC, START, acTimer, fakeHass, type FakeHass } from "./fake-hass";
 
 const MINUTE = 60_000;
@@ -92,6 +99,43 @@ describe("the time a countdown ends", () => {
         hourCycle: "h23",
       }).format(later),
     );
+  });
+});
+
+describe("the zone the clock is read in", () => {
+  it("reads the zone the label is written in", () => {
+    expect(displayTimeZone(fakeHass({ localeTimeZone: "server", timeZone: "Europe/London" }))).toBe(
+      "Europe/London",
+    );
+    // The browser's zone is no zone at all to `Intl`, which then uses its own.
+    expect(displayTimeZone(fakeHass({ localeTimeZone: "local", timeZone: "Europe/London" }))).toBe(
+      undefined,
+    );
+  });
+});
+
+describe("the next midnight", () => {
+  const london = (instant: number) => startOfNextDay("Europe/London", instant);
+
+  it("finds the next midnight exactly on the days the clocks change", () => {
+    // London puts its clocks forward at 01:00 UTC on 29 March, and back at 01:00 UTC on 25 October.
+    expect(london(Date.UTC(2026, 2, 28, 12))).toBe(Date.UTC(2026, 2, 29, 0));
+    expect(london(Date.UTC(2026, 2, 29, 12))).toBe(Date.UTC(2026, 2, 29, 23)); // a 23-hour day
+    expect(london(Date.UTC(2026, 9, 24, 12))).toBe(Date.UTC(2026, 9, 24, 23));
+    expect(london(Date.UTC(2026, 9, 25, 12))).toBe(Date.UTC(2026, 9, 26, 0)); // a 25-hour day
+    expect(london(Date.UTC(2026, 2, 28, 23, 59, 59, 500))).toBe(Date.UTC(2026, 2, 29, 0));
+  });
+
+  it("finds the next midnight where the calendar skips a day", () => {
+    // Samoa went from 29 December 2011 to 31 December, and the 29th ended at 10:00 UTC on the 30th.
+    expect(startOfNextDay("Pacific/Apia", Date.UTC(2011, 11, 30, 0))).toBe(
+      Date.UTC(2011, 11, 30, 10),
+    );
+  });
+
+  it("finds the next midnight in the browser's zone when none is given", () => {
+    // The tests run in New York, five hours behind UTC in January.
+    expect(startOfNextDay(undefined, Date.UTC(2026, 0, 5, 12))).toBe(Date.UTC(2026, 0, 6, 5));
   });
 });
 

@@ -13,7 +13,6 @@ One line per issue: its number and its title, under the area it belongs to.
 
 - [#7](https://github.com/klimofey/timerify/issues/7) Raise the minimum Home Assistant to 2026.11 to drop the first-load "Custom element doesn't exist" error
 - [#9](https://github.com/klimofey/timerify/issues/9) Card editor: the labels of a select's options can be in English before any card has loaded
-- [#63](https://github.com/klimofey/timerify/issues/63) Card: a weekday in a label that does not tick goes stale after midnight
 
 ## Forms
 

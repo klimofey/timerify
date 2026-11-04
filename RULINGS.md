@@ -5323,3 +5323,14 @@ now.
   gains `workflow_dispatch`, so a run can also be started by hand. The local gate stays the
   merge gate (CLAUDE.md rule 4). Cost if wrong: none for the code; a red run on GitHub is
   visible to visitors until the next green one.
+
+## Repository security (2026-11-04)
+
+- **The repository's guards, set by the owner's word.** Secret scanning with push
+  protection, private vulnerability reporting (with `SECURITY.md` pointing to it), Dependabot
+  alerts without update pull requests, and an approval before the workflow runs for any
+  outside contributor. `validate.yml` names `permissions: contents: read`, so its token stays
+  read-only even if the repository's default changes. The actions stay on `hacs/action@main`
+  and `home-assistant/actions/hassfest@master`, as their documentation asks: with a read-only
+  token and no secrets, a changed action can read the public code and nothing more. Cost if
+  wrong: an alert or an approval click the owner did not need.

@@ -28,7 +28,7 @@ On the pill are the icon of the device, its name, and the time left with the mom
 
 ![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](../screenshots/card-pill.png)
 
-The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. The name is below.
+The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. On a tile of 2 columns on a phone, the centre shows the icon instead of the time left. The time is in the pop-up and in the words for screen readers. The name is below.
 
 The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses). Its optional **Turn off** button is below the name.
 
@@ -67,7 +67,7 @@ mushroom: false                           # true gives the card the look of Mush
 tap: popup                                # popup (the default), run, stop, run_or_stop, action or none
 double_tap: none                          # the same choices, none by default
 hold: none                                # the same choices, run_or_stop on the round tile by default
-tap_action:                               # a Home Assistant action, used when tap is action
+tap_action:                               # a Home Assistant action, used when tap is action or not set
   action: more-info
 ```
 
@@ -84,7 +84,7 @@ tap_action:                               # a Home Assistant action, used when t
 | `tap` | `popup` | What a tap does. One of `popup`, `run`, `stop`, `run_or_stop`, `action` and `none`. See [Presses](#presses). |
 | `double_tap` | `none` | What a double tap does. The same choices. |
 | `hold` | `run_or_stop` on the round tile, `none` on the pill | What a long press does. The same choices. |
-| `tap_action`, `double_tap_action`, `hold_action` | none | A Home Assistant action, written as settings such as `action: more-info`. It is used when that press is set to `action`. |
+| `tap_action`, `double_tap_action`, `hold_action` | none | A Home Assistant action, written as settings such as `action: more-info`. It is used when that press is set to `action`, and when the press is not set. |
 
 An option that the card does not know is ignored. A value that it cannot use is shown as a message on the card, which says what is wrong.
 
@@ -95,7 +95,7 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 - It writes presets as text (`"15"`). Write them as text in YAML too, if you edit the card in the form afterwards. A list of numbers (`[15, 30]`) is shown in the form as bare chips ("15", not "15 min"). Its drop-down offers the defaults again, even when they are in the list. Picking one adds a second copy, which the card ignores.
 - Taking the last preset away leaves the list empty, which means the defaults.
 - The **Mushroom style** field says **Mushroom was not found** under it while Mushroom's cards are not loaded on the page. See [The Mushroom style](#the-mushroom-style).
-- The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field, and does its default.
+- The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field. It runs the action below it if one is set, and does its default otherwise.
 - A value that the form accepts but the card cannot use, such as a preset of 0, stays in the form. The preview shows the card's message. Only a value of the wrong kind sends the editor to YAML. An example is presets that are not a list.
 - A card written by hand without a layout is a pill. But the form does not preselect it, because Home Assistant's editor does not apply the defaults of a form.
 - Home Assistant itself translates the names of the fields. Some words are not translated that way: the two layouts, the six press choices and the labels of the presets. They are in the language of the last card that the page loaded. Before any card has loaded on the page, they are in English.
@@ -107,7 +107,7 @@ By default a tap anywhere on the card opens it, the border included. The chip an
 The pop-up is a modal dialog. Escape, the **Close** button and a click on the dimmed page behind it close it. From top to bottom it holds:
 
 - **The time left**, and when it ends, while a countdown runs. Under a limit it says only when the device turns off at the latest, such as "by 1:30 PM at the latest".
-- **The presets.** Pressing one runs the timer for that long, as setting **Run for** does. It restarts a countdown that runs. A preset that is longer than the timer's **Maximum of Run for** is not shown. If none is left, the row is left out.
+- **The presets.** Pressing one runs the timer for that long, as setting **Run for** does. It restarts a countdown that runs. A preset that is longer than the timer's **Maximum of Run for** is not shown. If none is left, the pop-up says so where the row would be, and names the maximum.
 - **Take off 5 minutes, add 5 minutes, and Stop.** Taking time off is offered while a countdown or a limit runs. Adding or taking off time turns a limit into a countdown that you chose. Adding time to a timer that is idle starts it, as the [**Add time** action](services.md#add-time) does. Stop is offered while the timer runs, with a countdown, under a limit or without either. It turns the device off and ends the countdown or the limit.
 - **Schedule**, when the timer has intervals. It shows a switch for each interval, named by its title. Each one turns the [switch of the interval](schedules.md#switch-an-interval-on-or-off) on and off. You do not create or edit intervals here. Use the timer's page. An interval whose switch is unavailable is shown as that and cannot be pressed.
 - **Pending commands**, when there are some. Each shows like "On at 7:30 AM for 1 hr" or "Off at Tue 7:00 AM". It also shows its settings ("Cool, 24 °C") and a × button that cancels it. If the **Next command** sensor is disabled, one line stands here instead. It says that the commands are hidden because of it.
@@ -163,10 +163,12 @@ Enter and Space do what a tap does, at once. The keyboard has no double tap and 
 
 ### Home Assistant actions
 
-Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used only when its press is set to **Home Assistant action**.
+Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used when its press is set to **Home Assistant action**, and when the press is not set. So an action alone is enough. Set only the **Tap action** to **Toggle**, and a tap toggles the device. A press that you set to something else keeps that choice.
 
 - The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
-- Leave the field on **Default**, and Home Assistant opens the dialog of the device.
+- With the press set to **Home Assistant action**, leave the field on **Default (More info)**, and Home Assistant opens the dialog of the device. With the press left empty, **Default (More info)** leaves the press to do what it does by default.
+- With the press left empty, the action **Nothing** switches the press off. So it switches off the long press of the round tile, as the press choice **Nothing** does.
+- If you cleared a press in the form and its action is still set, the press runs that action. To go back to what the press does by default (the pop-up, for a tap), set the action to **Default (More info)**. Or set the press to **Open the pop-up**.
 - The card does nothing until it has found its timer, which takes a moment after the page loads.
 
 This round tile opens the dialog of the device on a long press, and starts or stops the timer on a tap. A double tap opens the pop-up:

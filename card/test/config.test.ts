@@ -217,6 +217,58 @@ describe("the presses of the card", () => {
       }
     }
   });
+
+  it("does the action of a press whose choice is not given", () => {
+    expect(parseConfig({ entity: NUMBER, tap_action: { action: "toggle" } }).tap).toBe("action");
+    expect(parseConfig({ entity: NUMBER, double_tap_action: { action: "toggle" } }).double_tap).toBe(
+      "action",
+    );
+    expect(
+      parseConfig({ entity: NUMBER, layout: "pill", hold_action: { action: "more-info" } }).hold,
+    ).toBe("action");
+  });
+
+  it("lets a choice that is given win over the action", () => {
+    expect(
+      parseConfig({ entity: NUMBER, tap: "popup", tap_action: { action: "toggle" } }).tap,
+    ).toBe("popup");
+    expect(parseConfig({ entity: NUMBER, tap: "popup", tap_action: { action: "none" } }).tap).toBe(
+      "popup",
+    );
+  });
+
+  it("makes a press whose action is Nothing do nothing, with no choice and with the choice action", () => {
+    expect(parseConfig({ entity: NUMBER, tap_action: { action: "none" } }).tap).toBe("none");
+    expect(parseConfig({ entity: NUMBER, tap: "action", tap_action: { action: "none" } }).tap).toBe(
+      "none",
+    );
+    expect(
+      parseConfig({ entity: NUMBER, double_tap: "action", double_tap_action: { action: "none" } })
+        .double_tap,
+    ).toBe("none");
+    expect(
+      parseConfig({ entity: NUMBER, layout: "round", hold_action: { action: "none" } }).hold,
+    ).toBe("none");
+  });
+
+  it("replaces the round tile's long press by an action given alone", () => {
+    expect(
+      parseConfig({ entity: NUMBER, layout: "round", hold_action: { action: "more-info" } }).hold,
+    ).toBe("action");
+  });
+
+  it("leaves the default to an action that names nothing to do", () => {
+    expect(parseConfig({ entity: NUMBER, tap_action: {} }).tap).toBe("popup");
+    expect(parseConfig({ entity: NUMBER, tap_action: { action: 5 } }).tap).toBe("popup");
+    expect(parseConfig({ entity: NUMBER, tap_action: { action: "" } }).tap).toBe("popup");
+    expect(
+      parseConfig({
+        entity: NUMBER,
+        layout: "round",
+        hold_action: { navigation_path: "/lovelace/0" },
+      }).hold,
+    ).toBe("run_or_stop");
+  });
 });
 
 describe("the errors of a card on a page that is not in English", () => {

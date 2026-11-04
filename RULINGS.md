@@ -1453,8 +1453,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   `number.set_value` 0. Cost if wrong: none. Changed in 1.1.0: see "A
   press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
-  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the card
-  hands to Home Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
+  (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant action,
+  `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home Assistant's
+  own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **A tap is the `click` event of the card's body (a mouse, a finger, the keyboard and assistive
   technology all produce it); a hold is added on top of it.** The hold fires on release after
   at least 500 ms, as Home Assistant's own handler does, and swallows the click that follows
@@ -1468,9 +1469,9 @@ behaviour is written. Section numbers (§) and rules (R, S) are those of the spe
   act; there is none for keyboard users either, who start and stop through the pop-up. Changed in
   1.1.0: see "A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one
   of six choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice
-  `action` uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which
-  the card hands to Home Assistant's own handler as a `hass-action` event (#36)." under
-  Release 1.1.0.
+  `action` (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant
+  action, `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home
+  Assistant's own handler as a `hass-action` event (#36)." under Release 1.1.0.
 - **The body is an empty layer that covers the whole card, border included, under the content,
   as in Home Assistant's tile card; it carries `role="button"`, `tabindex="0"`,
   `aria-labelledby` the name and the status text, and, on the pill, the fill; the round tile's
@@ -3442,12 +3443,13 @@ in `docs/followups.md`.
 
 - **The pop-up offers only the presets that are not longer than the maximum of the timer's "Run
   for" number, which it reads from the `max` attribute of that number's state at every render
-  (#35).** `presetsWithinMaximum` keeps `minutes <= max` in the order of the card, so a preset equal
-  to the maximum is shown. A number that has no `max`, or whose `max` is not a finite number
-  (missing, `null`, text, `NaN`), sets no limit, and every preset is shown. The list is filtered
-  from the live state each time the pop-up renders and is never kept: the number is one of the
-  entities the pop-up watches, so a new maximum reaches an open pop-up with the next `hass`. When
-  no preset is left, the row is not rendered, and the plus, minus and Stop buttons remain.
+  (#35).** `maximumOf` reads that `max`, and `presetsWithin` keeps `minutes <= maximum` in the
+  order of the card, so a preset equal to the maximum is shown. A number that has no `max`, or
+  whose `max` is not a finite number (missing, `null`, text, `NaN`), sets no limit, and every
+  preset is shown. The list is filtered from the live state each time the pop-up renders and is
+  never kept: the number is one of the entities the pop-up watches, so a new maximum reaches an
+  open pop-up with the next `hass`. When no preset is left, the row is not rendered, a line says
+  why (the entry on #51 in Part D of release 1.3.0), and the plus, minus and Stop buttons remain.
   Why: `number.set_value` raises `out_of_range` for a value above the number's maximum, so the
   button of a longer preset would answer every press with an error. The card's `presets` cannot
   be checked once, when the config is read: the maximum belongs to the timer, not to the card
@@ -3456,19 +3458,20 @@ in `docs/followups.md`.
   that says "2 hr" and runs for 1 hr, and a preset left out of the config would not come back
   when the maximum is raised. The row is left out, rather than left empty, because an empty row
   would still take its 16 px gap in the column of the pop-up.
-  Cost if wrong: a card whose presets are all above the maximum shows no preset and does not say
-  why; the docs name the maximum as the cause. If a future Home Assistant wrote `max` as text,
-  every preset would show again and a press of a long one would be refused as before.
+  Cost if wrong: if a future Home Assistant wrote `max` as text, every preset would show again
+  and a press of a long one would be refused as before.
   Tests (`card/test/popup.test.ts`): `the pop-up hides a preset longer than the timer's maximum`
   (the preset equal to the maximum stays and runs), `the pop-up shows no presets when each is
-  above the maximum` (no row; plus, minus and Stop work), `the presets follow a maximum that
-  changes` (a lower and a higher maximum, each in a new `hass`), `shows every preset while the
-  number states no maximum` and `shows every preset when the maximum is not a number`.
+  above the maximum` (no row, and the line; plus, minus and Stop work), `the presets follow a
+  maximum that changes` (a lower and a higher maximum, each in a new `hass`), `shows every
+  preset while the number states no maximum` and `shows every preset when the maximum is not a
+  number`.
 
 - **A press of the card is chosen in two levels: `tap`, `double_tap` and `hold` take one of six
   choices (`popup`, `run`, `stop`, `run_or_stop`, `action`, `none`), and only the choice `action`
-  uses a Home Assistant action, `tap_action`, `double_tap_action` or `hold_action`, which the
-  card hands to Home Assistant's own handler as a `hass-action` event (#36).** The defaults keep
+  (and, since 1.3.0, a press with no choice whose action is given) uses a Home Assistant action,
+  `tap_action`, `double_tap_action` or `hold_action`, which the card hands to Home Assistant's
+  own handler as a `hass-action` event (#36).** The defaults keep
   the card of 1.0.0: `tap: popup`, `double_tap: none`, and `hold: run_or_stop` on the round layout
   and `none` on the pill. An unknown choice is `card_error_press`, and an action that is not a set
   of settings is `card_error_action`; the visual editor is thrown out of the form only for a
@@ -3503,10 +3506,11 @@ in `docs/followups.md`.
   and its translated labels). The action acts on the target and not on the card's entity
   because the card's entity is the "Run for" number, which cannot be toggled and whose
   more-info dialog is not the one the user means. A missing key makes Home Assistant open the
-  more-info dialog, so a press set to `action` with no action does that; the selector's own
-  "Default" choice writes no key. The `visible` condition of a form field, which would hide an
-  action while its press is not `action`, is not in the developer documentation, so the six
-  fields are always shown and the helper under each action says when it is used. The six fields
+  more-info dialog, so a press set to `action` with no action does that. Since 1.3.0 a press with
+  no choice but an action given does the action (see Part D under Release 1.3.0). The selector's
+  own "Default" choice writes no key. The `visible` condition of a form field, which would hide an
+  action while its press is not `action`, is not in the developer documentation, so the six fields
+  are always shown and the helper under each action says when it is used. The six fields
   sit in an `expandable` group with `flatten: true`, which keeps them at the top level of the
   config (without it they would be written under an `interactions` key). That key belongs to
   the frontend and is not in the form schema the developer documentation describes, so the card
@@ -3633,10 +3637,11 @@ in `docs/followups.md`.
   the button as its icon, its name for a screen reader, its size and the chip are as they
   should be and inside the card; with room it checks the words, a pill of 6 columns and one of
   7 on the two sides of the width where they begin, and the keyboard in both forms.
-  The dial of the round tile, 80 px, is wider than a tile of 3 columns on a phone 320 px wide
-  (by 5 px on each side) and than one of 2 columns on any screen (by 2 px to 18 px), with the
-  button or without it: that is the tile's own size, found here and left as it was; it needs a
-  higher minimum of the option-off tile, or a dial that shrinks with it (#52).
+  The dial of the round tile is 80 px where the tile has room for it, and shrinks with the tile
+  where it has less, and the time and the icon in it shrink too; a dial too small for a readable
+  time shows its icon instead of the time (#52, 1.3.0, see Part D). Before 1.3.0 it was 80 px at
+  any size, and wider than a tile of 3 columns on a phone 320 px wide and than one of 2 columns
+  on any screen, with the button or without it.
   When a press that leaves the focus on the button takes the button away (a keyboard user tabs
   to it, presses Enter, the target goes off and the button leaves), the focus goes to the body
   of the card, as it does when the pop-up closes, if the body is a button (`isPressable`): the
@@ -4168,10 +4173,11 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 - **A limit does not tick.** The one-second redraw follows `endsAt` only while the state is
   `counting`, since a time of day does not change as the seconds pass. The rule is in the
   callback that the card gives the countdown controller, which stays ignorant of limits.
-  The cost is that a card that said "by Tue 00:30 at the latest" before midnight keeps the
-  weekday after it, until the next state change. The words stay true, and the times of
-  pending commands go stale in the same way; it is not fixed here. Tests: "does not count
-  down" (`pill.test.ts`, `round.test.ts`, `popup.test.ts`).
+  The label still does not tick. Its one stale part was the weekday: a card that said "by Tue
+  00:30 at the latest" before midnight kept "Tue" after it, until the next state change, and
+  the times of pending commands in the pop-up went stale in the same way. Since 1.3.0 a day
+  that is shown is redrawn once, at the next midnight (`card/src/midnight.ts`, #63, in Part D
+  below). Tests: "does not count down" (`pill.test.ts`, `round.test.ts`, `popup.test.ts`).
 - **The pop-up's minus is on under a limit, and takes time off it.** The spec speaks only of
   adding; the engine takes a negative delta through the same line as a positive one
   (`add` moves the limit by the delta and starts a countdown that someone chose), and a
@@ -4212,10 +4218,11 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 The decisions of the 1.3.0 release (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`),
 in the form they have now. The release is built in four parts, one plan each. Part A is
 planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md`, Part B in
-`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md` and Part C in
-`docs/superpowers/plans/2026-11-03-1.3.0-part-c-voice.md`; each later part adds its own
-plan and its own section here. What is still open is a GitHub issue of klimofey/timerify,
-listed in `docs/followups.md`.
+`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md`, Part C in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-c-voice.md` and Part D in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-d-card.md`; each part has its own section
+here. What is still open is a GitHub issue of klimofey/timerify, listed in
+`docs/followups.md`.
 
 ### Part A: engine
 
@@ -4989,3 +4996,311 @@ now.
   stays open for the rest. Cost if wrong: unchanged from before this release, the device is
   switched at once in English. Test:
   `test_a_part_of_the_day_with_no_hour_is_left_to_the_gazetteer`.
+
+### Part D: the card
+
+The decisions of Part D (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`, part D,
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-d-card.md`), in the form they have
+now.
+
+- **A press with no choice of its own but with its action given does that action. One
+  resolver, `parsePress(raw, action, fallback)` in `card/src/config.ts`, decides it from three
+  inputs (#53).** `parseConfig` parses the actions first and then resolves `tap` (default
+  `popup`), `double_tap` (`none`) and `hold` (`run_or_stop` on the round layout, `none` on the
+  pill) from the press's choice, its action and its default. A choice that is given wins, and an
+  unknown one is still `card_error_press`. With no choice, an action that names something to do
+  makes the press `action`. With neither, the default applies. `ACTION_OF` maps each press to
+  the key of its action. Nothing after `config.ts` changes: `press.ts`, `layout.ts`, `pill.ts`,
+  `round.ts` and `timerify-card.ts` read the resolved press, and `#fireAction` already hands
+  every given action to Home Assistant. What follows from the rule: a `hold_action` alone gives
+  the pill a long press and replaces the round tile's start or stop, and a `double_tap_action`
+  alone makes a single tap wait `DOUBLE_TAP_MS` for a second one, as the cards of Home
+  Assistant do. Why: every Home Assistant card is configured with the action alone, such as
+  `tap_action: {action: toggle}`, and on a Timerify card that opened the pop-up and ignored
+  the action. The old rule, that an action is used only when its press is `action`, was never
+  written in the code: it was the absence of one. Putting the new rule in the one place that
+  resolves the config keeps the layouts, the press controller and the editor from each
+  repeating it. Cost if wrong: a card written with an action alone does the press's default
+  and not the action, as before 1.3.0. Tests (`card/test/config.test.ts`): `does the action of
+  a press whose choice is not given`, `lets a choice that is given win over the action` and
+  `replaces the round tile's long press by an action given alone`; (`card/test/press.test.ts`)
+  `a tap whose action alone is given toggles through Home Assistant and opens no pop-up`, `a
+  double tap action given alone makes a single tap wait for the double tap` and `a hold action
+  given alone gives the pill a long press`; end to end, `runs a tap action that is set alone,
+  and writes no tap` (`card/e2e/editor.spec.ts`: the form writes `tap_action` and no `tap`, and
+  a tap on the dashboard switches the device on and opens no pop-up).
+- **An action of "Nothing" makes its press nothing, with no choice and with the choice
+  `action`.** `{action: none}` resolves to `none` when the press has no choice, and when its
+  choice is `action`; a choice that is given and is anything else still wins (`tap: popup` with
+  `tap_action: {action: none}` opens the pop-up). So `hold_action: {action: none}` switches off
+  the round tile's long press, and `tap_action: {action: none}` alone turns the tap off, as in
+  Home Assistant, where "Nothing" is no press at all. A body whose only press is such a tap is
+  no button and no tab stop, as when all three presses are `none`, and a double tap set to
+  `action` with the action "Nothing" does not make a single tap wait 250 ms. Why: "Nothing" is
+  an entry of the action selector, and the user who picks it means that the press does nothing.
+  Read as `action`, a `double_tap_action` of "Nothing" would create a double tap that does
+  nothing and delay every tap, and a `hold_action` of "Nothing" could not switch off the round
+  tile's long press, the one way to do it without the choice. Cost if wrong: a user who picks
+  "Nothing" for a tap and wants the pop-up anyway sets the action to "Default" or the press to
+  "Open the pop-up". Tests (`card/test/config.test.ts`): `makes a press whose action is
+  Nothing do nothing, with no choice and with the choice action`; (`card/test/press.test.ts`)
+  `is no button when the only press it has is an action of Nothing` and `never makes a tap
+  wait for a double tap whose action is Nothing`.
+- **An action with no `action` key, with one that is not text, or with an empty one, counts as
+  not given.** `namedAction` returns the name of the action when it is a non-empty string and
+  `undefined` otherwise, and the resolver treats `undefined` as no action at all: `tap_action:
+  {}` and `tap_action: {action: 5}` leave the tap on the pop-up, and `hold_action:
+  {navigation_path: "/lovelace/0"}` leaves the round tile's long press on start or stop. An
+  action that is not a set of settings at all is still `card_error_action`, as before. Why: the
+  action names nothing to do, so a press that took it for an action would do nothing where the
+  default did something; and the visual editor's "Default" writes no key, so the editor never
+  writes such an action, which only YAML can. This is the planning call of Part D, a value that
+  names nothing is treated as no key. Cost if wrong: a user who writes `tap_action: {}`
+  expecting a press that does nothing gets the pop-up, and writes `{action: none}` instead.
+  Test (`card/test/config.test.ts`): `leaves the default to an action that names nothing to do`
+  (the empty object, `action: 5`, an empty name, and a hold with only a navigation path).
+- **The editor keeps the press's select empty when no choice is set, and two helper texts say
+  what that does. There is no custom editor.** `computeHelper` gives `tap`, `double_tap` and
+  `hold` the new `card_editor_press_helper` ("Empty: runs the action below if one is set.
+  Otherwise it does the default.") and the three action fields the reworded
+  `card_editor_action_helper` ("Used when the behavior above is "Home Assistant action" or
+  empty."), in the editor's language; the quoted label in the action helper is the string
+  `card_editor_press_action` of the same language. The owner decided this on 2026-11-03 after
+  the research. Why: the visual editor is the frontend's own form, which shows `config[name]`
+  literally, so a press with no key is an empty select; `computeHelper` is given no config and
+  so cannot say what a particular press is set to, and a field's `default` becomes the
+  selector's `placeholder`, which the select selector ignores. Filling `tap: action` in
+  `assertConfig`, which `hui-form-editor` runs from `setConfig`, would edit the user's object
+  while checking it. A custom editor element (`getConfigElement`) around `ha-form` could show
+  the press as "Home Assistant action" and map it back, but gives up the form and the
+  translated labels that the 1.1.0 entry chose, needs `ha-form` loaded by hand and costs more
+  tests; it is a non-goal of this release. Cost if wrong: the select does not read "Home
+  Assistant action" for a press that runs one, as it was first asked to; the helper under a
+  press that is set still says "Empty: ...", since it cannot see the config. Only a custom
+  editor gives the literal display. Tests (`card/test/editor.test.ts`): `says what an empty
+  press does, in the editor's language` and `names the Home Assistant action choice in the
+  action helper by its own label`; end to end, `runs a tap action that is set alone, and writes
+  no tap` (the helper shows under all three presses).
+- **A press whose choice was cleared while its action stayed runs the action now, and the
+  docs say how to go back to the pop-up.** A user who chose "Home Assistant action", set an
+  action, and then cleared the choice with the cross of its drop-down to go back to the
+  pop-up, has a config with `tap_action` and no `tap` (Home Assistant drops the key when the
+  select is cleared). Before 1.3.0 that card opened the pop-up. Now its tap runs the action.
+  To go back, the user sets the action to "Default" (which writes no key) or sets the press to
+  "Open the pop-up". `docs/en/card.md` and `docs/ru/card.md` say so under "Home Assistant
+  actions", and the release notes repeat it. Why: nothing in a saved config tells this card
+  from one that has an action alone, which is the case #53 asks for; the config belongs to the
+  user, and the card does not rewrite it. Cost if wrong: a few dashboards change a tap from
+  the pop-up to the action at the update, until the user reads the note. Tests: the config of
+  this user is the one in `does the action of a press whose choice is not given`
+  (`card/test/config.test.ts`); `goes back to opening the pop-up when what a tap does is
+  cleared` (`card/e2e/editor.spec.ts`) keeps its meaning, since clearing a choice that has no
+  action leaves the pop-up.
+- **The round tile's dial shrinks with its tile, and a dial too small for a readable time shows
+  its ring and its icon instead of the time (#52).** The dial is its own container, and its
+  rules sit in one `@supports (width: 1cqw)` block. In `roundStyles` (`card/src/round.ts`),
+  below the Mushroom rules, `.dial` gets `max-width: 100%`, `height: auto`, `aspect-ratio: 1` and
+  `container-type: inline-size`, its width staying `80px`. The parts of the dial follow it in
+  container units: `.round .time` is `min(var(--ha-font-size-l, 16px), 20cqw)`, the icon of the
+  Home Assistant look is `--mdc-icon-size: min(32px, 40cqw)`, and in the Mushroom style the time
+  is `min(<Mushroom's primary font size>, 20cqw)` and the icon shape is `min(<Mushroom's icon
+  size>, 45cqw)` for its width, height and font size (the symbol follows as `0.667em`). 45 % of
+  the full dial, 80 px, is 36 px, Mushroom's default, so a dial that has room for its 80 px is
+  what it was: a tile of 3 columns on a desktop keeps it, and the documentation screenshots,
+  which show tiles wider than 96 px, do not change. The rules of before stay as they are, above
+  the block. The owner decided that the dial shrinks with its tile, and kept `min_columns: 2`
+  for the round tile. On 2026-11-04 the owner amended it. The rule had said that the dial, its
+  time and its icon stay whole and readable at every size, and measured in the real Home
+  Assistant a tile of 2 columns on a phone is 44 px wide (320 px screen), its dial 26 px and the
+  time in it 4 to 7 px: whole, but not readable. So below a dial of 45 px the dial shows its
+  progress ring and its icon, and not the time, as Home Assistant's own small tiles do.
+  The mechanism: while the timer counts, the dial holds both the time (`aria-hidden`, for the eye
+  alone) and the icon (`renderCentre`), and the styles choose. `ha-card.round.counting .icon` is
+  `display: none` above the block, so that a browser without container queries shows the time
+  only, as before. Inside the block, `@container (width < 45px)` on the dial hides `.time` and
+  shows `.icon` (the icon of a timer that counts takes the active colour, as the pill's does).
+  The 45 is `TIME_FROM = MIN_TIME_PX * 100 / TIME_CQW` in `round.ts`: the time is 20cqw, and it
+  is never drawn below 9 px, which 20cqw reaches at a dial of 45 px. The selector has the
+  specificity of `ha-card.round.counting .icon`, above the Mushroom rule that shows the icon
+  (`:host([data-mushroom]) .icon`, in a sheet that comes later). What a screen reader reads is
+  not touched: the body is named by `#label`, which holds the name and the `.status`, and the
+  `.status` says the time left and the end, whatever the dial shows. Why the dial and not
+  `.content`: a `.content` that is always a container would take back the guarantee of the Turn
+  off entry above, that a card without the button is laid out as before, including one that a
+  layout sizes by its content (inline-size containment gives an element no width of its own
+  from its content), and `leaves its content as it was when it has no Turn off button` pins
+  `.content` as no container. The dial has a width of its own, so containment costs it nothing,
+  and `max-width: 100%` resolves against the room in `.content`; a percentage that depends on
+  the content counts as none when a layout asks for the intrinsic size, so such a layout still
+  gets 80 px. Why one `@supports` block, where the plan, and the spec before its amendment,
+  said "a plain declaration first":
+  `max-width: 100%` alone would shrink the dial in a browser that has no `aspect-ratio`, with its
+  height still 80 px, and `--mdc-icon-size: min(32px, 40cqw)` is a custom property, which a
+  browser that does not know `cqw` takes without a complaint and then finds invalid where
+  `var()` uses it, leaving the icon with no size at all. A block that is dropped as a whole
+  leaves the browser the dial it had. The floor of the block is the floor of container queries
+  and `cqw`: Chrome and Edge 105, Safari 16, Firefox 110. Home Assistant loads the card for every
+  browser, and the bundle targets es2022 (`card/build.mjs`), so a browser below that floor which
+  still runs the card (roughly Chrome and Edge 94 to 104, Firefox 94 to 109 and Safari 15) keeps
+  the dial at 80 px with its time, as it keeps the Turn off rule of the entry above, which is a
+  container query too. The Home Assistant icon also gets `line-height: 0` in the block: a small
+  symbol sat in a line of text 22.4 px high, and its box was taller than the symbol (10.4 by
+  22.4 px in a dial of 26 px), so that it did not fit the ring; the box of a symbol of 32 px is
+  the same with the rule or without it. The values were measured, with the time at its longest
+  (`1:29:xx`, a countdown of 90 minutes), at screen widths of 1280, 390 and 320 px, in the Home
+  Assistant look and in the Mushroom style. The tile of 2 columns is 76.7, 55.7 and 44 px wide,
+  and its dial 58.7, 37.7 and 26 px (Mushroom, with its larger spacing: 54.7, 33.7 and 22 px), so
+  it shows the time on a desktop (11.7 px high, Mushroom 10.9) and the icon on both phones. The
+  tile of 3 columns is 119, 87.5 and 70 px wide, and its dial 80, 69.5 and 52 px (Mushroom: 80,
+  65.5 and 48 px), so it shows the time everywhere, 9.6 px high at the least (Mushroom, 320 px).
+  The threshold itself was measured by narrowing a tile one pixel at a time, then by tenths of a
+  pixel, in both looks: a dial of 45 px shows the time at 9 px, and one of 44.99 px shows the
+  icon (its time would be 8.997 px); the tile is 63 px wide at that point in the Home Assistant
+  look (18 px of border and padding) and 67 px in the Mushroom style (22 px). The diagonal of
+  the time is at most 0.77 of the dial (Mushroom, the narrowest dial that shows it), against the
+  0.85 of the ring's inner circle, and that of the icon at most 0.64 (Mushroom's shape). So 20,
+  40 and 45 held, and none was changed after the first run. Cost if wrong: on a phone, a round
+  tile of 2 columns shows the ring and the icon, and a person opens the pop-up to read the time;
+  from 3 columns the time is there. The rule is the one number `MIN_TIME_PX`: a contributor who
+  wants the time smaller or larger changes it, and the threshold follows. A browser below the floor
+  shows a dial that is wider than a small tile, as before 1.3.0. Tests: end to end, `holds the
+  time, or the icon where the time cannot be read, inside its ring` (`card/e2e/sizes.spec.ts`;
+  its twin for the Mushroom style in `card/e2e/mushroom.spec.ts`; the steps are in
+  `card/e2e/dials.ts`): the view `dials` has the strict timer at the fewest columns and at 3,
+  and the loose timer at the fewest, and at each of three screen widths the dial is inside its
+  tile, a square of at most 80 px, with the time or the icon inside the ring (`fitsInRing` in
+  `card/e2e/sizing.ts`: the farthest corner of the part's box is inside the circle of 68 of 80),
+  the time at 9 px or more, the other of the two hidden, the tile of 2 columns showing the time
+  at 1280 px and the icon at 390 and 320 px, the body named by the time left, and the dial of
+  the tile of 3 columns 80 px on a desktop; `shows the time from a dial of 45 px, and the icon
+  below it` (both files): the tile is narrowed from a dial of 40 px to one of 50 px, and the time
+  appears at 45 px; `show a round tile with the button as an icon alone under its dial, inside
+  it` (and its twin for Mushroom) has the dial inside the tile with the Turn off button on a
+  phone 320 px wide; `keeps its dial at 80 px where there is room` (`card/e2e/round.spec.ts`);
+  and, in `card/test/round.test.ts`, `holds the icon beside the time while it counts, for a dial
+  too small to read the time`.
+- **When every preset is longer than the timer's maximum, a line stands where the pop-up's row of
+  presets would be: "Every preset is longer than this timer's maximum of {maximum}." (#51).** In
+  `#controls` (`card/src/popup.ts`), `maximumOf(runFor)` returns the `max` attribute of the Run
+  for number when it is a finite number, and `presetsWithin(presets, maximum)` keeps the presets
+  of at most that maximum, or all of them when there is none; it replaces `presetsWithinMaximum`.
+  When the presets left are none and the maximum is defined, `<p class="note above-maximum">`
+  says `card_presets_above_maximum`, with the maximum written by `formatMinutes` ("10 min",
+  "1 hr 30 min"); otherwise the row shows as it did. Nothing is said when only some presets are
+  hidden, when a preset equals the maximum (a maximum of 15 shows "15 min" and no line), or when
+  the number states no maximum. The pop-up line only, not the editor's helper, which the issue
+  offered second: `computeHelper(schema, localize)` of Home Assistant's form gets neither the
+  config nor `hass`, and `getConfigForm` is built once for every card, so a helper cannot know
+  the maximum of the timer a card has chosen. One string, `card_presets_above_maximum` in
+  `en.json` and `ru.json`, with the blank `{maximum}`, in the existing `.note` style. The maximum
+  is read on its own, so that the line can name it. Why: a card whose presets are all above the
+  maximum showed no preset and no reason, and a person could not tell a short maximum from a
+  broken card. The presets are never empty to begin with (`parsePresets` falls back to the
+  defaults), so an empty list after the filter means exactly this case, and the line stands in
+  the column where the row would, with no gap to manage. Cost if wrong: a person who picks
+  presets in the editor still learns of the maximum only when the pop-up opens, since the form
+  cannot say it earlier; a custom editor, which could, is a larger change that this release does
+  not make. Tests (`card/test/popup.test.ts`): `the pop-up shows no presets when each is above
+  the maximum` (the line, in English), `says in Russian why it shows no presets`, `says nothing
+  when only some presets are longer than the maximum`, `names a maximum over an hour in hours
+  and minutes`, `shows a preset equal to the maximum, and no line`, `says why it shows no
+  presets while the timer is unavailable, and offers nothing to press` (an unavailable number
+  keeps its `max`, as Home Assistant keeps the capability attributes), `the presets follow a
+  maximum that changes` (the line at 10, gone at 1440), `shows every preset while the number
+  states no maximum` and `shows every preset when the maximum is not a number` (no line).
+- **A label that shows a day is redrawn once, at the next midnight by the server's clock, in the
+  zone the label is written in (#63).** `MidnightController` (`card/src/midnight.ts`) is a Lit
+  controller in the style of `CountdownController`. It is built from the host and three callbacks:
+  the moments the host writes, the time now, and the zone. The decisions:
+  - It is armed while the host is on the page and some moment is on a later calendar day than
+    today. Only such a label carries a weekday or a date, and a time today ends with a state
+    change that redraws the card anyway. A moment that has passed on an earlier day keeps its
+    date whatever the hour, so it arms nothing. The callbacks `now` and `timeZone` are asked
+    only when there is a moment.
+  - Armed, it holds one `setTimeout` for `startOfNextDay(zone, now) - now`, and remembers the
+    zone and the day it waits to end (`calendarDay` of now in that zone), which fix the midnight.
+    It looks again on `hostConnected` and on every `hostUpdated`: the same zone and day keep
+    the timeout, a change rearms it, and nothing left to wait for clears it. The midnight is
+    looked for only when it arms, so an update that keeps the timeout costs `calendarDay` for
+    now and for each moment (one `Intl` formatter each), not the bisection.
+  - When the timeout fires it forgets what it armed for and calls `requestUpdate()`. That
+    redraw's `hostUpdated` arms again if a later day is still shown, so a card never waits on a
+    day it has stopped showing. A bare `requestUpdate()` passes both hosts' `shouldUpdate`,
+    since `mattersToRender` is true for an empty set of changes.
+  - There are two instances. The card's covers the end of a limit (state `limit`), which the
+    pill writes and the round tile keeps in its `.status` for screen readers. The pop-up's
+    covers, while it is open and only then, the end of a limit and the `at` of every pending
+    command that the "Next command" sensor lists: the commands of an idle timer are written in
+    the open pop-up, and nothing else redraws it. Inside the card the pop-up's limit moment is
+    also covered by the card's instance, which hands the pop-up a new view at every draw; the
+    pop-up keeps its own so that it does not depend on that. A date ("Jan 12") turns into a
+    weekday at midnight six days before, by the same rule.
+  - The zone is one rule now, `displayTimeZone(hass)` in `card/src/format.ts`
+    (`hass.config.time_zone` when the profile's `locale.time_zone` is "server", else none, which
+    `Intl` reads as the browser's), taken out of `formatClock`; `calendarDay` is exported for the
+    controller. The label and the controller cannot disagree about where the day changes. A
+    change of the profile's zone is a change of `locale`, which `mattersToRender` lets through,
+    so the next `hostUpdated` rearms the timeout for the new zone's midnight, or clears it when
+    no later day is shown in it any more. The zone is part of what the timeout is kept for
+    because two zones can be on the same day with different midnights.
+  - The clock is the server's: `now` is `serverNow(lookup)`, the clock `formatClock` is given.
+    The delay is the difference of two instants of that clock (the midnight, found from `now`,
+    and `now`), so the offset that the lookup measured cancels out of it, and the timeout counts
+    on the browser's own timer, which is right for a difference. If a new lookup measures the
+    offset again while the timeout waits, for example after a reconnect, it is still the same
+    day in the same zone, so the timeout is kept; it may then fire a few seconds before the
+    midnight by the new measure. The redraw finds the label's day unchanged, and `hostUpdated`
+    arms again for the seconds left. That cannot loop: `startOfNextDay` is always later than
+    `now`, and each timeout fires once.
+  - `startOfNextDay(zone, instant)` is the first whole second of the next calendar day. It
+    bisects between `instant`, floored to the second, and 49 hours on, which is later than the
+    end of any day (a date that the calendar repeats lasts 48 hours), and keeps the upper end
+    on the later day by `calendarDay`. It needs about 18 steps and 0.5 ms. It is exact on a day
+    of 23 or 25 hours, where "24 hours minus the time since midnight" is an hour wrong (the
+    timeout fires an hour early, which the rearm absorbs, or an hour late, and the label is
+    stale for an hour), and on a day the calendar skips. It does not use `Temporal`, which is
+    not in every browser that runs the card (the bundle targets es2022).
+  - The page that becomes visible: a tablet or a phone can sleep through a midnight, and the
+    timeout with it. `hostConnected` adds a `visibilitychange` listener on `document` and
+    `hostDisconnected` removes it. When the page becomes visible while the timeout is armed,
+    the controller clears it, forgets it and calls `requestUpdate()`, and the redraw arms for
+    the midnight that is left, if there is one.
+  Why: the label says "Tue" for a time that is now today, until the next state change, which
+  for a limit or an idle timer may be hours away; ticking every second for it would redraw a
+  card that has nothing else to change. One timeout at the one moment the text changes is the
+  least that fixes it.
+  Cost if wrong:
+  - A card in a hidden tab, whose browser holds timers back, can keep the old weekday until the
+    tab is seen; then it is redrawn at once.
+  - A device that suspends without hiding the page (a laptop with its lid closed) fires no
+    `visibilitychange`, so its timeout fires late by the length of the sleep, and the weekday
+    stays until then.
+  - If a zone's rules change while the timeout waits (a new rule file for a daylight-saving
+    day), it may fire an hour off, and the label is stale for up to that until the next redraw.
+  - An update that keeps the timeout asks `calendarDay` once for now and once for each moment.
+    A pop-up open on a counting timer, with a command on a later day, does that every second.
+  Tests (`card/test/midnight.test.ts`):
+  - `drops the weekday of a limit at midnight, with no state change`: the pill, with one
+    timeout, and none after.
+  - `drops the weekday of a limit on the round tile at midnight`: the `.status` for screen
+    readers.
+  - `drops the weekday of a pending command in the open pop-up of an idle timer`
+  - `sets no timeout once the pop-up is shut`
+  - `drops the weekday of a limit at midnight without the card drawing it again`: a pop-up with
+    no card around it, which has only its own timeout.
+  - `arms nothing for a command that is overdue from yesterday`
+  - `turns a date into a weekday at midnight six days before`
+  - `follows the zone the label is written in`: the browser's zone against the server's.
+  - `follows a change of the profile's time zone`
+  - `waits for the midnight of the zone the profile has now`: two zones that are on the same
+    day, with midnights 10 and 17 hours away.
+  - `arms again for the rest when it fires before midnight by a clock measured again`: the
+    offset moves 5 s after the timeout was armed.
+  - `sets no timeout while nothing shown has a day, and none after the card is removed`
+  - `redraws a label with a day when the page becomes visible after midnight`
+  In `card/test/format.test.ts`:
+  - `finds the next midnight exactly on the days the clocks change`: London on 29 March and 25
+    October 2026, and half a second before midnight.
+  - `finds the next midnight where the calendar skips a day`: Apia, 30 December 2011.
+  - `finds the next midnight in the browser's zone when none is given`
+  - `reads the zone the label is written in`

@@ -174,6 +174,8 @@ export interface WsRequest {
 
 export interface Changes {
   language?: Language;
+  /** The user's choice of `hass.locale.time_zone`. */
+  localeTimeZone?: "server" | "local";
   connected?: boolean;
   entities?: Record<string, RegistryEntry>;
   localize?: Localize;
@@ -386,14 +388,20 @@ function build(world: World, parts: Parts): FakeHass {
       world.serverClockAhead = milliseconds;
     },
     with(changes) {
-      const { states, formatters, ...rest } = changes;
+      const { states, formatters, localeTimeZone, ...rest } = changes;
       return build(world, {
         ...parts,
         ...rest,
         formatters: { ...parts.formatters, ...formatters },
-        locale: changes.language
-          ? { ...parts.locale, language: changes.language }
-          : parts.locale,
+        // The same object while neither the language nor the zone changes, as in the real one.
+        locale:
+          changes.language || localeTimeZone
+            ? {
+                ...parts.locale,
+                language: changes.language ?? parts.locale.language,
+                time_zone: localeTimeZone ?? parts.locale.time_zone,
+              }
+            : parts.locale,
         states: states ? withStates(parts.states, states) : parts.states,
       });
     },

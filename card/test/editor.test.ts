@@ -353,10 +353,31 @@ describe("the form of the visual editor", () => {
     }
     for (const field of [
       ...["entity", "layout", "name", "icon", "chip", "show_turn_off"],
-      ...["interactions", "tap", ""],
+      ...["interactions", ""],
     ]) {
       expect(form.computeHelper({ name: field }, localizeFor("en")), field).toBeUndefined();
     }
+  });
+
+  it("says what an empty press does, in the editor's language", async () => {
+    const { getConfigForm } = await freshEditor();
+
+    const form = await getConfigForm();
+
+    for (const press of ["tap", "double_tap", "hold"]) {
+      const inEnglish = form.computeHelper({ name: press }, localizeFor("en"));
+      const inRussian = form.computeHelper({ name: press }, localizeFor("ru"));
+      expect(inEnglish, press).toBe(english.card_editor_press_helper);
+      expect(inRussian, press).toBe(russian.card_editor_press_helper);
+      // A field with no helper has none in either language, so the words must be there.
+      expect(inEnglish, press).toEqual(expect.stringMatching(/\S/));
+      expect(inRussian, press).toEqual(expect.stringMatching(/\S/));
+    }
+  });
+
+  it("names the Home Assistant action choice in the action helper by its own label", () => {
+    expect(english.card_editor_action_helper).toContain(english.card_editor_press_action);
+    expect(russian.card_editor_action_helper).toContain(russian.card_editor_press_action);
   });
 
   it("says in the user's language which presses use a Home Assistant action", async () => {

@@ -27,18 +27,26 @@ const SIZE = 80;
 const STROKE = 6;
 const RADIUS = (SIZE - STROKE) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+/** The time is this many container units (1cqw is 1 % of the dial's width) high, at most. */
+const TIME_CQW = 20;
+/** The smallest the time is drawn, in px; a dial too small for it shows the icon instead. */
+const MIN_TIME_PX = 9;
+/** The dial's width in px from which it shows the time: `TIME_CQW` of it is `MIN_TIME_PX`. */
+const TIME_FROM = (MIN_TIME_PX * 100) / TIME_CQW;
 
 /**
  * The time left while the timer counts; the icon of its target otherwise, under a limit too,
- * which has no time left to show.
+ * which has no time left to show. While it counts the dial holds both and the styles choose:
+ * the time, except in a dial too small for the time to be read, where the icon is shown instead.
  */
 function renderCentre(view: TimerView): TemplateResult {
+  const icon = html`<span class="icon">${renderIcon(view)}</span>`;
   if (view.state !== "counting") {
-    return html`<span class="icon">${renderIcon(view)}</span>`;
+    return icon;
   }
-  // The label of the body already says it, with the end.
+  // The label of the body already says the time, with the end.
   const left = formatRemaining(view.remaining);
-  return html`<span class="time" aria-hidden="true">${left}</span>`;
+  return html`<span class="time" aria-hidden="true">${left}</span>${icon}`;
 }
 
 /**
@@ -164,6 +172,15 @@ export const roundStyles = css`
     display: flex;
     --mdc-icon-size: 32px;
   }
+  /*
+   * While it counts the dial holds the time and the icon, and shows the time. The icon takes its
+   * place only in a dial too small for the time, see the end of these styles; a browser that
+   * does not know container queries never shows it. The selector is more specific than the
+   * Mushroom rule that shows the icon (mushroomStyles, in layout.ts).
+   */
+  ha-card.round.counting .icon {
+    display: none;
+  }
   .round .text {
     position: relative;
     display: flex;
@@ -239,5 +256,49 @@ export const roundStyles = css`
   }
   :host([data-mushroom]) .turn-off-slot {
     height: ${mush.controlHeight};
+  }
+  /*
+   * The dial shrinks with its tile: it is 80 px where the tile has room, and as wide as the room
+   * where it has less, and the time and the icon follow it in container units. In a dial too
+   * small for the time to be read (TIME_FROM, where the time is MIN_TIME_PX high) the ring and
+   * the icon are shown and the time is not. The dial is the container and not .content, so that
+   * a card without the Turn off button is laid out as before (see turnOffAsIcon: only a card
+   * that has the button makes .content a container). All of it is one block, so that a browser
+   * that does not know container units keeps the dial at 80 px with its time: a width capped
+   * without an aspect ratio would not be a square, and a custom property with cqw in it is
+   * invalid only where it is used.
+   */
+  @supports (width: 1cqw) {
+    .dial {
+      max-width: 100%;
+      height: auto;
+      aspect-ratio: 1;
+      container-type: inline-size;
+    }
+    .round .time {
+      font-size: min(var(--ha-font-size-l, 16px), ${TIME_CQW}cqw);
+    }
+    :host(:not([data-mushroom])) .round .icon {
+      /* No line of text around a small symbol: the box of the icon is the symbol. */
+      line-height: 0;
+      --mdc-icon-size: min(32px, 40cqw);
+    }
+    :host([data-mushroom]) .round .time {
+      font-size: min(${mush.primaryFontSize}, ${TIME_CQW}cqw);
+    }
+    /* 45 % of the full dial, 80 px, is 36 px, the size of Mushroom's icon shape. */
+    :host([data-mushroom]) .round .icon {
+      width: min(${mush.iconSize}, 45cqw);
+      height: min(${mush.iconSize}, 45cqw);
+      font-size: min(${mush.iconSize}, 45cqw);
+    }
+    @container (width < ${TIME_FROM}px) {
+      ha-card.round.counting .time {
+        display: none;
+      }
+      ha-card.round.counting .icon {
+        display: flex;
+      }
+    }
   }
 `;

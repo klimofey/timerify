@@ -640,6 +640,7 @@
     "card_until_latest": "не позже {time}",
     "card_add_time": "Добавить {duration}",
     "card_subtract_time": "Убавить {duration}",
+    "card_presets_above_maximum": "Все готовые значения больше максимума этого таймера: {maximum}.",
     "card_stop": "Остановить",
     "card_turn_off": "Выключить",
     "card_schedule": "Расписание",
@@ -676,6 +677,7 @@
     "card_editor_press_run_or_stop": "Запустить или остановить",
     "card_editor_press_action": "Действие Home Assistant",
     "card_editor_press_none": "Ничего не делать",
-    "card_editor_action_helper": "Используется, когда выше выбрано «Действие Home Assistant»"
+    "card_editor_press_helper": "Если ничего не выбрано: выполняется действие ниже, а если его нет, то поведение по умолчанию.",
+    "card_editor_action_helper": "Используется, когда выше выбрано «Действие Home Assistant» или ничего не выбрано."
   }
 }

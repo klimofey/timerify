@@ -30,10 +30,28 @@ function countsTwelveHours({ language, time_format }: HomeAssistant["locale"]): 
   return options.hourCycle === "h11" || options.hourCycle === "h12";
 }
 
+const MS_PER_SECOND = 1000;
 const MS_PER_DAY = 86_400_000;
+/**
+ * Longer than the rest of any day, so that the next day has begun by then. The longest a day
+ * lasts is 48 hours, for a date the calendar repeats (Samoa's 4 July 1892), counted from the
+ * first moment of it; an hour of margin on top.
+ */
+const LONGER_THAN_A_DAY = 49 * 3_600_000;
+
+/**
+ * The zone the user reads the clock in: the server's when the profile chooses it, else none,
+ * which `Intl` takes for the browser's own. The labels and the redraw at midnight both go by
+ * this one rule.
+ */
+export function displayTimeZone(
+  hass: Pick<HomeAssistant, "locale" | "config">,
+): string | undefined {
+  return hass.locale.time_zone === "server" ? hass.config.time_zone : undefined;
+}
 
 /** The calendar day of the instant in the time zone, as a number of days since 1970. */
-function calendarDay(timeZone: string | undefined, instant: number): number {
+export function calendarDay(timeZone: string | undefined, instant: number): number {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone,
     year: "numeric",
@@ -42,6 +60,27 @@ function calendarDay(timeZone: string | undefined, instant: number): number {
   }).formatToParts(instant);
   const part = (type: string) => Number(parts.find((candidate) => candidate.type === type)?.value);
   return Date.UTC(part("year"), part("month") - 1, part("day")) / MS_PER_DAY;
+}
+
+/**
+ * The first whole second of the day after the one `instant` is in, in the time zone: the
+ * midnight that ends the day. A day is 23, 24 or 25 hours where the clocks change, so the
+ * calendar is asked. The search halves the span from the second of `instant` to 49 hours on,
+ * and keeps the end of it on the later day.
+ */
+export function startOfNextDay(timeZone: string | undefined, instant: number): number {
+  const today = calendarDay(timeZone, instant);
+  let before = Math.floor(instant / MS_PER_SECOND) * MS_PER_SECOND;
+  let after = before + LONGER_THAN_A_DAY;
+  while (after - before > MS_PER_SECOND) {
+    const middle = before + Math.floor((after - before) / (2 * MS_PER_SECOND)) * MS_PER_SECOND;
+    if (calendarDay(timeZone, middle) > today) {
+      after = middle;
+    } else {
+      before = middle;
+    }
+  }
+  return after;
 }
 
 /**
@@ -56,7 +95,7 @@ export function formatClock(
   now: number,
 ): string {
   const { locale } = hass;
-  const timeZone = locale.time_zone === "server" ? hass.config.time_zone : undefined;
+  const timeZone = displayTimeZone(hass);
   const daysAhead = calendarDay(timeZone, at.getTime()) - calendarDay(timeZone, now);
   const day: Intl.DateTimeFormatOptions =
     daysAhead === 0

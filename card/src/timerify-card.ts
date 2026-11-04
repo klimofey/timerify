@@ -6,8 +6,10 @@ import { addMinutes, runWithoutDuration, stop } from "./actions";
 import { ACTION_KEYS, parseConfig, type CardConfig, type Press } from "./config";
 import { CountdownController } from "./countdown";
 import { getConfigForm, getStubConfig } from "./editor";
+import { displayTimeZone } from "./format";
 import type { HomeAssistant } from "./hass";
 import { commonStyles, isPressable, mushroomStyles } from "./layout";
+import { MidnightController } from "./midnight";
 import { MushroomController } from "./mushroom";
 import { pillStyles, renderPill } from "./pill";
 import { TimerifyCardPopup } from "./popup";
@@ -114,6 +116,14 @@ export class TimerifyCard extends LitElement {
       // A limit shows a time of day alone, which a tick would not change.
       () => (this.#view?.state === "counting" ? this.#view.endsAt : undefined),
       () => serverNow(this._lookup),
+    );
+    // A limit that ends on another day is written with its weekday, which nothing else redraws
+    // when the day changes.
+    new MidnightController(
+      this,
+      () => (this.#view?.state === "limit" && this.#view.endsAt ? [this.#view.endsAt] : []),
+      () => serverNow(this._lookup),
+      () => (this.#hass ? displayTimeZone(this.#hass) : undefined),
     );
     // The card is marked while its config asks for the Mushroom style and Mushroom is there.
     new MushroomController(this, () => this._config?.mushroom === true);

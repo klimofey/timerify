@@ -21,6 +21,13 @@ export type ActionConfig = Record<string, unknown>;
 export const ACTION_KEYS = ["tap_action", "double_tap_action", "hold_action"] as const;
 export type ActionKey = (typeof ACTION_KEYS)[number];
 
+/** The key that holds the Home Assistant action of each press. */
+const ACTION_OF: { readonly [P in Press]: `${P}_action` } = {
+  tap: "tap_action",
+  double_tap: "double_tap_action",
+  hold: "hold_action",
+};
+
 export interface CardConfig {
   /** The "Run for" number of the timer. */
   entity: string;
@@ -35,12 +42,21 @@ export interface CardConfig {
   show_turn_off: boolean;
   /** Whether the card takes Mushroom's look, when Mushroom is on the page: see `mushroom.ts`. */
   mushroom: boolean;
-  /** What a tap does: it opens the pop-up unless the config says otherwise. */
+  /**
+   * What a tap does: it opens the pop-up unless the config sets it to something else, with a
+   * choice or with an action alone.
+   */
   tap: PressChoice;
   double_tap: PressChoice;
-  /** What a long press does: on the round layout it starts or stops, on the pill nothing. */
+  /**
+   * What a long press does: on the round layout it starts or stops, on the pill nothing, unless
+   * the config sets it to something else.
+   */
   hold: PressChoice;
-  /** The Home Assistant action of each press, for a press that is set to "action". */
+  /**
+   * The Home Assistant action of each press: used when the press is set to `action`, or is not
+   * set.
+   */
   tap_action?: ActionConfig;
   double_tap_action?: ActionConfig;
   hold_action?: ActionConfig;
@@ -106,15 +122,43 @@ const recordOf = (raw: unknown): Record<string, unknown> =>
 const isPressChoice = (given: unknown): given is PressChoice =>
   PRESS_CHOICES.some((choice) => choice === given);
 
-/** What a press is set to, or `fallback` when the config does not say. */
-function parsePress(raw: unknown, fallback: PressChoice): PressChoice {
+/**
+ * The name of the Home Assistant action to do (`toggle`, `more-info`, `none`), or `undefined`
+ * when the action names nothing to do: no action, one with no `action` key, or a name that is
+ * not text. Such an action counts as not given.
+ */
+function namedAction(action: ActionConfig | undefined): string | undefined {
+  const name = action?.action;
+  return typeof name === "string" && name !== "" ? name : undefined;
+}
+
+/**
+ * What a press does, from the three things the config can say of it: its choice (`raw`), its
+ * Home Assistant `action`, and the default (`fallback`).
+ *
+ * A choice that is given wins, as the user chose it. Without one, an action that is given is
+ * done, as every card of Home Assistant does it. The action `none` ("Nothing" in Home
+ * Assistant's selector, which reads it as no press at all) makes the press do nothing, with no
+ * choice and with the choice `action`: the second would hand Home Assistant an action that does
+ * nothing and, for a double tap, make every tap wait for it. With neither a choice nor an
+ * action, the press does its default.
+ */
+function parsePress(
+  raw: unknown,
+  action: ActionConfig | undefined,
+  fallback: PressChoice,
+): PressChoice {
+  const named = namedAction(action);
   if (raw === undefined) {
-    return fallback;
+    if (named === undefined) {
+      return fallback;
+    }
+    return named === "none" ? "none" : "action";
   }
   if (!isPressChoice(raw)) {
     throw new ConfigError("card_error_press");
   }
-  return raw;
+  return raw === "action" && named === "none" ? "none" : raw;
 }
 
 /** An option that is on only when the config says `true`; `error` is what any other kind says. */
@@ -199,6 +243,9 @@ export function parseConfig(raw: unknown): CardConfig {
     throw new ConfigError("card_error_layout");
   }
   const chip = parseChip(given.chip);
+  const actions = parseActions(given);
+  const pressOf = (press: Press, fallback: PressChoice) =>
+    parsePress(given[press], actions[ACTION_OF[press]], fallback);
   return {
     entity,
     layout,
@@ -208,10 +255,11 @@ export function parseConfig(raw: unknown): CardConfig {
     ...(chip !== undefined && { chip }),
     show_turn_off: parseSwitch(given.show_turn_off, "card_error_show_turn_off"),
     mushroom: parseSwitch(given.mushroom, "card_error_mushroom"),
-    tap: parsePress(given.tap, "popup"),
-    double_tap: parsePress(given.double_tap, "none"),
-    // Only the round tile has had a long press, and it keeps it unless the user turns it off.
-    hold: parsePress(given.hold, layout === "round" ? "run_or_stop" : "none"),
-    ...parseActions(given),
+    tap: pressOf("tap", "popup"),
+    double_tap: pressOf("double_tap", "none"),
+    // Only the round tile has had a long press, and it keeps it unless the user turns it off
+    // or gives an action of its own.
+    hold: pressOf("hold", layout === "round" ? "run_or_stop" : "none"),
+    ...actions,
   };
 }

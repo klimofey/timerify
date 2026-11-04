@@ -107,12 +107,15 @@ const behaviour = (page: Page, label: string, words: Record<string, string> = en
 const menuChoice = (page: Page, key: string, words: Record<string, string> = english) =>
   page.getByRole("menuitem", { name: words[key], exact: true });
 
+/** The drop-down of the form that carries this label. */
+const fieldOf = (page: Page, label: string) =>
+  page.locator(`ha-picker-field[aria-label="${english[label]}"]`);
+
 /**
  * The cross that clears a drop-down of the form once it holds a choice. It has no name of its
  * own, so it is found by its place: in the field that carries the label.
  */
-const clearOf = (page: Page, label: string) =>
-  page.locator(`ha-picker-field[aria-label="${english[label]}"]`).locator(".clear");
+const clearOf = (page: Page, label: string) => fieldOf(page, label).locator(".clear");
 
 /**
  * A yes-or-no field of the form, found by the words beside it: the switch has no name of its
@@ -306,6 +309,44 @@ test.describe("the card in Home Assistant's editor", () => {
           tap: "action",
         },
       ]);
+  });
+
+  test("runs a tap action that is set alone, and writes no tap", async ({ page, state, ws }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+    await page.getByText(english["card_editor_interactions"], { exact: true }).click();
+    // The three presses are empty, and each says what an empty press does.
+    await expect(page.getByText(english["card_editor_press_helper"], { exact: true })).toHaveCount(
+      3,
+    );
+
+    await behaviour(page, "card_editor_tap_action").click();
+    await page.getByRole("menuitem", { name: "Toggle", exact: true }).click();
+
+    // The editor wrote the action and no choice: the drop-down of the tap is still empty, so it
+    // has no cross to clear it.
+    await expect(fieldOf(page, "card_editor_tap")).toBeVisible();
+    await expect(clearOf(page, "card_editor_tap")).toBeHidden();
+    await expect(page.locator("timerify-card ha-card.pill")).toBeVisible();
+    await saveCard(page);
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          tap_action: { action: "toggle" },
+        },
+      ]);
+    await page.getByRole("button", { name: "Done" }).click();
+    await tap(page, page.locator("timerify-card"));
+    await expect.poll(async () => (await ws.state(timer.target))?.state).toBe("on");
+    await expect(page.locator("timerify-card dialog")).toBeHidden();
   });
 
   test("turns the Turn off button on in the form", async ({ page, state, ws }) => {

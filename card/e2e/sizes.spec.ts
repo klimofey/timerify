@@ -5,12 +5,23 @@
 // they declare, so Home Assistant gives each the fewest columns it declares; the test narrows
 // the page to the narrowest phone, 320 px, and reads it in Russian, the longer language, whose
 // words need the most room. View "wide": cards of 12 columns, and one pill on each side of the
-// width where the words begin.
+// width where the words begin. View "dials": the round tile without the button, whose dial is
+// measured at three widths of the page.
 import type { Locator, Page } from "@playwright/test";
+import { TIME_FROM, expectDialsToFit, expectTimeFromTheWidth, showDials } from "./dials";
 import { expect, test } from "./fixtures";
 import { tabToButton } from "./focus";
 import { isReady } from "./ready";
-import { PHONE, TARGET, boxOf, isCutOff, runBothTimers } from "./sizing";
+import {
+  PHONE,
+  TARGET,
+  boxOf,
+  fitsInRing,
+  isCutOff,
+  isInside,
+  reloadAtWidth,
+  runBothTimers,
+} from "./sizing";
 import { stringsIn } from "./strings";
 
 /** The space the pill leaves at its right: its padding and the border of the card. */
@@ -30,9 +41,7 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     await openDashboard(page, "sizes");
     // The login waits for the sidebar, which a phone hides: the page is narrowed after it, and
     // loaded again, as a phone loads it.
-    await page.setViewportSize(PHONE);
-    await page.reload({ waitUntil: "load" });
-    await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
+    await reloadAtWidth(page, PHONE);
     await expect(page.locator("timerify-card")).toHaveCount(3);
     for (const card of Object.values(cardsOf(page))) {
       await isReady(card);
@@ -87,9 +96,10 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     const dial = await boxOf(round.locator(".dial"));
     const turnOff = await boxOf(button);
 
-    // The dial is wider than the content of a tile of 3 columns on this phone, with the button or
-    // without it, and that is the tile's own size (the follow-up in RULINGS), so what is checked
-    // is what the button adds: it is as big as a finger needs, and inside the tile.
+    // The dial has shrunk to the room this phone leaves it, and its time is inside its ring.
+    expect(isInside(dial, outline)).toBe(true);
+    expect(await fitsInRing(round.locator(".dial"), round.locator(".time"))).toBe(true);
+    // The button is as big as a finger needs, and inside the tile.
     expect(turnOff.width).toBeGreaterThanOrEqual(TARGET);
     expect(turnOff.height).toBeGreaterThanOrEqual(TARGET);
     // The card's own padding, 8 px, is left on each side.
@@ -122,6 +132,26 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
       .toBe("off");
     await expect(button).toHaveCount(0);
     await expect(pill.locator(".body")).toBeFocused();
+  });
+});
+
+// The dial of the round tile is 80 px where the tile has room for it, and follows the tile where
+// it has less: 2 columns on any screen, 3 on a narrow phone. Where the dial is too small for
+// the time to be read it shows the icon instead. View "dials" (see dials.ts): the first three
+// of its six tiles are in the Home Assistant look.
+test.describe("the round tile's dial at every size the tile allows", () => {
+  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+    await showDials(page, openDashboard, ws, state);
+  });
+
+  test("holds the time, or the icon where the time cannot be read, inside its ring", async ({
+    page,
+  }) => {
+    await expectDialsToFit(page, { first: 0, mushroom: false });
+  });
+
+  test(`shows the time from a dial of ${TIME_FROM} px, and the icon below it`, async ({ page }) => {
+    await expectTimeFromTheWidth(page.locator("timerify-card").first());
   });
 });
 

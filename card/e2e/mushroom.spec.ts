@@ -5,16 +5,24 @@
 // size: the look Mushroom gives it, the look a theme's variables change, and that the Turn off
 // button still fits at the narrowest and the widest the card is made.
 // Views "mushroom-pill" and "mushroom-round": the two layouts with the option on; "mushroom-sizes"
-// and "mushroom-wide": the cards of the views "sizes" and "wide", with the option on.
-import type { Locator, Page } from "@playwright/test";
+// and "mushroom-wide": the cards of the views "sizes" and "wide", with the option on; "dials": the
+// round tiles of the dial's test, the last three of them with the option on.
+import type { Locator } from "@playwright/test";
+import { TIME_FROM, expectDialsToFit, expectTimeFromTheWidth, showDials } from "./dials";
 import { expect, test } from "./fixtures";
+import { loadMushroom } from "./mushroom";
 import { isReady } from "./ready";
-import { PHONE, TARGET, boxOf, isCutOff, runBothTimers } from "./sizing";
+import {
+  PHONE,
+  TARGET,
+  boxOf,
+  fitsInRing,
+  isCutOff,
+  isInside,
+  reloadAtWidth,
+  runBothTimers,
+} from "./sizing";
 import { stringsIn } from "./strings";
-
-/** What Mushroom does on a page: its cards become known to the browser, after ours did. */
-const loadMushroom = (page: Page) =>
-  page.evaluate(() => customElements.define("mushroom-entity-card", class extends HTMLElement {}));
 
 /** What a theme says in Mushroom's variables: larger spacing and icon, and another colour. */
 const THEME = `:root {
@@ -197,9 +205,7 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
     await runBothTimers(ws, state);
     await openDashboard(page, "mushroom-sizes");
-    await page.setViewportSize(PHONE);
-    await page.reload({ waitUntil: "load" });
-    await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
+    await reloadAtWidth(page, PHONE);
     await expect(page.locator("timerify-card")).toHaveCount(3);
     await loadMushroom(page);
     for (const card of await page.locator("timerify-card").all()) {
@@ -256,6 +262,9 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
     const dial = await boxOf(round.locator(".dial"));
     const turnOff = await boxOf(button);
 
+    // The dial has shrunk to the room this phone leaves it, and its time is inside its ring.
+    expect(isInside(dial, outline)).toBe(true);
+    expect(await fitsInRing(round.locator(".dial"), round.locator(".time"))).toBe(true);
     expect(turnOff.width).toBe(42);
     expect(turnOff.height).toBe(42);
     // The card's spacing, 10 px, is left on each side.
@@ -263,6 +272,28 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
     expect(turnOff.right).toBeLessThanOrEqual(outline.right - 10);
     expect(turnOff.top).toBeGreaterThanOrEqual(dial.bottom);
     expect(turnOff.bottom).toBeLessThanOrEqual(outline.bottom);
+  });
+});
+
+// The dial of the round tile in the Mushroom style, at every size the tile allows: the last three
+// of the six tiles of the view "dials" (see dials.ts, and sizes.spec.ts, which measures the first
+// three in the Home Assistant look). The time and the icon are Mushroom's, with its sizes.
+test.describe("the round tile's dial in the Mushroom style at every size the tile allows", () => {
+  test.beforeEach(async ({ page, openDashboard, state, ws }) => {
+    await showDials(page, openDashboard, ws, state);
+  });
+
+  test("holds the time, or the icon where the time cannot be read, inside its ring", async ({
+    page,
+  }) => {
+    await expectDialsToFit(page, { first: 3, mushroom: true });
+  });
+
+  test(`shows the time from a dial of ${TIME_FROM} px, and the icon below it`, async ({ page }) => {
+    await loadMushroom(page);
+    const card = page.locator("timerify-card").nth(3);
+    await expect(card).toHaveAttribute("data-mushroom", "");
+    await expectTimeFromTheWidth(card);
   });
 });
 

@@ -8,6 +8,7 @@ import { STRICT_NAME } from "./constants";
 import { expect, test } from "./fixtures";
 import { hold, tap, tapBorder } from "./press";
 import { isReady } from "./ready";
+import { DIAL, boxOf } from "./sizing";
 
 /** The strict timer's default duration, which a bare run takes (Task 4's fixture). */
 const DEFAULT_MINUTES = "30";
@@ -35,6 +36,12 @@ test.describe("the round card in Home Assistant", () => {
     expect(await content.evaluate((element) => getComputedStyle(element).containerType)).toBe(
       "normal",
     );
+  });
+
+  test("keeps its dial at 80 px where there is room", async ({ page }) => {
+    const { strict } = cardsOf(page);
+    const dial = await boxOf(strict.locator(".dial"));
+    expect({ width: dial.width, height: dial.height }).toEqual({ width: DIAL, height: DIAL });
   });
 
   test("is not zoomed by a double tap, which Safari does unless the body says otherwise", async ({

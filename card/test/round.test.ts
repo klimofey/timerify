@@ -105,6 +105,20 @@ describe("the ring and its centre", () => {
     );
   });
 
+  it("holds the icon beside the time while it counts, for a dial too small to read the time", async () => {
+    const card = await mountCard(counting(45), ROUND);
+
+    // The styles show one of the two, by the width of the dial (the end-to-end tests measure
+    // which). The time is for the eye alone; the label of the body says it to everyone else.
+    expect(part(card, ".centre .time")?.getAttribute("aria-hidden")).toBe("true");
+    expect(part(card, ".centre .icon")?.getAttribute("aria-hidden")).toBeNull();
+    expect(part(card, ".centre .icon")?.querySelector("ha-state-icon, ha-icon")).not.toBeNull();
+    const label = card.shadowRoot?.getElementById(
+      bodyOf(card).getAttribute("aria-labelledby") ?? "",
+    );
+    expect(label?.textContent).toContain("45:00");
+  });
+
   it("draws the track the ring runs along, whole", async () => {
     const card = await mountCard(counting(60), ROUND);
 

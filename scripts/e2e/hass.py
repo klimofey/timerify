@@ -139,7 +139,7 @@ def wide_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, An
 
 
 def dial_cards(strict: Timer, loose: Timer, **options: Any) -> list[dict[str, Any]]:
-    """The cards of the "dials" views: three round tiles with no Turn off button. The
+    """The cards of the "dials" view: three round tiles with no Turn off button. The
     strict timer asks for one column, which is less than a round tile declares, so Home
     Assistant gives it the fewest it declares; then it asks for three, the width a
     round tile starts at. The loose timer, at the fewest columns, stays idle and shows

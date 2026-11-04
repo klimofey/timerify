@@ -8,16 +8,14 @@
 // and "mushroom-wide": the cards of the views "sizes" and "wide", with the option on; "dials": the
 // round tiles of the dial's test, the last three of them with the option on.
 import type { Locator } from "@playwright/test";
+import { TIME_FROM, expectDialsToFit, expectTimeFromTheWidth, showDials } from "./dials";
 import { expect, test } from "./fixtures";
 import { loadMushroom } from "./mushroom";
 import { isReady } from "./ready";
 import {
-  DIAL,
-  DIAL_PAGE_WIDTHS,
   PHONE,
   TARGET,
   boxOf,
-  expectDialToFit,
   fitsInRing,
   isCutOff,
   isInside,
@@ -207,9 +205,7 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
     await runBothTimers(ws, state);
     await openDashboard(page, "mushroom-sizes");
-    await page.setViewportSize(PHONE);
-    await page.reload({ waitUntil: "load" });
-    await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
+    await reloadAtWidth(page, PHONE);
     await expect(page.locator("timerify-card")).toHaveCount(3);
     await loadMushroom(page);
     for (const card of await page.locator("timerify-card").all()) {
@@ -280,37 +276,24 @@ test.describe("the cards with a Turn off button at their narrowest, in the Mushr
 });
 
 // The dial of the round tile in the Mushroom style, at every size the tile allows: the last three
-// cards of the view "dials" (see sizes.spec.ts, which measures the first three in the Home
-// Assistant look). Mushroom's time and icon are measured, with what the style gives them.
+// of the six tiles of the view "dials" (see dials.ts, and sizes.spec.ts, which measures the first
+// three in the Home Assistant look). The time and the icon are Mushroom's, with its sizes.
 test.describe("the round tile's dial in the Mushroom style at every size the tile allows", () => {
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-    const { run_for } = state.timers.strict;
-    await ws.callService("number", "set_value", { value: 90 }, { entity_id: run_for });
-    await openDashboard(page, "dials");
+    await showDials(page, openDashboard, ws, state);
   });
 
-  test("is inside its tile, and holds the time or the icon inside its ring", async ({ page }) => {
-    for (const width of DIAL_PAGE_WIDTHS) {
-      await reloadAtWidth(page, width);
-      const cards = page.locator("timerify-card");
-      await expect(cards).toHaveCount(6);
-      await loadMushroom(page);
-      const [strictFewest, strictThree, looseFewest] = [cards.nth(3), cards.nth(4), cards.nth(5)];
-      for (const card of [strictFewest, strictThree, looseFewest]) {
-        await isReady(card);
-        await expect(card).toHaveAttribute("data-mushroom", "");
-      }
-      await expect(strictFewest.locator(".time")).toBeVisible();
-      await expect(strictThree.locator(".time")).toBeVisible();
-      await expect(looseFewest.locator(".icon")).toBeVisible();
+  test("holds the time, or the icon where the time cannot be read, inside its ring", async ({
+    page,
+  }) => {
+    await expectDialsToFit(page, { first: 3, mushroom: true });
+  });
 
-      await expectDialToFit(strictFewest, ".time");
-      await expectDialToFit(strictThree, ".time");
-      await expectDialToFit(looseFewest, ".icon");
-      if (width === 1280) {
-        expect((await boxOf(strictThree.locator(".dial"))).width).toBe(DIAL);
-      }
-    }
+  test(`shows the time from a dial of ${TIME_FROM} px, and the icon below it`, async ({ page }) => {
+    await loadMushroom(page);
+    const card = page.locator("timerify-card").nth(3);
+    await expect(card).toHaveAttribute("data-mushroom", "");
+    await expectTimeFromTheWidth(card);
   });
 });
 

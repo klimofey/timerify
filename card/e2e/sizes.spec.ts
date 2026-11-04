@@ -8,16 +8,14 @@
 // width where the words begin. View "dials": the round tile without the button, whose dial is
 // measured at three widths of the page.
 import type { Locator, Page } from "@playwright/test";
+import { TIME_FROM, expectDialsToFit, expectTimeFromTheWidth, showDials } from "./dials";
 import { expect, test } from "./fixtures";
 import { tabToButton } from "./focus";
 import { isReady } from "./ready";
 import {
-  DIAL,
-  DIAL_PAGE_WIDTHS,
   PHONE,
   TARGET,
   boxOf,
-  expectDialToFit,
   fitsInRing,
   isCutOff,
   isInside,
@@ -43,9 +41,7 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
     await openDashboard(page, "sizes");
     // The login waits for the sidebar, which a phone hides: the page is narrowed after it, and
     // loaded again, as a phone loads it.
-    await page.setViewportSize(PHONE);
-    await page.reload({ waitUntil: "load" });
-    await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
+    await reloadAtWidth(page, PHONE);
     await expect(page.locator("timerify-card")).toHaveCount(3);
     for (const card of Object.values(cardsOf(page))) {
       await isReady(card);
@@ -140,37 +136,22 @@ test.describe("the cards with a Turn off button at their narrowest", () => {
 });
 
 // The dial of the round tile is 80 px where the tile has room for it, and follows the tile where
-// it has less: 2 columns on any screen, 3 on a narrow phone. View "dials": three round tiles with
-// no Turn off button, the strict timer at the fewest columns, then at 3, and the loose timer at
-// the fewest (its dial holds the icon, as the strict timer's holds the time). The strict timer
-// runs for 90 minutes, so that the time reads `1:29:xx`, the longest text the dial holds.
+// it has less: 2 columns on any screen, 3 on a narrow phone. Where the dial is too small for
+// the time to be read it shows the icon instead. View "dials" (see dials.ts): the first three
+// of its six tiles are in the Home Assistant look.
 test.describe("the round tile's dial at every size the tile allows", () => {
   test.beforeEach(async ({ page, openDashboard, state, ws }) => {
-    const { run_for } = state.timers.strict;
-    await ws.callService("number", "set_value", { value: 90 }, { entity_id: run_for });
-    await openDashboard(page, "dials");
+    await showDials(page, openDashboard, ws, state);
   });
 
-  test("is inside its tile, and holds the time or the icon inside its ring", async ({ page }) => {
-    for (const width of DIAL_PAGE_WIDTHS) {
-      await reloadAtWidth(page, width);
-      const cards = page.locator("timerify-card");
-      await expect(cards).toHaveCount(6);
-      const [strictFewest, strictThree, looseFewest] = [cards.nth(0), cards.nth(1), cards.nth(2)];
-      for (const card of [strictFewest, strictThree, looseFewest]) {
-        await isReady(card);
-      }
-      await expect(strictFewest.locator(".time")).toBeVisible();
-      await expect(strictThree.locator(".time")).toBeVisible();
-      await expect(looseFewest.locator(".icon")).toBeVisible();
+  test("holds the time, or the icon where the time cannot be read, inside its ring", async ({
+    page,
+  }) => {
+    await expectDialsToFit(page, { first: 0, mushroom: false });
+  });
 
-      await expectDialToFit(strictFewest, ".time");
-      await expectDialToFit(strictThree, ".time");
-      await expectDialToFit(looseFewest, ".icon");
-      if (width === 1280) {
-        expect((await boxOf(strictThree.locator(".dial"))).width).toBe(DIAL);
-      }
-    }
+  test(`shows the time from a dial of ${TIME_FROM} px, and the icon below it`, async ({ page }) => {
+    await expectTimeFromTheWidth(page.locator("timerify-card").first());
   });
 });
 

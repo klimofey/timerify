@@ -28,7 +28,7 @@ On the pill are the icon of the device, its name, and the time left with the mom
 
 ![The pill layout: a countdown at 30:00 with two thirds of the fill left and a chip, above a timer that is off](../screenshots/card-pill.png)
 
-The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. The name is below.
+The **round** tile is made to sit several in a row. A ring shows the same share. While the countdown runs, the time left is in its centre. Otherwise the centre shows the icon of the device. That holds under a limit too: the moment of the limit is in the pop-up and in the words for screen readers. On a very small tile, the ring and the icon are all you see, and the time is in the pop-up. The name is below.
 
 The round tile has no chip. A long press on it starts or stops the timer. See [Presses](#presses). Its optional **Turn off** button is below the name.
 

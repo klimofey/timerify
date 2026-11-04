@@ -3636,9 +3636,10 @@ in `docs/followups.md`.
   should be and inside the card; with room it checks the words, a pill of 6 columns and one of
   7 on the two sides of the width where they begin, and the keyboard in both forms.
   The dial of the round tile is 80 px where the tile has room for it, and shrinks with the tile
-  where it has less, the time and the icon in it with it (#52, 1.3.0, see Part D). Before 1.3.0
-  it was 80 px at any size, and wider than a tile of 3 columns on a phone 320 px wide and than
-  one of 2 columns on any screen, with the button or without it.
+  where it has less, and the time and the icon in it shrink too; a dial too small for a readable
+  time shows its icon instead of the time (#52, 1.3.0, see Part D). Before 1.3.0 it was 80 px at
+  any size, and wider than a tile of 3 columns on a phone 320 px wide and than one of 2 columns
+  on any screen, with the button or without it.
   When a press that leaves the focus on the button takes the button away (a keyboard user tabs
   to it, presses Enter, the target goes off and the button leaves), the focus goes to the body
   of the card, as it does when the pop-up closes, if the body is a button (`isPressable`): the
@@ -5092,8 +5093,9 @@ now.
   (`card/test/config.test.ts`); `goes back to opening the pop-up when what a tap does is
   cleared` (`card/e2e/editor.spec.ts`) keeps its meaning, since clearing a choice that has no
   action leaves the pop-up.
-- **The round tile's dial shrinks with its tile. The dial is its own container, and its rules
-  sit in one `@supports (width: 1cqw)` block (#52).** In `roundStyles` (`card/src/round.ts`),
+- **The round tile's dial shrinks with its tile, and a dial too small for a readable time shows
+  its ring and its icon instead of the time (#52).** The dial is its own container, and its
+  rules sit in one `@supports (width: 1cqw)` block. In `roundStyles` (`card/src/round.ts`),
   below the Mushroom rules, `.dial` gets `max-width: 100%`, `height: auto`, `aspect-ratio: 1` and
   `container-type: inline-size`, its width staying `80px`. The parts of the dial follow it in
   container units: `.round .time` is `min(var(--ha-font-size-l, 16px), 20cqw)`, the icon of the
@@ -5104,47 +5106,75 @@ now.
   what it was: a tile of 3 columns on a desktop keeps it, and the documentation screenshots,
   which show tiles wider than 96 px, do not change. The rules of before stay as they are, above
   the block. The owner decided that the dial shrinks with its tile, and kept `min_columns: 2`
-  for the round tile. Why the dial and not `.content`: a `.content` that is
-  always a container would take back the guarantee of the Turn off entry above, that a card
-  without the button is laid out as before, including one that a layout sizes by its content
-  (inline-size containment gives an element no width of its own from its content), and
-  `leaves its content as it was when it has no Turn off button` pins `.content` as no container.
-  The dial has a width of its own, so containment costs it nothing, and `max-width: 100%`
-  resolves against the room in `.content`; a percentage that depends on the content counts as
-  none when a layout asks for the intrinsic size, so such a layout still gets 80 px. Why one
-  `@supports` block, where the spec said "a plain declaration first": `max-width: 100%` alone
-  would shrink the dial in a browser that has no `aspect-ratio`, with its height still 80 px,
-  and `--mdc-icon-size: min(32px, 40cqw)` is a custom property, which a browser that does not
-  know `cqw` takes without a complaint and then finds invalid where `var()` uses it, leaving the
-  icon with no size at all. A block that is dropped as a whole leaves the browser the dial it
-  had. The floor of the block is the floor of container queries and `cqw`: Chrome and Edge 105,
-  Safari 16, Firefox 110. The frontend's legacy build, for old wall tablets (Chrome 59, Safari
-  12, Firefox 94), keeps the dial at 80 px, as it does the Turn off rule of the entry above,
-  which is a container query too. The Home Assistant icon also gets `line-height: 0` in the
-  block: a small symbol sat in a line of text 22.4 px high, and its box was taller than the
-  symbol (10.4 by 22.4 px in a dial of 26 px), so that it did not fit the ring; the box of a
-  symbol of 32 px is the same with the rule or without it. The values were measured, with the
-  time at its longest (`1:29:xx`, a countdown of 90 minutes), at screen widths of 1280, 390 and
-  320 px, in the Home Assistant look and in the Mushroom style. The tile of 2 columns is 76.7,
-  55.7 and 44 px wide, and its dial 58.7, 37.7 and 26 px (Mushroom, with its larger spacing:
-  54.7, 33.7 and 22 px); the tile of 3 columns is 119, 87.5 and 70 px wide, and its dial 80,
-  69.5 and 52 px (Mushroom: 80, 65.5 and 48 px). The diagonal of the time is at most 0.78 of the
-  dial (Mushroom, the narrowest phone), against the 0.85 of the ring's inner circle, and that of
-  the icon at most 0.64 (Mushroom's shape). So 20, 40 and 45 held, and none was changed after
-  the first run. Cost if wrong: at the smallest size, a tile of 2 columns on a phone 320 px
-  wide, the dial is 26 px and the time in it 5 px high: it fits the ring, and a person can hardly
-  read it; the tile is readable from 3 columns, and a higher `min_columns` is the other way,
-  which the owner did not take. A browser below the floor shows a dial that is wider than a
-  small tile, as before 1.3.0. Tests: end to end, `the round tile's dial at every size the tile
-  allows` (`card/e2e/sizes.spec.ts`; its twin for the Mushroom style in
-  `card/e2e/mushroom.spec.ts`): the view `dials` has the strict timer at the fewest columns and
-  at 3, and the loose timer at the fewest, and at each of three screen widths the dial is inside
-  its tile, a square of at most 80 px, with the time or the icon inside the ring (`fitsInRing`
-  in `card/e2e/sizing.ts`: the part's box is in the dial and its diagonal is at most the ring's
-  inner diameter, 68 of 80), and the dial of the tile of 3 columns is 80 px on a desktop;
-  `show a round tile with the button as an icon alone under its dial, inside it` (and its twin
-  for Mushroom) has the dial inside the tile with the Turn off button on a phone 320 px wide;
-  `keeps its dial at 80 px where there is room` (`card/e2e/round.spec.ts`).
+  for the round tile. On 2026-11-04 the owner amended it. The rule had said that the dial, its
+  time and its icon stay whole and readable at every size, and measured in the real Home
+  Assistant a tile of 2 columns on a phone is 44 px wide (320 px screen), its dial 26 px and the
+  time in it 4 to 7 px: whole, but not readable. So below a dial of 45 px the dial shows its
+  progress ring and its icon, and not the time, as Home Assistant's own small tiles do.
+  The mechanism: while the timer counts, the dial holds both the time (`aria-hidden`, for the eye
+  alone) and the icon (`renderCentre`), and the styles choose. `ha-card.round.counting .icon` is
+  `display: none` above the block, so that a browser without container queries shows the time
+  only, as before. Inside the block, `@container (width < 45px)` on the dial hides `.time` and
+  shows `.icon` (the icon of a timer that counts takes the active colour, as the pill's does).
+  The 45 is `TIME_FROM = MIN_TIME_PX * 100 / TIME_CQW` in `round.ts`: the time is 20cqw, and it
+  is never drawn below 9 px, which 20cqw reaches at a dial of 45 px. The selector has the
+  specificity of `ha-card.round.counting .icon`, above the Mushroom rule that shows the icon
+  (`:host([data-mushroom]) .icon`, in a sheet that comes later). What a screen reader reads is
+  not touched: the body is named by `#label`, which holds the name and the `.status`, and the
+  `.status` says the time left and the end, whatever the dial shows. Why the dial and not
+  `.content`: a `.content` that is always a container would take back the guarantee of the Turn
+  off entry above, that a card without the button is laid out as before, including one that a
+  layout sizes by its content (inline-size containment gives an element no width of its own
+  from its content), and `leaves its content as it was when it has no Turn off button` pins
+  `.content` as no container. The dial has a width of its own, so containment costs it nothing,
+  and `max-width: 100%` resolves against the room in `.content`; a percentage that depends on
+  the content counts as none when a layout asks for the intrinsic size, so such a layout still
+  gets 80 px. Why one `@supports` block, where the spec said "a plain declaration first":
+  `max-width: 100%` alone would shrink the dial in a browser that has no `aspect-ratio`, with its
+  height still 80 px, and `--mdc-icon-size: min(32px, 40cqw)` is a custom property, which a
+  browser that does not know `cqw` takes without a complaint and then finds invalid where
+  `var()` uses it, leaving the icon with no size at all. A block that is dropped as a whole
+  leaves the browser the dial it had. The floor of the block is the floor of container queries
+  and `cqw`: Chrome and Edge 105, Safari 16, Firefox 110. Home Assistant loads the card for every
+  browser, and the bundle targets es2022 (`card/build.mjs`), so a browser below that floor which
+  still runs the card (roughly Chrome and Edge 94 to 104, Firefox 94 to 109 and Safari 15) keeps
+  the dial at 80 px with its time, as it keeps the Turn off rule of the entry above, which is a
+  container query too. The Home Assistant icon also gets `line-height: 0` in the block: a small
+  symbol sat in a line of text 22.4 px high, and its box was taller than the symbol (10.4 by
+  22.4 px in a dial of 26 px), so that it did not fit the ring; the box of a symbol of 32 px is
+  the same with the rule or without it. The values were measured, with the time at its longest
+  (`1:29:xx`, a countdown of 90 minutes), at screen widths of 1280, 390 and 320 px, in the Home
+  Assistant look and in the Mushroom style. The tile of 2 columns is 76.7, 55.7 and 44 px wide,
+  and its dial 58.7, 37.7 and 26 px (Mushroom, with its larger spacing: 54.7, 33.7 and 22 px), so
+  it shows the time on a desktop (11.7 px high, Mushroom 10.9) and the icon on both phones. The
+  tile of 3 columns is 119, 87.5 and 70 px wide, and its dial 80, 69.5 and 52 px (Mushroom: 80,
+  65.5 and 48 px), so it shows the time everywhere, 9.6 px high at the least (Mushroom, 320 px).
+  The threshold itself was measured by narrowing a tile one pixel at a time, then by tenths of a
+  pixel, in both looks: a dial of 45 px shows the time at 9 px, and one of 44.99 px shows the
+  icon (its time would be 8.997 px); the tile is 63 px wide at that point in the Home Assistant
+  look (18 px of border and padding) and 67 px in the Mushroom style (22 px). The diagonal of
+  the time is at most 0.77 of the dial (Mushroom, the narrowest dial that shows it), against the
+  0.85 of the ring's inner circle, and that of the icon at most 0.64 (Mushroom's shape). So 20,
+  40 and 45 held, and none was changed after the first run. Cost if wrong: on a phone, a round
+  tile of 2 columns shows the ring and the icon, and a person opens the pop-up to read the time;
+  from 3 columns the time is there. The rule is the one number `MIN_TIME_PX`: a person who wants
+  the time smaller or larger changes it, and the threshold follows. A browser below the floor
+  shows a dial that is wider than a small tile, as before 1.3.0. Tests: end to end, `holds the
+  time, or the icon where the time cannot be read, inside its ring` (`card/e2e/sizes.spec.ts`;
+  its twin for the Mushroom style in `card/e2e/mushroom.spec.ts`; the steps are in
+  `card/e2e/dials.ts`): the view `dials` has the strict timer at the fewest columns and at 3,
+  and the loose timer at the fewest, and at each of three screen widths the dial is inside its
+  tile, a square of at most 80 px, with the time or the icon inside the ring (`fitsInRing` in
+  `card/e2e/sizing.ts`: the farthest corner of the part's box is inside the circle of 68 of 80),
+  the time at 9 px or more, the other of the two hidden, the tile of 2 columns showing the time
+  at 1280 px and the icon at 390 and 320 px, the body named by the time left, and the dial of
+  the tile of 3 columns 80 px on a desktop; `shows the time from a dial of 45 px, and the icon
+  below it` (both files): the tile is narrowed from a dial of 40 px to one of 50 px, and the time
+  appears at 45 px; `show a round tile with the button as an icon alone under its dial, inside
+  it` (and its twin for Mushroom) has the dial inside the tile with the Turn off button on a
+  phone 320 px wide; `keeps its dial at 80 px where there is room` (`card/e2e/round.spec.ts`);
+  and, in `card/test/round.test.ts`, `holds the icon beside the time while it counts, for a dial
+  too small to read the time`.
 - **When every preset is longer than the timer's maximum, a line stands where the pop-up's row of
   presets would be: "Every preset is longer than this timer's maximum of {maximum}." (#51).** In
   `#controls` (`card/src/popup.ts`), `maximumOf(runFor)` returns the `max` attribute of the Run

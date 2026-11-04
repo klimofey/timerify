@@ -15,9 +15,6 @@ export const DIAL = 80;
 /** The inner diameter of the dial's ring as a share of the dial: the ring is 6 thick in 80. */
 export const RING_INNER = 68 / 80;
 
-/** The widths of the page that the dial is measured at: a desktop, a big phone, the narrowest. */
-export const DIAL_PAGE_WIDTHS = [1280, 390, 320] as const;
-
 export interface Box {
   left: number;
   right: number;
@@ -54,36 +51,27 @@ export function isInside(part: Box, whole: Box): boolean {
 }
 
 /**
- * Whether the part of the dial, the time or the icon, is in the circle inside its ring. The part
- * is centred in the dial, so its box is in the circle when the box is in the dial and its
- * diagonal is no longer than the circle's diameter.
+ * Whether the part of the dial, the time or the icon, is in the circle inside its ring: the
+ * corner of its box that is farthest from the middle of the dial is no farther from it than the
+ * radius of that circle.
  */
 export async function fitsInRing(dial: Locator, part: Locator): Promise<boolean> {
   const [whole, inner] = await Promise.all([boxOf(dial), boxOf(part)]);
-  return (
-    isInside(inner, whole) && Math.hypot(inner.width, inner.height) <= RING_INNER * whole.width
-  );
+  const dx = (inner.left + inner.right) / 2 - (whole.left + whole.right) / 2;
+  const dy = (inner.top + inner.bottom) / 2 - (whole.top + whole.bottom) / 2;
+  const corner = Math.hypot(Math.abs(dx) + inner.width / 2, Math.abs(dy) + inner.height / 2);
+  return corner <= (RING_INNER * whole.width) / 2;
 }
 
 /**
- * Checks the dial of a round tile: it is inside the tile, a square of at most its full size, and
- * holds its centre (`.time` or `.icon`) inside the ring.
- */
-export async function expectDialToFit(card: Locator, centre: ".time" | ".icon"): Promise<void> {
-  const dial = card.locator(".dial");
-  const box = await boxOf(dial);
-  expect(isInside(box, await boxOf(card.locator("ha-card")))).toBe(true);
-  expect(box.width).toBeLessThanOrEqual(DIAL);
-  expect(Math.abs(box.width - box.height)).toBeLessThan(0.5);
-  expect(await fitsInRing(dial, card.locator(centre))).toBe(true);
-}
-
-/**
- * Sets the page to `width` and loads it again, as a device of that width loads it: the login
+ * Sets the page to the size and loads it again, as a device of that size loads it: the login
  * waits for the sidebar, which a phone hides, so a page is narrowed after it.
  */
-export async function reloadAtWidth(page: Page, width: number): Promise<void> {
-  await page.setViewportSize({ width, height: 900 });
+export async function reloadAtWidth(
+  page: Page,
+  size: { width: number; height: number },
+): Promise<void> {
+  await page.setViewportSize(size);
   await page.reload({ waitUntil: "load" });
   await expect(page.locator("#ha-launch-screen")).toHaveCount(0);
 }

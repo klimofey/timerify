@@ -67,7 +67,7 @@ mushroom: false                           # true gives the card the look of Mush
 tap: popup                                # popup (the default), run, stop, run_or_stop, action or none
 double_tap: none                          # the same choices, none by default
 hold: none                                # the same choices, run_or_stop on the round tile by default
-tap_action:                               # a Home Assistant action, used when tap is action
+tap_action:                               # a Home Assistant action, used when tap is action or not set
   action: more-info
 ```
 
@@ -84,7 +84,7 @@ tap_action:                               # a Home Assistant action, used when t
 | `tap` | `popup` | What a tap does. One of `popup`, `run`, `stop`, `run_or_stop`, `action` and `none`. See [Presses](#presses). |
 | `double_tap` | `none` | What a double tap does. The same choices. |
 | `hold` | `run_or_stop` on the round tile, `none` on the pill | What a long press does. The same choices. |
-| `tap_action`, `double_tap_action`, `hold_action` | none | A Home Assistant action, written as settings such as `action: more-info`. It is used when that press is set to `action`. |
+| `tap_action`, `double_tap_action`, `hold_action` | none | A Home Assistant action, written as settings such as `action: more-info`. It is used when that press is set to `action`, and when the press is not set. |
 
 An option that the card does not know is ignored. A value that it cannot use is shown as a message on the card, which says what is wrong.
 
@@ -95,7 +95,7 @@ The visual editor has a field for each option. It offers only the **Run for** nu
 - It writes presets as text (`"15"`). Write them as text in YAML too, if you edit the card in the form afterwards. A list of numbers (`[15, 30]`) is shown in the form as bare chips ("15", not "15 min"). Its drop-down offers the defaults again, even when they are in the list. Picking one adds a second copy, which the card ignores.
 - Taking the last preset away leaves the list empty, which means the defaults.
 - The **Mushroom style** field says **Mushroom was not found** under it while Mushroom's cards are not loaded on the page. See [The Mushroom style](#the-mushroom-style).
-- The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field, and does its default.
+- The three presses and their actions are in the **Interactions** group. It stays closed until you open it. A press you have not set shows an empty field. It runs the action below it if one is set, and does its default otherwise.
 - A value that the form accepts but the card cannot use, such as a preset of 0, stays in the form. The preview shows the card's message. Only a value of the wrong kind sends the editor to YAML. An example is presets that are not a list.
 - A card written by hand without a layout is a pill. But the form does not preselect it, because Home Assistant's editor does not apply the defaults of a form.
 - Home Assistant itself translates the names of the fields. Some words are not translated that way: the two layouts, the six press choices and the labels of the presets. They are in the language of the last card that the page loaded. Before any card has loaded on the page, they are in English.
@@ -163,10 +163,12 @@ Enter and Space do what a tap does, at once. The keyboard has no double tap and 
 
 ### Home Assistant actions
 
-Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used only when its press is set to **Home Assistant action**.
+Set a press to **Home Assistant action** to give it one of the actions that Home Assistant's own cards offer. Each press has its own field for it: **Tap action**, **Double tap action** and **Hold action**. The field lists **More info**, **Toggle**, **Navigate**, **URL**, **Perform action**, **Assist** and **Nothing**. The field is used when its press is set to **Home Assistant action**, and when the press is not set. So an action alone is enough. Set only the **Tap action** to **Toggle**, and a tap toggles the device. A press that you set to something else keeps that choice.
 
 - The action acts on the device that the timer runs, not on the **Run for** number. **More info** opens the dialog of the device. **Toggle** switches the device. Timerify then follows the device as it does when someone else switches it. See [When something else switches the device](timers.md#when-something-else-switches-the-device).
 - Leave the field on **Default**, and Home Assistant opens the dialog of the device.
+- The action **Nothing** switches its press off. That is how you switch off the long press of the round tile.
+- If you cleared a press in the form and its action is still set, the press runs that action. To go back to the pop-up, set the action to **Default**, or set the press to **Open the pop-up**.
 - The card does nothing until it has found its timer, which takes a moment after the page loads.
 
 This round tile opens the dialog of the device on a long press, and starts or stops the timer on a tap. A double tap opens the pop-up:

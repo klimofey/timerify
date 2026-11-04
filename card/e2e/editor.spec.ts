@@ -308,6 +308,41 @@ test.describe("the card in Home Assistant's editor", () => {
       ]);
   });
 
+  test("runs a tap action that is set alone, and writes no tap", async ({ page, state, ws }) => {
+    const timer = firstTimer(state);
+    await startEditing(page);
+    await addCard(page);
+    await searchForCard(page);
+    await pickCard(page);
+    await page.getByText(english["card_editor_interactions"], { exact: true }).click();
+    // The three presses are empty, and each says what an empty press does.
+    await expect(page.getByText(english["card_editor_press_helper"], { exact: true })).toHaveCount(
+      3,
+    );
+
+    await behaviour(page, "card_editor_tap_action").click();
+    await page.getByRole("menuitem", { name: "Toggle", exact: true }).click();
+
+    // The editor wrote the action and no choice: the press is still empty in the form.
+    await expect(page.locator("timerify-card ha-card.pill")).toBeVisible();
+    await saveCard(page);
+    await expect
+      .poll(async () => (await ws.config("editor")).cards)
+      .toEqual([
+        {
+          type: "custom:timerify-card",
+          entity: timer.run_for,
+          layout: "pill",
+          presets: DEFAULT_PRESETS,
+          tap_action: { action: "toggle" },
+        },
+      ]);
+    await page.getByRole("button", { name: "Done" }).click();
+    await tap(page, page.locator("timerify-card"));
+    await expect.poll(async () => (await ws.state(timer.target))?.state).toBe("on");
+    await expect(page.locator("timerify-card dialog")).toBeHidden();
+  });
+
   test("turns the Turn off button on in the form", async ({ page, state, ws }) => {
     const timer = firstTimer(state);
     await startEditing(page);

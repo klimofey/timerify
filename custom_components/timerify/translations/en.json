@@ -676,6 +676,7 @@
     "card_editor_press_run_or_stop": "Start or stop",
     "card_editor_press_action": "Home Assistant action",
     "card_editor_press_none": "Nothing",
-    "card_editor_action_helper": "Used when the behavior above is set to \"Home Assistant action\""
+    "card_editor_press_helper": "Empty: runs the action below if one is set. Otherwise it does the default.",
+    "card_editor_action_helper": "Used when the behavior above is \"Home Assistant action\" or empty."
   }
 }

@@ -3503,8 +3503,9 @@ in `docs/followups.md`.
   and its translated labels). The action acts on the target and not on the card's entity
   because the card's entity is the "Run for" number, which cannot be toggled and whose
   more-info dialog is not the one the user means. A missing key makes Home Assistant open the
-  more-info dialog, so a press set to `action` with no action does that; the selector's own
-  "Default" choice writes no key. The `visible` condition of a form field, which would hide an
+  more-info dialog, so a press set to `action` with no action does that. Since 1.3.0 a press with
+  no choice but an action given does the action (see Part D under Release 1.3.0). The
+  selector's own "Default" choice writes no key. The `visible` condition of a form field, which would hide an
   action while its press is not `action`, is not in the developer documentation, so the six
   fields are always shown and the helper under each action says when it is used. The six fields
   sit in an `expandable` group with `flatten: true`, which keeps them at the top level of the
@@ -4212,10 +4213,11 @@ still open is a GitHub issue of klimofey/timerify, listed in `docs/followups.md`
 The decisions of the 1.3.0 release (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`),
 in the form they have now. The release is built in four parts, one plan each. Part A is
 planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-a-engine.md`, Part B in
-`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md` and Part C in
-`docs/superpowers/plans/2026-11-03-1.3.0-part-c-voice.md`; each later part adds its own
-plan and its own section here. What is still open is a GitHub issue of klimofey/timerify,
-listed in `docs/followups.md`.
+`docs/superpowers/plans/2026-11-03-1.3.0-part-b-entities.md`, Part C in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-c-voice.md` and Part D in
+`docs/superpowers/plans/2026-11-03-1.3.0-part-d-card.md`; each part has its own section
+here. What is still open is a GitHub issue of klimofey/timerify, listed in
+`docs/followups.md`.
 
 ### Part A: engine
 
@@ -4989,3 +4991,103 @@ now.
   stays open for the rest. Cost if wrong: unchanged from before this release, the device is
   switched at once in English. Test:
   `test_a_part_of_the_day_with_no_hour_is_left_to_the_gazetteer`.
+
+### Part D: the card
+
+The decisions of Part D (`docs/superpowers/specs/2026-11-03-release-1.3.0-design.md`, part D,
+planned in `docs/superpowers/plans/2026-11-03-1.3.0-part-d-card.md`), in the form they have
+now.
+
+- **A press with no choice of its own but with its action given does that action. One
+  resolver, `parsePress(raw, action, fallback)` in `card/src/config.ts`, decides it from three
+  inputs (#53).** `parseConfig` parses the actions first and then resolves `tap` (default
+  `popup`), `double_tap` (`none`) and `hold` (`run_or_stop` on the round layout, `none` on the
+  pill) from the press's choice, its action and its default. A choice that is given wins, and an
+  unknown one is still `card_error_press`. With no choice, an action that names something to do
+  makes the press `action`. With neither, the default applies. `ACTION_OF` maps each press to
+  the key of its action. Nothing after `config.ts` changes: `press.ts`, `layout.ts`, `pill.ts`,
+  `round.ts` and `timerify-card.ts` read the resolved press, and `#fireAction` already hands
+  every given action to Home Assistant. What follows from the rule: a `hold_action` alone gives
+  the pill a long press and replaces the round tile's start or stop, and a `double_tap_action`
+  alone makes a single tap wait `DOUBLE_TAP_MS` for a second one, as the cards of Home
+  Assistant do. Why: every Home Assistant card is configured with the action alone, such as
+  `tap_action: {action: toggle}`, and on a Timerify card that opened the pop-up and ignored
+  the action. The old rule, that an action is used only when its press is `action`, was never
+  written in the code: it was the absence of one. Putting the new rule in the one place that
+  resolves the config keeps the layouts, the press controller and the editor from each
+  repeating it. Cost if wrong: a card written with an action alone does the press's default
+  and not the action, as before 1.3.0. Tests (`card/test/config.test.ts`): `does the action of
+  a press whose choice is not given`, `lets a choice that is given win over the action` and
+  `replaces the round tile's long press by an action given alone`; (`card/test/press.test.ts`)
+  `a tap whose action alone is given toggles through Home Assistant and opens no pop-up`, `a
+  double tap action given alone makes a single tap wait for the double tap` and `a hold action
+  given alone gives the pill a long press`; end to end, `runs a tap action that is set alone,
+  and writes no tap` (`card/e2e/editor.spec.ts`: the form writes `tap_action` and no `tap`, and
+  a tap on the dashboard switches the device on and opens no pop-up).
+- **An action of "Nothing" makes its press nothing, with no choice and with the choice
+  `action`.** `{action: none}` resolves to `none` when the press has no choice, and when its
+  choice is `action`; a choice that is given and is anything else still wins (`tap: popup` with
+  `tap_action: {action: none}` opens the pop-up). So `hold_action: {action: none}` switches off
+  the round tile's long press, and `tap_action: {action: none}` alone turns the tap off, as in
+  Home Assistant, where "Nothing" is no press at all. A body whose only press is such a tap is
+  no button and no tab stop, as when all three presses are `none`, and a double tap set to
+  `action` with the action "Nothing" does not make a single tap wait 250 ms. Why: "Nothing" is
+  an entry of the action selector, and the user who picks it means that the press does nothing.
+  Read as `action`, a `double_tap_action` of "Nothing" would create a double tap that does
+  nothing and delay every tap, and a `hold_action` of "Nothing" could not switch off the round
+  tile's long press, the one way to do it without the choice. Cost if wrong: a user who picks
+  "Nothing" for a tap and wants the pop-up anyway sets the action to "Default" or the press to
+  "Open the pop-up". Tests (`card/test/config.test.ts`): `makes a press whose action is
+  Nothing do nothing, with no choice and with the choice action`; (`card/test/press.test.ts`)
+  `is no button when the only press it has is an action of Nothing` and `never makes a tap
+  wait for a double tap whose action is Nothing`.
+- **An action with no `action` key, with one that is not text, or with an empty one, counts as
+  not given.** `namedAction` returns the name of the action when it is a non-empty string and
+  `undefined` otherwise, and the resolver treats `undefined` as no action at all: `tap_action:
+  {}` and `tap_action: {action: 5}` leave the tap on the pop-up, and `hold_action:
+  {navigation_path: "/lovelace/0"}` leaves the round tile's long press on start or stop. An
+  action that is not a set of settings at all is still `card_error_action`, as before. Why: the
+  action names nothing to do, so a press that took it for an action would do nothing where the
+  default did something; and the visual editor's "Default" writes no key, so the editor never
+  writes such an action, which only YAML can. This is the planning call of Part D, a value that
+  names nothing is treated as no key. Cost if wrong: a user who writes `tap_action: {}`
+  expecting a press that does nothing gets the pop-up, and writes `{action: none}` instead.
+  Test (`card/test/config.test.ts`): `leaves the default to an action that names nothing to do`
+  (the empty object, `action: 5`, an empty name, and a hold with only a navigation path).
+- **The editor keeps the press's select empty when no choice is set, and two helper texts say
+  what that does. There is no custom editor.** `computeHelper` gives `tap`, `double_tap` and
+  `hold` the new `card_editor_press_helper` ("Empty: runs the action below if one is set.
+  Otherwise it does the default.") and the three action fields the reworded
+  `card_editor_action_helper` ("Used when the behavior above is "Home Assistant action" or
+  empty."), in the editor's language; the quoted label in the action helper is the string
+  `card_editor_press_action` of the same language. The owner decided this on 2026-11-03 after
+  the research. Why: the visual editor is the frontend's own form, which shows `config[name]`
+  literally, so a press with no key is an empty select; `computeHelper` is given no config and
+  so cannot say what a particular press is set to, and a field's `default` becomes the
+  selector's `placeholder`, which the select selector ignores. Filling `tap: action` in
+  `assertConfig`, which `hui-form-editor` runs from `setConfig`, would edit the user's object
+  while checking it. A custom editor element (`getConfigElement`) around `ha-form` could show
+  the press as "Home Assistant action" and map it back, but gives up the form and the
+  translated labels that the 1.1.0 entry chose, needs `ha-form` loaded by hand and costs more
+  tests; it is a non-goal of this release. Cost if wrong: the select does not read "Home
+  Assistant action" for a press that runs one, as it was first asked to; the helper under a
+  press that is set still says "Empty: ...", since it cannot see the config. Only a custom
+  editor gives the literal display. Tests (`card/test/editor.test.ts`): `says what an empty
+  press does, in the editor's language` and `names the Home Assistant action choice in the
+  action helper by its own label`; end to end, `runs a tap action that is set alone, and writes
+  no tap` (the helper shows under all three presses).
+- **A press whose choice was cleared while its action stayed runs the action now, and the
+  docs say how to go back to the pop-up.** A user who chose "Home Assistant action", set an
+  action, and then cleared the choice with the cross of its drop-down to go back to the
+  pop-up, has a config with `tap_action` and no `tap` (Home Assistant drops the key when the
+  select is cleared). Before 1.3.0 that card opened the pop-up. Now its tap runs the action.
+  To go back, the user sets the action to "Default" (which writes no key) or sets the press to
+  "Open the pop-up". `docs/en/card.md` and `docs/ru/card.md` say so under "Home Assistant
+  actions", and the release notes repeat it. Why: nothing in a saved config tells this card
+  from one that has an action alone, which is the case #53 asks for; the config belongs to the
+  user, and the card does not rewrite it. Cost if wrong: a few dashboards change a tap from
+  the pop-up to the action at the update, until the user reads the note. Tests: the config of
+  this user is the one in `does the action of a press whose choice is not given`
+  (`card/test/config.test.ts`); `goes back to opening the pop-up when what a tap does is
+  cleared` (`card/e2e/editor.spec.ts`) keeps its meaning, since clearing a choice that has no
+  action leaves the pop-up.

@@ -676,6 +676,7 @@
     "card_editor_press_run_or_stop": "Запустить или остановить",
     "card_editor_press_action": "Действие Home Assistant",
     "card_editor_press_none": "Ничего не делать",
-    "card_editor_action_helper": "Используется, когда выше выбрано «Действие Home Assistant»"
+    "card_editor_press_helper": "Пусто: выполняет действие ниже, если оно задано. Иначе делает то, что задано по умолчанию.",
+    "card_editor_action_helper": "Используется, когда выше выбрано «Действие Home Assistant» или ничего не выбрано."
   }
 }

@@ -447,6 +447,60 @@ describe("a press set to a Home Assistant action", () => {
   });
 });
 
+describe("a press whose action is given alone", () => {
+  it("a tap whose action alone is given toggles through Home Assistant and opens no pop-up", async () => {
+    const heard = actionsHeard();
+    const card = await mountCard(fakeHass(), { ...PILL, tap_action: { action: "toggle" } });
+
+    await click(card);
+
+    expect(heard).toStrictEqual([
+      { config: { entity: BOILER, tap_action: { action: "toggle" } }, action: "tap" },
+    ]);
+    expect(isOpen(card)).toBe(false);
+  });
+
+  it("a double tap action given alone makes a single tap wait for the double tap", async () => {
+    const card = await mountCard(fakeHass(), {
+      ...PILL,
+      double_tap_action: { action: "more-info" },
+    });
+
+    await click(card);
+    await wait(card, DOUBLE_TAP_MS - 1);
+    expect(isOpen(card)).toBe(false);
+    await wait(card, 1);
+
+    expect(isOpen(card)).toBe(true);
+  });
+
+  it("a hold action given alone gives the pill a long press", async () => {
+    const heard = actionsHeard();
+    const card = await mountCard(fakeHass(), { ...PILL, hold_action: { action: "more-info" } });
+
+    await pressFor(card, HOLD_MS);
+
+    expect(heard).toStrictEqual([
+      { config: { entity: BOILER, hold_action: { action: "more-info" } }, action: "hold" },
+    ]);
+    expect(isOpen(card)).toBe(false);
+  });
+
+  it("never makes a tap wait for a double tap whose action is Nothing", async () => {
+    const card = await mountCard(fakeHass(), {
+      ...PILL,
+      double_tap: "action",
+      double_tap_action: { action: "none" },
+    });
+
+    await click(card);
+
+    // No time has passed: the tap did not wait for a second one.
+    expect(isOpen(card)).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe("how the card describes a tap", () => {
   it("announces a pop-up only when a tap opens one", async () => {
     for (const layout of ["pill", "round"] as const) {
@@ -490,6 +544,23 @@ describe("whether the card is a button", () => {
       expect(hass.calls, layout).toEqual([]);
       card.remove();
     }
+  });
+
+  it("is no button when the only press it has is an action of Nothing", async () => {
+    const hass = fakeHass();
+    const heard = actionsHeard();
+    const card = await mountCard(hass, { ...PILL, tap_action: { action: "none" } });
+
+    const body = pressedPart(card);
+    expect(body).not.toBeNull();
+    expect(body?.hasAttribute("role")).toBe(false);
+    expect(body?.hasAttribute("tabindex")).toBe(false);
+
+    body?.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true }));
+    await card.updateComplete;
+    expect(isOpen(card)).toBe(false);
+    expect(hass.calls).toEqual([]);
+    expect(heard).toEqual([]);
   });
 
   it("is a button with a tab stop while any press does something, even when the tap does not", async () => {

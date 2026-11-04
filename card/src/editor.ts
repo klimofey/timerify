@@ -8,6 +8,7 @@
 import {
   DEFAULT_PRESETS,
   MAX_MINUTES,
+  PRESSES,
   PRESS_CHOICES,
   assertShape,
   type PressChoice,
@@ -97,6 +98,9 @@ const isLabelled = (name: string): name is keyof typeof LABELS => Object.hasOwn(
 
 /** Whether the field is the Home Assistant action of a press. */
 const isActionField = (name: string): boolean => name.endsWith("_action");
+
+/** Whether the field is what a press does. */
+const isPressField = (name: string): boolean => PRESSES.some((press) => press === name);
 
 const ENGLISH = { locale: { language: "en" } };
 
@@ -190,8 +194,11 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
         icon: "mdi:gesture-tap",
         // Each press is followed by its action, which it uses when it is set to one. The
         // selector of an action cannot offer the pop-up or Timerify's own actions, so the
-        // press is chosen first. An action that is not set is Home Assistant's default for
-        // it, the more-info dialog of the entity.
+        // press is chosen first. A press that is left empty runs its action when one is set
+        // and does its default otherwise: the form shows a key that is missing as an empty
+        // field and cannot show the press as "Home Assistant action", so the helper text says
+        // so. An action that is not set is Home Assistant's default for it, the more-info
+        // dialog of the entity.
         schema: [
           { name: "tap", selector: { select: { options: pressOptions } } },
           { name: "tap_action", selector: { ui_action: { default_action: "more-info" } } },
@@ -215,6 +222,9 @@ export async function getConfigForm(): Promise<LovelaceConfigForm> {
       }
       if (name === "mushroom") {
         return mushroomIsDefined() ? undefined : t({ localize }, "card_editor_mushroom_missing");
+      }
+      if (isPressField(name)) {
+        return t({ localize }, "card_editor_press_helper");
       }
       return isActionField(name) ? t({ localize }, "card_editor_action_helper") : undefined;
     },

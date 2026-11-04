@@ -80,7 +80,10 @@ What a release is checked with before it is published:
   turning a running target off, Timerify's actions and triggers under By target in the
   automation editor, a turn-on at a clock time said to Assist and kept as a pending
   command, the card's Turn off button in both layouts, and the Interactions group of the
-  card editor (`smoke-2` and `smoke-11` to `smoke-16`).
+  card editor (`smoke-2` and `smoke-11` to `smoke-16`). At 1.3.0 it went on to round tiles of 2
+  columns on a page 320 px wide, with the ring and the icon in place of the time, the pop-up of
+  a timer whose Maximum of Run for is shorter than every preset, and the card editor with only a
+  Tap action set (`smoke-17` to `smoke-19`).
 
 ## Development
 

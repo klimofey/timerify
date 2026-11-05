@@ -5,7 +5,7 @@
 <h1 align="center">Timerify</h1>
 
 <p align="center">
-  <a href="https://hacs.xyz/docs/faq/custom_repositories/"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5.svg" alt="HACS: Custom"></a>
+  <a href="https://hacs.xyz/"><img src="https://img.shields.io/badge/HACS-Default-41BDF5.svg" alt="HACS: Default"></a>
   <a href="https://www.home-assistant.io/"><img src="https://img.shields.io/badge/Home%20Assistant-2026.10.4%2B-41BDF5.svg?logo=homeassistant&amp;logoColor=white" alt="Home Assistant 2026.10.4+"></a>
   <a href="https://github.com/klimofey/timerify/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="Лицензия: MIT"></a>
 </p>
@@ -27,19 +27,23 @@ Timerify добавляет отсчёт к объекту, который у в
 
 Первая кнопка открывает Timerify в HACS, а в Home Assistant 2026.11 и новее в Marketplace. Вторая открывает меню Timerify, где вы выбираете **Добавить таймер**. Она работает, когда Timerify уже установлен. Нужен Home Assistant 2026.10.4 или новее.
 
-### Home Assistant 2026.10: HACS
-
-1. В HACS откройте меню (три точки справа вверху) и выберите «Custom repositories».
-2. Введите репозиторий `https://github.com/klimofey/timerify` и тип «Integration». Нажмите «Add».
-3. Найдите Timerify в HACS и скачайте его.
-
 ### Home Assistant 2026.11 и новее: Marketplace
 
 1. Откройте **Настройки > Marketplace**.
-2. Нажмите **Добавить по ссылке** (справа вверху).
-3. В поле **Ссылка на GitHub** введите `klimofey/timerify` и нажмите **Добавить**. В первый раз Home Assistant предложит подключить GitHub.
-4. Если он спросит тип, выберите **Интеграция** и нажмите **Добавить** ещё раз.
-5. Откройте Timerify в списке и установите его.
+2. На вкладке **Просмотреть** найдите Timerify через поиск.
+3. Откройте Timerify и нажмите **Установить**.
+
+### Home Assistant 2026.10: HACS
+
+1. Откройте HACS и найдите Timerify через поиск.
+2. Откройте Timerify и нажмите «Download».
+
+### Если поиск не находит Timerify
+
+Добавьте Timerify по ссылке:
+
+- В Marketplace нажмите **Добавить по ссылке** (справа вверху). В поле **Ссылка на GitHub** введите `klimofey/timerify` и нажмите **Добавить**. В первый раз Home Assistant предложит подключить GitHub. Если он спросит тип, выберите **Интеграция** и нажмите **Добавить** ещё раз.
+- В HACS откройте меню (три точки справа вверху) и выберите «Custom repositories». Введите репозиторий `https://github.com/klimofey/timerify` и тип «Integration». Нажмите «Add».
 
 ### Вручную
 

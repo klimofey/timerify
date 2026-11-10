@@ -18,7 +18,7 @@ What happens when you start or change the timer yourself is described under [How
 
 Intervals belong to the timer's entry, and you add them one at a time.
 
-1. Open **Settings > Devices & services**, then the timer's entry under Timerify.
+1. Open **Settings > Devices & services** and choose **Timerify**. Find the timer's entry.
 2. Choose **Add schedule interval**.
 3. Fill in the form and submit it.
 

@@ -174,7 +174,7 @@ The built-in agent needs Timerify's sentences. There are two ways to give it the
 
 This is the way to use, unless you have a reason not to.
 
-1. Open **Settings > Devices & services > Helpers**. Choose **Create helper**, then **Timerify**. In the menu, choose **Voice settings**. There is one such entry, and the menu does not offer it again.
+1. Open **Settings > Devices & services**. Choose **Add integration**, then **Timerify**. In the menu, choose **Voice settings**. There is one such entry, and the menu does not offer it again.
 2. Turn on **Add voice sentences for the built-in agent**. It is on to begin with. Pick the **Languages**: English, Russian, or both. Timerify picks your house language if it has it, and English otherwise.
 
 Timerify then writes the file `custom_sentences/<language>/timerify.yaml` in your configuration folder, for each language you picked. The file holds the names of your timers' devices. Timerify tells the built-in agent to read the sentences again.

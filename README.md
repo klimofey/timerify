@@ -51,7 +51,7 @@ Copy the `custom_components/timerify` folder of this repository into the `custom
 
 ### After you install Timerify
 
-Restart Home Assistant. Add a timer with the second button, or under **Settings > Devices & services > Helpers**: choose **Create helper**, then **Timerify**. The [Timers page](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md#add-a-timer-to-a-device) has the steps.
+Restart Home Assistant. Add a timer with the second button, or under **Settings > Devices & services**: choose **Add integration**, then **Timerify**. The [Timers page](https://github.com/klimofey/timerify/blob/main/docs/en/timers.md#add-a-timer-to-a-device) has the steps.
 
 The dashboard card comes with Timerify. Refresh your browser once after you install or update Timerify.
 

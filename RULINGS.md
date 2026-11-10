@@ -2458,29 +2458,39 @@ in `docs/followups.md`.
   `test_a_setting_dropped_from_an_interval_leaves_its_warning_while_offline`,
   `test_an_interval_left_with_no_setting_loses_its_warning_while_offline`,
   `test_disabling_the_timer_takes_its_warnings_away`.
-- **The integration page that does not re-render waits on Home Assistant (#40, upstream).**
-  After a timer or an interval is added, or an interval is edited, the Timerify page under
-  Settings > Devices & services shows nothing new until it is loaded again, on Home
-  Assistant 2026.10.4 (frontend 20260930.5) and on 2026.11.0b2 (frontend 20261028.1;
-  2026.11.0 was not published when it was tested). The page that behaved the same is the
-  one of the built-in Random helper, which also keeps saying "No entries" after a helper is
-  added. The pages of `kitchen_sink` (a sensor subentry) and `local_calendar` (a calendar)
-  show the change at once. The cause is in the frontend, in both versions: the page
-  subscribes with `config_entries/subscribe` and `type_filter` `device`, `hub`, `service`,
-  `hardware`, so it is sent no event for an integration of type `helper`; and
-  `ha-config-integration-page` loads the entries of an integration of any type but device,
-  hub and service once, in `_fetchManifest`, and never again. No local change was made,
-  because Timerify sends what `kitchen_sink` sends: a new entry is `added`, `updated`
-  (setup_in_progress), `updated` (loaded), and an interval added or edited is `updated`
-  (unload_in_progress), `updated` (not_loaded), `updated` (setup_in_progress) twice,
-  `updated` (loaded), through the reload that `_async_entry_updated` schedules. A copy of
-  Timerify whose manifest said `integration_type` `service` and nothing else different
-  showed every change within milliseconds, so the type alone decides it. That is not a
-  fix we take: it would move Timerify out of Helpers and its "Add helper" into "Add
-  service", a product decision, and a change made to get round a frontend fault. The issue
-  is labelled `upstream`; reporting it to Home Assistant is the owner's call.
-  Cost if wrong: none for the timers, their schedules or their entities, which are always
-  right on the server; the Timerify page lists the old state until it is loaded again.
+- **Timerify is an integration of type `service`, so it is on the Integrations tab (#40).**
+  Up to 1.3.2 the manifest said `integration_type` `helper`. Home Assistant's frontend
+  lists on the Integrations tab the entries of devices, hubs, services and hardware
+  (`config_entries/subscribe` with that `type_filter`), and the entries of a helper on the
+  Helpers tab. A timer's schedule intervals are subentries, which are added on the page of
+  the integration and nowhere else; the Voice settings entry, "Enable debug logging" and
+  deleting a timer are there too. The Integrations tab is the way to that page, so for a
+  helper it was reached from the card's pop-up or by its address alone, and the step "open
+  the timer's entry under Timerify" of the user docs could not be followed (the owner's
+  report, 2026-11-10). The same filter is behind #40: the page of a helper is sent no
+  event, and `ha-config-integration-page` loads the entries of an integration of any type
+  but device, hub and service once, in `_fetchManifest`, and never again, so a timer or an
+  interval that was added showed after a reload only, on Home Assistant 2026.10.4
+  (frontend 20260930.5) and on 2026.11.0b2 (frontend 20261028.1). The built-in Random
+  helper behaves the same. Timerify sent what `kitchen_sink` sends, and a copy of Timerify
+  that differed in the type alone showed every change within milliseconds. With the type
+  `service` the page shows a new interval without a reload, which closes #40.
+  `service` and not `hub` (the default, which Powercalc has by naming no type): an entry
+  is one timer of one entity, "a single service" in the words of the manifest docs. In
+  core the type decides the lists and nothing else: which of "Add integration" and "Create
+  helper" offers the flow (`ha/loader.py:428-473`) and what a `type_filter` returns
+  (`ha/components/config/config_entries.py:731-770`). Entries, entities, devices and
+  stored data do not depend on it, so nothing is migrated and the timers of 1.3.2 are
+  kept. What changes for the user: a timer is added with "Add integration" (the README's
+  button works as before), "Create helper" no longer offers Timerify, and the Helpers tab
+  no longer lists its timers. The catalog categories stay (see Release 1.3.1): they say
+  what Timerify is for, not where Home Assistant lists it.
+  Cost if wrong: a user who looks for Timerify under Helpers does not find it there;
+  going back is one line and a release, and loses nothing.
+  Tests: `tests/test_manifest.py`: `test_timerify_is_added_as_an_integration`,
+  `test_a_timer_is_on_the_integrations_tab`; `card/e2e/integrations.spec.ts`: Timerify
+  is on the Integrations tab, and its page shows an interval that was added while the page
+  was open. Both scenarios fail when the type is `helper`.
 
 ### Automations
 

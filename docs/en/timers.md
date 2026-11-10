@@ -6,7 +6,7 @@ This page shows how to add a timer to a device and run it for a set time.
 
 A timer attaches a countdown to an entity you already have. A plain switch, such as a boiler, gets a "Run for" control on its own device page. Each timer belongs to one entity. These pages call it the device.
 
-1. Open **Settings > Devices & services > Helpers**. Choose **Create helper**, then **Timerify**.
+1. Open **Settings > Devices & services**. Choose **Add integration**, then **Timerify**.
 2. In the menu, choose **Add a timer**.
 3. Pick the entity and the mode, **Strict** or **Loose**. The [Modes](#modes) section explains both. The [entities you can pick](#which-devices-can-have-a-timer) are listed below.
 4. Turn on **Count runtime** if you want the timer to add up how long the device is on. It is off to begin with. The [Runtime page](runtime.md) tells more.
@@ -17,7 +17,7 @@ A timer attaches a countdown to an entity you already have. A plain switch, such
 
 ![The form that adds a timer: the entity, the mode, Count runtime, Maximum of Run for and Turn off button](../screenshots/smoke-2-add-timer.png)
 
-The timer appears on the device page of the entity. The **Add integration** button on the Integrations tab lists Timerify too, as "Timerify (Helper)". The other item of the menu, **Voice settings**, sets up the voice sentences for Assist. The [Voice page](voice.md#use-the-voice-settings-entry) describes it.
+The timer appears on the device page of the entity. The Integrations tab now shows Timerify. Choose it to open the Timerify integration page, which lists every timer. The other item of the menu, **Voice settings**, sets up the voice sentences for Assist. The [Voice page](voice.md#use-the-voice-settings-entry) describes it.
 
 ### Change a timer later
 
